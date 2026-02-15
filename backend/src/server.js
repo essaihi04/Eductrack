@@ -1,0 +1,79 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import dotenv from 'dotenv';
+
+import authRoutes from './routes/auth.routes.js';
+import adminRoutes from './routes/admin.routes.js';
+import teacherRoutes from './routes/teacher.routes.js';
+import studentsRoutes from './routes/students.routes.js';
+import attendanceRoutes from './routes/attendance.routes.js';
+import behaviorRoutes from './routes/behavior.routes.js';
+import assignmentsRoutes from './routes/assignments.routes.js';
+import aiRoutes from './routes/ai.routes.js';
+import homeworkRoutes from './routes/homework.routes.js';
+import notificationsRoutes from './routes/notifications.routes.js';
+import controlsPlanRoutes from './routes/controlsPlan.routes.js';
+import documentsRoutes from './routes/documents.routes.js';
+import superadminRoutes from './routes/superadmin.routes.js';
+import whatsappRoutes from './routes/whatsapp.routes.js';
+import { startDailyReportScheduler } from './services/dailyReports.js';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.set('etag', false);
+
+// Middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
+app.use(cors());
+app.use(morgan('dev'));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Servir les fichiers statiques (logos, documents uploadés)
+app.use('/uploads', express.static('uploads'));
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/teacher', teacherRoutes);
+app.use('/api/students', studentsRoutes);
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/behavior', behaviorRoutes);
+app.use('/api/assignments', assignmentsRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/teacher', homeworkRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/teacher', controlsPlanRoutes);
+app.use('/api', controlsPlanRoutes);
+app.use('/api/teacher/documents', documentsRoutes);
+app.use('/api/documents', documentsRoutes);
+app.use('/api/superadmin', superadminRoutes);
+app.use('/api/admin/whatsapp', whatsappRoutes);
+
+// Route de test
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'API is running' });
+});
+
+// Gestion des erreurs 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Gestion des erreurs globales
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Something went wrong!' });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  startDailyReportScheduler();
+});

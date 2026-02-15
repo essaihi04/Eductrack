@@ -1,0 +1,83 @@
+import { supabaseAdmin } from '../config/supabase.js';
+
+export const initializeMissingTables = async () => {
+  try {
+    console.log('Vérification et création des tables manquantes...');
+
+    // Vérifier si teacher_subjects existe
+    const { data: teacherSubjectsExists } = await supabaseAdmin
+      .from('teacher_subjects')
+      .select('id')
+      .limit(1);
+
+    if (!teacherSubjectsExists) {
+      console.log('Création de la table teacher_subjects...');
+      await supabaseAdmin.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.teacher_subjects (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+            subject_id UUID NOT NULL REFERENCES public.subjects(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(teacher_id, subject_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_teacher_subjects_teacher_id ON public.teacher_subjects(teacher_id);
+          CREATE INDEX IF NOT EXISTS idx_teacher_subjects_subject_id ON public.teacher_subjects(subject_id);
+        `
+      });
+    }
+
+    // Vérifier si class_teachers existe
+    const { data: classTeachersExists } = await supabaseAdmin
+      .from('class_teachers')
+      .select('id')
+      .limit(1);
+
+    if (!classTeachersExists) {
+      console.log('Création de la table class_teachers...');
+      await supabaseAdmin.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.class_teachers (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            class_id UUID NOT NULL REFERENCES public.classes(id) ON DELETE CASCADE,
+            teacher_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(class_id, teacher_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_class_teachers_class_id ON public.class_teachers(class_id);
+          CREATE INDEX IF NOT EXISTS idx_class_teachers_teacher_id ON public.class_teachers(teacher_id);
+        `
+      });
+    }
+
+    // Vérifier si control_notes existe
+    const { data: controlNotesExists } = await supabaseAdmin
+      .from('control_notes')
+      .select('id')
+      .limit(1);
+
+    if (!controlNotesExists) {
+      console.log('Création de la table control_notes...');
+      await supabaseAdmin.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.control_notes (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            control_id UUID NOT NULL REFERENCES public.controls_plan(id) ON DELETE CASCADE,
+            student_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+            note DECIMAL(5,2) NOT NULL CHECK (note >= 0 AND note <= 20),
+            appreciation TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(control_id, student_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_control_notes_control_id ON public.control_notes(control_id);
+          CREATE INDEX IF NOT EXISTS idx_control_notes_student_id ON public.control_notes(student_id);
+        `
+      });
+    }
+
+    console.log('✓ Vérification des tables terminée');
+  } catch (error) {
+    console.error('Erreur lors de l\'initialisation des tables:', error);
+    // Ne pas arrêter le serveur si l'initialisation échoue
+  }
+};

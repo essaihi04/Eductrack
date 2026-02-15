@@ -1,0 +1,26 @@
+{
+  "name": "student-tracking-app",
+  "version": "1.0.0",
+  "description": "Application éducative complète pour le suivi des élèves",
+  "scripts": {
+    "start": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "install-all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "build": "npm run build --prefix frontend && npm run build --prefix backend"
+  },
+  "keywords": [
+    "education",
+    "student-tracking",
+    "react",
+    "supabase"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "jspdf": "^4.0.0",
+    "jspdf-autotable": "^5.0.7",
+    "pg": "^8.17.1"
+  }
+}

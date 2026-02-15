@@ -1,0 +1,582 @@
+import { useState, useEffect } from 'react';
+import { Calendar as CalendarIcon, Clock, FileText, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
+import { useAuth } from '../../contexts/AuthContext';
+
+const Planificateur = () => {
+  const navigate = useNavigate();
+  const { profile } = useAuth();
+
+  const [classes, setClasses] = useState([]);
+  const [controls, setControls] = useState([]);
+  const [calendarControls, setCalendarControls] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingControl, setEditingControl] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const [formData, setFormData] = useState({
+    class_id: '',
+    name: '',
+    date: '',
+    start_time: '',
+    end_time: '',
+    description: ''
+  });
+
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Rafraîchir les données quand la page reçoit le focus
+  useEffect(() => {
+    const handleFocus = () => {
+      fetchData();
+    };
+
+    document.addEventListener('visibilitychange', handleFocus);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleFocus);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const getAuthToken = async () => {
+    const { supabase } = await import('../../lib/supabase');
+    const {
+      data: { session: authSession },
+    } = await supabase.auth.getSession();
+    return authSession?.access_token;
+  };
+
+  const fetchData = async () => {
+    try {
+      const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = authSession?.access_token;
+
+      const [classesRes, controlsRes, calendarRes] = await Promise.all([
+        fetch(`${apiUrl}/api/teacher/my-classes`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${apiUrl}/api/teacher/controls-plan`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${apiUrl}/api/controls-plan-calendar`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+
+      const classesData = await classesRes.json();
+      const controlsData = await controlsRes.json();
+      const calendarData = await calendarRes.json();
+
+      setClasses(Array.isArray(classesData) ? classesData : []);
+      setControls(Array.isArray(controlsData) ? controlsData : []);
+      setCalendarControls(Array.isArray(calendarData) ? calendarData : []);
+    } catch (error) {
+      console.error('Erreur:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'planned':
+        return 'bg-blue-100 text-blue-800';
+      case 'in_progress':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'planned':
+        return 'Planifié';
+      case 'in_progress':
+        return 'En cours';
+      case 'completed':
+        return 'Terminé';
+      default:
+        return status;
+    }
+  };
+
+  const handleEdit = (control) => {
+    setEditingControl(control);
+    setFormData({
+      class_id: control.class_id,
+      name: control.name,
+      date: control.date,
+      start_time: control.start_time || '',
+      end_time: control.end_time || '',
+      description: control.description || ''
+    });
+    setShowCreateModal(true);
+  };
+
+  const handleDelete = async (controlId) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce contrôle ?')) {
+      return;
+    }
+
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/teacher/controls-plan/${controlId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        setControls(controls.filter(c => c.id !== controlId));
+      } else {
+        alert('Erreur lors de la suppression du contrôle');
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      alert('Erreur lors de la suppression du contrôle');
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      const token = await getAuthToken();
+      const endpoint = editingControl 
+        ? `${apiUrl}/api/teacher/controls-plan/${editingControl.id}`
+        : `${apiUrl}/api/teacher/controls-plan`;
+
+      const method = editingControl ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData)
+      });
+
+      if (res.ok) {
+        setShowCreateModal(false);
+        setEditingControl(null);
+        setFormData({
+          class_id: '',
+          name: '',
+          date: '',
+          start_time: '',
+          end_time: '',
+          description: ''
+        });
+        fetchData();
+      } else {
+        alert('Erreur lors de la sauvegarde du contrôle');
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      alert('Erreur lors de la sauvegarde du contrôle');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Composant CalendarView
+  const CalendarView = () => {
+    const [currentDate, setCurrentDate] = useState(new Date());
+    const [selectedDate, setSelectedDate] = useState(null);
+    const [showModal, setShowModal] = useState(false);
+    const [selectedControls, setSelectedControls] = useState([]);
+
+    const getDaysInMonth = (date) => {
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      const daysInMonth = lastDay.getDate();
+      const startingDayOfWeek = firstDay.getDay();
+
+      const days = [];
+      // Ajouter les jours vides du début
+      for (let i = 0; i < startingDayOfWeek; i++) {
+        days.push(null);
+      }
+      // Ajouter tous les jours du mois
+      for (let i = 1; i <= daysInMonth; i++) {
+        days.push(new Date(year, month, i));
+      }
+
+      return days;
+    };
+
+    const getControlsForDate = (date) => {
+      if (!date) return [];
+      const dateStr = date.toISOString().split('T')[0];
+      return calendarControls.filter(control => control.date === dateStr);
+    };
+
+    const handleDateClick = (date, controls) => {
+      setSelectedDate(date);
+      setSelectedControls(controls);
+      setShowModal(true);
+    };
+
+    const getSubjectColor = (subjectName) => {
+      const colors = [
+        'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-red-500',
+        'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-orange-500'
+      ];
+      const hash = subjectName ? subjectName.split('').reduce((a, b) => a + b.charCodeAt(0), 0) : 0;
+      return colors[hash % colors.length];
+    };
+
+    const days = getDaysInMonth(currentDate);
+    const monthNames = [
+      'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+      'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+    ];
+
+    return (
+      <>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Calendrier des Contrôles</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
+                  className="p-2 hover:bg-gray-100 rounded"
+                >
+                  <CalendarIcon className="w-5 h-5" />
+                </button>
+                <span className="font-medium">
+                  {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
+                </span>
+                <button
+                  onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
+                  className="p-2 hover:bg-gray-100 rounded"
+                >
+                  <CalendarIcon className="w-5 h-5" />
+                </button>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-7 gap-2">
+              {['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'].map(day => (
+                <div key={day} className="text-center text-sm font-medium text-gray-600 p-2">
+                  {day}
+                </div>
+              ))}
+              {days.map((date, index) => {
+                const controls = date ? getControlsForDate(date) : [];
+                const isToday = date && date.toDateString() === new Date().toDateString();
+                const isCurrentMonth = date && date.getMonth() === currentDate.getMonth();
+                
+                return (
+                  <div
+                    key={index}
+                    onClick={() => date && controls.length > 0 && handleDateClick(date, controls)}
+                    className={`
+                      min-h-[80px] border rounded-lg p-2 relative
+                      ${!date ? 'bg-gray-50' : 'bg-white'}
+                      ${isToday ? 'border-blue-500 border-2' : 'border-gray-200'}
+                      ${date && controls.length > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}
+                      ${!isCurrentMonth && date ? 'text-gray-400' : ''}
+                    `}
+                  >
+                    {date && (
+                      <>
+                        <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : ''}`}>
+                          {date.getDate()}
+                        </div>
+                        
+                        {controls.length > 0 && (
+                          <div className="space-y-1">
+                            {controls.slice(0, 2).map((control, idx) => {
+                              const subjectName = control.subject_name || 'Non spécifié';
+                              const colorClass = getSubjectColor(subjectName);
+                              const bgColorClass = colorClass.replace('bg-', 'bg-opacity-20 bg-');
+                              const textColorClass = colorClass.replace('bg-', 'text-');
+                              
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`text-xs p-1 rounded ${bgColorClass} ${textColorClass} truncate`}
+                                  title={control.name}
+                                >
+                                  {control.name}
+                                </div>
+                              );
+                            })}
+                            {controls.length > 2 && (
+                              <div className="text-xs text-gray-500">
+                                +{controls.length - 2} plus
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Modal pour afficher les détails d'une journée */}
+        {showModal && selectedDate && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">
+                  Contrôles du {selectedDate.toLocaleDateString('fr-FR')}
+                </h2>
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="p-2 hover:bg-gray-100 rounded"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {selectedControls.length === 0 ? (
+                <p className="text-gray-600 text-center py-8">
+                  Aucun contrôle prévu pour cette date
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {selectedControls.map(control => (
+                    <div key={control.id} className="border rounded-lg p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-lg mb-2">{control.name}</h3>
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-2">
+                              <FileText className="w-4 h-4" />
+                              <span>{control.class_name}</span>
+                            </div>
+                            {control.start_time && (
+                              <div className="flex items-center gap-2">
+                                <Clock className="w-4 h-4" />
+                                <span>{control.start_time} {control.end_time ? `- ${control.end_time}` : ''}</span>
+                              </div>
+                            )}
+                            {control.subject_name && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Matière:</span>
+                                <span>{control.subject_name}</span>
+                              </div>
+                            )}
+                            {control.description && (
+                              <p className="text-gray-700 mt-2">{control.description}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(control.status)}`}>
+                            {getStatusLabel(control.status)}
+                          </span>
+                          {control.status === 'planned' && (
+                            <button
+                              onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
+                              className="px-3 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700 transition-colors"
+                            >
+                              Démarrer
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Chargement...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-4xl font-bold">Planificateur</h1>
+          <p className="text-muted-foreground mt-2">Vue calendrier de vos contrôles</p>
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => navigate('/teacher/controls')}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
+          >
+            <FileText className="w-5 h-5" />
+            Gérer les Contrôles
+          </button>
+          <button
+            onClick={() => {
+              setEditingControl(null);
+              setFormData({
+                class_id: '',
+                name: '',
+                date: '',
+                start_time: '',
+                end_time: '',
+                description: ''
+              });
+              setShowCreateModal(true);
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Nouveau Contrôle
+          </button>
+        </div>
+      </div>
+
+      <CalendarView />
+
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">
+                {editingControl ? 'Modifier le Contrôle' : 'Nouveau Contrôle'}
+              </h2>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Classe *
+                </label>
+                <select
+                  value={formData.class_id}
+                  onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                >
+                  <option value="">Sélectionner une classe</option>
+                  {classes.map(cls => (
+                    <option key={cls.id} value={cls.id}>{cls.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nom du contrôle *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date *
+                </label>
+                <input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Heure de début
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.start_time}
+                    onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Heure de fin
+                  </label>
+                  <input
+                    type="time"
+                    value={formData.end_time}
+                    onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Sauvegarde...' : (editingControl ? 'Modifier' : 'Créer')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Planificateur;
