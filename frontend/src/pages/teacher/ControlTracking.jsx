@@ -578,33 +578,58 @@ const ControlTracking = () => {
         </CardContent>
       </Card>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          <div className="flex-1">
+      {/* Bouton Enregistrer flottant - toujours visible */}
+      <div className="fixed bottom-4 right-4">
+        <button
+          onClick={saveTracking}
+          disabled={saving}
+          className="px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-200"
+        >
+          <Save className="w-5 h-5" />
+          {saving ? 'Sauvegarde...' : 'Enregistrer'}
+        </button>
+      </div>
+
+      {/* Barre de progression - visible uniquement pendant la sauvegarde */}
+      {saving && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-blue-200 shadow-lg p-4 z-50">
+          <div className="max-w-7xl mx-auto">
             <div className="flex items-center gap-3">
-              <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div className="flex-1 bg-gray-200 rounded-full h-3 overflow-hidden">
                 <div 
-                  className={`h-full transition-all duration-300 ${
-                    saving ? 'bg-blue-600' : autoSaveStatus.includes('✓') ? 'bg-green-600' : 'bg-gray-400'
-                  }`}
-                  style={{ width: saving ? '50%' : autoSaveStatus.includes('✓') ? '100%' : '0%' }}
+                  className="h-full bg-blue-600 transition-all duration-500 animate-pulse"
+                  style={{ width: '100%' }}
                 ></div>
               </div>
-              <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                {saving ? 'Sauvegarde en cours...' : autoSaveStatus || 'Prêt à sauvegarder'}
+              <span className="text-sm font-medium text-blue-700 whitespace-nowrap">
+                Sauvegarde en cours...
               </span>
             </div>
           </div>
-          <button
-            onClick={saveTracking}
-            disabled={saving}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Save className="w-4 h-4" />
-            {saving ? 'Sauvegarde...' : 'Enregistrer'}
-          </button>
         </div>
-      </div>
+      )}
+
+      {/* Message de succès - visible une fois la sauvegarde terminée */}
+      {autoSaveStatus && autoSaveStatus.includes('✓') && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl text-center max-w-sm mx-4 animate-bounce">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Save className="w-8 h-8 text-green-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Enregistré !</h3>
+            <p className="text-gray-600 mb-6">Toutes les données du contrôle ont été sauvegardées avec succès.</p>
+            <button
+              onClick={() => {
+                setAutoSaveStatus('');
+                navigate('/teacher/home');
+              }}
+              className="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+            >
+              Fermer et retourner à l'accueil
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
