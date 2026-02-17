@@ -931,6 +931,7 @@ const SuiviRapide = () => {
       </div>
 
       {/* ── Panneau Séance ── */}
+      {!currentSession ? (
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         {/* En-tête du panneau */}
         <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
@@ -939,14 +940,6 @@ const SuiviRapide = () => {
             <span className="text-sm font-semibold text-gray-700">Séance du {sessionDate ? new Date(sessionDate + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '—'}</span>
           </div>
           <div className="flex items-center gap-2">
-            {currentSession && (
-              <button
-                onClick={handleResetSession}
-                className="text-xs text-gray-500 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition"
-              >
-                Nouvelle séance
-              </button>
-            )}
             <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full ${
               currentSession ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
             }`}>
@@ -963,89 +956,6 @@ const SuiviRapide = () => {
             </div>
           )}
 
-          {currentSession ? (
-            <>
-              {/* Infos séance active */}
-              <div className="flex items-center gap-4 text-sm">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span className="font-semibold">{formatTimeDisplay(currentSession.start_time)} — {formatTimeDisplay(currentSession.end_time)}</span>
-                </div>
-                {currentSession.type === 'control' && (
-                  <span className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 text-xs font-semibold">Contrôle</span>
-                )}
-                {sessionInfo && <span className="text-xs text-gray-500">{sessionInfo}</span>}
-              </div>
-
-              {/* Cahier de texte */}
-              {currentSession.type !== 'control' && (
-                <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-indigo-800 flex items-center gap-1.5">
-                      <BookOpen className="w-3.5 h-3.5" /> Cahier de texte
-                    </p>
-                    <button
-                      onClick={async () => {
-                        if (editingLesson) {
-                          try {
-                            const token = await getAuthToken();
-                            const res = await fetch(`${apiUrl}/api/teacher/sessions/${currentSession.id}`, {
-                              method: 'PUT',
-                              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ topic: lessonTitle || null, notes: lessonDescription || null }),
-                            });
-                            if (res.ok) {
-                              const updated = await res.json();
-                              setCurrentSession(updated);
-                              setAutoSaveStatus('✓ Contenu mis à jour');
-                              setTimeout(() => setAutoSaveStatus(''), 2000);
-                            }
-                          } catch (err) {
-                            console.error('Erreur mise à jour:', err);
-                          }
-                        }
-                        setEditingLesson(!editingLesson);
-                      }}
-                      className={`text-xs font-semibold px-2.5 py-1 rounded-lg transition ${
-                        editingLesson ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'text-indigo-700 hover:bg-indigo-100'
-                      }`}
-                    >
-                      {editingLesson ? '✓ Enregistrer' : '✏️ Modifier'}
-                    </button>
-                  </div>
-                  {editingLesson ? (
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        value={lessonTitle}
-                        onChange={(e) => setLessonTitle(e.target.value)}
-                        placeholder="Chapitre / Titre de la leçon"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      />
-                      <textarea
-                        value={lessonDescription}
-                        onChange={(e) => setLessonDescription(e.target.value)}
-                        placeholder="Objectif / Description de la séance"
-                        rows="2"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      />
-                    </div>
-                  ) : (
-                    <div className="text-sm">
-                      {lessonTitle ? (
-                        <>
-                          <p className="font-semibold text-gray-800">{lessonTitle}</p>
-                          {lessonDescription && <p className="text-gray-600 text-xs mt-1">{lessonDescription}</p>}
-                        </>
-                      ) : (
-                        <p className="text-gray-400 italic text-xs">Aucun contenu renseigné — cliquez "Modifier"</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
           <>
             {/* Type de séance */}
             <div className="flex gap-2">
@@ -1251,9 +1161,9 @@ const SuiviRapide = () => {
               </div>
             )}
           </>
-        )}
         </div>
       </div>
+      ) : null}
 
       {!currentSession && (
         <div className="flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
@@ -1262,7 +1172,7 @@ const SuiviRapide = () => {
         </div>
       )}
 
-      {existingSessions.length > 0 && (
+      {!currentSession && existingSessions.length > 0 && (
         <details className="rounded-xl border border-gray-200 bg-white shadow-sm group">
           <summary className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 transition rounded-xl">
             <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
