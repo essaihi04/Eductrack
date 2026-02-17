@@ -621,7 +621,7 @@ const ControlTracking = () => {
             <button
               onClick={() => {
                 setAutoSaveStatus('');
-                navigate('/teacher/home');
+                navigate('/teacher/dashboard');
               }}
               className="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
             >
