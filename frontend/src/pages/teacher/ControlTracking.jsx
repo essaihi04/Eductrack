@@ -142,7 +142,10 @@ const ControlTracking = () => {
       }
 
       setAutoSaveStatus('✓ Sauvegardé');
-      setTimeout(() => setAutoSaveStatus(''), 2000);
+      setTimeout(() => {
+        setAutoSaveStatus('');
+        navigate('/teacher/dashboard');
+      }, 1500);
     } catch (error) {
       console.error('Erreur de sauvegarde:', error);
       setAutoSaveStatus('✗ Erreur de sauvegarde');
