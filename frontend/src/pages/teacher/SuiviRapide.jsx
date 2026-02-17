@@ -237,13 +237,10 @@ const SuiviRapide = () => {
 
   useEffect(() => {
     if (!selectedClass || !sessionDate) return;
-    // Toujours charger depuis l'API en priorité pour trouver les séances existantes
-    const loadSession = async () => {
-      await fetchSessionFromApi();
-      // Puis hydrater avec les données locales seulement si aucune séance trouvée
-      hydrateSessionFromStorage();
-    };
-    loadSession();
+    // Ne pas charger automatiquement - toujours proposer la création d'une nouvelle séance
+    // L'utilisateur doit cliquer sur une séance existante dans la liste ou créer une nouvelle
+    clearStoredSession();
+    setCurrentSession(null);
     fetchActiveHomework();
     fetchTimetableSlots();
   }, [selectedClass, sessionDate, urlParams]);
