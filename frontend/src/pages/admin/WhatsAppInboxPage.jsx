@@ -333,7 +333,7 @@ const WhatsAppInboxPage = () => {
           </div>
 
           {/* Message thread */}
-          <div className={`flex-1 flex flex-col bg-[#f0f2f5] ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
+          <div className={`flex-1 flex-col bg-[#f0f2f5] ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
             {selectedConv ? (
               <>
                 {/* Thread header */}
