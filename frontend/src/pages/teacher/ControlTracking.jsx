@@ -161,45 +161,53 @@ const ControlTracking = () => {
     }));
   };
 
-  const setAllPresence = (presenceValue) => {
+  const toggleAllPresence = () => {
+    const allPresent = students.length > 0 && students.every(s => tracking[s.id]?.presence === 'present');
+    const newValue = allPresent ? null : 'present';
     const updatedTracking = {};
     students.forEach((student) => {
       updatedTracking[student.id] = {
         ...tracking[student.id],
-        presence: presenceValue,
+        presence: newValue,
       };
     });
     setTracking(updatedTracking);
   };
 
-  const setAllMaterial = (materialValue) => {
+  const toggleAllMaterial = () => {
+    const allComplete = students.length > 0 && students.every(s => tracking[s.id]?.material_status === 'complete');
+    const newValue = allComplete ? null : 'complete';
     const updatedTracking = {};
     students.forEach((student) => {
       updatedTracking[student.id] = {
         ...tracking[student.id],
-        material_status: materialValue,
+        material_status: newValue,
       };
     });
     setTracking(updatedTracking);
   };
 
-  const setAllDiscipline = (disciplineValue) => {
+  const toggleAllDiscipline = () => {
+    const allGood = students.length > 0 && students.every(s => tracking[s.id]?.discipline_status === 'good');
+    const newValue = allGood ? null : 'good';
     const updatedTracking = {};
     students.forEach((student) => {
       updatedTracking[student.id] = {
         ...tracking[student.id],
-        discipline_status: disciplineValue,
+        discipline_status: newValue,
       };
     });
     setTracking(updatedTracking);
   };
 
-  const setAllCopySubmitted = (copyValue) => {
+  const toggleAllCopySubmitted = () => {
+    const allSubmitted = students.length > 0 && students.every(s => tracking[s.id]?.copy_submitted === true);
+    const newValue = !allSubmitted;
     const updatedTracking = {};
     students.forEach((student) => {
       updatedTracking[student.id] = {
         ...tracking[student.id],
-        copy_submitted: copyValue,
+        copy_submitted: newValue,
       };
     });
     setTracking(updatedTracking);
@@ -455,30 +463,58 @@ const ControlTracking = () => {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <button
-          onClick={() => setAllPresence('present')}
-          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium flex items-center gap-2"
-        >
-          <span>✅</span> Tout présent
-        </button>
-        <button
-          onClick={() => setAllMaterial('complete')}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2"
-        >
-          <span>✅</span> Tout matériel complet
-        </button>
-        <button
-          onClick={() => setAllDiscipline('good')}
-          className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm font-medium flex items-center gap-2"
-        >
-          <span>✅</span> Tout discipline bon
-        </button>
-        <button
-          onClick={() => setAllCopySubmitted(true)}
-          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium flex items-center gap-2"
-        >
-          <span>📄</span> Toutes les copies rendues
-        </button>
+        {(() => {
+          const allPresent = students.length > 0 && students.every(s => tracking[s.id]?.presence === 'present');
+          return (
+            <button
+              onClick={toggleAllPresence}
+              className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 ${
+                allPresent ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'
+              }`}
+            >
+              <span>{allPresent ? '❌' : '✅'}</span> {allPresent ? 'Tout désélectionner' : 'Tout présent'}
+            </button>
+          );
+        })()}
+        {(() => {
+          const allComplete = students.length > 0 && students.every(s => tracking[s.id]?.material_status === 'complete');
+          return (
+            <button
+              onClick={toggleAllMaterial}
+              className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 ${
+                allComplete ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              <span>{allComplete ? '❌' : '✅'}</span> {allComplete ? 'Tout désélectionner' : 'Tout matériel complet'}
+            </button>
+          );
+        })()}
+        {(() => {
+          const allGood = students.length > 0 && students.every(s => tracking[s.id]?.discipline_status === 'good');
+          return (
+            <button
+              onClick={toggleAllDiscipline}
+              className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 ${
+                allGood ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-yellow-600 text-white hover:bg-yellow-700'
+              }`}
+            >
+              <span>{allGood ? '❌' : '✅'}</span> {allGood ? 'Tout désélectionner' : 'Tout discipline bon'}
+            </button>
+          );
+        })()}
+        {(() => {
+          const allSubmitted = students.length > 0 && students.every(s => tracking[s.id]?.copy_submitted === true);
+          return (
+            <button
+              onClick={toggleAllCopySubmitted}
+              className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 ${
+                allSubmitted ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-purple-600 text-white hover:bg-purple-700'
+              }`}
+            >
+              <span>{allSubmitted ? '❌' : '📄'}</span> {allSubmitted ? 'Tout désélectionner' : 'Toutes les copies rendues'}
+            </button>
+          );
+        })()}
       </div>
 
       <Card>
