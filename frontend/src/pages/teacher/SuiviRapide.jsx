@@ -253,7 +253,9 @@ const SuiviRapide = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
-      setTimetableSlots(Array.isArray(data) ? data : []);
+      // Filtrer pour n'afficher que les créneaux du professeur connecté
+      const mySlots = (Array.isArray(data) ? data : []).filter(slot => slot.teacher_id === profile?.id);
+      setTimetableSlots(mySlots);
     } catch (error) {
       console.error('Erreur chargement emploi du temps:', error);
       setTimetableSlots([]);
@@ -741,7 +743,10 @@ const SuiviRapide = () => {
       if (errorCount === 0) {
         setAutoSaveStatus('✓ Séance enregistrée');
         setSessionSaved(true);
-        setTimeout(() => setAutoSaveStatus(''), 3000);
+        setTimeout(() => {
+          setAutoSaveStatus('');
+          navigate('/teacher/dashboard');
+        }, 1500);
         // Recharger les données depuis l'API pour synchroniser l'état
         await fetchSessionTracking(currentSession.id);
         fetchExistingSessions();
@@ -1063,11 +1068,11 @@ const SuiviRapide = () => {
             </div>
 
             {/* Créneaux emploi du temps */}
-            {timetableSlots.length > 0 && (
+            {timetableSlots.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  Créneaux — {{ monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' }[timetableSlots[0]?.day_of_week] || ''}
+                  Mes créneaux — {{ monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' }[timetableSlots[0]?.day_of_week] || ''}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {timetableSlots.map((slot) => {
@@ -1097,6 +1102,12 @@ const SuiviRapide = () => {
                     );
                   })}
                 </div>
+              </div>
+            ) : selectedClass && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
+                <p className="text-xs text-amber-700">
+                  <span className="font-semibold">Aucun créneau programmé</span> pour vous dans cette classe à cette date. Veuillez définir manuellement l'horaire ou contacter l'administration.
+                </p>
               </div>
             )}
 
