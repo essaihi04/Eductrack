@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, FolderOpen, X, Check, Calendar } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, FolderOpen, X, Check, Calendar, FileSpreadsheet } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -96,6 +96,14 @@ const ClassesPage = () => {
     school_type: '',
     filiere: ''
   });
+
+  // Bulk class import states
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [isBulkImporting, setIsBulkImporting] = useState(false);
+  const [bulkImportProgress, setBulkImportProgress] = useState({ current: 0, total: 0, message: '' });
+  const [parsedClasses, setParsedClasses] = useState([]);
+  const [bulkImportErrors, setBulkImportErrors] = useState([]);
+  const [bulkImportResult, setBulkImportResult] = useState(null);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -518,6 +526,518 @@ const ClassesPage = () => {
     XLSX.writeFile(workbook, 'modele_eleves_arabe.xlsx');
   };
 
+  // Parse a single Excel file and extract class + students data
+  const parseExcelFile = async (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target.result;
+          const workbook = XLSX.read(data);
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+          if (rawData.length === 0) {
+            reject(new Error(`Le fichier ${file.name} est vide`));
+            return;
+          }
+
+          // Extract class metadata from first rows
+          let className = '';
+          let levelName = '';
+          let academicYear = '';
+          let schoolType = '';
+          let filiere = '';
+
+          // Look for class name, level, and academic year in metadata rows (rows 0-9)
+          for (let i = 0; i < Math.min(20, rawData.length); i++) {
+            const row = rawData[i];
+            if (!row) continue;
+
+            for (let j = 0; j < row.length; j++) {
+              const cell = row[j];
+              if (typeof cell === 'string') {
+                const trimmed = cell.trim();
+                // Detect class name (like TCSF-8, 1BACSEF-1)
+                if (trimmed.includes('القسم') || trimmed.includes('قسم')) {
+                  // Look for value in next cell (j+1) or two cells over (j+2)
+                  let valueCell = row[j + 1];
+                  if (!valueCell || (typeof valueCell === 'string' && !valueCell.trim())) {
+                    valueCell = row[j + 2];
+                  }
+                  if (valueCell && typeof valueCell === 'string' && valueCell.trim()) {
+                    className = valueCell.trim();
+                  }
+                }
+                // Detect level (like الجذع المشترك العلمي, الأولى بكالوريا)
+                if (trimmed.includes('المستوى') || trimmed.includes('مستوى')) {
+                  let valueCell = row[j + 1];
+                  if (!valueCell || (typeof valueCell === 'string' && !valueCell.trim())) {
+                    valueCell = row[j + 2];
+                  }
+                  if (valueCell && typeof valueCell === 'string' && valueCell.trim()) {
+                    levelName = valueCell.trim();
+                  }
+                }
+                // Detect academic year
+                if (trimmed.includes('السنة') || trimmed.includes('الدراسية')) {
+                  let valueCell = row[j + 1];
+                  if (!valueCell || (typeof valueCell === 'string' && !valueCell.trim())) {
+                    valueCell = row[j + 2];
+                  }
+                  if (valueCell && typeof valueCell === 'string' && valueCell.trim()) {
+                    academicYear = valueCell.trim();
+                  }
+                }
+              }
+            }
+          }
+
+          // If still no class name, try to extract from filename
+          if (!className) {
+            const fileName = file.name.replace('.xlsx', '').replace('.xls', '');
+            // Try to find pattern like TCSF-8, 1BACSEF-1, etc.
+            const classMatch = fileName.match(/(TC|1BAC|2BAC|1AC|2AC|3AC)[A-Za-z0-9-]+/i);
+            if (classMatch) {
+              className = classMatch[0].toUpperCase();
+            } else {
+              className = fileName;
+            }
+          }
+          
+          console.log(`[${file.name}] Metadata extracted:`, {
+            className,
+            levelName,
+            academicYear
+          });
+
+          // Map Arabic/French level names to our codes
+          let level = '';
+          const levelMapping = {
+            'جذع': 'TC',
+            'tronc': 'TC',
+            'TC': 'TC',
+            'أولى باكالوريا': '1BAC',
+            'الأولى باكالوريا': '1BAC',
+            'اولى باكالوريا': '1BAC',
+            '1ère': '1BAC',
+            '1bac': '1BAC',
+            'ثانية باكالوريا': '2BAC',
+            'الثانية باكالوريا': '2BAC',
+            'ثانية بكالوريا': '2BAC',
+            '2ème': '2BAC',
+            '2bac': '2BAC',
+            'الأولى إعدادي': '1AC',
+            'أولى إعدادي': '1AC',
+            'اولى اعدادي': '1AC',
+            '1ère année collège': '1AC',
+            '1ac': '1AC',
+            'الثانية إعدادي': '2AC',
+            'ثانية إعدادي': '2AC',
+            'ثانية اعدادي': '2AC',
+            '2ème année collège': '2AC',
+            '2ac': '2AC',
+            'الثالثة إعدادي': '3AC',
+            'ثالثة إعدادي': '3AC',
+            'ثالثة اعدادي': '3AC',
+            '3ème année collège': '3AC',
+            '3ac': '3AC'
+          };
+
+          for (const [key, value] of Object.entries(levelMapping)) {
+            if (levelName.toLowerCase().includes(key.toLowerCase())) {
+              level = value;
+              console.log(`[${file.name}] Matched level "${key}" -> ${value}`);
+              break;
+            }
+          }
+          
+          if (!level) {
+            console.log(`[${file.name}] ⚠️ Could not map level from: "${levelName}"`);
+          }
+
+          // Determine school type based on level
+          if (level && ['1AC', '2AC', '3AC'].includes(level)) {
+            schoolType = 'college';
+          } else if (level && ['TC', '1BAC', '2BAC'].includes(level)) {
+            schoolType = 'lycee';
+          }
+
+          // Determine filiere based on class name or level name
+          const combinedText = (className + ' ' + levelName).toLowerCase();
+          
+          // Sciences Expérimentales (SVT)
+          if (combinedText.includes('علوم تجريبية') || combinedText.includes('sciences exp') || 
+              combinedText.includes('sef') || combinedText.includes('svt')) {
+            filiere = 'sciences_exp';
+          }
+          // Sciences Physiques (PC)
+          else if (combinedText.includes('علوم فيزيائية') || combinedText.includes('sciences physiques') || 
+                   combinedText.includes('spf') || combinedText.includes('pc')) {
+            filiere = 'pc';
+          }
+          // Sciences Mathématiques
+          else if (combinedText.includes('علوم رياضية') || combinedText.includes('sciences math') || 
+                   combinedText.includes('sm') || combinedText.includes('math')) {
+            filiere = 'sciences_math';
+          }
+          // Sciences Économiques
+          else if (combinedText.includes('علوم اقتصادية') || combinedText.includes('économique') || 
+                   combinedText.includes('eco') || combinedText.includes('se')) {
+            filiere = 'sciences_eco';
+          }
+          // Lettres
+          else if (combinedText.includes('آداب') || combinedText.includes('أدبي') || 
+                   combinedText.includes('lettres') || combinedText.includes('la')) {
+            filiere = 'lettres';
+          }
+          // Tronc Commun - no filiere needed
+          else if (level === 'TC') {
+            filiere = '';
+          }
+          // College - no filiere needed
+          else if (schoolType === 'college') {
+            filiere = '';
+          }
+          
+          console.log(`[${file.name}] Filiere detection: "${combinedText}" -> ${filiere || '(none)'}`);
+
+          // Find student data header row
+          let headerRowIndex = -1;
+          let studentIdColIndex = -1;
+          let studentNameColIndex = -1;
+          let lastNameColIndex = -1;
+          let birthDateColIndex = -1;
+
+          console.log(`[${file.name}] Searching for header in ${rawData.length} rows...`);
+          
+          // Log first 15 rows for debugging
+          for (let i = 0; i < Math.min(15, rawData.length); i++) {
+            const row = rawData[i];
+            if (row && row.length > 0) {
+              console.log(`[${file.name}] Row ${i}:`, row.slice(0, 10).map(cell => 
+                typeof cell === 'string' ? `"${cell.trim()}"` : cell
+              ));
+            }
+          }
+
+          for (let i = 0; i < rawData.length; i++) {
+            const row = rawData[i];
+            if (!row) continue;
+
+            let tempStudentIdCol = -1;
+            let tempStudentNameCol = -1;
+            let tempLastNameCol = -1;
+            let tempBirthDateCol = -1;
+
+            for (let j = 0; j < row.length; j++) {
+              const cell = row[j];
+              if (typeof cell === 'string') {
+                const trimmed = cell.trim().replace(/\s+/g, ' ');
+
+                // Format 1: رقم التلميذ (student number)
+                if (trimmed.includes('رقم') && trimmed.includes('التلميذ')) {
+                  tempStudentIdCol = j;
+                  console.log(`[${file.name}] Found "رقم التلميذ" at row ${i}, col ${j}`);
+                }
+                // Format 2: الرمز (code/ID/Massar code) - this is the actual student ID
+                if (trimmed === 'الرمز' || trimmed === 'رمز' || trimmed.includes('الرمز')) {
+                  tempStudentIdCol = j;
+                  console.log(`[${file.name}] Found "الرمز" at row ${i}, col ${j}`);
+                }
+                // Note: ر.ت is just row number, not student ID - we ignore it
+                
+                // Format 1: إسم التلميذ (full student name)
+                if (trimmed.includes('إسم') && trimmed.includes('التلميذ')) {
+                  tempStudentNameCol = j;
+                  console.log(`[${file.name}] Found "إسم التلميذ" at row ${i}, col ${j}`);
+                }
+                // Format 2: الإسم (first name)
+                if (trimmed === 'الإسم' || trimmed === 'الاسم' || trimmed === 'إسم' || trimmed === 'اسم') {
+                  tempStudentNameCol = j;
+                  console.log(`[${file.name}] Found "الإسم" at row ${i}, col ${j}`);
+                }
+                // Format 2: النسب (last name/family name)
+                if (trimmed === 'النسب' || trimmed === 'نسب' || trimmed.includes('النسب')) {
+                  tempLastNameCol = j;
+                  console.log(`[${file.name}] Found "النسب" at row ${i}, col ${j}`);
+                }
+                
+                // Birth date
+                if (trimmed.includes('تاريخ') && (trimmed.includes('الإزدياد') || trimmed.includes('ازدياد') || trimmed.includes('الازدياد'))) {
+                  tempBirthDateCol = j;
+                  console.log(`[${file.name}] Found birth date at row ${i}, col ${j}`);
+                }
+              }
+            }
+
+            // Valid if we have student ID and at least one name column
+            if (tempStudentIdCol !== -1 && (tempStudentNameCol !== -1 || tempLastNameCol !== -1)) {
+              headerRowIndex = i;
+              studentIdColIndex = tempStudentIdCol;
+              studentNameColIndex = tempStudentNameCol;
+              lastNameColIndex = tempLastNameCol;
+              birthDateColIndex = tempBirthDateCol;
+              console.log(`[${file.name}] ✓ Header found at row ${i}`);
+              console.log(`[${file.name}] Columns: ID=${studentIdColIndex}, FirstName=${studentNameColIndex}, LastName=${lastNameColIndex}, BirthDate=${birthDateColIndex}`);
+              break;
+            }
+          }
+
+          if (headerRowIndex === -1) {
+            reject(new Error(`En-tête non trouvé dans ${file.name}. Colonnes requises: (الرمز ou رقم التلميذ) et (الإسم/النسب ou إسم التلميذ)`));
+            return;
+          }
+
+          // Extract students
+          const students = [];
+          console.log(`[${file.name}] Extracting students from row ${headerRowIndex + 1} to ${rawData.length}...`);
+          
+          for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+            const row = rawData[i];
+            if (!row || row.length === 0) continue;
+
+            const massarCode = row[studentIdColIndex];
+            const birthDate = birthDateColIndex !== -1 ? row[birthDateColIndex] : null;
+
+            // Skip if no massar code or if it's a header row
+            if (!massarCode || typeof massarCode !== 'string' || !massarCode.trim() ||
+                massarCode.includes('رقم') || massarCode.includes('الرمز') || massarCode.includes('ر.ت')) {
+              continue;
+            }
+
+            let firstName = '';
+            let lastName = '';
+
+            // Format 2: Separate first name and last name columns (الإسم and النسب)
+            if (lastNameColIndex !== -1 && studentNameColIndex !== -1) {
+              const firstNameCell = row[studentNameColIndex];
+              const lastNameCell = row[lastNameColIndex];
+
+              if (firstNameCell && typeof firstNameCell === 'string' && firstNameCell.trim() &&
+                  !firstNameCell.includes('الإسم') && !firstNameCell.includes('اسم')) {
+                firstName = firstNameCell.trim();
+              }
+
+              if (lastNameCell && typeof lastNameCell === 'string' && lastNameCell.trim() &&
+                  !lastNameCell.includes('النسب') && !lastNameCell.includes('نسب')) {
+                lastName = lastNameCell.trim();
+              }
+            }
+            // Format 1: Full name in one column (إسم التلميذ)
+            else if (studentNameColIndex !== -1) {
+              const studentName = row[studentNameColIndex];
+
+              if (studentName && typeof studentName === 'string' && studentName.trim() &&
+                  !studentName.includes('إسم') && !studentName.includes('اسم')) {
+                const fullName = studentName.trim();
+                const nameParts = fullName.split(/\s+/);
+
+                if (nameParts.length === 1) {
+                  firstName = nameParts[0];
+                  lastName = '';
+                } else if (nameParts.length === 2) {
+                  firstName = nameParts[0];
+                  lastName = nameParts[1];
+                } else {
+                  firstName = nameParts[0];
+                  lastName = nameParts.slice(1).join(' ');
+                }
+              }
+            }
+
+            // Only add if we have at least a first name
+            if (firstName) {
+              students.push({
+                massarCode: massarCode.trim(),
+                firstName,
+                lastName,
+                birthDate: birthDate || null
+              });
+            }
+          }
+          
+          console.log(`[${file.name}] ✓ Extracted ${students.length} students`);
+          if (students.length > 0) {
+            console.log(`[${file.name}] First student:`, students[0]);
+            console.log(`[${file.name}] Last student:`, students[students.length - 1]);
+          }
+
+          const result = {
+            fileName: file.name,
+            className,
+            level,
+            schoolType,
+            filiere,
+            academicYear,
+            students,
+            studentCount: students.length
+          };
+          
+          console.log(`[${file.name}] ✓ Final parsed data:`, {
+            className: result.className,
+            level: result.level,
+            schoolType: result.schoolType,
+            filiere: result.filiere,
+            academicYear: result.academicYear,
+            studentCount: result.studentCount
+          });
+          
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  // Handle multiple file selection for bulk import
+  const handleBulkFileSelect = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    setIsBulkImporting(true);
+    setBulkImportProgress({ current: 0, total: files.length, message: 'Analyse des fichiers Excel...' });
+    setParsedClasses([]);
+    setBulkImportErrors([]);
+
+    const parsed = [];
+    const errors = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        setBulkImportProgress({
+          current: i + 1,
+          total: files.length,
+          message: `Analyse de ${file.name}...`
+        });
+        const classData = await parseExcelFile(file);
+        parsed.push(classData);
+      } catch (error) {
+        errors.push({ fileName: file.name, error: error.message });
+      }
+    }
+
+    setParsedClasses(parsed);
+    setBulkImportErrors(errors);
+    setBulkImportProgress({ current: files.length, total: files.length, message: `Analyse terminée: ${parsed.length} fichier(s) valide(s)` });
+    setIsBulkImporting(false);
+  };
+
+  // Submit parsed classes to backend
+  const submitBulkImport = async () => {
+    if (parsedClasses.length === 0) return;
+
+    setIsBulkImporting(true);
+    setBulkImportProgress({ current: 0, total: parsedClasses.length, message: 'Création des classes et élèves...' });
+
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      // Format data for backend
+      const classesData = parsedClasses.map(pc => ({
+        name: pc.className,
+        level: pc.level,
+        school_type: pc.schoolType,
+        filiere: pc.filiere || null,
+        academic_year: pc.academicYear,
+        students: pc.students
+      }));
+
+      setBulkImportProgress({ current: 0, total: classesData.length, message: 'Envoi au serveur...' });
+
+      const res = await fetch(`${apiUrl}/api/admin/classes/import`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ classes: classesData })
+      });
+
+      if (res.ok) {
+        const result = await res.json();
+        setBulkImportResult(result);
+        setBulkImportProgress({ current: classesData.length, total: classesData.length, message: 'Importation terminée !' });
+
+        // Stocker les mots de passe dans localStorage
+        if (result.classes && Array.isArray(result.classes)) {
+          const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
+          result.classes.forEach(cls => {
+            if (cls.students && Array.isArray(cls.students)) {
+              cls.students.forEach(student => {
+                if (student.id && student.password) {
+                  storedPasswords[student.id] = student.password;
+                }
+              });
+            }
+          });
+          localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
+        }
+
+        // Refresh class list
+        await fetchData();
+
+        setTimeout(() => {
+          setShowBulkImport(false);
+          setParsedClasses([]);
+          setBulkImportErrors([]);
+          setBulkImportResult(null);
+        }, 3000);
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Erreur lors de l\'import');
+      }
+    } catch (error) {
+      console.error('Bulk import error:', error);
+      alert('Erreur lors de l\'import: ' + error.message);
+    } finally {
+      setIsBulkImporting(false);
+    }
+  };
+
+  // Download bulk import template
+  const downloadBulkTemplate = () => {
+    // Create a template with multiple sheets (one example per school type)
+    const workbook = XLSX.utils.book_new();
+
+    // College template (1AC)
+    const collegeSheet = XLSX.utils.aoa_to_sheet([
+      ['أكاديمية :', 'الدار البيضاء - سطات', '', 'م.الإقليمية :', 'عمالة مقاطعة عين الشق', '', 'École Collège'],
+      ['المستوى :', '1ère Année Collège', '', 'القسم :', '1AC-3', '', 'Nom Prof'],
+      ['', ''],
+      ['الدورة :', 'الدورة الأولى', '', 'نقط :', '', '', ''],
+      ['السنة الدراسية :', '2025/2026'],
+      [],
+      ['رقم التلميذ', 'إسم التلميذ', 'تاريخ الإزدياد', 'الفرض 1', 'الفرض 2', 'الأنشطة', 'ملاحظات'],
+      ['', '', 'النقطة', 'النقطة', 'النقطة', '-', ''],
+      ['F123456789', 'أحمد علي', '15-05-2012', '', '', '', ''],
+      ['F987654321', 'فاطمة محمد', '20-08-2011', '', '', '', '']
+    ]);
+    XLSX.utils.book_append_sheet(workbook, collegeSheet, '1AC-Exemple');
+
+    // Lycée template (TC)
+    const lyceeSheet = XLSX.utils.aoa_to_sheet([
+      ['أكاديمية :', 'الدار البيضاء - سطات', '', 'م.الإقليمية :', 'عمالة مقاطعة عين الشق', '', 'École Lycée'],
+      ['المستوى :', 'Tronc Commun Scientifique', '', 'القسم :', 'TCSF-8', '', 'Nom Prof'],
+      ['', 'علوم الحياة والأرض'],
+      ['الدورة :', 'الدورة الأولى', '', 'نقط :', '', '', ''],
+      ['السنة الدراسية :', '2025/2026'],
+      [],
+      ['رقم التلميذ', 'إسم التلميذ', 'تاريخ الإزدياد', 'الفرض 1', 'الفرض 2', 'الأنشطة', 'ملاحظات'],
+      ['', '', 'النقطة', 'النقطة', 'النقطة', '-', ''],
+      ['F164115196', 'أيت المدني رانيا', '17-12-2010', '', '', '', ''],
+      ['F166023242', 'ابت الساخي سعيد', '03-06-2008', '', '', '', '']
+    ]);
+    XLSX.utils.book_append_sheet(workbook, lyceeSheet, 'TCSF-Exemple');
+
+    XLSX.writeFile(workbook, 'modele_import_classes_multi.xlsx');
+  };
+
   if (loading) {
     return <div className="p-8">Chargement...</div>;
   }
@@ -729,7 +1249,7 @@ const ClassesPage = () => {
   return (
     <div className="p-8 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold">Gestion des Classes</h1>
           <div className="flex gap-3 mt-2 text-sm text-muted-foreground">
@@ -741,13 +1261,22 @@ const ClassesPage = () => {
             {uncategorized.length > 0 && <><span>·</span><span className="text-orange-600">{uncategorized.length} non classifiée(s)</span></>}
           </div>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-        >
-          <Plus className="w-5 h-5" />
-          Ajouter une classe
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBulkImport(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
+            <FileSpreadsheet className="w-5 h-5" />
+            Importer des classes (Excel)
+          </button>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            <Plus className="w-5 h-5" />
+            Ajouter une classe
+          </button>
+        </div>
       </div>
 
       {deleteStatus.message && (
@@ -858,6 +1387,177 @@ const ClassesPage = () => {
                 </button>
               </div>
             </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showBulkImport && (
+        <Card className="border-green-200">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <CardTitle>Importer des classes en vrac</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Importez plusieurs classes avec leurs élèves depuis des fichiers Excel
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowBulkImport(false);
+                  setParsedClasses([]);
+                  setBulkImportErrors([]);
+                  setBulkImportResult(null);
+                }}
+                className="p-2 hover:bg-muted rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Instructions */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-900 mb-2">📋 Instructions</h4>
+              <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                <li>Chaque fichier Excel = 1 classe avec ses élèves</li>
+                <li>Formats supportés :
+                  <ul className="ml-6 mt-1 space-y-0.5">
+                    <li>• Format 1: <strong>رقم التلميذ</strong> + <strong>إسم التلميذ</strong></li>
+                    <li>• Format 2: <strong>الرمز</strong> + <strong>الإسم</strong> + <strong>النسب</strong></li>
+                  </ul>
+                </li>
+                <li>Le nom de la classe sera extrait de la cellule "القسم" ou du nom du fichier</li>
+                <li>Vous pouvez sélectionner plusieurs fichiers à la fois</li>
+              </ul>
+            </div>
+
+            {/* Template Download */}
+            <button
+              onClick={downloadBulkTemplate}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
+            >
+              <Download className="w-4 h-4 text-blue-600" />
+              <span className="text-sm text-blue-600">Télécharger les modèles Excel (Collège + Lycée)</span>
+            </button>
+
+            {/* File Upload */}
+            {!bulkImportResult && (
+              <div className="border-2 border-dashed border-green-300 rounded-lg p-6 text-center">
+                <Upload className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                <p className="text-sm font-medium mb-2">Sélectionnez un ou plusieurs fichiers Excel</p>
+                <p className="text-xs text-muted-foreground mb-4">.xlsx, .xls - Fichiers de notes marocains</p>
+                <label className={`inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg cursor-pointer hover:bg-green-700 ${isBulkImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                  <span className="text-sm font-medium">
+                    {isBulkImporting ? 'Analyse en cours...' : 'Choisir les fichiers'}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    multiple
+                    onChange={handleBulkFileSelect}
+                    className="hidden"
+                    disabled={isBulkImporting}
+                  />
+                </label>
+              </div>
+            )}
+
+            {/* Progress */}
+            {isBulkImporting && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-green-800">{bulkImportProgress.message}</span>
+                  <span className="text-sm font-bold text-green-600">
+                    {bulkImportProgress.current} / {bulkImportProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-green-200 rounded-full h-2">
+                  <div
+                    className="bg-green-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${bulkImportProgress.total > 0 ? (bulkImportProgress.current / bulkImportProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Parsed Classes Preview */}
+            {parsedClasses.length > 0 && !bulkImportResult && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium">Classes détectées ({parsedClasses.length})</h4>
+                  <button
+                    onClick={submitBulkImport}
+                    disabled={isBulkImporting}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {isBulkImporting ? 'Importation...' : 'Confirmer l\'import'}
+                  </button>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto space-y-2">
+                  {parsedClasses.map((cls, idx) => (
+                    <div key={idx} className="border rounded-lg p-3 bg-white">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded bg-green-100 flex items-center justify-center text-green-700 font-bold text-sm">
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <p className="font-medium">{cls.className || 'Sans nom'}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {cls.level || 'Niveau inconnu'} • {cls.schoolType === 'college' ? 'Collège' : cls.schoolType === 'lycee' ? 'Lycée' : 'Type inconnu'}
+                              {cls.filiere && ` • ${getFiliereLabel(cls.filiere)}`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium text-green-700">{cls.studentCount} élève(s)</p>
+                          <p className="text-xs text-muted-foreground">{cls.fileName}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Errors */}
+            {bulkImportErrors.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <h4 className="font-medium text-red-800 mb-2">Erreurs ({bulkImportErrors.length})</h4>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {bulkImportErrors.map((err, idx) => (
+                    <p key={idx} className="text-sm text-red-700">
+                      • {err.fileName}: {err.error}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Success Result */}
+            {bulkImportResult && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3">
+                  <Check className="w-6 h-6 text-green-600" />
+                </div>
+                <h4 className="font-medium text-green-800 mb-1">Importation réussie !</h4>
+                <p className="text-sm text-green-700">
+                  {bulkImportResult.message}
+                </p>
+                {bulkImportResult.errors && bulkImportResult.errors.length > 0 && (
+                  <p className="text-xs text-orange-600 mt-2">
+                    {bulkImportResult.errors.length} erreur(s) - voir console
+                  </p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

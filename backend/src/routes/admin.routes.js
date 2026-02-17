@@ -104,6 +104,53 @@ const applySchoolFilter = (query, req, column = 'school_id') => {
 
 // ==================== ÉLÈVES ====================
 
+// Récupérer le parent d'un élève
+router.get('/students/:studentId/parent', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    // Récupérer la relation parent-élève
+    const { data: relation, error: relationError } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id')
+      .eq('student_id', studentId)
+      .single();
+
+    if (relationError || !relation) {
+      return res.status(404).json({ error: 'Aucun parent associé à cet élève' });
+    }
+
+    // Récupérer les informations du parent avec son numéro de téléphone depuis parent_contacts
+    const { data: parent, error: parentError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, first_name, last_name, phone')
+      .eq('id', relation.parent_id)
+      .single();
+
+    if (parentError) throw parentError;
+
+    // Si pas de téléphone dans profiles, chercher dans parent_contacts
+    if (!parent.phone) {
+      const { data: contact } = await supabaseAdmin
+        .from('parent_contacts')
+        .select('phone_e164')
+        .eq('parent_id', relation.parent_id)
+        .eq('channel', 'whatsapp')
+        .eq('is_primary', true)
+        .single();
+
+      if (contact) {
+        parent.phone = contact.phone_e164;
+      }
+    }
+
+    res.json(parent);
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // Récupérer tous les élèves
 router.get('/students', async (req, res) => {
   try {
@@ -636,7 +683,7 @@ router.post('/students', async (req, res) => {
 
     if (profileError) throw profileError;
 
-    res.status(201).json(profile);
+    res.status(201).json({ ...profile, password });
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
@@ -819,6 +866,165 @@ router.delete('/classes/:id', async (req, res) => {
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Importer des classes en vrac avec leurs élèves (depuis Excel)
+router.post('/classes/import', async (req, res) => {
+  try {
+    const { classes: classesData } = req.body;
+
+    if (!Array.isArray(classesData) || classesData.length === 0) {
+      return res.status(400).json({ error: 'Données invalides : tableau de classes requis' });
+    }
+
+    const schoolId = getSchoolId(req);
+    let schoolDomain = 'ecole.ma';
+    let schoolName = '';
+    
+    if (schoolId) {
+      const { data: school } = await supabaseAdmin
+        .from('schools')
+        .select('name, code')
+        .eq('id', schoolId)
+        .single();
+      if (school) {
+        schoolName = school.name || school.code || 'ecole';
+        schoolDomain = schoolName
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]/g, '') + '.ma';
+      }
+    }
+
+    const createdClasses = [];
+    const errors = [];
+    const allCreatedStudents = [];
+
+    for (const classData of classesData) {
+      const { name, level, school_type, filiere, academic_year, students: studentsList } = classData;
+
+      if (!name || !level) {
+        errors.push({ className: name || 'Inconnue', reason: 'Nom et niveau obligatoires' });
+        continue;
+      }
+
+      try {
+        // 1. Créer la classe
+        const { data: newClass, error: classError } = await supabaseAdmin
+          .from('classes')
+          .insert({
+            name,
+            level,
+            school_type: school_type || null,
+            filiere: filiere || null,
+            academic_year: academic_year || null,
+            school_id: schoolId
+          })
+          .select()
+          .single();
+
+        if (classError) {
+          errors.push({ className: name, reason: `Erreur création classe: ${classError.message}` });
+          continue;
+        }
+
+        // 2. Créer les élèves de cette classe
+        const classStudents = [];
+        if (Array.isArray(studentsList) && studentsList.length > 0) {
+          for (const student of studentsList) {
+            const { massarCode, firstName, lastName, birthDate, birthPlace, gender } = student;
+
+            if (!firstName || !lastName) {
+              continue; // Skip invalid students
+            }
+
+            // Générer email basé sur le code Massar ou le nom
+            const emailId = massarCode 
+              ? massarCode.toLowerCase().replace(/[^a-z0-9]/g, '')
+              : `${firstName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}${lastName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}`;
+            
+            const email = `${emailId}@${schoolDomain}`;
+            const password = `${firstName.charAt(0).toUpperCase()}${lastName.charAt(0).toLowerCase()}@${new Date().getFullYear()}`;
+
+            try {
+              // Créer l'utilisateur Auth
+              const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+                email,
+                password,
+                email_confirm: true,
+                user_metadata: { 
+                  first_name: firstName, 
+                  last_name: lastName, 
+                  role: 'student',
+                  massar_code: massarCode || null
+                }
+              });
+
+              if (authError) {
+                console.error(`[Import Class] Erreur auth ${email}:`, authError);
+                continue;
+              }
+
+              // Créer le profil élève
+              const { data: profile, error: profileError } = await supabaseAdmin
+                .from('profiles')
+                .insert({
+                  id: authData.user.id,
+                  email,
+                  first_name: firstName,
+                  last_name: lastName,
+                  role: 'student',
+                  class_id: newClass.id,
+                  school_id: schoolId,
+                  date_of_birth: birthDate || null
+                })
+                .select()
+                .single();
+
+              if (profileError) {
+                console.error(`[Import Class] Erreur profil ${email}:`, profileError);
+                continue;
+              }
+
+              classStudents.push({
+                ...profile,
+                password,
+                massarCode: massarCode || null
+              });
+              allCreatedStudents.push({
+                ...profile,
+                password,
+                className: name,
+                massarCode: massarCode || null
+              });
+            } catch (studentErr) {
+              console.error(`[Import Class] Erreur élève ${firstName} ${lastName}:`, studentErr);
+            }
+          }
+        }
+
+        createdClasses.push({
+          ...newClass,
+          studentCount: classStudents.length,
+          students: classStudents
+        });
+
+      } catch (err) {
+        errors.push({ className: name, reason: err.message });
+      }
+    }
+
+    console.log(`[Import Classes] ${createdClasses.length} classes créées, ${allCreatedStudents.length} élèves, ${errors.length} erreurs`);
+    res.status(201).json({
+      message: `${createdClasses.length} classe(s) importée(s) avec ${allCreatedStudents.length} élève(s)`,
+      classes: createdClasses,
+      totalStudents: allCreatedStudents.length,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error('Erreur import classes:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 

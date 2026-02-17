@@ -178,10 +178,98 @@ async function collectStudentDailyData(studentId, date, schoolId) {
   };
 }
 
+// ==================== CALCULATE DAILY STATS ====================
+
+function calculateDailyStats(studentData) {
+  const sessions = studentData.sessions.filter(s => s.tracking);
+  
+  if (sessions.length === 0) {
+    return {
+      presenceBar: '⬜⬜⬜⬜⬜ 0%',
+      participationBar: '⬜⬜⬜⬜⬜ 0%',
+      vigilanceBar: '⬜⬜⬜⬜⬜ 0%',
+      presenceText: 'Aucune donnée',
+      participationText: 'Aucune donnée',
+      vigilanceText: 'Aucune donnée'
+    };
+  }
+
+  // Calculer la présence
+  const presentCount = sessions.filter(s => s.tracking.presence === 'present').length;
+  const presencePercent = Math.round((presentCount / sessions.length) * 100);
+
+  // Calculer la participation moyenne
+  const participationMap = { 'excellent': 100, 'bon': 80, 'good': 80, 'moyen': 60, 'average': 60, 'faible': 30, 'poor': 30 };
+  const participations = sessions
+    .map(s => participationMap[s.tracking.participation?.toLowerCase()] || null)
+    .filter(v => v !== null);
+  const participationPercent = participations.length > 0 
+    ? Math.round(participations.reduce((a, b) => a + b, 0) / participations.length)
+    : 0;
+
+  // Calculer la vigilance (discipline) moyenne
+  const vigilanceMap = { 'concentre': 100, 'excellent': 100, 'good': 80, 'moyen': 60, 'average': 60, 'distrait': 30, 'poor': 30 };
+  const vigilances = sessions
+    .map(s => vigilanceMap[s.tracking.discipline?.toLowerCase()] || null)
+    .filter(v => v !== null);
+  const vigilancePercent = vigilances.length > 0
+    ? Math.round(vigilances.reduce((a, b) => a + b, 0) / vigilances.length)
+    : 0;
+
+  // Calculer le taux de devoirs faits
+  const homeworkSessions = sessions.filter(s => s.tracking.homework_done !== null && s.tracking.homework_done !== undefined);
+  const homeworkDone = homeworkSessions.filter(s => s.tracking.homework_done === true).length;
+  const homeworkPercent = homeworkSessions.length > 0
+    ? Math.round((homeworkDone / homeworkSessions.length) * 100)
+    : null;
+
+  // Calculer le taux de présence du cahier
+  const cahierSessions = sessions.filter(s => s.tracking.cahier_present !== null && s.tracking.cahier_present !== undefined);
+  const cahierPresent = cahierSessions.filter(s => s.tracking.cahier_present === true).length;
+  const cahierPercent = cahierSessions.length > 0
+    ? Math.round((cahierPresent / cahierSessions.length) * 100)
+    : null;
+
+  // Générer les barres de progression
+  const createBar = (percent) => {
+    const filled = Math.round(percent / 20); // 5 blocs max
+    const empty = 5 - filled;
+    return '🟩'.repeat(filled) + '⬜'.repeat(empty) + ` ${percent}%`;
+  };
+
+  return {
+    presenceBar: createBar(presencePercent),
+    participationBar: createBar(participationPercent),
+    vigilanceBar: createBar(vigilancePercent),
+    homeworkBar: homeworkPercent !== null ? createBar(homeworkPercent) : null,
+    cahierBar: cahierPercent !== null ? createBar(cahierPercent) : null,
+    presenceText: `${presentCount}/${sessions.length} séances présent (${presencePercent}%)`,
+    participationText: participations.length > 0 ? `${participationPercent}%` : 'Non évalué',
+    vigilanceText: vigilances.length > 0 ? `${vigilancePercent}%` : 'Non évalué',
+    homeworkText: homeworkPercent !== null ? `${homeworkDone}/${homeworkSessions.length} devoirs faits (${homeworkPercent}%)` : 'Non évalué',
+    cahierText: cahierPercent !== null ? `${cahierPresent}/${cahierSessions.length} séances avec cahier (${cahierPercent}%)` : 'Non évalué'
+  };
+}
+
 // ==================== AI REPORT GENERATION ====================
 
 async function generateReport(studentData, language, settings) {
   if (!studentData || !studentData.sessions.length) return null;
+
+  // Calculer les statistiques pour les barres de progression
+  const stats = calculateDailyStats(studentData);
+  const hasMultipleSubjects = studentData.sessions.length > 2;
+  
+  // Créer le résumé de présence par matière
+  const subjectPresenceSummary = studentData.sessions
+    .map(s => {
+      if (!s.tracking) return null;
+      const icon = s.tracking.presence === 'present' ? '✅' : 
+                   s.tracking.presence === 'absent' ? '❌' : '⚠️';
+      return `${icon} ${s.subject}`;
+    })
+    .filter(Boolean)
+    .join('\n');
 
   const systemPrompt = `Tu es un conseiller pédagogique bienveillant et professionnel. Tu génères des rapports quotidiens pour les parents d'élèves.
 
@@ -196,86 +284,201 @@ RÈGLES ABSOLUES:
 - Le rapport doit ressembler à un compte-rendu bienveillant d'un pédagogue
 - Si l'élève a des difficultés, les présenter comme des "axes d'amélioration" avec des solutions concrètes
 - Valoriser TOUJOURS au moins un point positif, même minime
+- GÉNÈRE DU CONTENU RÉEL, ne remplis PAS le message avec des lignes de séparation
+${hasMultipleSubjects ? '- MESSAGE COURT: L\'élève a plusieurs matières aujourd\'hui, donc le rapport doit être CONCIS et RÉSUMÉ (pas de détails par matière)' : ''}
 
 FORMAT DU RAPPORT:
 ${language === 'ar' ? `
 - Écrire ENTIÈREMENT en arabe (dialecte marocain/arabe standard accessible)
 - Utiliser des emojis appropriés pour rendre le message agréable
-- Structure: Salutation → Nom de l'école → Résumé de la journée → Détails par matière → Points positifs → Recommandations → Encouragement final
-- TOUJOURS mentionner le nom de l'école au début du rapport
+- Structure: Salutation → EN-TÊTE (Nom élève + Classe) → Nom de l'école → BARRES DE PROGRESSION → ${hasMultipleSubjects ? 'Résumé général de la journée' : 'Détails par matière'} → Points positifs → Recommandations courtes → Encouragement final → PIED DE PAGE (Équipe pédagogique + École)
 ` : language === 'fr' ? `
 - Écrire ENTIÈREMENT en français
 - Utiliser des emojis appropriés pour rendre le message agréable  
-- Structure: Salutation → Nom de l'école → Résumé de la journée → Détails par matière → Points positifs → Recommandations → Encouragement final
-- TOUJOURS mentionner le nom de l'école au début du rapport
+- Structure: Salutation → EN-TÊTE (Nom élève + Classe) → Nom de l'école → BARRES DE PROGRESSION → ${hasMultipleSubjects ? 'Résumé général de la journée' : 'Détails par matière'} → Points positifs → Recommandations courtes → Encouragement final → PIED DE PAGE (Équipe pédagogique + École)
 ` : `
 - Écrire le rapport en DEUX parties: d'abord en français, puis en arabe
 - Séparer les deux versions par une ligne "━━━━━━━━━━━━━━━"
 - Utiliser des emojis appropriés pour rendre le message agréable
-- Structure pour chaque langue: Salutation → Nom de l'école → Résumé de la journée → Détails par matière → Points positifs → Recommandations → Encouragement final
-- TOUJOURS mentionner le nom de l'école au début du rapport
+- Structure pour chaque langue: Salutation → EN-TÊTE (Nom élève + Classe) → Nom de l'école → BARRES DE PROGRESSION → ${hasMultipleSubjects ? 'Résumé général de la journée' : 'Détails par matière'} → Points positifs → Recommandations courtes → Encouragement final → PIED DE PAGE (Équipe pédagogique + École)
 `}
 
+EN-TÊTE OBLIGATOIRE (AU DÉBUT DU RAPPORT):
+📋 *Élève:* ${studentData.student.firstName} ${studentData.student.lastName}
+🎓 *Classe:* ${studentData.student.className}
+
+PIED DE PAGE OBLIGATOIRE (À LA FIN DU RAPPORT):
+
+━━━━━━━━━━━━━━━━━━━━━
+👥 *L'équipe pédagogique*
+🏫 *${studentData.student.schoolName || 'École'}*
+
+ÉLÉMENTS VISUELS OBLIGATOIRES (APRÈS L'EN-TÊTE ET LE NOM DE L'ÉCOLE):
+
+📊 *Présence:* ${stats.presenceBar}
+🙋 *Participation:* ${stats.participationBar}
+👁️ *Vigilance:* ${stats.vigilanceBar}
+${stats.homeworkBar ? `📝 *Devoirs:* ${stats.homeworkBar}` : ''}
+${stats.cahierBar ? `📓 *Cahier:* ${stats.cahierBar}` : ''}
+
+📚 *Matières d'aujourd'hui:*
+${subjectPresenceSummary}
+
+UTILISE CES ICÔNES VISUELLES DANS LE RAPPORT:
+- ✅ = Positif/Fait/Bon
+- ❌ = Négatif/Non fait/Problème
+- ⚠️ = Attention/À améliorer
+- 📚 = Devoirs/Cahier
+- 📝 = Notes/Évaluations
+- 💯 = Excellente performance
+- 👍 = Bien/Bon comportement
+- 🎯 = Objectif/Recommandation
+- 📖 = Chapitres étudiés
+- ⭐ = Point fort/Félicitations
+- 🔔 = Rappel important
+
+PRÉSENTATION VISUELLE DES INFORMATIONS:
+- Utilise des listes à puces avec icônes au lieu de paragraphes longs
+- Chaque information importante doit avoir son icône
+- Groupe les informations similaires ensemble
+- Limite les phrases à 1-2 lignes maximum
+- NE PAS utiliser de longues lignes de séparation (━━━)
+- Utilise plutôt des sauts de ligne et des emojis pour structurer
+
 CONTENU À INCLURE:
-${settings.include_chapter_info ? '- Les chapitres/sujets étudiés dans chaque matière' : ''}
-${settings.include_homework_status ? '- Le statut des devoirs (faits ou non)' : ''}
-${settings.include_behavior ? '- Le comportement général (participation, discipline, attitude)' : ''}
-${settings.include_grades ? '- Les notes obtenues si disponibles' : ''}
-${settings.include_recommendations ? '- Des recommandations pédagogiques personnalisées pour aider l\'élève à progresser' : ''}
+${settings.include_chapter_info ? '- Les chapitres/sujets étudiés' + (hasMultipleSubjects ? ' (résumé général)' : ' dans chaque matière avec les icônes appropriées') : ''}
+${settings.include_homework_status ? '- Le statut des devoirs (faits ou non) avec ✅ ou ❌' : ''}
+${settings.include_behavior ? '- Le comportement général (participation, discipline, attitude) avec les icônes 💯, 👍 ou ⚠️' : ''}
+${settings.include_grades ? '- Les notes obtenues si disponibles avec icônes' : ''}
+${settings.include_recommendations ? '- Des recommandations pédagogiques COURTES et personnalisées avec 🎯' : ''}
+${hasMultipleSubjects ? '\n⚠️ IMPORTANT: Comme l\'élève a plusieurs matières, le rapport doit être COURT et RÉSUMÉ (max 10-12 lignes après les barres). Ne détaille PAS chaque matière séparément.' : '\n✅ IMPORTANT: L\'élève a peu de matières aujourd\'hui. Tu DOIS détailler chaque séance avec:\n- Le chapitre étudié 📖\n- La présence (✅/❌/⚠️)\n- Le cahier (✅/❌)\n- Les devoirs (✅/❌)\n- La participation (💯/👍/⚠️)\n- La discipline (💯/👍/⚠️)\n- Tout autre élément de suivi disponible\n- Les commentaires du professeur si présents 💬'}
 
 RECOMMANDATIONS PÉDAGOGIQUES À INCLURE:
-- Conseils pratiques pour les parents (comment aider à la maison)
-- Suggestions d'activités complémentaires si pertinent
-- Rappels sur l'importance du sommeil, de l'organisation, etc.
-- Encouragements adaptés au profil de l'élève`;
+- Conseils pratiques COURTS pour les parents avec 🎯
+- Encouragements adaptés au profil de l'élève avec ⭐
+
+EXEMPLE DE FORMAT ATTENDU (après les barres de progression):
+
+📖 *Séances d'aujourd'hui:*
+
+Sciences de la Vie et de la Terre - Échange gazeux
+✅ Présent avec cahier
+💯 Bonne participation
+👍 Discipline correcte
+
+Physique-Chimie - [Sujet]
+✅ Présent
+[Autres détails...]
+
+⭐ *Points positifs:*
+- [Points forts observés]
+
+🎯 *Recommandations:*
+- [Conseils courts]
+
+Continuez ainsi ! 💪`;
 
   // Build the data summary for the AI
   let dataSummary = `DONNÉES DE LA JOURNÉE DU ${studentData.date}:\n`;
   if (studentData.student.schoolName) dataSummary += `École: ${studentData.student.schoolName}\n`;
   dataSummary += `Élève: ${studentData.student.firstName} ${studentData.student.lastName}\n`;
-  dataSummary += `Classe: ${studentData.student.className} (${studentData.student.level})\n\n`;
+  dataSummary += `Classe: ${studentData.student.className} (${studentData.student.level})\n`;
+  dataSummary += `Nombre de matières: ${studentData.sessions.length}\n\n`;
+  dataSummary += `STATISTIQUES GLOBALES:\n`;
+  dataSummary += `Présence: ${stats.presenceText}\n`;
+  dataSummary += `Participation moyenne: ${stats.participationText}\n`;
+  dataSummary += `Vigilance moyenne: ${stats.vigilanceText}\n\n`;
 
   dataSummary += `SÉANCES DE LA JOURNÉE:\n`;
   studentData.sessions.forEach((session, i) => {
     dataSummary += `\n--- Séance ${i + 1}: ${session.subject} (${session.type === 'control' ? 'Contrôle' : 'Cours'}) ---\n`;
-    dataSummary += `Chapitre/Sujet: ${session.topic}\n`;
-    dataSummary += `Horaire: ${session.time}\n`;
+    dataSummary += `📖 Chapitre/Sujet: ${session.topic}\n`;
+    dataSummary += `🕐 Horaire: ${session.time}\n`;
 
     if (session.tracking) {
       const t = session.tracking;
-      dataSummary += `Présence: ${t.presence === 'present' ? 'Présent' : t.presence === 'absent' ? 'Absent' : t.presence === 'late' ? 'En retard' : t.presence}\n`;
-      if (t.cahier_present !== null && t.cahier_present !== undefined) dataSummary += `Cahier présent: ${t.cahier_present ? 'Oui' : 'Non'}\n`;
-      if (t.sleeping !== null && t.sleeping !== undefined) dataSummary += `Dort en classe: ${t.sleeping ? 'Oui' : 'Non'}\n`;
-      if (t.homework_done !== null && t.homework_done !== undefined) dataSummary += `Devoir fait: ${t.homework_done ? 'Oui' : 'Non'}\n`;
-      if (t.participation !== null && t.participation !== undefined) dataSummary += `Participation: ${t.participation}\n`;
-      if (t.discipline !== null && t.discipline !== undefined) dataSummary += `Discipline: ${t.discipline}\n`;
-      if (t.phone_use !== null && t.phone_use !== undefined) dataSummary += `Utilisation téléphone: ${t.phone_use ? 'Oui' : 'Non'}\n`;
-      if (t.attitude) dataSummary += `Attitude: ${t.attitude}\n`;
-      if (t.writing) dataSummary += `Écriture: ${t.writing}\n`;
-      if (t.mini_eval !== null && t.mini_eval !== undefined) dataSummary += `Mini-évaluation: ${t.mini_eval}/10\n`;
-      if (t.cahier_lesson !== null && t.cahier_lesson !== undefined) dataSummary += `Leçon dans cahier: ${t.cahier_lesson ? 'Oui' : 'Non'}\n`;
-      if (t.cahier_documents !== null && t.cahier_documents !== undefined) dataSummary += `Documents dans cahier: ${t.cahier_documents ? 'Oui' : 'Non'}\n`;
-      if (t.cahier_readability) dataSummary += `Lisibilité cahier: ${t.cahier_readability}\n`;
-      if (t.comment) dataSummary += `Commentaire du professeur: ${t.comment}\n`;
-      if (t.notes) dataSummary += `Notes du professeur: ${t.notes}\n`;
+      // Présence avec icône
+      const presenceIcon = t.presence === 'present' ? '✅' : t.presence === 'absent' ? '❌' : '⚠️';
+      dataSummary += `${presenceIcon} Présence: ${t.presence === 'present' ? 'Présent' : t.presence === 'absent' ? 'Absent' : t.presence === 'late' ? 'En retard' : t.presence}\n`;
+      
+      // Cahier avec icône
+      if (t.cahier_present !== null && t.cahier_present !== undefined) {
+        dataSummary += `${t.cahier_present ? '✅' : '❌'} Cahier présent: ${t.cahier_present ? 'Oui' : 'Non'}\n`;
+      }
+      
+      // Comportement avec icônes
+      if (t.sleeping !== null && t.sleeping !== undefined && t.sleeping) {
+        dataSummary += `⚠️ Dort en classe: Oui\n`;
+      }
+      
+      // Devoir avec icône
+      if (t.homework_done !== null && t.homework_done !== undefined) {
+        dataSummary += `${t.homework_done ? '✅' : '❌'} Devoir fait: ${t.homework_done ? 'Oui' : 'Non'}\n`;
+      }
+      
+      // Participation avec icône
+      if (t.participation !== null && t.participation !== undefined) {
+        const partIcon = ['excellent', 'bon', 'good'].includes(t.participation?.toLowerCase()) ? '💯' : 
+                        ['moyen', 'average'].includes(t.participation?.toLowerCase()) ? '👍' : '⚠️';
+        dataSummary += `${partIcon} Participation: ${t.participation}\n`;
+      }
+      
+      // Discipline avec icône
+      if (t.discipline !== null && t.discipline !== undefined) {
+        const discIcon = ['concentre', 'excellent', 'good'].includes(t.discipline?.toLowerCase()) ? '💯' : 
+                        ['moyen', 'average'].includes(t.discipline?.toLowerCase()) ? '👍' : '⚠️';
+        dataSummary += `${discIcon} Discipline: ${t.discipline}\n`;
+      }
+      
+      // Téléphone avec icône
+      if (t.phone_use !== null && t.phone_use !== undefined && t.phone_use) {
+        dataSummary += `⚠️ Utilisation téléphone: Oui\n`;
+      }
+      
+      if (t.attitude) dataSummary += `👤 Attitude: ${t.attitude}\n`;
+      if (t.writing) dataSummary += `✍️ Écriture: ${t.writing}\n`;
+      
+      // Mini-évaluation avec icône
+      if (t.mini_eval !== null && t.mini_eval !== undefined) {
+        const evalIcon = t.mini_eval >= 7 ? '💯' : t.mini_eval >= 5 ? '👍' : '⚠️';
+        dataSummary += `${evalIcon} Mini-évaluation: ${t.mini_eval}/10\n`;
+      }
+      
+      if (t.cahier_lesson !== null && t.cahier_lesson !== undefined) {
+        dataSummary += `${t.cahier_lesson ? '✅' : '❌'} Leçon dans cahier: ${t.cahier_lesson ? 'Oui' : 'Non'}\n`;
+      }
+      if (t.cahier_documents !== null && t.cahier_documents !== undefined) {
+        dataSummary += `${t.cahier_documents ? '✅' : '❌'} Documents dans cahier: ${t.cahier_documents ? 'Oui' : 'Non'}\n`;
+      }
+      if (t.cahier_readability) dataSummary += `📝 Lisibilité cahier: ${t.cahier_readability}\n`;
+      if (t.comment) dataSummary += `💬 Commentaire du professeur: ${t.comment}\n`;
+      if (t.notes) dataSummary += `📌 Notes du professeur: ${t.notes}\n`;
     }
 
     if (session.control) {
-      dataSummary += `[CONTRÔLE] Copie rendue: ${session.control.copy_submitted ? 'Oui' : 'Non'}\n`;
-      dataSummary += `Matériel: ${session.control.material_status}\n`;
+      dataSummary += `${session.control.copy_submitted ? '✅' : '❌'} [CONTRÔLE] Copie rendue: ${session.control.copy_submitted ? 'Oui' : 'Non'}\n`;
+      dataSummary += `📦 Matériel: ${session.control.material_status}\n`;
     }
 
     if (session.grade) {
-      dataSummary += `Note obtenue: ${session.grade.note}/${session.grade.max_note}\n`;
+      const gradePercent = (session.grade.note / session.grade.max_note) * 100;
+      const gradeIcon = gradePercent >= 70 ? '💯' : gradePercent >= 50 ? '👍' : '⚠️';
+      dataSummary += `${gradeIcon} Note obtenue: ${session.grade.note}/${session.grade.max_note}\n`;
     }
   });
 
   if (studentData.homeworkSubmissions.length > 0) {
-    dataSummary += `\nDEVOIRS:\n`;
+    dataSummary += `\n📚 DEVOIRS:\n`;
     studentData.homeworkSubmissions.forEach(h => {
-      dataSummary += `- ${h.title}: ${h.status === 'submitted' ? 'Rendu' : 'Non rendu'}\n`;
+      const icon = h.status === 'submitted' ? '✅' : '❌';
+      dataSummary += `${icon} ${h.title}: ${h.status === 'submitted' ? 'Rendu' : 'Non rendu'}\n`;
     });
   }
+
+  // Debug: Log the data being sent to AI
+  console.log('[DailyReports] Data summary length:', dataSummary.length);
+  console.log('[DailyReports] Sessions count:', studentData.sessions.length);
+  console.log('[DailyReports] First 500 chars of dataSummary:', dataSummary.substring(0, 500));
 
   try {
     const completion = await deepseek.chat.completions.create({
@@ -284,7 +487,7 @@ RECOMMANDATIONS PÉDAGOGIQUES À INCLURE:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: dataSummary }
       ],
-      max_tokens: 2000,
+      max_tokens: 1000,
       temperature: 0.7
     });
 
@@ -365,6 +568,7 @@ export async function processDailyReports(schoolId = null) {
       .eq('role', 'student')
       .eq('school_id', settings.school_id);
 
+    console.log(`[DailyReports] Found ${students?.length || 0} students in school`);
     if (!students?.length) continue;
 
     // Get parent links for all students
@@ -374,6 +578,7 @@ export async function processDailyReports(schoolId = null) {
       .select('parent_id, student_id')
       .in('student_id', studentIds);
 
+    console.log(`[DailyReports] Found ${parentLinks?.length || 0} parent-student links`);
     if (!parentLinks?.length) continue;
 
     const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
@@ -385,6 +590,8 @@ export async function processDailyReports(schoolId = null) {
       .in('parent_id', parentIds)
       .eq('channel', 'whatsapp')
       .order('is_primary', { ascending: false });
+
+    console.log(`[DailyReports] Found ${contacts?.length || 0} WhatsApp contacts`);
 
     // Build parent → phone map
     const parentPhoneMap = {};
@@ -399,11 +606,19 @@ export async function processDailyReports(schoolId = null) {
       studentParentMap[l.student_id].push(l.parent_id);
     });
 
+    // Track skip reasons for summary
+    let skippedNoParents = 0;
+    let skippedAlreadySent = 0;
+    let skippedNoSessions = 0;
+
     // Process each student
     for (const student of students) {
       try {
         const parents = studentParentMap[student.id] || [];
-        if (parents.length === 0) continue;
+        if (parents.length === 0) {
+          skippedNoParents++;
+          continue;
+        }
 
         // Check if report already exists for today
         const { data: existing } = await supabaseAdmin
@@ -413,11 +628,19 @@ export async function processDailyReports(schoolId = null) {
           .eq('report_date', today)
           .limit(1);
 
-        if (existing?.length > 0) continue;
+        if (existing?.length > 0) {
+          skippedAlreadySent++;
+          continue;
+        }
 
         // Collect daily data
         const studentData = await collectStudentDailyData(student.id, today, settings.school_id);
-        if (!studentData || studentData.sessions.length === 0) continue;
+        if (!studentData || studentData.sessions.length === 0) {
+          skippedNoSessions++;
+          continue;
+        }
+
+        console.log(`[DailyReports] Processing ${student.first_name} ${student.last_name} (${studentData.sessions.length} sessions)`);
 
         totalProcessed++;
 
@@ -467,9 +690,14 @@ export async function processDailyReports(schoolId = null) {
         totalFailed++;
       }
     }
-  }
 
-  console.log(`[DailyReports] Done. Processed: ${totalProcessed}, Sent: ${totalSent}, Failed: ${totalFailed}`);
+    // Log summary statistics
+    if (skippedNoParents > 0 || skippedAlreadySent > 0 || skippedNoSessions > 0) {
+      console.log(`[DailyReports] Skipped: ${skippedNoParents} (no parents), ${skippedAlreadySent} (already sent), ${skippedNoSessions} (no sessions)`);
+    }
+    console.log(`[DailyReports] Done. Processed: ${totalProcessed}, Sent: ${totalSent}, Failed: ${totalFailed}`);
+  }
+  
   return { processed: totalProcessed, sent: totalSent, failed: totalFailed };
 }
 
@@ -1081,21 +1309,27 @@ export function startDailyReportScheduler() {
       const currentTime = now.toLocaleTimeString('en-GB', { 
         hour: '2-digit', minute: '2-digit', hour12: false, 
         timeZone: 'Africa/Casablanca' 
-      });
+      }); // Format: HH:MM
 
-      // Find settings where send_time matches current HH:MM
-      const { data: matchingSettings } = await supabaseAdmin
+      console.log(`[DailyReports] Checking at ${currentTime}`);
+
+      // Get all enabled settings and check manually (to handle both HH:MM and HH:MM:SS formats)
+      const { data: allSettings } = await supabaseAdmin
         .from('daily_report_settings')
-        .select('school_id')
-        .eq('enabled', true)
-        .eq('send_time', currentTime + ':00');
+        .select('school_id, send_time')
+        .eq('enabled', true);
 
-      if (matchingSettings?.length > 0) {
-        for (const s of matchingSettings) {
-          console.log(`[DailyReports] Triggered for school ${s.school_id} at ${currentTime}`);
-          processDailyReports(s.school_id).catch(err => {
-            console.error('[DailyReports] Scheduler error:', err.message);
-          });
+      if (allSettings?.length > 0) {
+        for (const setting of allSettings) {
+          // Normalize send_time to HH:MM format (remove seconds if present)
+          const sendTime = setting.send_time?.substring(0, 5); // Get first 5 chars (HH:MM)
+          
+          if (sendTime === currentTime) {
+            console.log(`[DailyReports] ✅ Triggered for school ${setting.school_id} at ${currentTime}`);
+            processDailyReports(setting.school_id).catch(err => {
+              console.error('[DailyReports] Scheduler error:', err.message);
+            });
+          }
         }
       }
     } catch (err) {

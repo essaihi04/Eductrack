@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -257,6 +257,14 @@ const StudentsPage = () => {
 
       if (res.ok) {
         const newStudent = await res.json();
+        
+        // Stocker le mot de passe dans localStorage
+        if (newStudent.password) {
+          const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
+          storedPasswords[newStudent.id] = newStudent.password;
+          localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
+        }
+        
         setStudents([...students, newStudent]);
         setFormData({ email: '', password: '', firstName: '', lastName: '', classId: '' });
         setShowForm(false);
@@ -282,6 +290,103 @@ const StudentsPage = () => {
     } catch (error) {
       console.error('Error deleting student:', error);
     }
+  };
+
+  // Envoyer les identifiants au parent via WhatsApp
+  const sendCredentialsToParent = async (student) => {
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      // Récupérer les informations du parent
+      const parentRes = await fetch(`${apiUrl}/api/admin/students/${student.id}/parent`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (!parentRes.ok) {
+        alert('Aucun parent associé à cet élève');
+        return;
+      }
+
+      const parent = await parentRes.json();
+
+      if (!parent.phone) {
+        alert('Le parent n\'a pas de numéro de téléphone enregistré');
+        return;
+      }
+
+      // Construire le message WhatsApp
+      const schoolName = profile?.school?.name || 'Notre école';
+      const message = `Bonjour,
+
+Voici les identifiants de connexion pour votre enfant *${student.first_name} ${student.last_name}* sur la plateforme ${schoolName} :
+
+📧 *Email :* ${student.email}
+🔑 *Mot de passe :* ${student.password || '(Non disponible)'}
+
+⚠️ Veuillez conserver ces informations en sécurité et ne pas les partager.
+
+Cordialement,
+L'administration de ${schoolName}`;
+
+      // Envoyer via l'API WaSender
+      const sendRes = await fetch(`${apiUrl}/api/admin/whatsapp/send-direct`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          phone: parent.phone,
+          message: message,
+          type: 'text',
+          parentId: parent.id
+        })
+      });
+
+      if (sendRes.ok) {
+        alert('Message envoyé avec succès au parent !');
+      } else {
+        const errorData = await sendRes.json();
+        alert(`Erreur lors de l'envoi: ${errorData.error || 'Erreur inconnue'}`);
+      }
+    } catch (error) {
+      console.error('Erreur envoi WhatsApp:', error);
+      alert('Erreur lors de l\'envoi via WhatsApp');
+    }
+  };
+
+  // Envoyer les identifiants à plusieurs parents via WhatsApp
+  const sendBulkCredentialsToParents = async () => {
+    if (selectedStudents.size === 0) {
+      alert('Aucun élève sélectionné');
+      return;
+    }
+
+    if (!confirm(`Envoyer les identifiants de ${selectedStudents.size} élève(s) à leurs parents via WhatsApp ?`)) {
+      return;
+    }
+
+    const selectedStudentsList = students.filter(s => selectedStudents.has(s.id));
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const student of selectedStudentsList) {
+      try {
+        await sendCredentialsToParent(student);
+        successCount++;
+        // Petit délai entre chaque envoi pour éviter de surcharger l'API
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (error) {
+        console.error(`Erreur envoi pour ${student.first_name} ${student.last_name}:`, error);
+        errorCount++;
+      }
+    }
+
+    alert(`${successCount} message(s) envoyé(s) avec succès${errorCount > 0 ? `. ${errorCount} erreur(s)` : ''}`);
+    
+    // Désélectionner tous les élèves après l'envoi
+    setSelectedStudents(new Set());
   };
 
   const resetPassword = async (studentId) => {
@@ -495,13 +600,23 @@ const StudentsPage = () => {
               <CardDescription>Cliquez sur une ligne pour voir les identifiants de connexion</CardDescription>
             </div>
             {isAdmin && selectedStudents.size > 0 && (
-              <button
-                onClick={deleteSelectedStudents}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
-              >
-                <Trash2 className="w-4 h-4" />
-                Supprimer ({selectedStudents.size})
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={sendBulkCredentialsToParents}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  title="Envoyer les identifiants aux parents via WhatsApp"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Envoyer via WhatsApp ({selectedStudents.size})
+                </button>
+                <button
+                  onClick={deleteSelectedStudents}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Supprimer ({selectedStudents.size})
+                </button>
+              </div>
             )}
           </div>
         </CardHeader>
@@ -665,6 +780,15 @@ const StudentsPage = () => {
                       <p className="text-xs text-gray-600 bg-yellow-50 p-2 rounded">
                         ⚠️ Conservez ces identifiants en sécurité. L'élève doit les utiliser pour sa première connexion.
                       </p>
+
+                      {/* Bouton WhatsApp pour envoyer au parent */}
+                      <button
+                        onClick={() => sendCredentialsToParent(student)}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        Envoyer au parent via WhatsApp
+                      </button>
                     </div>
                   )}
                 </div>
