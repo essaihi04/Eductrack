@@ -234,8 +234,8 @@ const WhatsAppInboxPage = () => {
 
       {view === 'conversations' ? (
         <div className="flex flex-1 overflow-hidden">
-          {/* Conversations list */}
-          <div className={`w-full lg:w-96 border-r border-gray-200 bg-white flex flex-col ${selectedConv ? 'hidden lg:flex' : 'flex'}`}>
+          {/* Conversations list - always visible on desktop, hidden on mobile when conversation selected */}
+          <div className={`${selectedConv ? 'hidden' : 'flex'} lg:flex w-full lg:w-96 border-r border-gray-200 bg-white flex-col`}>
             {/* Search + Filter */}
             <div className="p-3 border-b border-gray-100 space-y-2">
               <div className="relative">
@@ -332,8 +332,8 @@ const WhatsAppInboxPage = () => {
             </div>
           </div>
 
-          {/* Message thread */}
-          <div className={`flex-1 flex-col bg-[#f0f2f5] ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
+          {/* Message thread - takes remaining space */}
+          <div className={`${selectedConv ? 'flex' : 'hidden lg:flex'} flex-1 flex-col bg-[#f0f2f5]`}>
             {selectedConv ? (
               <>
                 {/* Thread header */}
