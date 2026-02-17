@@ -430,7 +430,7 @@ const ControlTracking = () => {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate(`/teacher/home`)}
+            onClick={() => navigate('/teacher/dashboard')}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <ChevronLeft className="w-5 h-5" />
@@ -612,7 +612,7 @@ const ControlTracking = () => {
       {/* Message de succès - visible une fois la sauvegarde terminée */}
       {autoSaveStatus && autoSaveStatus.includes('✓') && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-8 shadow-2xl text-center max-w-sm mx-4 animate-bounce">
+          <div className="bg-white rounded-2xl p-8 shadow-2xl text-center max-w-sm mx-4">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Save className="w-8 h-8 text-green-600" />
             </div>
@@ -625,7 +625,7 @@ const ControlTracking = () => {
               }}
               className="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
             >
-              Fermer et retourner à l'accueil
+              Retourner à l'accueil
             </button>
           </div>
         </div>
