@@ -1195,11 +1195,14 @@ const SuiviRapide = () => {
                   if (session.type === 'control') {
                     navigate(`/teacher/control/${selectedClass}/${session.id}`);
                   } else {
+                    // Charger directement cette séance spécifique
                     const dateStr = typeof session.date === 'string' ? session.date : new Date(session.date).toISOString().split('T')[0];
                     setSessionDate(dateStr);
                     setStartTime(session.start_time);
                     setEndTime(session.end_time || '');
-                    fetchSessionFromApi(dateStr);
+                    // Appliquer directement les données de la séance cliquée
+                    applySessionData(session);
+                    fetchSessionTracking(session.id);
                   }
                 }}
               >
