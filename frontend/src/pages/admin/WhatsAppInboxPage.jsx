@@ -233,9 +233,9 @@ const WhatsAppInboxPage = () => {
       </div>
 
       {view === 'conversations' ? (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-w-0">
           {/* Conversations list - always visible on desktop, hidden on mobile when conversation selected */}
-          <div className={`${selectedConv ? 'hidden' : 'flex'} lg:flex w-full lg:w-96 border-r border-gray-200 bg-white flex-col`}>
+          <div className={`${selectedConv ? 'hidden' : 'flex'} lg:flex w-full lg:w-96 lg:flex-shrink-0 border-r border-gray-200 bg-white flex-col`}>
             {/* Search + Filter */}
             <div className="p-3 border-b border-gray-100 space-y-2">
               <div className="relative">
@@ -333,7 +333,7 @@ const WhatsAppInboxPage = () => {
           </div>
 
           {/* Message thread - takes remaining space */}
-          <div className={`${selectedConv ? 'flex' : 'hidden lg:flex'} flex-1 flex-col bg-[#f0f2f5]`}>
+          <div className={`${selectedConv ? 'flex' : 'hidden lg:flex'} flex-1 min-w-0 overflow-hidden flex-col bg-[#f0f2f5]`}>
             {selectedConv ? (
               <>
                 {/* Thread header */}
@@ -363,7 +363,7 @@ const WhatsAppInboxPage = () => {
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                <div className="flex-1 min-w-0 overflow-y-auto px-4 py-4 space-y-3">
                   {selectedConv.messages.map((msg, idx) => {
                     // Show date separator
                     const showDate = idx === 0 || (
@@ -382,7 +382,7 @@ const WhatsAppInboxPage = () => {
 
                         {/* Outgoing message bubble (WhatsApp style - right aligned) */}
                         <div className="flex justify-end">
-                          <div className="max-w-[75%] bg-[#d9fdd3] rounded-lg rounded-tr-none px-3 py-2 shadow-sm">
+                          <div className="max-w-[92%] sm:max-w-[80%] lg:max-w-[72%] bg-[#d9fdd3] rounded-lg rounded-tr-none px-3 py-2 shadow-sm">
                             {/* Media indicator */}
                             {msg.messageType !== 'text' && (
                               <div className="flex items-center gap-1.5 mb-1.5 text-green-700">
@@ -395,7 +395,7 @@ const WhatsAppInboxPage = () => {
 
                             {/* Message content */}
                             {msg.content && (
-                              <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words leading-relaxed">
+                              <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">
                                 {msg.content}
                               </p>
                             )}

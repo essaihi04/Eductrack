@@ -1151,9 +1151,9 @@ const WhatsAppPage = () => {
 
       {/* ===================== TAB: INBOX ===================== */}
       {activeTab === 'inbox' && (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-w-0">
           {/* Sub-tabs */}
-          <div className={`w-full lg:w-96 border-r border-gray-200 bg-white flex flex-col ${selectedConv ? 'hidden lg:flex' : 'flex'}`}>
+          <div className={`w-full lg:w-96 lg:flex-shrink-0 border-r border-gray-200 bg-white flex flex-col ${selectedConv ? 'hidden lg:flex' : 'flex'}`}>
             {/* Stats bar */}
             <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center gap-4 flex-shrink-0">
               <span className="text-[11px] text-gray-600"><strong className="text-gray-900">{conversations.length}</strong> conv.</span>
@@ -1277,7 +1277,7 @@ const WhatsAppPage = () => {
           </div>
 
           {/* Message thread */}
-          <div className={`flex-1 flex flex-col bg-[#f0f2f5] ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
+          <div className={`flex-1 min-w-0 overflow-hidden flex flex-col bg-[#f0f2f5] ${selectedConv ? 'flex' : 'hidden lg:flex'}`}>
             {selectedConv ? (
               <>
                 <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 flex-shrink-0">
@@ -1292,7 +1292,7 @@ const WhatsAppPage = () => {
                     <p className="text-xs text-gray-500 flex items-center gap-1"><Phone className="w-3 h-3" />{selectedConv.phone} · {selectedConv.messageCount} msg</p>
                   </div>
                 </div>
-                <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                <div className="flex-1 min-w-0 overflow-y-auto px-4 py-4 space-y-3">
                   {selectedConv.messages.map((msg, idx) => {
                     const showDate = idx === 0 || new Date(msg.createdAt).toDateString() !== new Date(selectedConv.messages[idx - 1].createdAt).toDateString();
                     return (
@@ -1305,7 +1305,7 @@ const WhatsAppPage = () => {
                           </div>
                         )}
                         <div className="flex justify-end">
-                          <div className={`max-w-[75%] rounded-lg rounded-tr-none px-3 py-2 shadow-sm ${msg.isComprehensiveReport ? 'bg-[#dbeafe] border border-blue-200' : msg.isAiReport ? 'bg-[#e8e0f3] border border-purple-200' : 'bg-[#d9fdd3]'}`}>
+                          <div className={`max-w-[92%] sm:max-w-[80%] lg:max-w-[72%] rounded-lg rounded-tr-none px-3 py-2 shadow-sm ${msg.isComprehensiveReport ? 'bg-[#dbeafe] border border-blue-200' : msg.isAiReport ? 'bg-[#e8e0f3] border border-purple-200' : 'bg-[#d9fdd3]'}`}>
                             {msg.isComprehensiveReport && (
                               <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-blue-200">
                                 <FileText className="w-3.5 h-3.5 text-blue-600" />
@@ -1326,7 +1326,7 @@ const WhatsAppPage = () => {
                                 <span className="text-xs font-medium">{msg.fileName || (msg.messageType === 'image' ? 'Image' : 'Document')}</span>
                               </div>
                             )}
-                            {msg.content && <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>}
+                            {msg.content && <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">{msg.content}</p>}
                             {msg.errorMessage && (
                               <p className="text-[11px] text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{msg.errorMessage}</p>
                             )}
