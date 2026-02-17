@@ -196,6 +196,9 @@ const SuiviRapide = () => {
   };
 
   const hydrateSessionFromStorage = () => {
+    // Ne pas hydrater si une séance est déjà chargée depuis l'API
+    if (currentSession) return false;
+    
     const storedSession = loadSessionFromStorage();
     if (!storedSession) return false;
 
@@ -234,9 +237,13 @@ const SuiviRapide = () => {
 
   useEffect(() => {
     if (!selectedClass || !sessionDate) return;
-    if (!hydrateSessionFromStorage()) {
-      fetchSessionFromApi();
-    }
+    // Toujours charger depuis l'API en priorité pour trouver les séances existantes
+    const loadSession = async () => {
+      await fetchSessionFromApi();
+      // Puis hydrater avec les données locales seulement si aucune séance trouvée
+      hydrateSessionFromStorage();
+    };
+    loadSession();
     fetchActiveHomework();
     fetchTimetableSlots();
   }, [selectedClass, sessionDate, urlParams]);
