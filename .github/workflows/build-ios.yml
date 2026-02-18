@@ -3,8 +3,6 @@ name: Build iOS IPA
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'edtrack-capacitor/**'
   workflow_dispatch:
 
 jobs:
@@ -18,7 +16,7 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.x'
 
       - name: Verify Node version
         run: |
@@ -27,15 +25,15 @@ jobs:
 
       - name: Install Capacitor dependencies
         working-directory: edtrack-capacitor
-        run: npm ci
+        run: npm install
 
       - name: Add iOS platform
         working-directory: edtrack-capacitor
-        run: node_modules/.bin/cap add ios || echo "iOS already added"
+        run: ./node_modules/.bin/cap add ios || echo "iOS already added"
 
       - name: Sync Capacitor
         working-directory: edtrack-capacitor
-        run: node_modules/.bin/cap sync ios
+        run: ./node_modules/.bin/cap sync ios
 
       - name: Disable ATS (allow HTTP) in Info.plist
         working-directory: edtrack-capacitor/ios/App
