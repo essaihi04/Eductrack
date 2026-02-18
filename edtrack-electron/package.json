@@ -1,0 +1,86 @@
+{
+  "name": "edtrack-electron",
+  "version": "1.0.1",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "electron-builder --win",
+    "build:portable": "electron-builder --win portable",
+    "dist": "electron-builder --win --publish=never",
+    "release:win": "npm run build && node scripts/upload-release.js",
+    "version:patch": "npm version patch && npm run release:win",
+    "version:minor": "npm version minor && npm run release:win",
+    "version:major": "npm version major && npm run release:win"
+  },
+  "keywords": [
+    "eductrack",
+    "education",
+    "desktop"
+  ],
+  "author": "Eductrack Team",
+  "license": "ISC",
+  "description": "Application desktop Eductrack - Suivi pédagogique",
+  "homepage": "https://edtrack.duckdns.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/essaihi04/Eductrack.git"
+  },
+  "build": {
+    "appId": "org.edtrack.app",
+    "productName": "Eductrack",
+    "copyright": "Copyright © 2026 Eductrack",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "node_modules/**/*"
+    ],
+    "extraMetadata": {
+      "main": "main.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "ia32"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Eductrack",
+      "uninstallDisplayName": "Eductrack"
+    },
+    "portable": {
+      "artifactName": "Eductrack-${version}-portable.exe"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "essaihi04",
+      "repo": "Eductrack",
+      "releaseType": "release"
+    }
+  },
+  "devDependencies": {
+    "electron": "^40.4.1",
+    "electron-builder": "^26.7.0"
+  }
+}
