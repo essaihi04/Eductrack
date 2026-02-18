@@ -31,36 +31,27 @@ jobs:
         working-directory: edtrack-capacitor
         run: ./node_modules/.bin/cap sync ios
 
-      - name: Check Podfile exists
-        working-directory: edtrack-capacitor
-        run: |
-          find ios -name "Podfile" 2>/dev/null || echo "No Podfile found"
-          ls -la ios/App/
-
       - name: Disable ATS (allow HTTP) in Info.plist
         working-directory: edtrack-capacitor
         run: |
           PLIST="ios/App/App/Info.plist"
-          if [ -f "$PLIST" ]; then
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" "$PLIST" 2>/dev/null || true
-            echo "ATS disabled in $PLIST"
-          else
-            echo "Info.plist not found at $PLIST"
-          fi
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" "$PLIST" 2>/dev/null || true
+          echo "ATS disabled"
 
-      - name: Install CocoaPods
+      - name: Resolve Swift Package dependencies
         working-directory: edtrack-capacitor/ios/App
         run: |
-          ls -la
-          pod install --repo-update
+          xcodebuild -resolvePackageDependencies \
+            -project App.xcodeproj \
+            -scheme App
 
-      - name: Build IPA (unsigned - for sideloading)
+      - name: Build IPA (unsigned - SPM, no CocoaPods)
         working-directory: edtrack-capacitor/ios/App
         run: |
           xcodebuild \
-            -workspace App.xcworkspace \
+            -project App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination generic/platform=iOS \
