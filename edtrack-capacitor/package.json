@@ -4,8 +4,11 @@
   "main": "index.js",
   "scripts": {
     "start": "npx cap run android",
-    "build": "npx cap sync && cd android && ./gradlew assembleDebug",
-    "build:release": "npx cap sync && cd android && ./gradlew assembleRelease",
+    "build": "npx cap sync && cd android && gradlew.bat assembleDebug",
+    "build:release": "npx cap sync && cd android && gradlew.bat assembleRelease",
+    "keystore": "powershell -ExecutionPolicy Bypass -File scripts/generate-keystore.ps1",
+    "apk:debug": "npx cap sync && cd android && gradlew.bat assembleDebug",
+    "apk:release": "powershell -ExecutionPolicy Bypass -File scripts/generate-keystore.ps1 && npx cap sync && cd android && gradlew.bat assembleRelease",
     "sync": "npx cap sync",
     "android": "npx cap open android",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -16,7 +19,8 @@
   "dependencies": {
     "@capacitor/android": "^8.1.0",
     "@capacitor/cli": "^8.1.0",
-    "@capacitor/core": "^8.1.0"
+    "@capacitor/core": "^8.1.0",
+    "@capacitor/ios": "^8.1.0"
   },
   "description": "Application mobile Eductrack - Suivi pédagogique"
 }

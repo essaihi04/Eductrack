@@ -29,11 +29,18 @@ jobs:
 
       - name: Add iOS platform
         working-directory: edtrack-capacitor
-        run: ./node_modules/.bin/cap add ios || echo "iOS already added"
+        run: |
+          if [ ! -d "ios" ]; then
+            ./node_modules/.bin/cap add ios
+          else
+            echo "iOS platform already exists, skipping add"
+          fi
 
       - name: Sync Capacitor
         working-directory: edtrack-capacitor
-        run: ./node_modules/.bin/cap sync ios
+        run: |
+          ls -la
+          ./node_modules/.bin/cap sync ios
 
       - name: Disable ATS (allow HTTP) in Info.plist
         working-directory: edtrack-capacitor/ios/App
