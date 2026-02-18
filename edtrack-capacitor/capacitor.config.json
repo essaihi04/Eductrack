@@ -4,19 +4,25 @@
   "webDir": "www",
   "bundledWebRuntime": false,
   "server": {
-    "androidScheme": "https",
+    "url": "http://edtrack.duckdns.org",
+    "cleartext": true,
+    "androidScheme": "http",
+    "iosScheme": "http",
     "allowNavigation": [
       "edtrack.duckdns.org",
       "*.duckdns.org"
     ]
   },
+  "ios": {
+    "allowsLinkPreview": false,
+    "scrollEnabled": true,
+    "contentInset": "automatic"
+  },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 2000,
       "launchAutoHide": true,
-      "backgroundColor": "#1e3a5f",
-      "androidSplashResourceName": "splash",
-      "androidScaleType": "CENTER_CROP"
+      "backgroundColor": "#1e3a5f"
     }
   }
 }

@@ -1,0 +1,96 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'edtrack-capacitor/**'
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: edtrack-capacitor/package-lock.json
+
+      - name: Install Capacitor dependencies
+        working-directory: edtrack-capacitor
+        run: npm install
+
+      - name: Add iOS platform
+        working-directory: edtrack-capacitor
+        run: npx cap add ios || echo "iOS already added"
+
+      - name: Sync Capacitor
+        working-directory: edtrack-capacitor
+        run: npx cap sync ios
+
+      - name: Disable ATS (allow HTTP) in Info.plist
+        working-directory: edtrack-capacitor/ios/App
+        run: |
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" App/Info.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" App/Info.plist 2>/dev/null || true
+
+      - name: Install CocoaPods
+        working-directory: edtrack-capacitor/ios/App
+        run: pod install --repo-update
+
+      - name: Build IPA (unsigned - for sideloading)
+        working-directory: edtrack-capacitor/ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination generic/platform=iOS \
+            -archivePath $RUNNER_TEMP/Eductrack.xcarchive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Export IPA
+        run: |
+          mkdir -p $RUNNER_TEMP/ipa
+          xcodebuild \
+            -exportArchive \
+            -archivePath $RUNNER_TEMP/Eductrack.xcarchive \
+            -exportPath $RUNNER_TEMP/ipa \
+            -exportOptionsPlist $GITHUB_WORKSPACE/edtrack-capacitor/ios-export-options.plist \
+            || true
+          # Fallback: extract .app from archive manually
+          find $RUNNER_TEMP/Eductrack.xcarchive -name "*.app" -exec cp -r {} $RUNNER_TEMP/ipa/ \;
+
+      - name: Package as IPA
+        run: |
+          cd $RUNNER_TEMP/ipa
+          APP=$(find . -name "*.app" | head -1)
+          if [ -n "$APP" ]; then
+            mkdir -p Payload
+            cp -r "$APP" Payload/
+            zip -r Eductrack.ipa Payload/
+            echo "IPA created successfully"
+          else
+            echo "No .app found, listing archive contents:"
+            find $RUNNER_TEMP/Eductrack.xcarchive -type f | head -30
+          fi
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eductrack-iOS
+          path: |
+            ${{ runner.temp }}/ipa/Eductrack.ipa
+            ${{ runner.temp }}/ipa/*.app
+          retention-days: 30
+          if-no-files-found: warn
