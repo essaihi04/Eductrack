@@ -443,16 +443,16 @@ L'administration de ${schoolName}`;
   }
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-3 md:p-8 space-y-4 md:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Gestion des Élèves</h1>
-          <p className="text-muted-foreground mt-2">Total: {students.length} élèves</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Élèves</h1>
+          <p className="text-muted-foreground mt-1">Total: {students.length} élèves</p>
         </div>
         {isAdmin && (
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 w-full sm:w-auto"
           >
             <Plus className="w-5 h-5" />
             Ajouter un élève
@@ -465,7 +465,7 @@ L'administration de ${schoolName}`;
           <CardTitle>Filtres</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="text-xs font-semibold text-gray-700 block mb-1">Rechercher par nom</label>
               <input
@@ -531,7 +531,7 @@ L'administration de ${schoolName}`;
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
                   type="email"
                   placeholder="Email"
@@ -594,24 +594,24 @@ L'administration de ${schoolName}`;
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <CardTitle>Liste des élèves</CardTitle>
-              <CardDescription>Cliquez sur une ligne pour voir les identifiants de connexion</CardDescription>
+              <CardDescription className="hidden sm:block">Cliquez sur une ligne pour voir les identifiants</CardDescription>
             </div>
             {isAdmin && selectedStudents.size > 0 && (
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <button
                   onClick={sendBulkCredentialsToParents}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
                   title="Envoyer les identifiants aux parents via WhatsApp"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  Envoyer via WhatsApp ({selectedStudents.size})
+                  WhatsApp ({selectedStudents.size})
                 </button>
                 <button
                   onClick={deleteSelectedStudents}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
                 >
                   <Trash2 className="w-4 h-4" />
                   Supprimer ({selectedStudents.size})
@@ -659,14 +659,11 @@ L'administration de ${schoolName}`;
                 {getFilteredStudents().map((student) => (
                   <div key={student.id} className="border rounded-lg overflow-hidden">
                     <div className="p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         {/* Checkbox de sélection (admin uniquement) */}
                         {isAdmin && (
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleStudentSelection(student.id);
-                            }}
+                            onClick={(e) => { e.stopPropagation(); toggleStudentSelection(student.id); }}
                             className="p-1 hover:bg-gray-200 rounded flex-shrink-0"
                           >
                             {selectedStudents.has(student.id) ? (
@@ -678,42 +675,33 @@ L'administration de ${schoolName}`;
                         )}
 
                         {/* Informations de l'élève */}
-                        <div 
-                          className="flex-1 cursor-pointer"
+                        <div
+                          className="flex-1 min-w-0 cursor-pointer"
                           onClick={() => togglePasswordVisibility(student.id)}
                         >
-                          <p className="font-medium text-gray-900">{student.first_name} {student.last_name}</p>
-                          <p className="text-sm text-gray-600">{student.email}</p>
+                          <p className="font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</p>
+                          <p className="text-xs text-gray-500 truncate">{student.email}</p>
+                          <p className="text-xs text-gray-400">{student.class_id ? 'Classe assignée' : 'Non assigné'}</p>
                         </div>
 
-                        <div className="text-sm text-gray-600">
-                          {student.class_id ? 'Classe assignée' : '-'}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <span 
-                            className="text-xs text-gray-500 cursor-pointer hover:text-gray-700"
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <span
+                            className="text-xs text-gray-500 cursor-pointer hover:text-gray-700 px-1"
                             onClick={() => togglePasswordVisibility(student.id)}
                           >
                             {visiblePasswords[student.id] ? '▼' : '▶'}
                           </span>
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              resetPassword(student.id);
-                            }}
-                            className="p-2 hover:bg-blue-500/20 rounded transition-colors"
+                            onClick={(e) => { e.stopPropagation(); resetPassword(student.id); }}
+                            className="p-1.5 hover:bg-blue-500/20 rounded transition-colors"
                             title="Réinitialiser le mot de passe"
                           >
                             <RefreshCw className="w-4 h-4 text-blue-600" />
                           </button>
                           {isAdmin && (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteStudent(student.id);
-                              }}
-                              className="p-2 hover:bg-red-500/20 rounded transition-colors"
+                              onClick={(e) => { e.stopPropagation(); deleteStudent(student.id); }}
+                              className="p-1.5 hover:bg-red-500/20 rounded transition-colors"
                               title="Supprimer"
                             >
                               <Trash2 className="w-4 h-4 text-red-500" />

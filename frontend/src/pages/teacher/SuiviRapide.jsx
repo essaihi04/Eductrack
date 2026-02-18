@@ -1327,8 +1327,106 @@ const SuiviRapide = () => {
               </div>
             </div>
 
-            {/* Tableau restructuré */}
-            <div className="overflow-x-auto">
+            {/* ── Vue CARTE mobile (visible uniquement sur mobile) ── */}
+            <div className="md:hidden space-y-3">
+              {students.map((student) => {
+                const t = tracking[student.id] || {};
+                const isAbsent = t.presence === 'absent';
+                return (
+                  <div key={student.id} className={`rounded-xl border p-3 space-y-2 ${isAbsent ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
+                    {/* Nom + Présence */}
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-sm text-gray-900">{student.first_name} {student.last_name}</p>
+                      <div className="flex gap-1">
+                        {[{value:'present',icon:'✔️'},{value:'absent',icon:'✖️'},{value:'late',icon:'⏱️'}].map(opt => (
+                          <button key={opt.value} onClick={() => updateTracking(student.id, 'presence', opt.value)}
+                            className={`w-8 h-8 rounded-lg text-sm ${t.presence === opt.value ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
+                            {opt.icon}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Indicateurs rapides */}
+                    {!isAbsent && (
+                      <div className="flex flex-wrap gap-2">
+                        {trackingOptions?.cahier_present && (
+                          <label className="flex items-center gap-1 text-xs bg-blue-50 px-2 py-1 rounded-lg border border-blue-200 cursor-pointer">
+                            <input type="checkbox" checked={t.cahier_present || false}
+                              onChange={(e) => updateTracking(student.id, 'cahier_present', e.target.checked)}
+                              className="w-4 h-4" />
+                            📘 Cahier
+                          </label>
+                        )}
+                        {trackingOptions?.writing && (
+                          <button onClick={() => updateTracking(student.id, 'writing', !t.writing)}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${t.writing ? 'bg-purple-600 text-white border-purple-600' : 'bg-purple-50 border-purple-200'}`}>
+                            ✍️ Écrit
+                          </button>
+                        )}
+                        {trackingOptions?.discipline && (
+                          <div className="flex gap-1">
+                            {[{value:'good',icon:'👁️✅'},{value:'medium',icon:'👁️⚠️'},{value:'bad',icon:'👁️❌'}].map(opt => (
+                              <button key={opt.value} onClick={() => updateTracking(student.id, 'discipline', opt.value)}
+                                className={`text-xs px-1.5 py-1 rounded border ${t.discipline === opt.value ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}>
+                                {opt.icon}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {trackingOptions?.participation && (
+                          <div className="flex gap-1">
+                            {[{value:'good',icon:'🙋✅'},{value:'medium',icon:'🙋⚠️'},{value:'bad',icon:'🙋❌'}].map(opt => (
+                              <button key={opt.value} onClick={() => updateTracking(student.id, 'participation', opt.value)}
+                                className={`text-xs px-1.5 py-1 rounded border ${t.participation === opt.value ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 border-green-200'}`}>
+                                {opt.icon}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {trackingOptions?.sleeping && (
+                          <button onClick={() => updateTracking(student.id, 'sleeping', !t.sleeping)}
+                            className={`text-xs px-2 py-1 rounded-lg border ${t.sleeping ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 border-blue-200'}`}>
+                            😴 Veille
+                          </button>
+                        )}
+                        {trackingOptions?.phone_use && (
+                          <button onClick={() => updateTracking(student.id, 'phone_use', !t.phone_use)}
+                            className={`text-xs px-2 py-1 rounded-lg border ${t.phone_use ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}>
+                            📱 Tél.
+                          </button>
+                        )}
+                        {(activeHomework.length > 0 ? activeHomework : []).map(hw => {
+                          const hwKey = `homework_${hw.id}`;
+                          if (!trackingOptions[hwKey]) return null;
+                          return (
+                            <button key={hw.id} onClick={() => updateTracking(student.id, hwKey, t[hwKey] !== 'done' ? 'done' : null)}
+                              className={`text-xs px-2 py-1 rounded-lg border ${t[hwKey] === 'done' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 border-emerald-200'}`}>
+                              📚 {hw.title}
+                            </button>
+                          );
+                        })}
+                        {trackingOptions?.homework && activeHomework.length === 0 && (
+                          <button onClick={() => updateTracking(student.id, 'homework', t.homework === 'done' ? null : 'done')}
+                            className={`text-xs px-2 py-1 rounded-lg border ${t.homework === 'done' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 border-emerald-200'}`}>
+                            📚 Devoir
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Note */}
+                    <input type="text" placeholder="Observation..." maxLength="80"
+                      value={t.comment || ''}
+                      onChange={(e) => updateTracking(student.id, 'comment', e.target.value)}
+                      className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50" />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Vue TABLEAU desktop (cachée sur mobile) ── */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-[10px]">
