@@ -1824,17 +1824,16 @@ const SuiviRapide = () => {
 
       {/* ── Barre flottante de sauvegarde ── */}
       {!sessionSaved && currentSession && (
-        <div className="fixed bottom-0 left-64 right-0 z-40 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-          <div className="flex items-center justify-between px-6 py-3 max-w-full">
+        <div className="fixed bottom-0 left-0 md:left-64 right-0 z-40 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+          <div className="flex items-center justify-between px-3 md:px-6 py-3 max-w-full">
             {/* Indicateur de complétude */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-gray-400" />
-                <span className="text-sm font-medium text-gray-700">
-                  {students.filter(s => tracking[s.id]?.presence).length}/{students.length} présences
-                </span>
-              </div>
-              <div className="w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <span className="text-xs md:text-sm font-medium text-gray-700">
+                {students.filter(s => tracking[s.id]?.presence).length}/{students.length}
+                <span className="hidden sm:inline"> présences</span>
+              </span>
+              <div className="w-16 md:w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all ${
                     students.filter(s => tracking[s.id]?.presence).length === students.length
@@ -1845,7 +1844,7 @@ const SuiviRapide = () => {
                 />
               </div>
               {students.filter(s => tracking[s.id]?.presence).length < students.length && (
-                <span className="text-[11px] text-amber-600 font-medium">
+                <span className="hidden sm:inline text-[11px] text-amber-600 font-medium">
                   {students.length - students.filter(s => tracking[s.id]?.presence).length} restant(s)
                 </span>
               )}
@@ -1855,7 +1854,7 @@ const SuiviRapide = () => {
             <button
               onClick={saveTracking}
               disabled={saving || students.filter(s => tracking[s.id]?.presence).length < students.length}
-              className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition shadow-sm ${
+              className={`inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg text-sm font-semibold transition shadow-sm ${
                 students.filter(s => tracking[s.id]?.presence).length === students.length
                   ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-200'
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
@@ -1866,7 +1865,8 @@ const SuiviRapide = () => {
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              {saving ? 'Enregistrement...' : 'Enregistrer la séance'}
+              <span className="hidden sm:inline">{saving ? 'Enregistrement...' : 'Enregistrer la séance'}</span>
+              <span className="sm:hidden">{saving ? '...' : 'Enregistrer'}</span>
             </button>
           </div>
         </div>
