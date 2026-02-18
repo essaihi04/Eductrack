@@ -27,31 +27,34 @@ jobs:
         working-directory: edtrack-capacitor
         run: npm install
 
-      - name: Add iOS platform
+      - name: Sync Capacitor iOS
         working-directory: edtrack-capacitor
-        run: |
-          if [ ! -d "ios" ]; then
-            ./node_modules/.bin/cap add ios
-          else
-            echo "iOS platform already exists, skipping add"
-          fi
+        run: ./node_modules/.bin/cap sync ios
 
-      - name: Sync Capacitor
+      - name: Check Podfile exists
         working-directory: edtrack-capacitor
         run: |
-          ls -la
-          ./node_modules/.bin/cap sync ios
+          find ios -name "Podfile" 2>/dev/null || echo "No Podfile found"
+          ls -la ios/App/
 
       - name: Disable ATS (allow HTTP) in Info.plist
-        working-directory: edtrack-capacitor/ios/App
+        working-directory: edtrack-capacitor
         run: |
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" App/Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" App/Info.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" App/Info.plist 2>/dev/null || true
+          PLIST="ios/App/App/Info.plist"
+          if [ -f "$PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" "$PLIST" 2>/dev/null || true
+            echo "ATS disabled in $PLIST"
+          else
+            echo "Info.plist not found at $PLIST"
+          fi
 
       - name: Install CocoaPods
         working-directory: edtrack-capacitor/ios/App
-        run: pod install --repo-update
+        run: |
+          ls -la
+          pod install --repo-update
 
       - name: Build IPA (unsigned - for sideloading)
         working-directory: edtrack-capacitor/ios/App
