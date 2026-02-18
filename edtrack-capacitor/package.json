@@ -1,0 +1,22 @@
+{
+  "name": "edtrack-capacitor",
+  "version": "1.0.1",
+  "main": "index.js",
+  "scripts": {
+    "start": "npx cap run android",
+    "build": "npx cap sync && cd android && ./gradlew assembleDebug",
+    "build:release": "npx cap sync && cd android && ./gradlew assembleRelease",
+    "sync": "npx cap sync",
+    "android": "npx cap open android",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["eductrack", "mobile", "capacitor", "android"],
+  "author": "Eductrack Team",
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^8.1.0",
+    "@capacitor/cli": "^8.1.0",
+    "@capacitor/core": "^8.1.0"
+  },
+  "description": "Application mobile Eductrack - Suivi pédagogique"
+}

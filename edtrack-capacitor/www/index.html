@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Eductrack</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2d6a9f 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: white;
+      overflow: hidden;
+    }
+    .logo-container {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .logo-img {
+      width: 100px;
+      height: 100px;
+      border-radius: 20px;
+      object-fit: cover;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      margin-bottom: 16px;
+    }
+    .app-name {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: 2px;
+    }
+    .app-name span {
+      color: #4fc3f7;
+    }
+    .subtitle {
+      font-size: 14px;
+      opacity: 0.7;
+      margin-top: 8px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255,255,255,0.2);
+      border-top-color: #4fc3f7;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin-top: 30px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .status {
+      margin-top: 16px;
+      font-size: 13px;
+      opacity: 0.6;
+    }
+    #webview {
+      display: none;
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .error-box {
+      display: none;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      max-width: 320px;
+      margin-top: 20px;
+    }
+    .error-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+    .error-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .error-msg {
+      font-size: 13px;
+      opacity: 0.7;
+      margin-bottom: 16px;
+    }
+    button {
+      background: #4fc3f7;
+      color: #1e3a5f;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #81d4fa;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="logo-container">
+      <div class="app-name">Educ<span>Track</span></div>
+      <div class="subtitle">Suivi pédagogique intelligent</div>
+    </div>
+    <div class="spinner"></div>
+    <div class="status">Chargement...</div>
+  </div>
+
+  <div id="error" class="error-box">
+    <div class="error-icon">⚠️</div>
+    <div class="error-title">Connexion impossible</div>
+    <div class="error-msg">Impossible de joindre le serveur Eductrack. Vérifiez votre connexion internet.</div>
+    <button onclick="location.reload()">Réessayer</button>
+  </div>
+
+  <iframe id="webview" src="http://edtrack.duckdns.org"></iframe>
+
+  <script>
+    const webview = document.getElementById('webview');
+    const loading = document.getElementById('loading');
+    const error = document.getElementById('error');
+
+    webview.onload = function() {
+      loading.style.display = 'none';
+      webview.style.display = 'block';
+    };
+
+    webview.onerror = function() {
+      loading.style.display = 'none';
+      error.style.display = 'block';
+    };
+
+    // Timeout fallback
+    setTimeout(() => {
+      if (webview.style.display === 'none' && error.style.display === 'none') {
+        loading.style.display = 'none';
+        webview.style.display = 'block';
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

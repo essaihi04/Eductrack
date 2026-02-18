@@ -58,7 +58,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "verifyUpdateCodeSignature": false
     },
     "nsis": {

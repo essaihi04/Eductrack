@@ -140,13 +140,13 @@ const TeacherHome = () => {
   const todayControlSessions = todaySessions.filter(s => s.type === 'control');
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 md:space-y-8">
       <div>
-        <h1 className="text-4xl font-bold">Bienvenue, {profile.first_name}</h1>
+        <h1 className="text-2xl md:text-4xl font-bold">Bienvenue, {profile.first_name}</h1>
         <p className="text-muted-foreground mt-2">Gérez vos séances et suivez vos élèves</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Choisir une classe</CardTitle>

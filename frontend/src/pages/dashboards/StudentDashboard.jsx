@@ -612,7 +612,7 @@ const StudentDashboard = () => {
         </motion.div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
         <StatusCard
           icon={Calendar}
           title="Présence"
@@ -655,7 +655,7 @@ const StudentDashboard = () => {
               style={{ width: `${scoreValue}%` }}
             />
           </div>
-          <div className="grid grid-cols-5 gap-3 mt-5 text-center">
+          <div className="grid grid-cols-5 gap-1 md:gap-3 mt-5 text-center">
             <div className="flex flex-col items-center gap-1">
               <span className="text-lg">📅</span>
               <span className={`text-xs font-medium ${scoreBreakdown.presenceScore >= 75 ? 'text-green-600' : scoreBreakdown.presenceScore >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>●</span>
@@ -727,7 +727,7 @@ const StudentDashboard = () => {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         {documents.length > 0 && (
           <Card className="border-blue-200 bg-blue-50">
             <CardHeader>
