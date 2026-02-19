@@ -377,10 +377,10 @@ const CahierDeTexte = () => {
   return (
     <div className="p-4 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-indigo-600" />
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-indigo-600 flex-shrink-0" />
             Cahier de Texte
           </h1>
           <p className="text-sm text-gray-500 mt-1">
@@ -391,7 +391,7 @@ const CahierDeTexte = () => {
           <button
             onClick={generatePDF}
             disabled={pdfGenerating}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
+            className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium w-full sm:w-auto"
           >
             <Download className="w-4 h-4" />
             {pdfGenerating ? 'Génération...' : 'Télécharger PDF'}
@@ -520,7 +520,70 @@ const CahierDeTexte = () => {
                   <p className="text-sm font-semibold text-indigo-900">{group.classInfo?.name || 'Classe'}</p>
                 </div>
               )}
-              <div className="overflow-x-auto">
+              {/* Vue cartes mobile */}
+              <div className="md:hidden divide-y divide-gray-100">
+                {(group.sessions || []).length === 0 ? (
+                  <p className="px-4 py-8 text-center text-gray-400 text-sm">Aucune séance trouvée pour cette période.</p>
+                ) : (
+                  (group.sessions || []).map((s, idx) => (
+                    <div key={s.id || idx} className="p-3 space-y-2 bg-white">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-indigo-700">{formatDateFr(s.date)}</p>
+                          <p className="text-xs text-gray-500">{formatTime(s.start_time)} – {formatTime(s.end_time)}{calcDuration(s.start_time, s.end_time) ? ` · ${calcDuration(s.start_time, s.end_time)}` : ''}</p>
+                        </div>
+                        {s.type === 'control' && <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium flex-shrink-0">Contrôle</span>}
+                      </div>
+                      {editingId === s.id ? (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={editTopic}
+                            onChange={(e) => setEditTopic(e.target.value)}
+                            placeholder="Chapitre / Titre de la leçon"
+                            className="w-full rounded border border-indigo-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-indigo-500"
+                            autoFocus
+                          />
+                          <textarea
+                            value={editNotes}
+                            onChange={(e) => setEditNotes(e.target.value)}
+                            placeholder="Objectif / Description"
+                            rows="2"
+                            className="w-full rounded border border-indigo-300 px-2 py-1 text-sm resize-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                          <div className="flex gap-2">
+                            <button onClick={() => saveEdit(s.id)} disabled={savingEdit} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-xs hover:bg-green-700 disabled:opacity-50">
+                              <Check className="w-3 h-3" />{savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                            </button>
+                            <button onClick={() => setEditingId(null)} className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">Annuler</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          {s.topic ? (
+                            <>
+                              <p className="text-sm font-semibold text-gray-900">{s.topic}</p>
+                              {s.notes && <p className="text-xs text-gray-600 mt-0.5"><span className="font-medium">OBJECTIF :</span> {s.notes}</p>}
+                            </>
+                          ) : (
+                            <p className="text-sm text-gray-400 italic">{s.type === 'control' ? 'Contrôle' : 'Non renseigné'}</p>
+                          )}
+                          {isAdmin && s.teacher && <p className="text-xs text-indigo-500 mt-1">Prof : {s.teacher.first_name} {s.teacher.last_name}</p>}
+                          {s.subject?.name && <p className="text-xs text-gray-400">{s.subject.name}</p>}
+                          {!isAdmin && s.type !== 'control' && editingId !== s.id && (
+                            <button onClick={() => startEditing(s)} className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs mt-1">
+                              <Pencil className="w-3 h-3" />Modifier
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Vue tableau desktop */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">

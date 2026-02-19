@@ -37,7 +37,7 @@ const MobileNav = () => {
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: Calendar, label: 'Suivi', path: '/teacher/rapide' },
         { icon: ClipboardList, label: 'Contrôles', path: '/teacher/controls' },
-        { icon: FileText, label: 'Devoirs', path: '/teacher/devoirs' },
+        { icon: BookOpen, label: 'Cahier', path: '/teacher/cahier-de-texte' },
       ];
     }
 

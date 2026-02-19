@@ -1950,14 +1950,14 @@ const ControlsPage = () => {
       {showNotesModal && selectedControlForNotes && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-6 border-b">
-              <div>
-                <h2 className="text-2xl font-bold flex items-center gap-2">
-                  <BarChart3 className="w-6 h-6 text-blue-600" />
-                  Notes – Contrôle : {selectedControlForNotes.name}
+            <div className="flex items-center justify-between p-3 md:p-6 border-b">
+              <div className="min-w-0 flex-1 pr-2">
+                <h2 className="text-base md:text-2xl font-bold flex items-center gap-2 truncate">
+                  <BarChart3 className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                  <span className="truncate">Notes – {selectedControlForNotes.name}</span>
                 </h2>
-                <p className="text-gray-600 mt-1">
-                  {selectedControlForNotes.class_name} - {new Date(selectedControlForNotes.date).toLocaleDateString('fr-FR')}
+                <p className="text-gray-600 mt-1 text-xs md:text-sm truncate">
+                  {selectedControlForNotes.class_name} · {new Date(selectedControlForNotes.date).toLocaleDateString('fr-FR')}
                 </p>
               </div>
               <button
@@ -1970,39 +1970,39 @@ const ControlsPage = () => {
 
             {/* Onglets */}
             <div className="border-b">
-              <div className="flex">
+              <div className="flex w-full">
                 <button
                   onClick={() => setActiveNotesTab('import')}
-                  className={`px-6 py-3 font-medium flex items-center gap-2 border-b-2 transition-colors ${
+                  className={`flex-1 px-2 md:px-6 py-2.5 md:py-3 font-medium flex items-center justify-center gap-1 md:gap-2 border-b-2 transition-colors text-xs md:text-sm ${
                     activeNotesTab === 'import'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <Upload className="w-4 h-4" />
-                  Import Excel
+                  <Upload className="w-4 h-4 flex-shrink-0" />
+                  <span>Import Excel</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('manual')}
-                  className={`px-6 py-3 font-medium flex items-center gap-2 border-b-2 transition-colors ${
+                  className={`flex-1 px-2 md:px-6 py-2.5 md:py-3 font-medium flex items-center justify-center gap-1 md:gap-2 border-b-2 transition-colors text-xs md:text-sm ${
                     activeNotesTab === 'manual'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <Edit3 className="w-4 h-4" />
-                  Saisie manuelle
+                  <Edit3 className="w-4 h-4 flex-shrink-0" />
+                  <span>Saisie</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('stats')}
-                  className={`px-6 py-3 font-medium flex items-center gap-2 border-b-2 transition-colors ${
+                  className={`flex-1 px-2 md:px-6 py-2.5 md:py-3 font-medium flex items-center justify-center gap-1 md:gap-2 border-b-2 transition-colors text-xs md:text-sm ${
                     activeNotesTab === 'stats'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <BarChart3 className="w-4 h-4" />
-                  Statistiques
+                  <BarChart3 className="w-4 h-4 flex-shrink-0" />
+                  <span>Stats</span>
                 </button>
               </div>
             </div>
@@ -2046,7 +2046,25 @@ const ControlsPage = () => {
                     </div>
                   ) : (
                     <>
-                      <div className="overflow-x-auto">
+                      {/* Vue carte mobile */}
+                      <div className="md:hidden space-y-2">
+                        {classStudents.map((student) => (
+                          <div key={student.id} className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg bg-white">
+                            <span className="flex-1 text-sm font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</span>
+                            <input
+                              type="number"
+                              min="0" max="20" step="0.25"
+                              value={studentsNotes[student.id]?.note ?? ''}
+                              onChange={(e) => setStudentsNotes(prev => ({ ...prev, [student.id]: { ...prev[student.id], note: e.target.value } }))}
+                              placeholder="/20"
+                              className="w-16 text-center border border-gray-300 rounded px-1 py-1 text-sm"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Vue tableau desktop */}
+                      <div className="hidden md:block overflow-x-auto">
                         <table className="w-full border border-gray-200 rounded-lg">
                           <thead className="bg-gray-50">
                             <tr>
