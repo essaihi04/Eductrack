@@ -2125,7 +2125,7 @@ const ControlsPage = () => {
                           </tbody>
                         </table>
                       </div>
-                      <div className="flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-0 mt-2 sm:mt-0">
+                      <div className="flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-0 mt-3 sm:mt-4">
                         <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-2">
                           <button 
                             onClick={() => setShowPasteModal(true)}
