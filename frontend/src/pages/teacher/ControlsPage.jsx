@@ -13,40 +13,40 @@ const ControlsPage = () => {
     const stats = controlsStatsCache[control.id];
 
     return (
-      <div className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <h3 className="text-lg font-semibold text-gray-900">{control.name}</h3>
-              <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(control.status)}`}>
+      <div className="p-3 sm:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0 mb-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">{control.name}</h3>
+              <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${getStatusColor(control.status)}`}>
                 {getStatusLabel(control.status)}
               </span>
             </div>
-            <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
-              <div className="flex items-center gap-1">
-                <Calendar className="w-4 h-4" />
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 mb-2">
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
                 {new Date(control.date).toLocaleDateString('fr-FR')}
               </div>
               {control.start_time && (
-                <div className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <Clock className="w-3 h-3 sm:w-4 sm:h-4" />
                   {control.start_time} {control.end_time ? `- ${control.end_time}` : ''}
                 </div>
               )}
-              <div className="flex items-center gap-1">
-                <FileText className="w-4 h-4" />
-                {control.class_name}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <FileText className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span className="truncate">{control.class_name}</span>
               </div>
             </div>
             {control.description && (
-              <p className="text-sm text-gray-700">{control.description}</p>
+              <p className="text-xs sm:text-sm text-gray-700 line-clamp-2">{control.description}</p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
             {control.status === 'planned' && (
               <button
                 onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
-                className="px-3 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700 transition-colors"
+                className="px-2 py-1 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors flex-shrink-0"
               >
                 Démarrer
               </button>
@@ -57,24 +57,24 @@ const ControlsPage = () => {
                 setShowNotesModal(true);
                 setActiveNotesTab('manual');
               }}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"
+              className="px-2 py-1 sm:px-3 sm:py-1.5 bg-blue-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1 flex-shrink-0"
             >
-              <BarChart3 className="w-4 h-4" />
+              <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4" />
               Notes
             </button>
             <button
               onClick={() => handleEdit(control)}
-              className="p-2 hover:bg-blue-100 rounded transition"
+              className="p-1.5 sm:p-2 hover:bg-blue-100 rounded transition flex-shrink-0"
               title="Modifier"
             >
-              <Edit2 className="w-4 h-4 text-blue-600" />
+              <Edit2 className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
             </button>
             <button
               onClick={() => handleDelete(control.id)}
-              className="p-2 hover:bg-red-100 rounded transition"
+              className="p-1.5 sm:p-2 hover:bg-red-100 rounded transition flex-shrink-0"
               title="Supprimer"
             >
-              <Trash2 className="w-4 h-4 text-red-600" />
+              <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-600" />
             </button>
           </div>
         </div>
@@ -1507,11 +1507,11 @@ const ControlsPage = () => {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-4xl font-bold">Gestion des Contrôles</h1>
-          <p className="text-muted-foreground mt-2">Gérez et suivez tous vos contrôles</p>
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-4xl font-bold truncate">Gestion des Contrôles</h1>
+          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">Gérez et suivez tous vos contrôles</p>
         </div>
         <button
           onClick={() => {
@@ -1526,10 +1526,10 @@ const ControlsPage = () => {
             });
             setShowCreateModal(true);
           }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+          className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 flex-shrink-0"
         >
-          <Plus className="w-5 h-5" />
-          Nouveau Contrôle
+          <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+          <span className="text-sm sm:text-base">Nouveau Contrôle</span>
         </button>
       </div>
 
