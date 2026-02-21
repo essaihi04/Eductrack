@@ -907,8 +907,7 @@ const ControlsPage = () => {
     setDetailsData(details);
     setShowDetailsModal(true);
   };
-
-  // Fonction pour afficher les élèves en échec
+    // Fonction pour afficher les élèves en échec
   const showFailingStudents = (stats) => {
     setFailingStudents(stats.failingStudents);
     setShowFailingModal(true);
@@ -1970,21 +1969,22 @@ const ControlsPage = () => {
 
             {/* Onglets */}
             <div className="border-b">
-              <div className="flex w-full">
+              <div className="flex w-full overflow-x-auto scrollbar-hide">
                 <button
                   onClick={() => setActiveNotesTab('import')}
-                  className={`flex-1 px-2 md:px-6 py-2.5 md:py-3 font-medium flex items-center justify-center gap-1 md:gap-2 border-b-2 transition-colors text-xs md:text-sm ${
+                  className={`flex-1 min-w-[80px] px-1 sm:px-2 md:px-6 py-2 md:py-3 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-xs md:text-sm ${
                     activeNotesTab === 'import'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
                   <Upload className="w-4 h-4 flex-shrink-0" />
-                  <span>Import Excel</span>
+                  <span className="hidden sm:inline">Import Excel</span>
+                  <span className="sm:hidden">Excel</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('manual')}
-                  className={`flex-1 px-2 md:px-6 py-2.5 md:py-3 font-medium flex items-center justify-center gap-1 md:gap-2 border-b-2 transition-colors text-xs md:text-sm ${
+                  className={`flex-1 min-w-[80px] px-1 sm:px-2 md:px-6 py-2 md:py-3 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-xs md:text-sm ${
                     activeNotesTab === 'manual'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
@@ -1995,7 +1995,7 @@ const ControlsPage = () => {
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('stats')}
-                  className={`flex-1 px-2 md:px-6 py-2.5 md:py-3 font-medium flex items-center justify-center gap-1 md:gap-2 border-b-2 transition-colors text-xs md:text-sm ${
+                  className={`flex-1 min-w-[80px] px-1 sm:px-2 md:px-6 py-2 md:py-3 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-xs md:text-sm ${
                     activeNotesTab === 'stats'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
@@ -2008,13 +2008,13 @@ const ControlsPage = () => {
             </div>
 
             {/* Contenu des onglets */}
-            <div className="p-6">
+            <div className="p-3 sm:p-6">
               {activeNotesTab === 'import' && (
-                <div className="text-center py-8">
-                  <Upload className="w-12 h-12 text-green-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-800 mb-2">Import Excel disponible en haut de la page</h3>
-                  <p className="text-gray-600 mb-4">
-                    Utilisez la section <strong>« Importer les notes via Excel »</strong> en haut de la page des contrôles pour importer les notes depuis un fichier Excel marocain.
+                <div className="text-center py-4 sm:py-8">
+                  <Upload className="w-8 h-8 sm:w-12 sm:h-12 text-green-400 mx-auto mb-2 sm:mb-4" />
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">Import Excel disponible en haut</h3>
+                  <p className="text-xs sm:text-sm text-gray-600 mb-4">
+                    Utilisez la section <strong>« Importer les notes via Excel »</strong> en haut de la page.
                   </p>
                   <button
                     onClick={() => {
@@ -2022,7 +2022,7 @@ const ControlsPage = () => {
                       setShowExcelImportSection(true);
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
-                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium inline-flex items-center gap-2"
+                    className="px-4 py-2 sm:px-6 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium inline-flex items-center gap-2"
                   >
                     <Upload className="w-4 h-4" />
                     Aller à l'import Excel
@@ -2031,33 +2031,33 @@ const ControlsPage = () => {
               )}
 
               {activeNotesTab === 'manual' && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">Saisie manuelle des notes</h3>
+                <div className="space-y-3 sm:space-y-4">
+                  <h3 className="text-base sm:text-lg font-semibold hidden sm:block">Saisie manuelle des notes</h3>
                   
                   {loadingStudents ? (
-                    <div className="text-center py-8">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                      <p className="text-gray-600">Chargement des élèves...</p>
+                    <div className="text-center py-4 sm:py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto mb-2 sm:mb-4"></div>
+                      <p className="text-xs sm:text-sm text-gray-600">Chargement...</p>
                     </div>
                   ) : classStudents.length === 0 ? (
-                    <div className="text-center py-8">
-                      <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-600">Aucun élève trouvé dans cette classe</p>
+                    <div className="text-center py-4 sm:py-8">
+                      <Users className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400 mx-auto mb-2 sm:mb-4" />
+                      <p className="text-xs sm:text-sm text-gray-600">Aucun élève trouvé</p>
                     </div>
                   ) : (
                     <>
                       {/* Vue carte mobile */}
-                      <div className="md:hidden space-y-2">
+                      <div className="md:hidden space-y-2 max-h-[50vh] overflow-y-auto pr-1">
                         {classStudents.map((student) => (
-                          <div key={student.id} className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg bg-white">
-                            <span className="flex-1 text-sm font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</span>
+                          <div key={student.id} className="flex items-center gap-2 p-2 border border-gray-200 rounded bg-white">
+                            <span className="flex-1 text-xs font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</span>
                             <input
                               type="number"
                               min="0" max="20" step="0.25"
                               value={studentsNotes[student.id]?.note ?? ''}
                               onChange={(e) => setStudentsNotes(prev => ({ ...prev, [student.id]: { ...prev[student.id], note: e.target.value } }))}
                               placeholder="/20"
-                              className="w-16 text-center border border-gray-300 rounded px-1 py-1 text-sm"
+                              className="w-14 text-center border border-gray-300 rounded px-1 py-1 text-xs"
                             />
                           </div>
                         ))}
@@ -2123,24 +2123,24 @@ const ControlsPage = () => {
                           </tbody>
                         </table>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <div className="flex gap-2">
+                      <div className="flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-0 mt-2 sm:mt-0">
+                        <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-2">
                           <button 
                             onClick={() => setShowPasteModal(true)}
-                            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
+                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm flex-1 sm:flex-none"
                           >
-                            <Upload className="w-4 h-4" />
-                            Coller les notes
+                            <Upload className="w-3 h-3 sm:w-4 sm:h-4" />
+                            Coller notes
                           </button>
-                          <div className="text-sm text-gray-600 flex items-center">
-                            {classStudents.length} élève(s) dans la classe
+                          <div className="text-[10px] sm:text-sm text-gray-600">
+                            {classStudents.length} élève(s)
                           </div>
                         </div>
                         <button 
                           onClick={handleSaveNotes}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                          className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
                         >
-                          Enregistrer les notes
+                          Enregistrer
                         </button>
                       </div>
                     </>
@@ -2149,60 +2149,60 @@ const ControlsPage = () => {
               )}
 
               {activeNotesTab === 'stats' && (
-                <div className="space-y-6">
-                  <h3 className="text-lg font-semibold">Statistiques des notes</h3>
+                <div className="space-y-4 sm:space-y-6">
+                  <h3 className="text-base sm:text-lg font-semibold">Statistiques des notes</h3>
                   
                   {/* Statistiques calculées dynamiquement */}
                   {(() => {
                     const stats = calculateControlStats(selectedControlForNotes.id);
                     return (
                       <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <BarChart3 className="w-5 h-5 text-blue-600" />
-                              <h4 className="font-medium text-blue-800">Moyenne</h4>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 sm:p-4">
+                            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                              <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                              <h4 className="text-xs sm:text-sm font-medium text-blue-800">Moyenne</h4>
                             </div>
-                            <p className="text-2xl font-bold text-blue-600">{stats.average.toFixed(2)}/20</p>
-                            <p className="text-sm text-blue-600">Classe : {getClassName(selectedControlForNotes)}</p>
+                            <p className="text-lg sm:text-2xl font-bold text-blue-600">{stats.average.toFixed(2)}/20</p>
+                            <p className="text-[10px] sm:text-sm text-blue-600 truncate">Classe : {getClassName(selectedControlForNotes)}</p>
                           </div>
                           
-                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Users className="w-5 h-5 text-green-600" />
-                              <h4 className="font-medium text-green-800">Élèves notés</h4>
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-2 sm:p-4">
+                            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                              <Users className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
+                              <h4 className="text-xs sm:text-sm font-medium text-green-800">Élèves notés</h4>
                             </div>
-                            <p className="text-2xl font-bold text-green-600">{stats.notedStudents}/{stats.totalStudents}</p>
-                            <p className="text-sm text-green-600">{stats.notedPercentage}% des élèves</p>
+                            <p className="text-lg sm:text-2xl font-bold text-green-600">{stats.notedStudents}/{stats.totalStudents}</p>
+                            <p className="text-[10px] sm:text-sm text-green-600">{stats.notedPercentage}% des élèves</p>
                           </div>
                           
-                          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <TrendingUp className="w-5 h-5 text-purple-600" />
-                              <h4 className="font-medium text-purple-800">Taux de réussite</h4>
+                          <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 sm:p-4">
+                            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+                              <h4 className="text-xs sm:text-sm font-medium text-purple-800 truncate">Taux de réussite</h4>
                             </div>
                             <button
                               onClick={() => showFailingStudents(stats)}
-                              className="text-2xl font-bold text-purple-600 hover:text-purple-700 transition-colors cursor-pointer"
+                              className="text-lg sm:text-2xl font-bold text-purple-600 hover:text-purple-700 transition-colors cursor-pointer block"
                               title="Cliquez pour voir les élèves en échec"
                             >
                               {stats.successRate}%
                             </button>
-                            <p className="text-sm text-purple-600">≥ 10/20 (cliquable)</p>
+                            <p className="text-[10px] sm:text-sm text-purple-600">≥ 10/20 (cliquable)</p>
                           </div>
 
-                          <div className={`border rounded-lg p-4 ${
+                          <div className={`border rounded-lg p-2 sm:p-4 ${
                             stats.dispersion === 'Faible' ? 'bg-green-50 border-green-200' :
                             stats.dispersion === 'Moyen' ? 'bg-yellow-50 border-yellow-200' :
                             'bg-red-50 border-red-200'
                           }`}>
-                            <div className="flex items-center gap-2 mb-2">
-                              <Activity className="w-5 h-5 text-gray-600" />
-                              <h4 className="font-medium text-gray-800">Dispersion</h4>
+                            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                              <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
+                              <h4 className="text-xs sm:text-sm font-medium text-gray-800">Dispersion</h4>
                             </div>
                             <button
                               onClick={() => showDispersionInterpretation(stats.dispersion)}
-                              className={`text-2xl font-bold hover:opacity-80 transition-opacity cursor-pointer ${
+                              className={`text-lg sm:text-2xl font-bold hover:opacity-80 transition-opacity cursor-pointer block ${
                                 stats.dispersion === 'Faible' ? 'text-green-600' :
                                 stats.dispersion === 'Moyen' ? 'text-yellow-600' :
                                 'text-red-600'
@@ -2211,7 +2211,7 @@ const ControlsPage = () => {
                             >
                               {stats.dispersion}
                             </button>
-                            <p className="text-sm text-gray-600">
+                            <p className="text-[10px] sm:text-sm text-gray-600 truncate">
                               {stats.dispersion === 'Faible' ? 'Classe homogène' :
                                stats.dispersion === 'Moyen' ? 'Écarts moyens' :
                                'Gros écarts'} (cliquable)
@@ -2219,63 +2219,63 @@ const ControlsPage = () => {
                           </div>
                         </div>
 
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                          <h4 className="font-medium text-gray-800 mb-4">Répartition des notes</h4>
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-20 text-sm">15-20</div>
-                              <div className="flex-1 bg-gray-200 rounded-full h-6">
-                                <div className="bg-green-500 h-6 rounded-full" style={{width: `${stats.distribution.high}%`}}></div>
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
+                          <h4 className="text-sm sm:text-base font-medium text-gray-800 mb-2 sm:mb-4">Répartition des notes</h4>
+                          <div className="space-y-2 sm:space-y-3">
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <div className="w-12 sm:w-20 text-xs sm:text-sm">15-20</div>
+                              <div className="flex-1 bg-gray-200 rounded-full h-4 sm:h-6">
+                                <div className="bg-green-500 h-4 sm:h-6 rounded-full" style={{width: `${stats.distribution.high}%`}}></div>
                               </div>
-                              <div className="w-12 text-sm text-right">{stats.distribution.high}%</div>
+                              <div className="w-10 sm:w-12 text-xs sm:text-sm text-right">{stats.distribution.high}%</div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <div className="w-20 text-sm">10-14</div>
-                              <div className="flex-1 bg-gray-200 rounded-full h-6">
-                                <div className="bg-blue-500 h-6 rounded-full" style={{width: `${stats.distribution.medium}%`}}></div>
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <div className="w-12 sm:w-20 text-xs sm:text-sm">10-14</div>
+                              <div className="flex-1 bg-gray-200 rounded-full h-4 sm:h-6">
+                                <div className="bg-blue-500 h-4 sm:h-6 rounded-full" style={{width: `${stats.distribution.medium}%`}}></div>
                               </div>
-                              <div className="w-12 text-sm text-right">{stats.distribution.medium}%</div>
+                              <div className="w-10 sm:w-12 text-xs sm:text-sm text-right">{stats.distribution.medium}%</div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <div className="w-20 text-sm">0-9</div>
-                              <div className="flex-1 bg-gray-200 rounded-full h-6">
-                                <div className="bg-red-500 h-6 rounded-full" style={{width: `${stats.distribution.low}%`}}></div>
+                            <div className="flex items-center gap-2 sm:gap-3">
+                              <div className="w-12 sm:w-20 text-xs sm:text-sm">0-9</div>
+                              <div className="flex-1 bg-gray-200 rounded-full h-4 sm:h-6">
+                                <div className="bg-red-500 h-4 sm:h-6 rounded-full" style={{width: `${stats.distribution.low}%`}}></div>
                               </div>
-                              <div className="w-12 text-sm text-right">{stats.distribution.low}%</div>
+                              <div className="w-10 sm:w-12 text-xs sm:text-sm text-right">{stats.distribution.low}%</div>
                             </div>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <TrendingDown className="w-5 h-5 text-orange-600" />
-                              <h4 className="font-medium text-orange-800">Note minimale</h4>
+                        <div className="grid grid-cols-2 gap-2 sm:gap-4">
+                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 sm:p-4">
+                            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                              <TrendingDown className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
+                              <h4 className="text-xs sm:text-sm font-medium text-orange-800">Note minimale</h4>
                             </div>
-                            <p className="text-2xl font-bold text-orange-600">{stats.minNote}/20</p>
-                            <p className="text-sm text-orange-600">Qui a chuté ?</p>
+                            <p className="text-lg sm:text-2xl font-bold text-orange-600">{stats.minNote}/20</p>
+                            <p className="text-[10px] sm:text-sm text-orange-600">Qui a chuté ?</p>
                           </div>
                           
-                          <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <TrendingUp className="w-5 h-5 text-teal-600" />
-                              <h4 className="font-medium text-teal-800">Note maximale</h4>
+                          <div className="bg-teal-50 border border-teal-200 rounded-lg p-2 sm:p-4">
+                            <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                              <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-teal-600" />
+                              <h4 className="text-xs sm:text-sm font-medium text-teal-800">Note maximale</h4>
                             </div>
-                            <p className="text-2xl font-bold text-teal-600">{stats.maxNote}/20</p>
-                            <p className="text-sm text-teal-600">Sujet trop dur ?</p>
+                            <p className="text-lg sm:text-2xl font-bold text-teal-600">{stats.maxNote}/20</p>
+                            <p className="text-[10px] sm:text-sm text-teal-600">Sujet trop dur ?</p>
                           </div>
                         </div>
 
-                        <div className="flex justify-end gap-3">
+                        <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 mt-2 sm:mt-0">
                           <button 
                             onClick={() => exportControlToPDF(selectedControlForNotes)}
-                            className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                            className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
                           >
                             Exporter en PDF
                           </button>
                           <button 
                             onClick={() => viewControlDetails(selectedControlForNotes)}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                            className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
                           >
                             Voir le détail
                           </button>
@@ -2545,51 +2545,51 @@ const ControlsPage = () => {
               </div>
 
               {/* Statistiques principales */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <BarChart3 className="w-4 h-4 text-green-600" />
-                    <h5 className="font-medium text-green-800">Moyenne</h5>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
+                    <h5 className="text-xs sm:text-sm font-medium text-green-800">Moyenne</h5>
                   </div>
-                  <p className="text-xl font-bold text-green-600">
+                  <p className="text-lg sm:text-xl font-bold text-green-600">
                     {detailsData.stats.average.toFixed(2)}/20
                   </p>
                 </div>
                 
-                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Users className="w-4 h-4 text-purple-600" />
-                    <h5 className="font-medium text-purple-800">Élèves notés</h5>
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+                    <h5 className="text-xs sm:text-sm font-medium text-purple-800 leading-tight">Élèves notés</h5>
                   </div>
-                  <p className="text-xl font-bold text-purple-600">
+                  <p className="text-lg sm:text-xl font-bold text-purple-600">
                     {detailsData.stats.notedStudents}/{detailsData.stats.totalStudents}
                   </p>
-                  <p className="text-xs text-purple-600">
-                    {detailsData.stats.notedPercentage}% des élèves
+                  <p className="text-[10px] sm:text-xs text-purple-600">
+                    {detailsData.stats.notedPercentage}%
                   </p>
                 </div>
                 
-                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-4 h-4 text-orange-600" />
-                    <h5 className="font-medium text-orange-800">Taux de réussite</h5>
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
+                    <h5 className="text-xs sm:text-sm font-medium text-orange-800">Réussite</h5>
                   </div>
-                  <p className="text-xl font-bold text-orange-600">
+                  <p className="text-lg sm:text-xl font-bold text-orange-600">
                     {detailsData.stats.successRate}%
                   </p>
-                  <p className="text-xs text-orange-600">≥ 10/20</p>
+                  <p className="text-[10px] sm:text-xs text-orange-600">≥ 10/20</p>
                 </div>
 
-                <div className={`border rounded-lg p-4 ${
+                <div className={`border rounded-lg p-3 sm:p-4 ${
                   detailsData.stats.dispersion === 'Faible' ? 'bg-green-50 border-green-200' :
                   detailsData.stats.dispersion === 'Moyen' ? 'bg-yellow-50 border-yellow-200' :
                   'bg-red-50 border-red-200'
                 }`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Activity className="w-4 h-4 text-gray-600" />
-                    <h5 className="font-medium text-gray-800">Dispersion</h5>
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
+                    <h5 className="text-xs sm:text-sm font-medium text-gray-800">Dispersion</h5>
                   </div>
-                  <p className={`text-xl font-bold ${
+                  <p className={`text-lg sm:text-xl font-bold ${
                     detailsData.stats.dispersion === 'Faible' ? 'text-green-600' :
                     detailsData.stats.dispersion === 'Moyen' ? 'text-yellow-600' :
                     'text-red-600'
@@ -2600,89 +2600,89 @@ const ControlsPage = () => {
               </div>
 
               {/* Notes extrêmes */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <TrendingDown className="w-4 h-4 text-red-600" />
-                    <h5 className="font-medium text-red-800">Note minimale</h5>
+              <div className="grid grid-cols-2 gap-2 sm:gap-4">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <TrendingDown className="w-4 h-4 sm:w-5 sm:h-5 text-red-600" />
+                    <h5 className="text-xs sm:text-sm font-medium text-red-800 truncate">Note min</h5>
                   </div>
-                  <p className="text-xl font-bold text-red-600">
+                  <p className="text-lg sm:text-xl font-bold text-red-600">
                     {detailsData.stats.minNote}/20
                   </p>
-                  <p className="text-xs text-red-600">Qui a chuté ?</p>
+                  <p className="text-[10px] sm:text-xs text-red-600">Qui a chuté ?</p>
                 </div>
                 
-                <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-4 h-4 text-teal-600" />
-                    <h5 className="font-medium text-teal-800">Note maximale</h5>
+                <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 sm:p-4">
+                  <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
+                    <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-teal-600" />
+                    <h5 className="text-xs sm:text-sm font-medium text-teal-800 truncate">Note max</h5>
                   </div>
-                  <p className="text-xl font-bold text-teal-600">
+                  <p className="text-lg sm:text-xl font-bold text-teal-600">
                     {detailsData.stats.maxNote}/20
                   </p>
-                  <p className="text-xs text-teal-600">Sujet trop dur ?</p>
+                  <p className="text-[10px] sm:text-xs text-teal-600">Sujet trop dur ?</p>
                 </div>
               </div>
 
               {/* Répartition détaillée */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                <h4 className="font-medium text-gray-800 mb-4">Répartition détaillée des notes</h4>
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-20 text-sm font-medium">15-20</div>
-                    <div className="flex-1 bg-gray-200 rounded-full h-6">
-                      <div className="bg-green-500 h-6 rounded-full flex items-center justify-end pr-2" 
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
+                <h4 className="text-sm sm:text-base font-medium text-gray-800 mb-3 sm:mb-4">Répartition détaillée des notes</h4>
+                <div className="space-y-2 sm:space-y-3">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="w-12 sm:w-20 text-xs sm:text-sm font-medium">15-20</div>
+                    <div className="flex-1 bg-gray-200 rounded-full h-4 sm:h-6">
+                      <div className="bg-green-500 h-4 sm:h-6 rounded-full flex items-center justify-end pr-1 sm:pr-2" 
                            style={{width: `${detailsData.stats.distribution.high}%`}}>
-                        <span className="text-xs text-white font-medium">
+                        <span className="text-[10px] sm:text-xs text-white font-medium">
                           {detailsData.stats.distribution.high}%
                         </span>
                       </div>
                     </div>
-                    <div className="w-16 text-sm text-right">
+                    <div className="w-12 sm:w-16 text-xs sm:text-sm text-right leading-tight">
                       {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.high / 100)} élèves
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="w-20 text-sm font-medium">10-14</div>
-                    <div className="flex-1 bg-gray-200 rounded-full h-6">
-                      <div className="bg-blue-500 h-6 rounded-full flex items-center justify-end pr-2" 
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="w-12 sm:w-20 text-xs sm:text-sm font-medium">10-14</div>
+                    <div className="flex-1 bg-gray-200 rounded-full h-4 sm:h-6">
+                      <div className="bg-blue-500 h-4 sm:h-6 rounded-full flex items-center justify-end pr-1 sm:pr-2" 
                            style={{width: `${detailsData.stats.distribution.medium}%`}}>
-                        <span className="text-xs text-white font-medium">
+                        <span className="text-[10px] sm:text-xs text-white font-medium">
                           {detailsData.stats.distribution.medium}%
                         </span>
                       </div>
                     </div>
-                    <div className="w-16 text-sm text-right">
+                    <div className="w-12 sm:w-16 text-xs sm:text-sm text-right leading-tight">
                       {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.medium / 100)} élèves
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <div className="w-20 text-sm font-medium">0-9</div>
-                    <div className="flex-1 bg-gray-200 rounded-full h-6">
-                      <div className="bg-red-500 h-6 rounded-full flex items-center justify-end pr-2" 
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="w-12 sm:w-20 text-xs sm:text-sm font-medium">0-9</div>
+                    <div className="flex-1 bg-gray-200 rounded-full h-4 sm:h-6">
+                      <div className="bg-red-500 h-4 sm:h-6 rounded-full flex items-center justify-end pr-1 sm:pr-2" 
                            style={{width: `${detailsData.stats.distribution.low}%`}}>
-                        <span className="text-xs text-white font-medium">
+                        <span className="text-[10px] sm:text-xs text-white font-medium">
                           {detailsData.stats.distribution.low}%
                         </span>
                       </div>
                     </div>
-                    <div className="w-16 text-sm text-right">
+                    <div className="w-12 sm:w-16 text-xs sm:text-sm text-right leading-tight">
                       {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.low / 100)} élèves
                     </div>
                   </div>
                 </div>
               </div>
               
-              <div className="flex justify-end gap-3">
+              <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3">
                 <button
                   onClick={() => setShowDetailsModal(false)}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
                 >
                   Fermer
                 </button>
                 <button
                   onClick={() => exportControlToPDF(detailsData.control)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
                 >
                   Exporter en PDF
                 </button>
@@ -2694,32 +2694,32 @@ const ControlsPage = () => {
 
       {/* Modal des élèves en échec */}
       {showFailingModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
           <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 md:p-6 border-b">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-red-600" />
+            <div className="flex items-center justify-between p-3 sm:p-4 md:p-6 border-b">
+              <h3 className="text-base sm:text-lg font-semibold flex items-center gap-1 sm:gap-2">
+                <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600" />
                 Élèves en échec (&lt; 10/20)
               </h3>
               <button
                 onClick={() => setShowFailingModal(false)}
-                className="p-2 hover:bg-gray-100 rounded"
+                className="p-1 sm:p-2 hover:bg-gray-100 rounded"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
             
-            <div className="p-4 md:p-6">
+            <div className="p-3 sm:p-4 md:p-6">
               {failingStudents.length === 0 ? (
-                <div className="text-center py-8">
-                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-4" />
-                  <p className="text-gray-600">Aucun élève en échec ! 🎉</p>
-                  <p className="text-sm text-gray-500 mt-2">Tous les élèves ont une note supérieure ou égale à 10/20</p>
+                <div className="text-center py-4 sm:py-8">
+                  <CheckCircle className="w-8 h-8 sm:w-12 sm:h-12 text-green-500 mx-auto mb-2 sm:mb-4" />
+                  <p className="text-sm sm:text-base text-gray-600">Aucun élève en échec ! 🎉</p>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">Tous les élèves ont une note supérieure ou égale à 10/20</p>
                 </div>
               ) : (
                 <>
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-red-800">
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4 mb-3 sm:mb-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-xs sm:text-sm text-red-800">
                       <div>
                         <strong>📊 Nombre d'élèves en échec :</strong> {failingStudents.length}
                       </div>
@@ -2732,7 +2732,29 @@ const ControlsPage = () => {
                     </div>
                   </div>
                   
-                  <div className="overflow-x-auto">
+                  {/* Vue mobile: cartes pour les élèves en échec */}
+                  <div className="sm:hidden space-y-2 mb-3">
+                    {failingStudents.map((student, index) => {
+                      const note = parseFloat(student.note.replace(',', '.'));
+                      const gap = (10 - note).toFixed(2);
+                      return (
+                        <div key={student.id} className="p-3 border border-red-200 rounded-lg bg-red-50/50 flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-900 truncate pr-2">{student.name}</span>
+                          <div className="flex flex-col items-end">
+                            <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded text-xs font-bold mb-1">
+                              {student.note}/20
+                            </span>
+                            <span className="text-xs text-red-600 font-medium">
+                              -{gap} pts
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Vue desktop: tableau pour les élèves en échec */}
+                  <div className="hidden sm:block overflow-x-auto mb-4">
                     <table className="w-full border border-gray-200 rounded-lg">
                       <thead className="bg-gray-50">
                         <tr>
@@ -2769,22 +2791,22 @@ const ControlsPage = () => {
                     </table>
                   </div>
                   
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
-                    <h4 className="font-medium text-yellow-800 mb-2">💡 Recommandations pédagogiques :</h4>
-                    <ul className="text-sm text-yellow-700 space-y-1">
-                      <li>• Prévoir une séance de soutien pour les élèves ayant un écart de plus de 3 points</li>
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 sm:p-4 mt-3 sm:mt-4">
+                    <h4 className="text-sm font-medium text-yellow-800 mb-1 sm:mb-2">💡 Recommandations pédagogiques :</h4>
+                    <ul className="text-xs sm:text-sm text-yellow-700 space-y-1 pl-1">
+                      <li>• Prévoir une séance de soutien pour les élèves avec &gt; 3 pts d'écart</li>
                       <li>• Proposer des exercices de renforcement personnalisés</li>
-                      <li>• Envisager un contrôle de rattrapage pour les notes très basses (&lt; 5/20)</li>
+                      <li>• Envisager un rattrapage pour les notes &lt; 5/20</li>
                       <li>• Analyser les questions qui ont posé le plus de difficultés</li>
                     </ul>
                   </div>
                 </>
               )}
               
-              <div className="flex justify-end gap-3 mt-6">
+              <div className="flex justify-end gap-2 sm:gap-3 mt-4 sm:mt-6">
                 <button
                   onClick={() => setShowFailingModal(false)}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
                 >
                   Fermer
                 </button>
