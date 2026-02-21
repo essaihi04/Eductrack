@@ -1947,70 +1947,70 @@ const ControlsPage = () => {
 
       {/* Modal de gestion des notes */}
       {showNotesModal && selectedControlForNotes && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-3 md:p-6 border-b">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-lg w-full max-w-4xl max-h-[95vh] flex flex-col">
+            <div className="flex items-center justify-between p-2 sm:p-4 border-b flex-shrink-0">
               <div className="min-w-0 flex-1 pr-2">
-                <h2 className="text-base md:text-2xl font-bold flex items-center gap-2 truncate">
-                  <BarChart3 className="w-5 h-5 text-blue-600 flex-shrink-0" />
+                <h2 className="text-sm sm:text-xl font-bold flex items-center gap-1 sm:gap-2 truncate">
+                  <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
                   <span className="truncate">Notes – {selectedControlForNotes.name}</span>
                 </h2>
-                <p className="text-gray-600 mt-1 text-xs md:text-sm truncate">
+                <p className="text-gray-600 mt-0.5 sm:mt-1 text-[10px] sm:text-sm truncate">
                   {selectedControlForNotes.class_name} · {new Date(selectedControlForNotes.date).toLocaleDateString('fr-FR')}
                 </p>
               </div>
               <button
                 onClick={() => setShowNotesModal(false)}
-                className="p-2 hover:bg-gray-100 rounded"
+                className="p-1.5 sm:p-2 hover:bg-gray-100 rounded"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
 
             {/* Onglets */}
-            <div className="border-b">
+            <div className="border-b flex-shrink-0">
               <div className="flex w-full overflow-x-auto scrollbar-hide">
                 <button
                   onClick={() => setActiveNotesTab('import')}
-                  className={`flex-1 min-w-[80px] px-1 sm:px-2 md:px-6 py-2 md:py-3 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-xs md:text-sm ${
+                  className={`flex-1 min-w-[70px] sm:min-w-[80px] px-1 sm:px-4 py-2 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-[10px] sm:text-sm ${
                     activeNotesTab === 'import'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <Upload className="w-4 h-4 flex-shrink-0" />
+                  <Upload className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span className="hidden sm:inline">Import Excel</span>
                   <span className="sm:hidden">Excel</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('manual')}
-                  className={`flex-1 min-w-[80px] px-1 sm:px-2 md:px-6 py-2 md:py-3 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-xs md:text-sm ${
+                  className={`flex-1 min-w-[70px] sm:min-w-[80px] px-1 sm:px-4 py-2 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-[10px] sm:text-sm ${
                     activeNotesTab === 'manual'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <Edit3 className="w-4 h-4 flex-shrink-0" />
+                  <Edit3 className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span>Saisie</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('stats')}
-                  className={`flex-1 min-w-[80px] px-1 sm:px-2 md:px-6 py-2 md:py-3 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-xs md:text-sm ${
+                  className={`flex-1 min-w-[70px] sm:min-w-[80px] px-1 sm:px-4 py-2 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-[10px] sm:text-sm ${
                     activeNotesTab === 'stats'
                       ? 'border-blue-500 text-blue-600 bg-blue-50'
                       : 'border-transparent text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  <BarChart3 className="w-4 h-4 flex-shrink-0" />
+                  <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                   <span>Stats</span>
                 </button>
               </div>
             </div>
 
             {/* Contenu des onglets */}
-            <div className="p-3 sm:p-6">
+            <div className="p-2 sm:p-4 overflow-y-auto flex-1">
               {activeNotesTab === 'import' && (
-                <div className="text-center py-4 sm:py-8">
+                <div className="text-center py-4">
                   <Upload className="w-8 h-8 sm:w-12 sm:h-12 text-green-400 mx-auto mb-2 sm:mb-4" />
                   <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">Import Excel disponible en haut</h3>
                   <p className="text-xs sm:text-sm text-gray-600 mb-4">
@@ -2047,17 +2047,19 @@ const ControlsPage = () => {
                   ) : (
                     <>
                       {/* Vue carte mobile */}
-                      <div className="md:hidden space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+                      <div className="md:hidden space-y-1.5">
                         {classStudents.map((student) => (
-                          <div key={student.id} className="flex items-center gap-2 p-2 border border-gray-200 rounded bg-white">
-                            <span className="flex-1 text-xs font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</span>
+                          <div key={student.id} className="flex items-center gap-1.5 p-1.5 border border-gray-200 rounded bg-white">
+                            <div className="flex-1 min-w-0">
+                              <span className="block text-xs font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</span>
+                            </div>
                             <input
                               type="number"
                               min="0" max="20" step="0.25"
                               value={studentsNotes[student.id]?.note ?? ''}
                               onChange={(e) => setStudentsNotes(prev => ({ ...prev, [student.id]: { ...prev[student.id], note: e.target.value } }))}
                               placeholder="/20"
-                              className="w-14 text-center border border-gray-300 rounded px-1 py-1 text-xs"
+                              className="w-12 text-center border border-gray-300 rounded px-1 py-1 text-xs"
                             />
                           </div>
                         ))}
@@ -2149,8 +2151,8 @@ const ControlsPage = () => {
               )}
 
               {activeNotesTab === 'stats' && (
-                <div className="space-y-4 sm:space-y-6">
-                  <h3 className="text-base sm:text-lg font-semibold">Statistiques des notes</h3>
+                <div className="space-y-3 sm:space-y-6">
+                  <h3 className="text-sm sm:text-lg font-semibold">Statistiques des notes</h3>
                   
                   {/* Statistiques calculées dynamiquement */}
                   {(() => {
