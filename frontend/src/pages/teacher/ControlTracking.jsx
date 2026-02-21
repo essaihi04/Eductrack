@@ -522,7 +522,47 @@ const ControlTracking = () => {
 
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          {/* Vue mobile: cartes */}
+          <div className="md:hidden divide-y divide-gray-200">
+            {students.map(student => {
+              const studentTracking = tracking[student.id] || {};
+              const isAbsent = studentTracking.presence === 'absent' || studentTracking.presence === 'excused';
+              return (
+                <div key={student.id} className={`p-3 space-y-3 ${isAbsent ? 'bg-gray-50 opacity-75' : 'bg-white'}`}>
+                  {/* Header de la carte: Nom et Présence */}
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-gray-900 text-sm">{student.first_name} {student.last_name}</p>
+                    <PresenceCell student={student} trackingData={studentTracking} />
+                  </div>
+
+                  {/* Reste des contrôles si présent */}
+                  {!isAbsent && (
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                      <div>
+                        <span className="text-[10px] font-bold text-blue-600 uppercase mb-1 block">Matériel</span>
+                        <MaterialCell student={student} trackingData={studentTracking} />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-red-600 uppercase mb-1 block">Téléphone</span>
+                        <PhoneCell student={student} trackingData={studentTracking} />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-yellow-600 uppercase mb-1 block">Discipline</span>
+                        <DisciplineCell student={student} trackingData={studentTracking} />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-purple-600 uppercase mb-1 block">Copie</span>
+                        <CopyCell student={student} trackingData={studentTracking} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Vue desktop: tableau */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-xs border-collapse">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
