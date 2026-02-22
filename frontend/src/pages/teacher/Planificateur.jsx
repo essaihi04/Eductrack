@@ -249,32 +249,32 @@ const Planificateur = () => {
     return (
       <>
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Calendrier des Contrôles</span>
-              <div className="flex items-center gap-2">
+          <CardHeader className="p-3 sm:p-6">
+            <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+              <span className="text-base sm:text-lg">Calendrier des Contrôles</span>
+              <div className="flex items-center justify-center gap-2">
                 <button
                   onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
-                  className="p-2 hover:bg-gray-100 rounded"
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded"
                 >
-                  <CalendarIcon className="w-5 h-5" />
+                  <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
-                <span className="font-medium">
+                <span className="font-medium text-sm sm:text-base">
                   {monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}
                 </span>
                 <button
                   onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
-                  className="p-2 hover:bg-gray-100 rounded"
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded"
                 >
-                  <CalendarIcon className="w-5 h-5" />
+                  <CalendarIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               </div>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-7 gap-2">
+          <CardContent className="p-2 sm:p-6">
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'].map(day => (
-                <div key={day} className="text-center text-sm font-medium text-gray-600 p-2">
+                <div key={day} className="text-center text-[10px] sm:text-sm font-medium text-gray-600 p-1 sm:p-2">
                   {day}
                 </div>
               ))}
@@ -288,7 +288,7 @@ const Planificateur = () => {
                     key={index}
                     onClick={() => date && controls.length > 0 && handleDateClick(date, controls)}
                     className={`
-                      min-h-[80px] border rounded-lg p-2 relative
+                      min-h-[60px] sm:min-h-[80px] border rounded p-1 sm:p-2 relative
                       ${!date ? 'bg-gray-50' : 'bg-white'}
                       ${isToday ? 'border-blue-500 border-2' : 'border-gray-200'}
                       ${date && controls.length > 0 ? 'cursor-pointer hover:bg-gray-50' : ''}
@@ -297,12 +297,12 @@ const Planificateur = () => {
                   >
                     {date && (
                       <>
-                        <div className={`text-sm font-medium mb-1 ${isToday ? 'text-blue-600' : ''}`}>
+                        <div className={`text-[10px] sm:text-sm font-medium mb-0.5 sm:mb-1 ${isToday ? 'text-blue-600' : ''}`}>
                           {date.getDate()}
                         </div>
                         
                         {controls.length > 0 && (
-                          <div className="space-y-1">
+                          <div className="space-y-0.5 sm:space-y-1">
                             {controls.slice(0, 2).map((control, idx) => {
                               const subjectName = control.subject_name || 'Non spécifié';
                               const colorClass = getSubjectColor(subjectName);
@@ -312,7 +312,7 @@ const Planificateur = () => {
                               return (
                                 <div
                                   key={idx}
-                                  className={`text-xs p-1 rounded ${bgColorClass} ${textColorClass} truncate`}
+                                  className={`text-[8px] sm:text-xs p-0.5 sm:p-1 rounded ${bgColorClass} ${textColorClass} truncate`}
                                   title={control.name}
                                 >
                                   {control.name}
@@ -320,8 +320,8 @@ const Planificateur = () => {
                               );
                             })}
                             {controls.length > 2 && (
-                              <div className="text-xs text-gray-500">
-                                +{controls.length - 2} plus
+                              <div className="text-[8px] sm:text-xs text-gray-500">
+                                +{controls.length - 2}
                               </div>
                             )}
                           </div>
@@ -337,17 +337,17 @@ const Planificateur = () => {
 
         {/* Modal pour afficher les détails d'une journée */}
         {showModal && selectedDate && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">
+                <h2 className="text-lg sm:text-xl font-bold">
                   Contrôles du {selectedDate.toLocaleDateString('fr-FR')}
                 </h2>
                 <button
                   onClick={() => setShowModal(false)}
-                  className="p-2 hover:bg-gray-100 rounded"
+                  className="p-1.5 sm:p-2 hover:bg-gray-100 rounded flex-shrink-0"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
               </div>
 
@@ -356,42 +356,42 @@ const Planificateur = () => {
                   Aucun contrôle prévu pour cette date
                 </p>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {selectedControls.map(control => (
-                    <div key={control.id} className="border rounded-lg p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-lg mb-2">{control.name}</h3>
-                          <div className="space-y-1 text-sm text-gray-600">
+                    <div key={control.id} className="border rounded-lg p-3 sm:p-4">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-base sm:text-lg mb-2 truncate">{control.name}</h3>
+                          <div className="space-y-1 text-xs sm:text-sm text-gray-600">
                             <div className="flex items-center gap-2">
-                              <FileText className="w-4 h-4" />
-                              <span>{control.class_name}</span>
+                              <FileText className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
+                              <span className="truncate">{control.class_name}</span>
                             </div>
                             {control.start_time && (
                               <div className="flex items-center gap-2">
-                                <Clock className="w-4 h-4" />
+                                <Clock className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                                 <span>{control.start_time} {control.end_time ? `- ${control.end_time}` : ''}</span>
                               </div>
                             )}
                             {control.subject_name && (
                               <div className="flex items-center gap-2">
                                 <span className="font-medium">Matière:</span>
-                                <span>{control.subject_name}</span>
+                                <span className="truncate">{control.subject_name}</span>
                               </div>
                             )}
                             {control.description && (
-                              <p className="text-gray-700 mt-2">{control.description}</p>
+                              <p className="text-gray-700 mt-2 line-clamp-2">{control.description}</p>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(control.status)}`}>
+                        <div className="flex flex-wrap sm:flex-col items-center gap-2">
+                          <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${getStatusColor(control.status)}`}>
                             {getStatusLabel(control.status)}
                           </span>
                           {control.status === 'planned' && (
                             <button
                               onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
-                              className="px-3 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700 transition-colors"
+                              className="px-3 py-1.5 bg-green-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors flex-shrink-0"
                             >
                               Démarrer
                             </button>
@@ -421,19 +421,19 @@ const Planificateur = () => {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-4xl font-bold">Planificateur</h1>
-          <p className="text-muted-foreground mt-2">Vue calendrier de vos contrôles</p>
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto pb-20 md:pb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-4xl font-bold truncate">Planificateur</h1>
+          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">Vue calendrier de vos contrôles</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
           <button
             onClick={() => navigate('/teacher/controls')}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
           >
-            <FileText className="w-5 h-5" />
-            Gérer les Contrôles
+            <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span>Gérer les Contrôles</span>
           </button>
           <button
             onClick={() => {
@@ -448,10 +448,10 @@ const Planificateur = () => {
               });
               setShowCreateModal(true);
             }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
           >
-            <Plus className="w-5 h-5" />
-            Nouveau Contrôle
+            <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span>Nouveau Contrôle</span>
           </button>
         </div>
       </div>
@@ -459,17 +459,17 @@ const Planificateur = () => {
       <CalendarView />
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">
+              <h2 className="text-lg sm:text-xl font-bold">
                 {editingControl ? 'Modifier le Contrôle' : 'Nouveau Contrôle'}
               </h2>
               <button
                 onClick={() => setShowCreateModal(false)}
-                className="p-2 hover:bg-gray-100 rounded"
+                className="p-1.5 sm:p-2 hover:bg-gray-100 rounded flex-shrink-0"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </div>
 

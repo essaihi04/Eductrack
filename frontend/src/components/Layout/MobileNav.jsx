@@ -15,7 +15,8 @@ import {
   Upload,
   School,
   GitCompare,
-  Activity
+  Activity,
+  CalendarDays
 } from 'lucide-react';
 
 const MobileNav = () => {
@@ -37,7 +38,7 @@ const MobileNav = () => {
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: Calendar, label: 'Suivi', path: '/teacher/rapide' },
         { icon: ClipboardList, label: 'Contrôles', path: '/teacher/controls' },
-        { icon: BookOpen, label: 'Cahier', path: '/teacher/cahier-de-texte' },
+        { icon: CalendarDays, label: 'Planning', path: '/teacher/planificateur' },
       ];
     }
 
