@@ -1366,7 +1366,7 @@ const SuiviRapide = () => {
                         )}
                         {trackingOptions?.discipline && (
                           <div className="flex gap-1">
-                            {[{value:'good',icon:'👁️✅'},{value:'medium',icon:'👁️⚠️'},{value:'bad',icon:'👁️❌'}].map(opt => (
+                            {[{value:'concentre',icon:'�'},{value:'moyen',icon:'�'},{value:'distrait',icon:'�'}].map(opt => (
                               <button key={opt.value} onClick={() => updateTracking(student.id, 'discipline', opt.value)}
                                 className={`text-xs px-1.5 py-1 rounded border ${t.discipline === opt.value ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}>
                                 {opt.icon}
@@ -1376,7 +1376,7 @@ const SuiviRapide = () => {
                         )}
                         {trackingOptions?.participation && (
                           <div className="flex gap-1">
-                            {[{value:'good',icon:'🙋✅'},{value:'medium',icon:'🙋⚠️'},{value:'bad',icon:'🙋❌'}].map(opt => (
+                            {[{value:'faible',icon:'�'},{value:'bon',icon:'🙋'},{value:'excellent',icon:'⭐'}].map(opt => (
                               <button key={opt.value} onClick={() => updateTracking(student.id, 'participation', opt.value)}
                                 className={`text-xs px-1.5 py-1 rounded border ${t.participation === opt.value ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 border-green-200'}`}>
                                 {opt.icon}
