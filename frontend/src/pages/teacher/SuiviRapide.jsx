@@ -1366,9 +1366,10 @@ const SuiviRapide = () => {
                         )}
                         {trackingOptions?.discipline && (
                           <div className="flex gap-1">
-                            {[{value:'concentre',icon:'�'},{value:'moyen',icon:'�'},{value:'distrait',icon:'�'}].map(opt => (
+                            {[{value:'concentre',icon:'🟢',label:'Concentré'},{value:'moyen',icon:'🟡',label:'Moyen'},{value:'distrait',icon:'🔴',label:'Distrait'}].map(opt => (
                               <button key={opt.value} onClick={() => updateTracking(student.id, 'discipline', opt.value)}
-                                className={`text-xs px-1.5 py-1 rounded border ${t.discipline === opt.value ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}>
+                                className={`text-xs px-1.5 py-1 rounded border ${t.discipline === opt.value ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}
+                                title={opt.label}>
                                 {opt.icon}
                               </button>
                             ))}
@@ -1376,9 +1377,10 @@ const SuiviRapide = () => {
                         )}
                         {trackingOptions?.participation && (
                           <div className="flex gap-1">
-                            {[{value:'faible',icon:'�'},{value:'bon',icon:'🙋'},{value:'excellent',icon:'⭐'}].map(opt => (
+                            {[{value:'faible',icon:'😐',label:'Faible'},{value:'bon',icon:'🙋',label:'Bonne'},{value:'excellent',icon:'⭐',label:'Excellente'}].map(opt => (
                               <button key={opt.value} onClick={() => updateTracking(student.id, 'participation', opt.value)}
-                                className={`text-xs px-1.5 py-1 rounded border ${t.participation === opt.value ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 border-green-200'}`}>
+                                className={`text-xs px-1.5 py-1 rounded border ${t.participation === opt.value ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 border-green-200'}`}
+                                title={opt.label}>
                                 {opt.icon}
                               </button>
                             ))}
@@ -1412,6 +1414,30 @@ const SuiviRapide = () => {
                             📚 Devoir
                           </button>
                         )}
+                      </div>
+                    )}
+
+                    {/* Détails du cahier (si option activée) */}
+                    {!isAbsent && trackingOptions?.cahier && t.cahier_present && (
+                      <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-200">
+                        <label className="flex items-center gap-1 text-xs bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 cursor-pointer">
+                          <input type="checkbox" checked={t.cahier_lesson === 'complete' || false}
+                            onChange={(e) => updateTracking(student.id, 'cahier_lesson', e.target.checked ? 'complete' : null)}
+                            className="w-4 h-4" />
+                          ✏️ Leçon complète
+                        </label>
+                        <label className="flex items-center gap-1 text-xs bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 cursor-pointer">
+                          <input type="checkbox" checked={t.cahier_documents === 'correct' || false}
+                            onChange={(e) => updateTracking(student.id, 'cahier_documents', e.target.checked ? 'correct' : null)}
+                            className="w-4 h-4" />
+                          📄 Documents corrects
+                        </label>
+                        <label className="flex items-center gap-1 text-xs bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 cursor-pointer">
+                          <input type="checkbox" checked={t.cahier_readability === 'readable' || false}
+                            onChange={(e) => updateTracking(student.id, 'cahier_readability', e.target.checked ? 'readable' : null)}
+                            className="w-4 h-4" />
+                          🔍 Lisible
+                        </label>
                       </div>
                     )}
 
