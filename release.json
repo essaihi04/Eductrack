@@ -1,0 +1,8 @@
+{
+  "tag_name": "v1.0.0",
+  "name": "Première Release - Eductrack v1.0.0",
+  "body": "## 🎉 Première release officielle d'Eductrack\n\n### Fonctionnalités incluses :\n- **Suivi pédagogique complet** (contrôles, séances, compétences)\n- **Gestion des élèves** avec import Excel\n- **Système WhatsApp** pour notifications parents\n- **Tableau de bord** admin, professeur, élève\n- **Système multi-écoles** avec super admin\n- **Cahier de texte numérique**\n- **Rapports quotidiens automatisés**\n\n### Déploiement :\n- URL production : https://edtrack.duckdns.org\n- Backend : Node.js + Express + Supabase\n- Frontend : React + Vite + TailwindCSS\n\n### Installation desktop :\n```bash\ncd edtrack-electron\nnpm install\nnpm start\n```\n\n---\n**Date :** 17 Février 2026",
+  "draft": false,
+  "prerelease": false,
+  "generate_release_notes": true
+}
