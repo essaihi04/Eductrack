@@ -4,10 +4,10 @@
   "webDir": "www",
   "bundledWebRuntime": false,
   "server": {
-    "url": "http://edtrack.duckdns.org",
-    "cleartext": true,
-    "androidScheme": "http",
-    "iosScheme": "http",
+    "url": "https://edtrack.duckdns.org",
+    "cleartext": false,
+    "androidScheme": "https",
+    "iosScheme": "https",
     "allowNavigation": [
       "edtrack.duckdns.org",
       "*.duckdns.org"

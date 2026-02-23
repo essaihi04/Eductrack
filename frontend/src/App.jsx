@@ -42,7 +42,7 @@ import AuditLogPage from './pages/superadmin/AuditLogPage';
 import WhatsAppPage from './pages/admin/WhatsAppPage';
 
 const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
 
   if (loading) {
     return (
@@ -52,7 +52,12 @@ const ProtectedRoute = ({ children }) => {
     );
   }
 
-  return user ? children : <Navigate to="/login" />;
+  // Rediriger vers login si pas d'utilisateur OU pas de profil
+  if (!user || !profile) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
 };
 
 function App() {
