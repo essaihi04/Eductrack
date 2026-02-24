@@ -43,7 +43,8 @@ const DashboardLayout = () => {
   // Vérifier si on est sur une page de suivi
   const isTrackingPage = location.pathname.includes('/teacher/suivi') || 
                          location.pathname.includes('/teacher/session-tracking') ||
-                         location.pathname.includes('/teacher/control-tracking');
+                         location.pathname.includes('/teacher/control-tracking') ||
+                         location.pathname.includes('/teacher/rapide');
 
   return (
     <div className="min-h-screen bg-background">
