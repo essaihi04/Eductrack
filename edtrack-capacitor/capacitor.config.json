@@ -4,13 +4,13 @@
   "webDir": "www",
   "bundledWebRuntime": false,
   "server": {
-    "url": "https://edtrack.duckdns.org",
+    "url": "https://etrack.ma",
     "cleartext": false,
     "androidScheme": "https",
     "iosScheme": "https",
     "allowNavigation": [
-      "edtrack.duckdns.org",
-      "*.duckdns.org"
+      "etrack.ma",
+      "*.etrack.ma"
     ]
   },
   "ios": {
