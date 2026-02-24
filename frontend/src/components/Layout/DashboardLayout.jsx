@@ -12,11 +12,20 @@ const DashboardLayout = () => {
   // Détecter l'orientation du téléphone
   useEffect(() => {
     const checkOrientation = () => {
-      const landscape = window.innerWidth > window.innerHeight && window.innerWidth < 1024;
-      setIsLandscape(landscape);
+      // Détecter le mode paysage : largeur > hauteur ET hauteur < 600px (typique mobile)
+      const isMobileLandscape = window.innerWidth > window.innerHeight && window.innerHeight < 600;
+      
+      console.log('[DashboardLayout] Orientation check:', {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        isMobileLandscape,
+        pathname: location.pathname
+      });
+      
+      setIsLandscape(isMobileLandscape);
       
       // Fermer automatiquement la sidebar en mode paysage
-      if (landscape) {
+      if (isMobileLandscape) {
         setSidebarOpen(false);
       }
     };
@@ -29,7 +38,7 @@ const DashboardLayout = () => {
       window.removeEventListener('resize', checkOrientation);
       window.removeEventListener('orientationchange', checkOrientation);
     };
-  }, []);
+  }, [location.pathname]);
 
   // Vérifier si on est sur une page de suivi
   const isTrackingPage = location.pathname.includes('/teacher/suivi') || 
