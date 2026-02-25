@@ -16,10 +16,10 @@ const Login = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user && profile && !loading) {
+    if (user && profile) {
       navigate('/dashboard', { replace: true });
     }
-  }, [user, profile, loading, navigate]);
+  }, [user, profile, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
