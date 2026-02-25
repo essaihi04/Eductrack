@@ -48,6 +48,16 @@ const WhatsAppPage = () => {
   const [detailMessage, setDetailMessage] = useState(null);
   const [availableLevels, setAvailableLevels] = useState([]);
 
+  // ===================== TAB: TEACHERS =====================
+  const [teachers, setTeachers] = useState([]);
+  const [selectedTeachers, setSelectedTeachers] = useState([]);
+  const [teacherFiliereFilter, setTeacherFiliereFilter] = useState('');
+  const [teacherClassFilter, setTeacherClassFilter] = useState('');
+  const [teacherCount, setTeacherCount] = useState(0);
+  const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [teacherMessageText, setTeacherMessageText] = useState('');
+  const [teacherSending, setTeacherSending] = useState(false);
+
   // ===================== TAB: INBOX =====================
   const [conversations, setConversations] = useState([]);
   const [inboxLoading, setInboxLoading] = useState(false);
@@ -125,25 +135,32 @@ const WhatsAppPage = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  // Load classes on mount
+  // Load classes and teachers on mount
   useEffect(() => {
-    const loadClasses = async () => {
+    const loadData = async () => {
       try {
         const token = await getAuthToken();
-        const res = await fetch(`${apiUrl}/api/admin/classes`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        const data = await res.json();
-        const cls = Array.isArray(data) ? data : [];
+        const [classesRes, teachersRes] = await Promise.all([
+          fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${apiUrl}/api/admin/teachers`, { headers: { Authorization: `Bearer ${token}` } })
+        ]);
+        const classesData = await classesRes.json();
+        const teachersData = await teachersRes.json();
+        
+        const cls = Array.isArray(classesData) ? classesData : [];
         setClasses(cls);
         setSelectedClasses(cls.map(c => c.id));
         const levels = [...new Set(cls.map(c => c.level).filter(Boolean))].sort();
         setAvailableLevels(levels);
+        
+        const tchs = Array.isArray(teachersData) ? teachersData : [];
+        setTeachers(tchs);
+        setSelectedTeachers(tchs.map(t => t.id));
       } catch (error) {
-        console.error('Erreur chargement classes:', error);
+        console.error('Erreur chargement données:', error);
       }
     };
-    loadClasses();
+    loadData();
   }, [apiUrl]);
 
   // ===================== SEND LOGIC =====================
@@ -925,7 +942,8 @@ const WhatsAppPage = () => {
 
   // ===================== TABS CONFIG =====================
   const tabs = [
-    { key: 'send', label: 'Envoyer', icon: Send },
+    { key: 'send', label: 'Parents', icon: Send },
+    { key: 'teachers', label: 'Professeurs', icon: Users },
     { key: 'inbox', label: 'Boîte de messages', icon: Inbox },
     { key: 'reports', label: 'Rapports IA', icon: Bot },
     { key: 'connection', label: 'Connexion', icon: Smartphone }
@@ -974,7 +992,7 @@ const WhatsAppPage = () => {
         </div>
       </div>
 
-      {/* ===================== TAB: SEND ===================== */}
+      {/* ===================== TAB: PARENTS ===================== */}
       {activeTab === 'send' && (
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1143,6 +1161,207 @@ const WhatsAppPage = () => {
                       className="text-xs text-gray-600 hover:text-gray-800 disabled:opacity-50">Suivant</button>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== TAB: TEACHERS ===================== */}
+      {activeTab === 'teachers' && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* Filters */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+              <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Users className="w-4 h-4" /> Sélectionner les professeurs
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Filière</label>
+                  <select value={teacherFiliereFilter} onChange={(e) => setTeacherFiliereFilter(e.target.value)}
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
+                    <option value="">Toutes les filières</option>
+                    {[...new Set(classes.map(c => c.filiere).filter(Boolean))].map(f => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Classe</label>
+                  <select value={teacherClassFilter} onChange={(e) => setTeacherClassFilter(e.target.value)}
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
+                    <option value="">Toutes les classes</option>
+                    {classes
+                      .filter(c => !teacherFiliereFilter || c.filiere === teacherFiliereFilter)
+                      .map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={() => {
+                      setTeacherFiliereFilter('');
+                      setTeacherClassFilter('');
+                      setSelectedTeachers(teachers.map(t => t.id));
+                    }}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50">
+                    Réinitialiser
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Teachers List */}
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-700">
+                  Professeurs ({teachers.filter(t => 
+                    (!teacherFiliereFilter || classes.find(c => c.teacher_id === t.id)?.filiere === teacherFiliereFilter) &&
+                    (!teacherClassFilter || classes.find(c => c.teacher_id === t.id)?.id === teacherClassFilter)
+                  ).length})
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const filtered = teachers.filter(t => 
+                        (!teacherFiliereFilter || classes.find(c => c.teacher_id === t.id)?.filiere === teacherFiliereFilter) &&
+                        (!teacherClassFilter || classes.find(c => c.teacher_id === t.id)?.id === teacherClassFilter)
+                      );
+                      setSelectedTeachers(filtered.map(t => t.id));
+                    }}
+                    className="text-xs text-green-600 hover:text-green-700 font-medium">
+                    Tout sélectionner
+                  </button>
+                  <button
+                    onClick={() => setSelectedTeachers([])}
+                    className="text-xs text-gray-500 hover:text-gray-700 font-medium">
+                    Tout désélectionner
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-96 overflow-y-auto">
+                {teachers
+                  .filter(t => 
+                    (!teacherFiliereFilter || classes.find(c => c.teacher_id === t.id)?.filiere === teacherFiliereFilter) &&
+                    (!teacherClassFilter || classes.find(c => c.teacher_id === t.id)?.id === teacherClassFilter)
+                  )
+                  .map(teacher => (
+                    <label key={teacher.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedTeachers.includes(teacher.id)}
+                        onChange={() => {
+                          setSelectedTeachers(prev =>
+                            prev.includes(teacher.id)
+                              ? prev.filter(id => id !== teacher.id)
+                              : [...prev, teacher.id]
+                          );
+                        }}
+                        className="w-4 h-4 rounded text-green-600"
+                      />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-gray-800">
+                          {teacher.first_name} {teacher.last_name}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {teacher.phone && (
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <Phone className="w-3 h-3" />
+                              {teacher.phone}
+                            </span>
+                          )}
+                          {!teacher.phone && (
+                            <span className="text-xs text-red-500">Pas de téléphone</span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+            </div>
+
+            {/* Message Compose */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+              <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Send className="w-4 h-4" /> Message
+              </h2>
+              <textarea
+                value={teacherMessageText}
+                onChange={(e) => setTeacherMessageText(e.target.value)}
+                placeholder="Tapez votre message aux professeurs..."
+                rows="6"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              />
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                <span className="text-sm text-gray-600">
+                  {selectedTeachers.filter(id => teachers.find(t => t.id === id)?.phone).length} professeur(s) avec téléphone sélectionné(s)
+                </span>
+                <button
+                  onClick={async () => {
+                    if (!teacherMessageText.trim()) {
+                      alert('Veuillez saisir un message');
+                      return;
+                    }
+                    if (selectedTeachers.length === 0) {
+                      alert('Veuillez sélectionner au moins un professeur');
+                      return;
+                    }
+                    
+                    const teachersWithPhone = selectedTeachers.filter(id => teachers.find(t => t.id === id)?.phone);
+                    if (teachersWithPhone.length === 0) {
+                      alert('Aucun professeur sélectionné n\'a de numéro de téléphone');
+                      return;
+                    }
+
+                    if (!confirm(`Envoyer ce message à ${teachersWithPhone.length} professeur(s) ?`)) {
+                      return;
+                    }
+
+                    setTeacherSending(true);
+                    try {
+                      const token = await getAuthToken();
+                      const res = await fetch(`${apiUrl}/api/whatsapp/send-to-teachers`, {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${token}`,
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                          teacher_ids: teachersWithPhone,
+                          message: teacherMessageText
+                        })
+                      });
+
+                      const data = await res.json();
+                      if (res.ok) {
+                        alert(`Message envoyé avec succès à ${data.sent || teachersWithPhone.length} professeur(s)`);
+                        setTeacherMessageText('');
+                      } else {
+                        alert(`Erreur: ${data.error || 'Échec de l\'envoi'}`);
+                      }
+                    } catch (error) {
+                      console.error('Erreur envoi:', error);
+                      alert('Erreur lors de l\'envoi du message');
+                    } finally {
+                      setTeacherSending(false);
+                    }
+                  }}
+                  disabled={teacherSending || !teacherMessageText.trim() || selectedTeachers.length === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium">
+                  {teacherSending ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Envoi en cours...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Envoyer aux professeurs
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </div>
