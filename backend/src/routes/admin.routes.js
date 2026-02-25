@@ -1153,7 +1153,7 @@ router.get('/teachers', async (req, res) => {
 // Créer un professeur
 router.post('/teachers', async (req, res) => {
   try {
-    let { email, password, firstName, lastName, subjectId } = req.body;
+    let { email, password, firstName, lastName, phone, subjectId } = req.body;
 
     if (!firstName || !lastName) {
       return res.status(400).json({ error: 'Le prénom et le nom sont obligatoires.' });
@@ -1203,6 +1203,7 @@ router.post('/teachers', async (req, res) => {
         email,
         first_name: firstName,
         last_name: lastName,
+        phone: phone || null,
         role: 'teacher',
         school_id: getSchoolId(req)
       })
@@ -1270,7 +1271,7 @@ router.post('/teachers/import', async (req, res) => {
     const sanitize = (str) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 
     for (const teacher of teachers) {
-      const { firstName, lastName, subjectName } = teacher;
+      const { firstName, lastName, phone, subjectName } = teacher;
 
       if (!firstName || !lastName) {
         errors.push({ name: `${firstName || ''} ${lastName || ''}`, reason: 'Prénom et nom obligatoires' });
@@ -1302,6 +1303,7 @@ router.post('/teachers/import', async (req, res) => {
             email,
             first_name: firstName,
             last_name: lastName,
+            phone: phone || null,
             role: 'teacher',
             school_id: schoolId
           })

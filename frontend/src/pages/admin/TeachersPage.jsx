@@ -20,6 +20,7 @@ const TeachersPage = () => {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
+    phone: '',
     subjectId: ''
   });
 
@@ -98,6 +99,7 @@ const TeachersPage = () => {
         body: JSON.stringify({
           firstName: formData.firstName,
           lastName: formData.lastName,
+          phone: formData.phone || null,
           subjectId: formData.subjectId || null
         })
       });
@@ -110,7 +112,7 @@ const TeachersPage = () => {
           email: data.generatedEmail || data.email,
           password: data.password || 'Prof@2025'
         });
-        setFormData({ firstName: '', lastName: '', subjectId: '' });
+        setFormData({ firstName: '', lastName: '', phone: '', subjectId: '' });
         fetchData();
       } else {
         alert(data.error || 'Erreur lors de la création');
@@ -222,13 +224,13 @@ const TeachersPage = () => {
   const downloadTemplate = () => {
     const workbook = XLSX.utils.book_new();
     const data = [
-      ['Prénom', 'Nom', 'Matière'],
-      ['Ahmed', 'Bennani', 'Mathématiques'],
-      ['Fatima', 'El Amrani', 'Physique-Chimie'],
-      ['Youssef', 'Tazi', 'Français']
+      ['Prénom', 'Nom', 'Téléphone', 'Matière'],
+      ['Ahmed', 'Bennani', '0612345678', 'Mathématiques'],
+      ['Fatima', 'El Amrani', '0623456789', 'Physique-Chimie'],
+      ['Youssef', 'Tazi', '0634567890', 'Français']
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(data);
-    worksheet['!cols'] = [{ wch: 20 }, { wch: 20 }, { wch: 25 }];
+    worksheet['!cols'] = [{ wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 25 }];
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Professeurs');
     XLSX.writeFile(workbook, 'modele_import_professeurs.xlsx');
   };
@@ -257,21 +259,24 @@ const TeachersPage = () => {
       const header = rows[0].map(h => (h || '').toString().toLowerCase().trim());
       let firstNameCol = header.findIndex(h => h.includes('prénom') || h.includes('prenom') || h === 'first name');
       let lastNameCol = header.findIndex(h => (h.includes('nom') && !h.includes('prénom') && !h.includes('prenom')) || h === 'last name');
+      let phoneCol = header.findIndex(h => h.includes('téléphone') || h.includes('telephone') || h.includes('phone') || h.includes('tel'));
       let subjectCol = header.findIndex(h => h.includes('matière') || h.includes('matiere') || h.includes('subject'));
 
       if (firstNameCol === -1) firstNameCol = 0;
       if (lastNameCol === -1) lastNameCol = 1;
-      if (subjectCol === -1) subjectCol = 2;
+      if (phoneCol === -1) phoneCol = 2;
+      if (subjectCol === -1) subjectCol = 3;
 
       const teachersToImport = [];
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const firstName = (row[firstNameCol] || '').toString().trim();
         const lastName = (row[lastNameCol] || '').toString().trim();
+        const phone = (row[phoneCol] || '').toString().trim();
         const subjectName = (row[subjectCol] || '').toString().trim();
 
         if (firstName && lastName) {
-          teachersToImport.push({ firstName, lastName, subjectName });
+          teachersToImport.push({ firstName, lastName, phone, subjectName });
         }
       }
 
@@ -392,7 +397,8 @@ const TeachersPage = () => {
               <h4 className="font-medium text-blue-900 mb-2">Instructions</h4>
               <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
                 <li>Téléchargez le modèle Excel ci-dessous</li>
-                <li>Remplissez les colonnes : <strong>Prénom</strong>, <strong>Nom</strong>, <strong>Matière</strong></li>
+                <li>Remplissez les colonnes : <strong>Prénom</strong>, <strong>Nom</strong>, <strong>Téléphone</strong>, <strong>Matière</strong></li>
+                <li>Le téléphone est optionnel (format: 0612345678)</li>
                 <li>La matière doit correspondre exactement au nom d'une matière existante</li>
                 <li>L'email et le mot de passe seront générés automatiquement</li>
               </ol>
@@ -495,7 +501,7 @@ const TeachersPage = () => {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-1">Prénom *</label>
                   <input
@@ -515,6 +521,16 @@ const TeachersPage = () => {
                     value={formData.lastName}
                     onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                     required
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700 block mb-1">Téléphone</label>
+                  <input
+                    type="tel"
+                    placeholder="0612345678"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                   />
                 </div>
