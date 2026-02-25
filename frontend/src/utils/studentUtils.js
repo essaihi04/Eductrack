@@ -16,29 +16,23 @@ export const generateEmail = (studentIdOrName, schoolNameOrId, schoolDomain) => 
   return `${first}.${last}${randomNum}@student.edu`;
 };
 
-// Générer un mot de passe sécurisé
-export const generatePassword = () => {
-  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-  const numbers = '0123456789';
-  const symbols = '!@#$%^&*';
+// Générer un mot de passe simple pour les élèves
+// Format: PrénomAnnée (ex: Ahmed2025)
+export const generatePassword = (firstName = '') => {
+  const year = new Date().getFullYear();
+  const cleanFirstName = firstName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z]/g, '')
+    .trim();
   
-  const allChars = uppercase + lowercase + numbers + symbols;
-  let password = '';
-  
-  // Assurer au moins un caractère de chaque type
-  password += uppercase[Math.floor(Math.random() * uppercase.length)];
-  password += lowercase[Math.floor(Math.random() * lowercase.length)];
-  password += numbers[Math.floor(Math.random() * numbers.length)];
-  password += symbols[Math.floor(Math.random() * symbols.length)];
-  
-  // Remplir le reste aléatoirement
-  for (let i = password.length; i < 12; i++) {
-    password += allChars[Math.floor(Math.random() * allChars.length)];
+  if (cleanFirstName) {
+    // Première lettre en majuscule, reste en minuscule + année
+    return cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year;
   }
   
-  // Mélanger le mot de passe
-  return password.split('').sort(() => Math.random() - 0.5).join('');
+  // Fallback si pas de prénom
+  return `Eleve${year}`;
 };
 
 // Créer un modèle Excel en arabe

@@ -945,7 +945,9 @@ router.post('/classes/import', async (req, res) => {
               : `${firstName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}${lastName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}`;
             
             const email = `${emailId}@${schoolDomain}`;
-            const password = `${firstName.charAt(0).toUpperCase()}${lastName.charAt(0).toLowerCase()}@${new Date().getFullYear()}`;
+            // Mot de passe simplifié: Prénom + Année (ex: Ahmed2025)
+            const cleanFirstName = firstName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z]/g, '');
+            const password = cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + new Date().getFullYear();
 
             try {
               // Créer l'utilisateur Auth
