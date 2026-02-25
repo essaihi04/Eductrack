@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { GraduationCap, Mail, Lock, AlertCircle } from 'lucide-react';
@@ -12,8 +12,14 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, user, profile } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && profile && !loading) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, profile, loading, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -22,11 +28,9 @@ const Login = () => {
 
     try {
       await signIn(email, password);
-      navigate('/dashboard');
     } catch (err) {
       setError('Email ou mot de passe incorrect');
       console.error('Login error:', err);
-    } finally {
       setLoading(false);
     }
   };
