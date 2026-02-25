@@ -33,9 +33,18 @@ const NotificationsBell = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
+      if (!token) {
+        return;
+      }
+
       const res = await fetch(`${apiUrl}/api/notifications`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      
+      if (res.status === 401) {
+        return;
+      }
+      
       const data = await res.json();
       setNotifications(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -48,14 +57,20 @@ const NotificationsBell = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      console.log('[DEBUG] Fetching unread count...');
+      if (!token) {
+        return;
+      }
+
       const res = await fetch(`${apiUrl}/api/notifications/unread-count`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      
+      if (res.status === 401) {
+        return;
+      }
+      
       const data = await res.json();
-      console.log('[DEBUG] Unread count response:', data);
       setUnreadCount(data.count || 0);
-      console.log('[DEBUG] Unread count set to:', data.count || 0);
     } catch (error) {
       console.error('Error fetching unread count:', error);
     }
@@ -66,10 +81,18 @@ const NotificationsBell = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      await fetch(`${apiUrl}/api/notifications/${id}/read`, {
+      if (!token) {
+        return;
+      }
+
+      const res = await fetch(`${apiUrl}/api/notifications/${id}/read`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (res.status === 401) {
+        return;
+      }
 
       setNotifications(notifications.map(n => 
         n.id === id ? { ...n, read: true } : n
@@ -85,10 +108,18 @@ const NotificationsBell = () => {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      await fetch(`${apiUrl}/api/notifications/read-all`, {
+      if (!token) {
+        return;
+      }
+
+      const res = await fetch(`${apiUrl}/api/notifications/read-all`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` }
       });
+
+      if (res.status === 401) {
+        return;
+      }
 
       setNotifications(notifications.map(n => ({ ...n, read: true })));
       setUnreadCount(0);
