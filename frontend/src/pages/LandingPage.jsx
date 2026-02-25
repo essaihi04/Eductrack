@@ -26,9 +26,11 @@ const LandingPage = () => {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-                <GraduationCap className="w-6 h-6 text-white" />
-              </div>
+              <img 
+                src="/logo.jpeg" 
+                alt="EduTrack Logo" 
+                className="w-10 h-10 object-contain rounded-lg"
+              />
               <span className="text-xl font-bold text-gray-900 dark:text-white">EduTrack</span>
             </div>
 

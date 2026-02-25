@@ -16,9 +16,11 @@ const LandingFooter = () => {
           {/* Brand */}
           <div className="col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-                <GraduationCap className="w-6 h-6 text-white" />
-              </div>
+              <img 
+                src="/logo.jpeg" 
+                alt="EduTrack Logo" 
+                className="w-10 h-10 object-contain rounded-lg"
+              />
               <span className="text-xl font-bold text-white">EduTrack</span>
             </div>
             <p className="text-sm text-gray-400 leading-relaxed">

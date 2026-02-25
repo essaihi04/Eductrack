@@ -32,9 +32,13 @@ const Hero = () => {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.2, type: 'spring' }}
-              className="inline-flex items-center justify-center w-20 h-20 bg-primary rounded-full mb-6 shadow-lg"
+              className="inline-flex items-center justify-center mb-6"
             >
-              <GraduationCap className="w-12 h-12 text-white" />
+              <img 
+                src="/logo.jpeg" 
+                alt="EduTrack Logo" 
+                className="w-24 h-24 object-contain rounded-2xl shadow-lg"
+              />
             </motion.div>
 
             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 dark:text-white mb-6 leading-tight">
