@@ -442,6 +442,47 @@ L'administration de ${schoolName}`;
     return <div className="p-8">Chargement...</div>;
   }
 
+  const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
+  const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
+  const [sendCredentialsFiliere, setSendCredentialsFiliere] = useState('');
+  const [sendCredentialsClass, setSendCredentialsClass] = useState('');
+  const [sendingCredentials, setSendingCredentials] = useState(false);
+
+  const sendCredentialsViaWhatsApp = async () => {
+    try {
+      setSendingCredentials(true);
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(`${apiUrl}/api/admin/students/send-credentials-whatsapp`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          filter: sendCredentialsFilter,
+          filiere: sendCredentialsFiliere,
+          classId: sendCredentialsClass
+        })
+      });
+
+      const data = await res.json();
+      
+      if (res.ok) {
+        alert(`✅ Identifiants envoyés avec succès à ${data.sent || 0} parent(s) via WhatsApp`);
+        setShowSendCredentialsModal(false);
+      } else {
+        alert(`❌ Erreur: ${data.error || 'Échec de l\'envoi'}`);
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      alert('❌ Erreur lors de l\'envoi des identifiants');
+    } finally {
+      setSendingCredentials(false);
+    }
+  };
+
   return (
     <div className="p-3 md:p-8 space-y-4 md:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -450,15 +491,118 @@ L'administration de ${schoolName}`;
           <p className="text-muted-foreground mt-1">Total: {students.length} élèves</p>
         </div>
         {isAdmin && (
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 w-full sm:w-auto"
-          >
-            <Plus className="w-5 h-5" />
-            Ajouter un élève
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setShowSendCredentialsModal(true)}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            >
+              <Send className="w-5 h-5" />
+              Envoyer identifiants WhatsApp
+            </button>
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              <Plus className="w-5 h-5" />
+              Ajouter un élève
+            </button>
+          </div>
         )}
       </div>
+
+      {/* Modal pour envoyer les identifiants via WhatsApp */}
+      {showSendCredentialsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSendCredentialsModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Envoyer les identifiants via WhatsApp</h3>
+              <p className="text-sm text-gray-500 mt-1">Les login et mots de passe seront envoyés aux parents</p>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-2">Filtrer par</label>
+                <select
+                  value={sendCredentialsFilter}
+                  onChange={(e) => {
+                    setSendCredentialsFilter(e.target.value);
+                    setSendCredentialsFiliere('');
+                    setSendCredentialsClass('');
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="all">Tous les élèves</option>
+                  <option value="filiere">Par filière</option>
+                  <option value="class">Par classe</option>
+                </select>
+              </div>
+
+              {sendCredentialsFilter === 'filiere' && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 block mb-2">Filière</label>
+                  <select
+                    value={sendCredentialsFiliere}
+                    onChange={(e) => setSendCredentialsFiliere(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">Sélectionner une filière</option>
+                    {[...new Set(classes.map(c => c.filiere).filter(Boolean))].map(f => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {sendCredentialsFilter === 'class' && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 block mb-2">Classe</label>
+                  <select
+                    value={sendCredentialsClass}
+                    onChange={(e) => setSendCredentialsClass(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">Sélectionner une classe</option>
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>Note:</strong> Les identifiants (login et mot de passe) seront envoyés séparément pour faciliter la copie.
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
+              <button
+                onClick={() => setShowSendCredentialsModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                disabled={sendingCredentials}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={sendCredentialsViaWhatsApp}
+                disabled={sendingCredentials || (sendCredentialsFilter === 'filiere' && !sendCredentialsFiliere) || (sendCredentialsFilter === 'class' && !sendCredentialsClass)}
+                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {sendingCredentials ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Envoi en cours...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Envoyer
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
