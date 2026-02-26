@@ -1183,7 +1183,15 @@ router.post('/teachers', async (req, res) => {
         email = `${sanitize(firstName)}${sanitize(lastName)}@${schoolDomain}`;
       }
       if (!password) {
-        password = 'Prof@2025';
+        const year = new Date().getFullYear();
+        const cleanFirstName = firstName
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z]/g, '')
+          .trim();
+        password = cleanFirstName ? 
+          cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
+          `Prof${year}`;
       }
     }
 
@@ -1279,7 +1287,15 @@ router.post('/teachers/import', async (req, res) => {
       }
 
       const email = `${sanitize(firstName)}${sanitize(lastName)}@${schoolDomain}`;
-      const password = 'Prof@2025';
+      const year = new Date().getFullYear();
+      const cleanFirstName = firstName
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z]/g, '')
+        .trim();
+      const password = cleanFirstName ? 
+        cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
+        `Prof${year}`;
 
       try {
         // Créer l'utilisateur dans Auth
