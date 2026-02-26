@@ -348,7 +348,8 @@ const TeachersPage = () => {
         setEditingTeacher(null);
         alert('✅ Professeur modifié avec succès');
       } else {
-        alert('❌ Erreur lors de la modification');
+        const errorData = await res.json();
+        alert(`❌ Erreur lors de la modification: ${errorData.error || 'Erreur inconnue'}`);
       }
     } catch (error) {
       console.error('Error updating teacher:', error);
