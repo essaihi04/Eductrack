@@ -396,8 +396,9 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
                   .insert({
                     school_id: req.user.school_id,
                     sent_by: teacherId,
-                    message_type: 'text',
+                    message_type: 'document',
                     content: messageText,
+                    file_name: req.file.originalname,
                     total_recipients: recipients.length,
                     status: 'sending'
                   })
@@ -420,7 +421,11 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
                         .single();
 
                       if (recipientLog.data) {
-                        const response = await fetch('https://api.wasender.com/api/v1/messages/text', {
+                        // Envoyer le fichier via WhatsApp
+                        const fileBuffer = fs.readFileSync(req.file.path);
+                        const fileBase64 = fileBuffer.toString('base64');
+                        
+                        const response = await fetch('https://api.wasender.com/api/v1/messages/document', {
                           method: 'POST',
                           headers: {
                             'Authorization': `Bearer ${sessionApiKey}`,
@@ -428,7 +433,9 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
                           },
                           body: JSON.stringify({
                             phone: contact.phone_e164,
-                            message: messageText
+                            document: fileBase64,
+                            filename: req.file.originalname,
+                            caption: messageText
                           })
                         });
 
@@ -438,9 +445,11 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
                             .update({ status: 'sent', sent_at: new Date().toISOString() })
                             .eq('id', recipientLog.data.id);
                         } else {
+                          const errorData = await response.text();
+                          console.error('Erreur envoi document WhatsApp:', errorData);
                           await supabaseAdmin
                             .from('whatsapp_recipients')
-                            .update({ status: 'failed', error_message: 'Échec envoi API' })
+                            .update({ status: 'failed', error_message: 'Échec envoi document' })
                             .eq('id', recipientLog.data.id);
                         }
                       }
