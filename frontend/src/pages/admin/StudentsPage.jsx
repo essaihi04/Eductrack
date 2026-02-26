@@ -26,6 +26,11 @@ const StudentsPage = () => {
     lastName: '',
     classId: ''
   });
+  const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
+  const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
+  const [sendCredentialsFiliere, setSendCredentialsFiliere] = useState('');
+  const [sendCredentialsClass, setSendCredentialsClass] = useState('');
+  const [sendingCredentials, setSendingCredentials] = useState(false);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -398,7 +403,6 @@ L'administration de ${schoolName}`;
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
       
-      // Générer un nouveau mot de passe
       const newPassword = generatePassword();
 
       const endpoint = (profile.role === 'admin' || profile.role === 'school_admin') 
@@ -415,38 +419,15 @@ L'administration de ${schoolName}`;
       });
 
       if (res.ok) {
-        const data = await res.json();
-        
-        // Mettre à jour le localStorage
-        const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
-        storedPasswords[studentId] = newPassword;
-        localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
-
-        // Mettre à jour l'état
-        setStudents(students.map(s => 
-          s.id === studentId ? { ...s, password: newPassword } : s
-        ));
-
-        alert(`Mot de passe réinitialisé avec succès !\n\nNouveau mot de passe : ${newPassword}`);
+        alert(`✅ Mot de passe réinitialisé: ${newPassword}`);
       } else {
-        const errorData = await res.json();
-        alert(`Erreur : ${errorData.error || 'Impossible de réinitialiser le mot de passe'}`);
+        alert('❌ Erreur lors de la réinitialisation');
       }
     } catch (error) {
       console.error('Error resetting password:', error);
       alert('Erreur lors de la réinitialisation du mot de passe');
     }
   };
-
-  if (loading) {
-    return <div className="p-8">Chargement...</div>;
-  }
-
-  const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
-  const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
-  const [sendCredentialsFiliere, setSendCredentialsFiliere] = useState('');
-  const [sendCredentialsClass, setSendCredentialsClass] = useState('');
-  const [sendingCredentials, setSendingCredentials] = useState(false);
 
   const sendCredentialsViaWhatsApp = async () => {
     try {
@@ -482,6 +463,10 @@ L'administration de ${schoolName}`;
       setSendingCredentials(false);
     }
   };
+
+  if (loading) {
+    return <div className="p-8">Chargement...</div>;
+  }
 
   return (
     <div className="p-3 md:p-8 space-y-4 md:space-y-6">
