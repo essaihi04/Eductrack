@@ -915,14 +915,13 @@ const TeachersPage = () => {
                             className="flex-1 px-3 py-2 border rounded text-sm"
                           >
                             <option value="">Sélectionner une matière</option>
-                            {subjects.map(subject => {
-                              const isAssigned = teacherSubjects[teacher.id]?.some(ts => ts.subject_id === subject.id);
-                              return !isAssigned && (
+                            {subjects
+                              .filter(subject => !teacherSubjects[teacher.id]?.some(ts => ts.subject_id === subject.id))
+                              .map(subject => (
                                 <option key={subject.id} value={subject.id}>
                                   {subject.name}
                                 </option>
-                              );
-                            })}
+                              ))}
                           </select>
                         </div>
                       </div>
