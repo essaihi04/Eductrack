@@ -1527,39 +1527,6 @@ router.get('/teachers', async (req, res) => {
   }
 });
 
-// Modifier un professeur
-router.put('/teachers/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { firstName, lastName, phone } = req.body;
-
-    if (!firstName || !lastName) {
-      return res.status(400).json({ error: 'Le prénom et le nom sont obligatoires.' });
-    }
-
-    // Mettre à jour le profil
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .update({
-        first_name: firstName,
-        last_name: lastName,
-        phone: phone || null
-      })
-      .eq('id', id)
-      .eq('role', 'teacher')
-      .select()
-      .single();
-
-    if (profileError) throw profileError;
-    if (!profile) return res.status(404).json({ error: 'Professeur non trouvé' });
-
-    res.json(profile);
-  } catch (error) {
-    console.error('Erreur PUT /teachers/:id:', error);
-    res.status(500).json({ error: error.message || 'Erreur serveur' });
-  }
-});
-
 // Créer un professeur
 router.post('/teachers', async (req, res) => {
   try {
@@ -1644,6 +1611,39 @@ router.post('/teachers', async (req, res) => {
     res.status(201).json({ ...profile, password, generatedEmail: email });
   } catch (error) {
     console.error('Erreur:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Modifier un professeur
+router.put('/teachers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { firstName, lastName, phone } = req.body;
+
+    if (!firstName || !lastName) {
+      return res.status(400).json({ error: 'Le prénom et le nom sont obligatoires.' });
+    }
+
+    // Mettre à jour le profil
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .update({
+        first_name: firstName,
+        last_name: lastName,
+        phone: phone || null
+      })
+      .eq('id', id)
+      .eq('role', 'teacher')
+      .select()
+      .single();
+
+    if (profileError) throw profileError;
+    if (!profile) return res.status(404).json({ error: 'Professeur non trouvé' });
+
+    res.json(profile);
+  } catch (error) {
+    console.error('Erreur PUT /teachers/:id:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
