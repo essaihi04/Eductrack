@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -17,6 +17,9 @@ const TeachersPage = () => {
   const [showImport, setShowImport] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
+  const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
+  const [sendingCredentials, setSendingCredentials] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -309,6 +312,39 @@ const TeachersPage = () => {
     }
   };
 
+  const sendCredentialsViaWhatsApp = async () => {
+    try {
+      setSendingCredentials(true);
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(`${apiUrl}/api/admin/teachers/send-credentials-whatsapp`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          filter: sendCredentialsFilter
+        })
+      });
+
+      const data = await res.json();
+      
+      if (res.ok) {
+        alert(`✅ Identifiants envoyés avec succès à ${data.sent || 0} professeur(s) via WhatsApp`);
+        setShowSendCredentialsModal(false);
+      } else {
+        alert(`❌ Erreur: ${data.error || 'Échec de l\'envoi'}`);
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      alert('❌ Erreur lors de l\'envoi des identifiants');
+    } finally {
+      setSendingCredentials(false);
+    }
+  };
+
   if (loading) {
     return <div className="p-8">Chargement...</div>;
   }
@@ -321,6 +357,13 @@ const TeachersPage = () => {
           <p className="text-muted-foreground mt-2">Total: {teachers.length} professeurs</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowSendCredentialsModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+          >
+            <Send className="w-5 h-5" />
+            Envoyer identifiants WhatsApp
+          </button>
           <button
             onClick={() => { setShowImport(!showImport); setShowForm(false); }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -337,6 +380,62 @@ const TeachersPage = () => {
           </button>
         </div>
       </div>
+
+      {/* Modal pour envoyer les identifiants via WhatsApp */}
+      {showSendCredentialsModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSendCredentialsModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Envoyer les identifiants via WhatsApp</h3>
+              <p className="text-sm text-gray-500 mt-1">Les login et mots de passe seront envoyés aux professeurs</p>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-2">Envoyer à</label>
+                <select
+                  value={sendCredentialsFilter}
+                  onChange={(e) => setSendCredentialsFilter(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value="all">Tous les professeurs</option>
+                </select>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs text-blue-800">
+                  <strong>Note:</strong> Les identifiants (login et mot de passe) seront envoyés séparément aux numéros de téléphone des professeurs pour faciliter la copie.
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
+              <button
+                onClick={() => setShowSendCredentialsModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                disabled={sendingCredentials}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={sendCredentialsViaWhatsApp}
+                disabled={sendingCredentials}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {sendingCredentials ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Envoi en cours...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Envoyer
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Identifiants générés après création */}
       {createdCredentials && (

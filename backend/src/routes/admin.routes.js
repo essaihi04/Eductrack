@@ -1747,6 +1747,171 @@ router.post('/teachers/import', async (req, res) => {
   }
 });
 
+// Envoyer les identifiants des professeurs via WhatsApp en masse
+router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
+  try {
+    const { filter } = req.body;
+    const schoolId = getSchoolId(req);
+
+    // Récupérer tous les professeurs
+    let teachersQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, email, first_name, last_name, phone')
+      .eq('role', 'teacher');
+
+    if (schoolId) {
+      teachersQuery = teachersQuery.eq('school_id', schoolId);
+    }
+
+    const { data: teachers, error: teachersError } = await teachersQuery;
+    if (teachersError) throw teachersError;
+
+    if (!teachers || teachers.length === 0) {
+      return res.status(400).json({ error: 'Aucun professeur trouvé' });
+    }
+
+    // Filtrer uniquement les professeurs avec numéro de téléphone
+    const teachersWithPhone = teachers.filter(t => t.phone);
+
+    if (teachersWithPhone.length === 0) {
+      return res.status(400).json({ error: 'Aucun professeur n\'a de numéro de téléphone' });
+    }
+
+    // Récupérer la clé API WhatsApp de l'école
+    const { data: school } = await supabaseAdmin
+      .from('schools')
+      .select('wasender_api_key')
+      .eq('id', schoolId)
+      .single();
+
+    const sessionApiKey = school?.wasender_api_key;
+
+    if (!sessionApiKey) {
+      return res.status(400).json({ error: 'Clé API WhatsApp non configurée pour cette école' });
+    }
+
+    let sentCount = 0;
+    let errorCount = 0;
+
+    for (const teacher of teachersWithPhone) {
+      try {
+        // Générer un nouveau mot de passe pour le professeur
+        const year = new Date().getFullYear();
+        const cleanFirstName = teacher.first_name
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z]/g, '')
+          .trim();
+        const newPassword = cleanFirstName ? 
+          cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
+          `Prof${year}`;
+
+        // Mettre à jour le mot de passe
+        await supabaseAdmin.auth.admin.updateUserById(teacher.id, {
+          password: newPassword
+        });
+
+        // Formater le numéro de téléphone (ajouter +212 si nécessaire)
+        let phoneNumber = teacher.phone.replace(/\s/g, '');
+        if (phoneNumber.startsWith('0')) {
+          phoneNumber = '+212' + phoneNumber.substring(1);
+        } else if (!phoneNumber.startsWith('+')) {
+          phoneNumber = '+212' + phoneNumber;
+        }
+
+        // Formater le message
+        const messageText = `🔐 *Identifiants de connexion*\n\n` +
+          `Voici vos identifiants de connexion pour la plateforme EduTrack :\n\n` +
+          `📧 *Login (Email)*\n${teacher.email}\n\n` +
+          `🔑 *Mot de passe*\n${newPassword}\n\n` +
+          `_Vous pouvez copier ces informations séparément pour faciliter la connexion._\n\n` +
+          `⚠️ Veuillez conserver ces informations en sécurité.`;
+
+        // Créer le log du message
+        const { data: msgLog } = await supabaseAdmin
+          .from('whatsapp_messages')
+          .insert({
+            school_id: schoolId,
+            sent_by: req.user.id,
+            message_type: 'text',
+            content: messageText,
+            total_recipients: 1,
+            status: 'sending'
+          })
+          .select()
+          .single();
+
+        if (msgLog) {
+          // Créer le log du destinataire
+          const recipientLog = await supabaseAdmin
+            .from('whatsapp_recipients')
+            .insert({
+              message_id: msgLog.id,
+              phone_e164: phoneNumber,
+              status: 'pending'
+            })
+            .select()
+            .single();
+
+          if (recipientLog.data) {
+            // Envoyer le message
+            const response = await fetch('https://api.wasender.com/api/v1/messages/text', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${sessionApiKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                phone: phoneNumber,
+                message: messageText
+              })
+            });
+
+            if (response.ok) {
+              await supabaseAdmin
+                .from('whatsapp_recipients')
+                .update({ status: 'sent', sent_at: new Date().toISOString() })
+                .eq('id', recipientLog.data.id);
+              
+              await supabaseAdmin
+                .from('whatsapp_messages')
+                .update({ status: 'sent', sent_count: 1 })
+                .eq('id', msgLog.id);
+              
+              sentCount++;
+            } else {
+              await supabaseAdmin
+                .from('whatsapp_recipients')
+                .update({ status: 'failed', error_message: 'Échec envoi API' })
+                .eq('id', recipientLog.data.id);
+              
+              await supabaseAdmin
+                .from('whatsapp_messages')
+                .update({ status: 'failed', failed_count: 1 })
+                .eq('id', msgLog.id);
+              
+              errorCount++;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Erreur pour professeur:', teacher.id, err);
+        errorCount++;
+      }
+    }
+
+    res.json({ 
+      message: `Identifiants envoyés à ${sentCount} professeur(s)`,
+      sent: sentCount,
+      errors: errorCount,
+      total: teachersWithPhone.length
+    });
+  } catch (error) {
+    console.error('Erreur:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // Réinitialiser le mot de passe d'un professeur
 router.post('/teachers/:id/reset-password', async (req, res) => {
   try {
