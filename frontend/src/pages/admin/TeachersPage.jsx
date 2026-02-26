@@ -20,6 +20,12 @@ const TeachersPage = () => {
   const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
   const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
   const [sendingCredentials, setSendingCredentials] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    firstName: '',
+    lastName: '',
+    phone: ''
+  });
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -312,6 +318,44 @@ const TeachersPage = () => {
     }
   };
 
+  const openEditModal = (teacher) => {
+    setEditingTeacher(teacher);
+    setEditFormData({
+      firstName: teacher.first_name || '',
+      lastName: teacher.last_name || '',
+      phone: teacher.phone || ''
+    });
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(`${apiUrl}/api/admin/teachers/${editingTeacher.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(editFormData)
+      });
+
+      if (res.ok) {
+        const updatedTeacher = await res.json();
+        setTeachers(teachers.map(t => t.id === editingTeacher.id ? updatedTeacher : t));
+        setEditingTeacher(null);
+        alert('✅ Professeur modifié avec succès');
+      } else {
+        alert('❌ Erreur lors de la modification');
+      }
+    } catch (error) {
+      console.error('Error updating teacher:', error);
+      alert('Erreur lors de la modification du professeur');
+    }
+  };
+
   const sendCredentialsViaWhatsApp = async () => {
     try {
       setSendingCredentials(true);
@@ -380,6 +424,65 @@ const TeachersPage = () => {
           </button>
         </div>
       </div>
+
+      {/* Modal pour modifier un professeur */}
+      {editingTeacher && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setEditingTeacher(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Modifier le professeur</h3>
+              <p className="text-sm text-gray-500 mt-1">Mettre à jour les informations personnelles</p>
+            </div>
+            <form onSubmit={handleEditSubmit} className="px-6 py-4 space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-2">Prénom</label>
+                <input
+                  type="text"
+                  value={editFormData.firstName}
+                  onChange={(e) => setEditFormData({ ...editFormData, firstName: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-2">Nom</label>
+                <input
+                  type="text"
+                  value={editFormData.lastName}
+                  onChange={(e) => setEditFormData({ ...editFormData, lastName: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-2">Téléphone</label>
+                <input
+                  type="tel"
+                  value={editFormData.phone}
+                  onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                  placeholder="+212 6XX XXX XXX"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Format: +212 6XX XXX XXX</p>
+              </div>
+            </form>
+            <div className="px-6 py-4 border-t border-gray-200 flex gap-3">
+              <button
+                onClick={() => setEditingTeacher(null)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleEditSubmit}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal pour envoyer les identifiants via WhatsApp */}
       {showSendCredentialsModal && (
@@ -698,6 +801,30 @@ const TeachersPage = () => {
 
                   {expandedTeacher === teacher.id && (
                     <div className="p-4 border-t space-y-3">
+                      {/* Informations du professeur */}
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-medium text-gray-900">Informations personnelles</h4>
+                          <button
+                            onClick={() => openEditModal(teacher)}
+                            className="p-2 hover:bg-gray-200 rounded transition-colors"
+                            title="Modifier les informations"
+                          >
+                            <Edit2 className="w-4 h-4 text-gray-600" />
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <div>
+                            <label className="text-sm font-medium text-gray-700">Nom complet:</label>
+                            <p className="text-sm text-gray-900">{teacher.first_name} {teacher.last_name}</p>
+                          </div>
+                          <div>
+                            <label className="text-sm font-medium text-gray-700">Téléphone:</label>
+                            <p className="text-sm text-gray-900">{teacher.phone || 'Non renseigné'}</p>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Carte avec identifiants */}
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                         <h4 className="font-medium text-blue-900 mb-3">Identifiants de connexion</h4>
