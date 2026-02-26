@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send, Edit2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
