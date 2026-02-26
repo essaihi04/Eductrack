@@ -192,6 +192,170 @@ router.post('/controls-plan', authenticateUser, async (req, res) => {
       console.log('[DEBUG] Aucun admin trouvé');
     }
 
+    // Envoyer notification WhatsApp aux parents
+    try {
+      if (studentsData && studentsData.length > 0) {
+        const studentIds = studentsData.map(s => s.id);
+
+        // Récupérer les parents des élèves
+        const { data: parentLinks } = await supabase
+          .from('parent_students')
+          .select('parent_id, student_id')
+          .in('student_id', studentIds);
+
+        if (parentLinks && parentLinks.length > 0) {
+          const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
+
+          // Récupérer les contacts WhatsApp des parents
+          const { data: contacts } = await supabase
+            .from('parent_contacts')
+            .select('parent_id, phone_e164, is_primary')
+            .in('parent_id', parentIds)
+            .eq('channel', 'whatsapp')
+            .order('is_primary', { ascending: false });
+
+          if (contacts && contacts.length > 0) {
+            // Dédupliquer les numéros
+            const parentPhoneMap = {};
+            contacts.forEach(c => {
+              if (!parentPhoneMap[c.parent_id]) {
+                parentPhoneMap[c.parent_id] = c;
+              }
+            });
+
+            const uniquePhones = {};
+            Object.values(parentPhoneMap).forEach(c => {
+              if (!uniquePhones[c.phone_e164]) {
+                uniquePhones[c.phone_e164] = c;
+              }
+            });
+
+            const recipients = Object.values(uniquePhones);
+
+            if (recipients.length > 0) {
+              // Récupérer la clé API WhatsApp de l'école
+              const { data: school } = await supabase
+                .from('schools')
+                .select('wasender_api_key')
+                .eq('id', req.user.school_id)
+                .single();
+
+              const sessionApiKey = school?.wasender_api_key;
+
+              if (sessionApiKey) {
+                // Formater le message
+                const teacherName = teacherData ? `${teacherData.first_name} ${teacherData.last_name}` : 'Votre professeur';
+                const className = classData ? classData.name : 'N/A';
+                const subjectName = subjectData && subjectData.subjects ? subjectData.subjects.name : '';
+                
+                const dateFormatted = new Date(date).toLocaleDateString('fr-FR', {
+                  weekday: 'long',
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric'
+                });
+
+                const timeInfo = start_time && end_time ? 
+                  `\n⏰ Horaire: ${start_time} - ${end_time}` : '';
+
+                const messageText = `📝 *Nouveau contrôle planifié*\n\n` +
+                  `Classe: ${className}\n` +
+                  `Professeur: ${teacherName}\n` +
+                  (subjectName ? `Matière: ${subjectName}\n` : '') +
+                  `\n*${name}*\n\n` +
+                  `📅 Date: ${dateFormatted}${timeInfo}\n\n` +
+                  (description ? `${description}\n\n` : '') +
+                  `Merci de préparer votre enfant pour ce contrôle.`;
+
+                // Créer le log du message
+                const { data: msgLog } = await supabase
+                  .from('whatsapp_messages')
+                  .insert({
+                    school_id: req.user.school_id,
+                    sent_by: teacher_id,
+                    message_type: 'text',
+                    content: messageText,
+                    total_recipients: recipients.length,
+                    status: 'sending'
+                  })
+                  .select()
+                  .single();
+
+                if (msgLog) {
+                  // Envoyer les messages en arrière-plan
+                  const sendPromises = recipients.map(async (contact) => {
+                    try {
+                      const recipientLog = await supabase
+                        .from('whatsapp_recipients')
+                        .insert({
+                          message_id: msgLog.id,
+                          phone_e164: contact.phone_e164,
+                          parent_id: contact.parent_id,
+                          status: 'pending'
+                        })
+                        .select()
+                        .single();
+
+                      if (recipientLog.data) {
+                        const response = await fetch('https://api.wasender.com/api/v1/messages/text', {
+                          method: 'POST',
+                          headers: {
+                            'Authorization': `Bearer ${sessionApiKey}`,
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify({
+                            phone: contact.phone_e164,
+                            message: messageText
+                          })
+                        });
+
+                        if (response.ok) {
+                          await supabase
+                            .from('whatsapp_recipients')
+                            .update({ status: 'sent', sent_at: new Date().toISOString() })
+                            .eq('id', recipientLog.data.id);
+                        } else {
+                          await supabase
+                            .from('whatsapp_recipients')
+                            .update({ status: 'failed', error_message: 'Échec envoi API' })
+                            .eq('id', recipientLog.data.id);
+                        }
+                      }
+                    } catch (err) {
+                      console.error('Erreur envoi WhatsApp:', err);
+                    }
+                  });
+
+                  // Exécuter tous les envois
+                  Promise.all(sendPromises).then(async () => {
+                    const { data: recipientStats } = await supabase
+                      .from('whatsapp_recipients')
+                      .select('status')
+                      .eq('message_id', msgLog.id);
+
+                    const sentCount = recipientStats?.filter(r => r.status === 'sent').length || 0;
+                    const failedCount = recipientStats?.filter(r => r.status === 'failed').length || 0;
+
+                    await supabase
+                      .from('whatsapp_messages')
+                      .update({
+                        status: failedCount === recipients.length ? 'failed' : 'sent',
+                        sent_count: sentCount,
+                        failed_count: failedCount
+                      })
+                      .eq('id', msgLog.id);
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (whatsappError) {
+      console.error('Erreur notification WhatsApp:', whatsappError);
+      // Ne pas bloquer la création du contrôle si l'envoi WhatsApp échoue
+    }
+
     res.status(201).json(control);
   } catch (error) {
     console.error('Erreur lors de la création du contrôle planifié:', error);
