@@ -1817,10 +1817,10 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
     const { filter } = req.body;
     const schoolId = getSchoolId(req);
 
-    // Récupérer tous les professeurs
+    // Récupérer tous les professeurs avec leurs classes
     let teachersQuery = supabaseAdmin
       .from('profiles')
-      .select('id, email, first_name, last_name, phone')
+      .select('id, email, first_name, last_name, phone, classes!fk_profiles_class(id, name, filiere)')
       .eq('role', 'teacher');
 
     if (schoolId) {
@@ -1834,15 +1834,35 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun professeur trouvé' });
     }
 
+    // Appliquer les filtres
+    let filteredTeachers = teachers || [];
+    
+    // Filtrer par IDs de professeurs spécifiques
+    if (filter?.teacher_ids && filter.teacher_ids.length > 0) {
+      filteredTeachers = filteredTeachers.filter(t => filter.teacher_ids.includes(t.id));
+    }
+    
+    // Filtrer par filière
+    if (filter?.filiere) {
+      filteredTeachers = filteredTeachers.filter(t => t.classes?.filiere === filter.filiere);
+    }
+    
+    // Filtrer par classe
+    if (filter?.classId) {
+      filteredTeachers = filteredTeachers.filter(t => t.classes?.id === filter.classId);
+    }
+
     // Normaliser les numéros puis garder uniquement les professeurs avec numéro valide
-    const teachersWithPhone = (teachers || [])
+    const teachersWithPhone = filteredTeachers
       .map((t) => ({ ...t, normalized_phone: normalizePhoneToE164(t.phone) }))
       .filter((t) => !!t.normalized_phone);
 
     console.log('[Teachers WhatsApp] Stats:', {
       schoolId,
       totalTeachers: teachers?.length || 0,
-      teachersWithValidPhone: teachersWithPhone.length
+      filteredTeachers: filteredTeachers.length,
+      teachersWithValidPhone: teachersWithPhone.length,
+      filters: filter
     });
 
     if (teachersWithPhone.length === 0) {

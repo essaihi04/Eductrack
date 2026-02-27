@@ -1329,7 +1329,11 @@ const WhatsAppPage = () => {
                           'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                          filter: {}
+                          filter: {
+                            teacher_ids: teachersWithPhone,
+                            filiere: teacherFiliereFilter,
+                            classId: teacherClassFilter
+                          }
                         })
                       });
 
