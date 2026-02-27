@@ -874,6 +874,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
           `Voici les identifiants de connexion pour *${student.first_name} ${student.last_name}* :\n\n` +
           `📧 *Login (Email)*\n${student.email}\n\n` +
           `🔑 *Mot de passe*\n${newPassword}\n\n` +
+          `🌐 *Lien de connexion*\nhttps://etrack.ma/login\n\n` +
           `_Vous pouvez copier ces informations séparément pour faciliter la connexion._\n\n` +
           `⚠️ Veuillez conserver ces informations en sécurité.`;
 
@@ -1047,6 +1048,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                   `Voici les nouveaux identifiants de connexion :\n\n` +
                   `📧 *Login (Email)*\n${student.email}\n\n` +
                   `🔑 *Mot de passe*\n${newPassword}\n\n` +
+                  `🌐 *Lien de connexion*\nhttps://etrack.ma/login\n\n` +
                   `_Vous pouvez copier ces informations séparément pour faciliter la connexion._\n\n` +
                   `⚠️ Veuillez conserver ces informations en sécurité.`;
 
@@ -1913,6 +1915,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             `Voici vos identifiants de connexion pour la plateforme EduTrack :\n\n` +
             `📧 *Login (Email)*\n${teacher.email}\n\n` +
             `🔑 *Mot de passe*\n${newPassword}\n\n` +
+            `🌐 *Lien de connexion*\nhttps://etrack.ma/login\n\n` +
             `_Vous pouvez copier ces informations séparément pour faciliter la connexion._\n\n` +
             `⚠️ Veuillez conserver ces informations en sécurité.`;
           message_type = 'text';
