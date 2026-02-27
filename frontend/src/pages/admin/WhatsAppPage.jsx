@@ -1322,15 +1322,14 @@ const WhatsAppPage = () => {
                     setTeacherSending(true);
                     try {
                       const token = await getAuthToken();
-                      const res = await fetch(`${apiUrl}/api/whatsapp/send-to-teachers`, {
+                      const res = await fetch(`${apiUrl}/api/admin/teachers/send-credentials-whatsapp`, {
                         method: 'POST',
                         headers: {
                           'Authorization': `Bearer ${token}`,
                           'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                          teacher_ids: teachersWithPhone,
-                          message: teacherMessageText
+                          filter: {}
                         })
                       });
 
