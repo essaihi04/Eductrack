@@ -949,6 +949,59 @@ const WhatsAppPage = () => {
     setReportSettings(updated);
   };
 
+  // ===================== FONCTIONS MÉDIAS PROFESSEURS =====================
+  const handleTeacherFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setTeacherMediaFile(file);
+    setTeacherFileName(file.name);
+    if (file.type.startsWith('image/')) {
+      setTeacherMessageType('image');
+      const reader = new FileReader();
+      reader.onload = (ev) => setTeacherMediaPreview(ev.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setTeacherMessageType('document');
+      setTeacherMediaPreview(null);
+    }
+  };
+
+  const removeTeacherMedia = () => {
+    setTeacherMediaFile(null); 
+    setTeacherMediaPreview(null); 
+    setTeacherMediaUrl(''); 
+    setTeacherFileName(''); 
+    setTeacherMessageType('text');
+    if (teacherFileInputRef.current) teacherFileInputRef.current.value = '';
+  };
+
+  const uploadTeacherMedia = async () => {
+    if (!teacherMediaFile) return null;
+    setTeacherUploading(true);
+    try {
+      const reader = new FileReader();
+      return new Promise((resolve, reject) => {
+        reader.onload = async (ev) => {
+          try {
+            const res = await fetch(`${apiUrl}/api/admin/whatsapp/upload`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${await getAuthToken()}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ base64: ev.target.result, mimetype: teacherMediaFile.type })
+            });
+            const data = await res.json();
+            if (data.success && data.publicUrl) { 
+              setTeacherMediaUrl(data.publicUrl); 
+              resolve(data.publicUrl); 
+            }
+            else reject(new Error(data.error || 'Erreur upload'));
+          } catch (err) { reject(err); } finally { setTeacherUploading(false); }
+        };
+        reader.onerror = () => { setTeacherUploading(false); reject(new Error('Erreur lecture')); };
+        reader.readAsDataURL(teacherMediaFile);
+      });
+    } catch (error) { setTeacherUploading(false); throw error; }
+  };
+
   // ===================== TABS CONFIG =====================
   const tabs = [
     { key: 'send', label: 'Parents', icon: Send },
@@ -1001,29 +1054,17 @@ const WhatsAppPage = () => {
         </div>
       </div>
 
-      {// ===================== FONCTIONS MÉDIAS PROFESSEURS =====================
-  const handleTeacherFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setTeacherMediaFile(file);
-    setTeacherFileName(file.name);
-    if (file.type.startsWith('image/')) {
-      setTeacherMessageType('image');
-      const reader = new FileReader();
-      reader.onload = (ev) => setTeacherMediaPreview(ev.target.result);
-      reader.readAsDataURL(file);
-    } else {
-      setTeacherMessageType('document');
-      setTeacherMediaPreview(null);
-    }
-  };
-              {/* Recipient Filters */}
-              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
-                <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  <Users className="w-4 h-4" /> Destinataires
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
+      {/* Tab Content */}
+      {activeTab === 'send' && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* Recipient Filters */}
+            <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
+              <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <Users className="w-4 h-4" /> Destinataires
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
                     <label className="text-xs font-semibold text-gray-600 block mb-1">Cycle</label>
                     <select value={schoolTypeFilter} onChange={(e) => setSchoolTypeFilter(e.target.value)}
                       className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
@@ -1183,8 +1224,7 @@ const WhatsAppPage = () => {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* ===================== TAB: TEACHERS ===================== */}
       {activeTab === 'teachers' && (

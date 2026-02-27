@@ -403,7 +403,9 @@ L'administration de ${schoolName}`;
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
       
-      const newPassword = generatePassword();
+      // Trouver l'élève pour obtenir son prénom
+      const student = students.find(s => s.id === studentId);
+      const newPassword = generatePassword(student?.first_name || '');
 
       const endpoint = (profile.role === 'admin' || profile.role === 'school_admin') 
         ? `${apiUrl}/api/admin/students/${studentId}/reset-password`
@@ -419,6 +421,11 @@ L'administration de ${schoolName}`;
       });
 
       if (res.ok) {
+        // Mettre à jour l'état local pour refléter le nouveau mot de passe
+        setStudents(students.map(s => 
+          s.id === studentId ? { ...s, password: newPassword } : s
+        ));
+        
         alert(`✅ Mot de passe réinitialisé: ${newPassword}`);
       } else {
         alert('❌ Erreur lors de la réinitialisation');

@@ -21,6 +21,7 @@ const TeachersPage = () => {
   const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
   const [sendingCredentials, setSendingCredentials] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
+  const [selectedTeachers, setSelectedTeachers] = useState(new Set());
   const [editFormData, setEditFormData] = useState({
     firstName: '',
     lastName: '',
@@ -45,6 +46,26 @@ const TeachersPage = () => {
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
     alert('Copié dans le presse-papiers !');
+  };
+
+  const toggleTeacherSelection = (teacherId) => {
+    setSelectedTeachers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(teacherId)) {
+        newSet.delete(teacherId);
+      } else {
+        newSet.add(teacherId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllTeachers = () => {
+    setSelectedTeachers(new Set(teachers.map(t => t.id)));
+  };
+
+  const deselectAllTeachers = () => {
+    setSelectedTeachers(new Set());
   };
 
   useEffect(() => {
@@ -240,6 +261,49 @@ const TeachersPage = () => {
     } catch (error) {
       console.error('Error resetting password:', error);
       alert('Erreur lors de la réinitialisation du mot de passe');
+    }
+  };
+
+  const sendSelectedTeachersCredentials = async () => {
+    if (selectedTeachers.size === 0) {
+      alert('Veuillez sélectionner au moins un professeur');
+      return;
+    }
+
+    if (!confirm(`Envoyer les identifiants à ${selectedTeachers.size} professeur(s) sélectionné(s) ?`)) {
+      return;
+    }
+
+    try {
+      setSendingCredentials(true);
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const res = await fetch(`${apiUrl}/api/admin/teachers/send-credentials-whatsapp`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          filter: {
+            teacher_ids: Array.from(selectedTeachers)
+          }
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        alert(`✅ Identifiants envoyés avec succès à ${data.sent || selectedTeachers.size} professeur(s) via WhatsApp`);
+        setSelectedTeachers(new Set());
+      } else {
+        alert(`❌ Erreur: ${data.error || 'Échec de l\'envoi'}`);
+      }
+    } catch (error) {
+      console.error('Error sending credentials:', error);
+      alert('Erreur lors de l\'envoi des identifiants');
+    } finally {
+      setSendingCredentials(false);
     }
   };
 
@@ -787,7 +851,39 @@ const TeachersPage = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Liste des professeurs</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Liste des professeurs</CardTitle>
+            {teachers.length > 0 && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllTeachers}
+                  className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  Tout sélectionner
+                </button>
+                <span className="text-gray-300">|</span>
+                <button
+                  onClick={deselectAllTeachers}
+                  className="text-sm text-gray-600 hover:text-gray-700 font-medium"
+                >
+                  Tout désélectionner
+                </button>
+                {selectedTeachers.size > 0 && (
+                  <>
+                    <span className="text-gray-300">|</span>
+                    <button
+                      onClick={sendSelectedTeachersCredentials}
+                      disabled={sendingCredentials}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                    >
+                      <Send className="w-4 h-4" />
+                      {sendingCredentials ? 'Envoi...' : `Envoyer identifiants (${selectedTeachers.size})`}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
@@ -796,13 +892,19 @@ const TeachersPage = () => {
             ) : (
               teachers.map((teacher) => (
                 <div key={teacher.id} className="border rounded-lg overflow-hidden">
-                  <div className="flex items-center justify-between p-4 bg-muted/50 hover:bg-muted cursor-pointer"
-                    onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
-                    <div className="flex-1">
+                  <div className="flex items-center gap-3 p-4 bg-muted/50 hover:bg-muted">
+                    <input
+                      type="checkbox"
+                      checked={selectedTeachers.has(teacher.id)}
+                      onChange={() => toggleTeacherSelection(teacher.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-4 h-4 rounded text-blue-600 cursor-pointer"
+                    />
+                    <div className="flex-1 cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
                       <p className="font-medium">{teacher.first_name} {teacher.last_name}</p>
                       <p className="text-sm text-muted-foreground">{teacher.email}</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
                       <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded">
                         {teacherSubjects[teacher.id]?.length || 0} matière(s)
                       </span>
