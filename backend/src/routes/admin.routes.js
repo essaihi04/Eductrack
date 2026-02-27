@@ -102,6 +102,47 @@ const applySchoolFilter = (query, req, column = 'school_id') => {
   return query;
 };
 
+const WASENDER_BASE = 'https://www.wasenderapi.com';
+
+const safeJson = async (response) => {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error('WasenderAPI returned non-JSON:', text.substring(0, 200));
+    return { success: false, message: `WasenderAPI error (HTTP ${response.status})` };
+  }
+};
+
+const getGlobalApiKey = () => process.env.WASENDER_API_KEY || null;
+
+const getSchoolSessionId = async (schoolId) => {
+  if (!schoolId) return null;
+  const { data } = await supabaseAdmin
+    .from('whatsapp_school_sessions')
+    .select('wasender_session_id')
+    .eq('school_id', schoolId)
+    .single();
+  return data?.wasender_session_id || null;
+};
+
+const getSessionApiKey = async (schoolId) => {
+  const globalKey = getGlobalApiKey();
+  if (!globalKey) return null;
+
+  const mappedSessionId = await getSchoolSessionId(schoolId);
+  if (!mappedSessionId) return null;
+
+  const detailRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}`, {
+    headers: { 'Authorization': `Bearer ${globalKey}` }
+  });
+  const detailData = await safeJson(detailRes);
+  if (detailData.success && detailData.data?.api_key && detailData.data.status === 'connected') {
+    return detailData.data.api_key;
+  }
+  return null;
+};
+
 // ==================== ÉLÈVES ====================
 
 // Récupérer le parent d'un élève
@@ -802,14 +843,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
           continue;
         }
 
-        // Récupérer la clé API WhatsApp de l'école
-        const { data: school } = await supabaseAdmin
-          .from('schools')
-          .select('wasender_api_key')
-          .eq('id', schoolId)
-          .single();
-
-        const sessionApiKey = school?.wasender_api_key;
+        const sessionApiKey = await getSessionApiKey(schoolId);
 
         if (!sessionApiKey) {
           errorCount++;
@@ -870,15 +904,15 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 .single();
 
               if (recipientLog.data) {
-                const response = await fetch('https://api.wasender.com/api/v1/messages/text', {
+                const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
                   method: 'POST',
                   headers: {
                     'Authorization': `Bearer ${sessionApiKey}`,
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    phone: contact.phone_e164,
-                    message: messageText
+                    to: contact.phone_e164,
+                    text: messageText
                   })
                 });
 
@@ -999,14 +1033,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
             const recipients = Object.values(uniquePhones);
 
             if (recipients.length > 0) {
-              // Récupérer la clé API WhatsApp de l'école
-              const { data: school } = await supabaseAdmin
-                .from('schools')
-                .select('wasender_api_key')
-                .eq('id', student.school_id)
-                .single();
-
-              const sessionApiKey = school?.wasender_api_key;
+              const sessionApiKey = await getSessionApiKey(student.school_id);
 
               if (sessionApiKey) {
                 // Formater le message avec login et mot de passe séparés
@@ -1048,15 +1075,15 @@ router.post('/students/:id/reset-password', async (req, res) => {
                         .single();
 
                       if (recipientLog.data) {
-                        const response = await fetch('https://api.wasender.com/api/v1/messages/text', {
+                        const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
                           method: 'POST',
                           headers: {
                             'Authorization': `Bearer ${sessionApiKey}`,
                             'Content-Type': 'application/json'
                           },
                           body: JSON.stringify({
-                            phone: contact.phone_e164,
-                            message: messageText
+                            to: contact.phone_e164,
+                            text: messageText
                           })
                         });
 
@@ -1810,17 +1837,10 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun professeur n\'a de numéro de téléphone' });
     }
 
-    // Récupérer la clé API WhatsApp de l'école
-    const { data: school } = await supabaseAdmin
-      .from('schools')
-      .select('wasender_api_key')
-      .eq('id', schoolId)
-      .single();
-
-    const sessionApiKey = school?.wasender_api_key;
+    const sessionApiKey = await getSessionApiKey(schoolId);
 
     if (!sessionApiKey) {
-      return res.status(400).json({ error: 'Clé API WhatsApp non configurée pour cette école' });
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école' });
     }
 
     let sentCount = 0;
@@ -1888,15 +1908,15 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
 
           if (recipientLog.data) {
             // Envoyer le message
-            const response = await fetch('https://api.wasender.com/api/v1/messages/text', {
+            const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
               method: 'POST',
               headers: {
                 'Authorization': `Bearer ${sessionApiKey}`,
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
-                phone: phoneNumber,
-                message: messageText
+                to: phoneNumber,
+                text: messageText
               })
             });
 
