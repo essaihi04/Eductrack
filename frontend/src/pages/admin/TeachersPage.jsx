@@ -22,6 +22,9 @@ const TeachersPage = () => {
   const [sendingCredentials, setSendingCredentials] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [selectedTeachers, setSelectedTeachers] = useState(new Set());
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  const [classes, setClasses] = useState([]);
   const [editFormData, setEditFormData] = useState({
     firstName: '',
     lastName: '',
@@ -77,16 +80,19 @@ const TeachersPage = () => {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
 
-      const [teachersRes, subjectsRes] = await Promise.all([
+      const [teachersRes, subjectsRes, classesRes] = await Promise.all([
         fetch(`${apiUrl}/api/admin/teachers`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${apiUrl}/api/admin/subjects`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${apiUrl}/api/admin/subjects`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${apiUrl}/api/admin/classes`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
 
       const teachersData = await teachersRes.json();
       const subjectsData = await subjectsRes.json();
+      const classesData = await classesRes.json();
 
       setTeachers(Array.isArray(teachersData) ? teachersData : []);
       setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
+      setClasses(Array.isArray(classesData) ? classesData : []);
 
       // Charger les matières pour chaque professeur
       for (const teacher of teachersData) {
@@ -886,11 +892,70 @@ const TeachersPage = () => {
           </div>
         </CardHeader>
         <CardContent>
+          {/* Filtres */}
+          {teachers.length > 0 && (
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Matière</label>
+                  <select
+                    value={subjectFilter}
+                    onChange={(e) => setSubjectFilter(e.target.value)}
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Toutes les matières</option>
+                    {subjects.map(subject => (
+                      <option key={subject.id} value={subject.id}>{subject.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Classe</label>
+                  <select
+                    value={classFilter}
+                    onChange={(e) => setClassFilter(e.target.value)}
+                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Toutes les classes</option>
+                    {classes.map(cls => (
+                      <option key={cls.id} value={cls.id}>{cls.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <button
+                    onClick={() => {
+                      setSubjectFilter('');
+                      setClassFilter('');
+                    }}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-100"
+                  >
+                    Réinitialiser
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="space-y-2">
             {teachers.length === 0 ? (
               <p className="text-center py-8 text-muted-foreground">Aucun professeur</p>
             ) : (
-              teachers.map((teacher) => (
+              teachers
+                .filter(teacher => {
+                  // Filtrer par matière
+                  if (subjectFilter) {
+                    const teacherSubjectsList = teacherSubjects[teacher.id] || [];
+                    if (!teacherSubjectsList.some(s => s.id === subjectFilter)) {
+                      return false;
+                    }
+                  }
+                  // Filtrer par classe
+                  if (classFilter && teacher.class_id !== classFilter) {
+                    return false;
+                  }
+                  return true;
+                })
+                .map((teacher) => (
                 <div key={teacher.id} className="border rounded-lg overflow-hidden">
                   <div className="flex items-center gap-3 p-4 bg-muted/50 hover:bg-muted">
                     <input
