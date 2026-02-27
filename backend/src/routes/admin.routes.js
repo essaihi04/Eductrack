@@ -1814,7 +1814,7 @@ router.post('/teachers/import', async (req, res) => {
 // Envoyer les identifiants des professeurs via WhatsApp en masse
 router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
   try {
-    const { filter } = req.body;
+    const { filter, message, messageType = 'text', mediaUrl, fileName } = req.body;
     const schoolId = getSchoolId(req);
 
     // Récupérer tous les professeurs avec leurs classes
@@ -1880,31 +1880,46 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
 
     for (const teacher of teachersWithPhone) {
       try {
-        // Générer un nouveau mot de passe pour le professeur
-        const year = new Date().getFullYear();
-        const cleanFirstName = teacher.first_name
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-zA-Z]/g, '')
-          .trim();
-        const newPassword = cleanFirstName ? 
-          cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
-          `Prof${year}`;
-
-        // Mettre à jour le mot de passe
-        await supabaseAdmin.auth.admin.updateUserById(teacher.id, {
-          password: newPassword
-        });
-
         const phoneNumber = teacher.normalized_phone;
 
-        // Formater le message
-        const messageText = `🔐 *Identifiants de connexion*\n\n` +
-          `Voici vos identifiants de connexion pour la plateforme EduTrack :\n\n` +
-          `📧 *Login (Email)*\n${teacher.email}\n\n` +
-          `🔑 *Mot de passe*\n${newPassword}\n\n` +
-          `_Vous pouvez copier ces informations séparément pour faciliter la connexion._\n\n` +
-          `⚠️ Veuillez conserver ces informations en sécurité.`;
+        // Utiliser le message personnalisé ou générer les identifiants par défaut
+        let messageText, message_type, content, media_url, file_name;
+        
+        if (message && message.trim()) {
+          // Message personnalisé avec support média
+          messageText = message;
+          message_type = messageType;
+          content = message;
+          media_url = mediaUrl || null;
+          file_name = fileName || null;
+        } else {
+          // Générer identifiants par défaut (comportement existant)
+          const year = new Date().getFullYear();
+          const cleanFirstName = teacher.first_name
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z]/g, '')
+            .trim();
+          const newPassword = cleanFirstName ? 
+            cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
+            `Prof${year}`;
+
+          // Mettre à jour le mot de passe
+          await supabaseAdmin.auth.admin.updateUserById(teacher.id, {
+            password: newPassword
+          });
+
+          messageText = `🔐 *Identifiants de connexion*\n\n` +
+            `Voici vos identifiants de connexion pour la plateforme EduTrack :\n\n` +
+            `📧 *Login (Email)*\n${teacher.email}\n\n` +
+            `🔑 *Mot de passe*\n${newPassword}\n\n` +
+            `_Vous pouvez copier ces informations séparément pour faciliter la connexion._\n\n` +
+            `⚠️ Veuillez conserver ces informations en sécurité.`;
+          message_type = 'text';
+          content = messageText;
+          media_url = null;
+          file_name = null;
+        }
 
         // Créer le log du message
         const { data: msgLog } = await supabaseAdmin
@@ -1912,8 +1927,10 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
           .insert({
             school_id: schoolId,
             sent_by: req.user.id,
-            message_type: 'text',
-            content: messageText,
+            message_type: message_type,
+            content: content,
+            media_url: media_url,
+            file_name: file_name,
             total_recipients: 1,
             status: 'sending'
           })
@@ -1934,6 +1951,20 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             .single();
 
           if (recipientLog.data) {
+            // Préparer le payload Wasender selon le type
+            let wasenderPayload = { to: phoneNumber };
+            
+            if (messageType === 'image' && mediaUrl) {
+              wasenderPayload.imageUrl = mediaUrl;
+              if (messageText) wasenderPayload.text = messageText;
+            } else if (messageType === 'document' && mediaUrl) {
+              wasenderPayload.documentUrl = mediaUrl;
+              if (fileName) wasenderPayload.fileName = fileName;
+              if (messageText) wasenderPayload.text = messageText;
+            } else {
+              wasenderPayload.text = messageText;
+            }
+
             // Envoyer le message
             const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
               method: 'POST',
@@ -1941,10 +1972,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
                 'Authorization': `Bearer ${sessionApiKey}`,
                 'Content-Type': 'application/json'
               },
-              body: JSON.stringify({
-                to: phoneNumber,
-                text: messageText
-              })
+              body: JSON.stringify(wasenderPayload)
             });
 
             if (response.ok) {

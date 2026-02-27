@@ -57,6 +57,15 @@ const WhatsAppPage = () => {
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [teacherMessageText, setTeacherMessageText] = useState('');
   const [teacherSending, setTeacherSending] = useState(false);
+  
+  // États pour les médias professeurs
+  const [teacherMediaFile, setTeacherMediaFile] = useState(null);
+  const [teacherMediaPreview, setTeacherMediaPreview] = useState(null);
+  const [teacherMediaUrl, setTeacherMediaUrl] = useState('');
+  const [teacherFileName, setTeacherFileName] = useState('');
+  const [teacherUploading, setTeacherUploading] = useState(false);
+  const [teacherMessageType, setTeacherMessageType] = useState('text');
+  const teacherFileInputRef = useRef(null);
 
   // ===================== TAB: INBOX =====================
   const [conversations, setConversations] = useState([]);
@@ -992,12 +1001,22 @@ const WhatsAppPage = () => {
         </div>
       </div>
 
-      {/* ===================== TAB: PARENTS ===================== */}
-      {activeTab === 'send' && (
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left: Filters + Compose */}
-            <div className="lg:col-span-2 space-y-4">
+      {// ===================== FONCTIONS MÉDIAS PROFESSEURS =====================
+  const handleTeacherFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setTeacherMediaFile(file);
+    setTeacherFileName(file.name);
+    if (file.type.startsWith('image/')) {
+      setTeacherMessageType('image');
+      const reader = new FileReader();
+      reader.onload = (ev) => setTeacherMediaPreview(ev.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setTeacherMessageType('document');
+      setTeacherMediaPreview(null);
+    }
+  };
               {/* Recipient Filters */}
               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm space-y-3">
                 <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
@@ -1294,14 +1313,64 @@ const WhatsAppPage = () => {
                 rows="6"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
               />
+              
+              {/* Media Preview */}
+              {teacherMediaFile && (
+                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  {teacherMediaPreview ? (
+                    <img src={teacherMediaPreview} alt="preview" className="w-16 h-16 object-cover rounded" />
+                  ) : (
+                    <FileText className="w-6 h-6 text-blue-600" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{teacherFileName}</p>
+                    <p className="text-xs text-gray-500">{teacherMessageType === 'image' ? 'Image' : 'Document'}</p>
+                  </div>
+                  <button onClick={removeTeacherMedia} className="p-1 hover:bg-gray-200 rounded">
+                    <X className="w-4 h-4 text-gray-500" />
+                  </button>
+                </div>
+              )}
+              
+              {/* Media Upload Buttons */}
+              <div className="flex items-center gap-2">
+                <input 
+                  ref={teacherFileInputRef} 
+                  type="file" 
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                  onChange={handleTeacherFileSelect} 
+                  className="hidden" 
+                />
+                <button 
+                  onClick={() => teacherFileInputRef.current?.click()} 
+                  disabled={teacherSending}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Paperclip className="w-4 h-4" />
+                  Fichier
+                </button>
+                <button 
+                  onClick={() => { 
+                    if (teacherFileInputRef.current) {
+                      teacherFileInputRef.current.accept = 'image/*'; 
+                      teacherFileInputRef.current.click(); 
+                      teacherFileInputRef.current.accept = "image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"; 
+                    } 
+                  }} 
+                  disabled={teacherSending}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                >
+                  <Image className="w-4 h-4" /> Image
+                </button>
+              </div>
               <div className="flex items-center justify-between pt-2 border-t border-gray-100">
                 <span className="text-sm text-gray-600">
                   {selectedTeachers.filter(id => teachers.find(t => t.id === id)?.phone).length} professeur(s) avec téléphone sélectionné(s)
                 </span>
                 <button
                   onClick={async () => {
-                    if (!teacherMessageText.trim()) {
-                      alert('Veuillez saisir un message');
+                    if (!teacherMessageText.trim() && !teacherMediaFile) {
+                      alert('Veuillez saisir un message ou sélectionner un fichier');
                       return;
                     }
                     if (selectedTeachers.length === 0) {
@@ -1321,6 +1390,12 @@ const WhatsAppPage = () => {
 
                     setTeacherSending(true);
                     try {
+                      // Upload média si nécessaire
+                      let uploadedUrl = teacherMediaUrl;
+                      if (teacherMediaFile && !teacherMediaUrl) {
+                        uploadedUrl = await uploadTeacherMedia();
+                      }
+                      
                       const token = await getAuthToken();
                       const res = await fetch(`${apiUrl}/api/admin/teachers/send-credentials-whatsapp`, {
                         method: 'POST',
@@ -1333,7 +1408,11 @@ const WhatsAppPage = () => {
                             teacher_ids: teachersWithPhone,
                             filiere: teacherFiliereFilter,
                             classId: teacherClassFilter
-                          }
+                          },
+                          message: teacherMessageText,
+                          messageType: teacherMessageType,
+                          mediaUrl: uploadedUrl || null,
+                          fileName: teacherFileName || null
                         })
                       });
 
@@ -1341,6 +1420,7 @@ const WhatsAppPage = () => {
                       if (res.ok) {
                         alert(`Message envoyé avec succès à ${data.sent || teachersWithPhone.length} professeur(s)`);
                         setTeacherMessageText('');
+                        removeTeacherMedia();
                       } else {
                         alert(`Erreur: ${data.error || 'Échec de l\'envoi'}`);
                       }
@@ -1351,12 +1431,12 @@ const WhatsAppPage = () => {
                       setTeacherSending(false);
                     }
                   }}
-                  disabled={teacherSending || !teacherMessageText.trim() || selectedTeachers.length === 0}
+                  disabled={teacherSending || teacherUploading || (!teacherMessageText.trim() && !teacherMediaFile) || selectedTeachers.length === 0}
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium">
-                  {teacherSending ? (
+                  {teacherSending || teacherUploading ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      Envoi en cours...
+                      {teacherUploading ? 'Upload...' : 'Envoi en cours...'}
                     </>
                   ) : (
                     <>
