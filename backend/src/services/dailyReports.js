@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import cron from 'node-cron';
 
 const WASENDER_BASE = 'https://www.wasenderapi.com';
+const WASENDER_MIN_INTERVAL_MS = 5000;
 
 // DeepSeek client (OpenAI-compatible API)
 const deepseek = new OpenAI({
@@ -16,6 +17,8 @@ const safeJson = async (response) => {
   try { return JSON.parse(text); }
   catch { return { success: false, message: `HTTP ${response.status}` }; }
 };
+
+const waitWasenderInterval = () => new Promise(resolve => setTimeout(resolve, WASENDER_MIN_INTERVAL_MS));
 
 // Global Wasender API key — shared by all schools
 const getGlobalApiKey = () => process.env.WASENDER_API_KEY || null;
@@ -527,14 +530,14 @@ async function sendReportWhatsApp(phone, reportText, sessionApiKey, retries = 3)
       
       // If failed but not last attempt, wait before retry
       if (attempt < retries) {
-        const backoffDelay = attempt * 2000; // Exponential backoff: 2s, 4s, 6s
+        const backoffDelay = WASENDER_MIN_INTERVAL_MS * attempt;
         console.log(`[WhatsApp] Retry ${attempt}/${retries} for ${phone} after ${backoffDelay}ms`);
         await new Promise(r => setTimeout(r, backoffDelay));
       }
     } catch (error) {
       console.error(`[WhatsApp] Attempt ${attempt}/${retries} error:`, error.message);
       if (attempt < retries) {
-        await new Promise(r => setTimeout(r, attempt * 2000));
+        await new Promise(r => setTimeout(r, WASENDER_MIN_INTERVAL_MS * attempt));
       }
     }
   }
@@ -544,9 +547,9 @@ async function sendReportWhatsApp(phone, reportText, sessionApiKey, retries = 3)
 // ==================== QUEUE SYSTEM FOR PARALLEL PROCESSING ====================
 
 class MessageQueue {
-  constructor(concurrency = 5, delayMs = 400) {
+  constructor(concurrency = 1, delayMs = WASENDER_MIN_INTERVAL_MS) {
     this.concurrency = concurrency; // Messages per second per school
-    this.delayMs = delayMs; // Delay between messages (400ms = ~2.5 msg/sec)
+    this.delayMs = delayMs; // Delay between messages
     this.queue = [];
     this.processing = 0;
   }
@@ -571,7 +574,7 @@ class MessageQueue {
       resolve({ success: false, error: error.message });
     }
     
-    await new Promise(r => setTimeout(r, this.delayMs));
+    await waitWasenderInterval();
     this.processing--;
     this.process();
   }
@@ -582,7 +585,7 @@ class MessageQueue {
 async function processSchoolReports(settings, today) {
   console.log(`[DailyReports] 🏫 Processing school ${settings.school_id}...`);
   
-  const queue = new MessageQueue(5, 400); // 5 concurrent, 400ms delay = ~2.5 msg/sec
+  const queue = new MessageQueue(1, WASENDER_MIN_INTERVAL_MS); // 1 message / 5 seconds
   let processed = 0, sent = 0, failed = 0;
 
   try {

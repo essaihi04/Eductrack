@@ -143,6 +143,9 @@ const getSessionApiKey = async (schoolId) => {
   return null;
 };
 
+const WASENDER_MIN_INTERVAL_MS = 5000;
+const waitWasenderInterval = () => new Promise((resolve) => setTimeout(resolve, WASENDER_MIN_INTERVAL_MS));
+
 // ==================== ÉLÈVES ====================
 
 // Récupérer le parent d'un élève
@@ -928,6 +931,8 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                     .update({ status: 'failed', error_message: 'Échec envoi API' })
                     .eq('id', recipientLog.data.id);
                 }
+
+                await waitWasenderInterval();
               }
             } catch (err) {
               console.error('Erreur envoi WhatsApp:', err);
@@ -1060,8 +1065,8 @@ router.post('/students/:id/reset-password', async (req, res) => {
                   .single();
 
                 if (msgLog) {
-                  // Envoyer les messages en arrière-plan
-                  const sendPromises = recipients.map(async (contact) => {
+                  // Envoyer les messages séquentiellement (limite Wasender: 1 message / 5 secondes)
+                  for (const contact of recipients) {
                     try {
                       const recipientLog = await supabaseAdmin
                         .from('whatsapp_recipients')
@@ -1098,31 +1103,30 @@ router.post('/students/:id/reset-password', async (req, res) => {
                             .update({ status: 'failed', error_message: 'Échec envoi API' })
                             .eq('id', recipientLog.data.id);
                         }
+
+                        await waitWasenderInterval();
                       }
                     } catch (err) {
                       console.error('Erreur envoi WhatsApp:', err);
                     }
-                  });
+                  }
 
-                  // Exécuter tous les envois
-                  Promise.all(sendPromises).then(async () => {
-                    const { data: recipientStats } = await supabaseAdmin
-                      .from('whatsapp_recipients')
-                      .select('status')
-                      .eq('message_id', msgLog.id);
+                  const { data: recipientStats } = await supabaseAdmin
+                    .from('whatsapp_recipients')
+                    .select('status')
+                    .eq('message_id', msgLog.id);
 
-                    const sentCount = recipientStats?.filter(r => r.status === 'sent').length || 0;
-                    const failedCount = recipientStats?.filter(r => r.status === 'failed').length || 0;
+                  const sentCount = recipientStats?.filter(r => r.status === 'sent').length || 0;
+                  const failedCount = recipientStats?.filter(r => r.status === 'failed').length || 0;
 
-                    await supabaseAdmin
-                      .from('whatsapp_messages')
-                      .update({
-                        status: failedCount === recipients.length ? 'failed' : 'sent',
-                        sent_count: sentCount,
-                        failed_count: failedCount
-                      })
-                      .eq('id', msgLog.id);
-                  });
+                  await supabaseAdmin
+                    .from('whatsapp_messages')
+                    .update({
+                      status: failedCount === recipients.length ? 'failed' : 'sent',
+                      sent_count: sentCount,
+                      failed_count: failedCount
+                    })
+                    .eq('id', msgLog.id);
                 }
               }
             }
@@ -1955,6 +1959,8 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
               
               errorCount++;
             }
+
+            await waitWasenderInterval();
           }
         }
       } catch (err) {

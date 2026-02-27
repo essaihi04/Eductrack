@@ -64,8 +64,9 @@ const getSessionApiKey = async (schoolId) => {
   return null;
 };
 
+const WASENDER_MIN_INTERVAL_MS = 5000;
 // Helper: delay between messages to respect rate limits
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const waitWasenderInterval = () => new Promise(resolve => setTimeout(resolve, WASENDER_MIN_INTERVAL_MS));
 
 // ==================== RECIPIENTS ====================
 
@@ -369,8 +370,8 @@ router.post('/send', async (req, res) => {
         .update({ sent_count: sentCount, failed_count: failedCount, updated_at: new Date().toISOString() })
         .eq('id', msgLog.id);
 
-      // Rate limit delay (1.5s between messages)
-      await delay(1500);
+      // Rate limit delay (Wasender account protection: 1 message / 5 seconds)
+      await waitWasenderInterval();
     }
 
     // Final status
@@ -1296,7 +1297,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
           try { sendData = JSON.parse(sendText); } catch { sendData = { success: false, error: sendText }; }
           if (!sendData.success) { console.log(`[SendReport] Send failed:`, sendData); contactSuccess = false; break; }
         } catch (err) { console.error(`[SendReport] Send exception:`, err.message); contactSuccess = false; break; }
-        if (i < textChunks.length - 1) await new Promise(r => setTimeout(r, 1000));
+        if (i < textChunks.length - 1) await waitWasenderInterval();
       }
 
       // Update recipient status in DB
@@ -1309,7 +1310,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
       }
 
       if (contactSuccess) sent++; else failed++;
-      if (contacts.indexOf(contact) < contacts.length - 1) await new Promise(r => setTimeout(r, 1000));
+      if (contacts.indexOf(contact) < contacts.length - 1) await waitWasenderInterval();
     }
 
     // Update final message status
@@ -1460,7 +1461,7 @@ router.post('/daily-reports/retry-all-failed', async (req, res) => {
           failed++;
         }
       } catch { failed++; }
-      await new Promise(r => setTimeout(r, 2000));
+      await waitWasenderInterval();
     }
 
     res.json({ success: true, sent, failed, total: failedReports.length });
