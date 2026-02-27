@@ -1830,8 +1830,16 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun professeur trouvé' });
     }
 
-    // Filtrer uniquement les professeurs avec numéro de téléphone
-    const teachersWithPhone = teachers.filter(t => t.phone);
+    // Normaliser les numéros puis garder uniquement les professeurs avec numéro valide
+    const teachersWithPhone = (teachers || [])
+      .map((t) => ({ ...t, normalized_phone: normalizePhoneToE164(t.phone) }))
+      .filter((t) => !!t.normalized_phone);
+
+    console.log('[Teachers WhatsApp] Stats:', {
+      schoolId,
+      totalTeachers: teachers?.length || 0,
+      teachersWithValidPhone: teachersWithPhone.length
+    });
 
     if (teachersWithPhone.length === 0) {
       return res.status(400).json({ error: 'Aucun professeur n\'a de numéro de téléphone' });
@@ -1864,13 +1872,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
           password: newPassword
         });
 
-        // Formater le numéro de téléphone (ajouter +212 si nécessaire)
-        let phoneNumber = teacher.phone.replace(/\s/g, '');
-        if (phoneNumber.startsWith('0')) {
-          phoneNumber = '+212' + phoneNumber.substring(1);
-        } else if (!phoneNumber.startsWith('+')) {
-          phoneNumber = '+212' + phoneNumber;
-        }
+        const phoneNumber = teacher.normalized_phone;
 
         // Formater le message
         const messageText = `🔐 *Identifiants de connexion*\n\n` +
@@ -1933,6 +1935,14 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
               
               sentCount++;
             } else {
+              const waErrorText = await response.text().catch(() => '');
+              console.error('[Teachers WhatsApp] API send failed:', {
+                teacherId: teacher.id,
+                phoneNumber,
+                status: response.status,
+                body: waErrorText?.substring(0, 300)
+              });
+
               await supabaseAdmin
                 .from('whatsapp_recipients')
                 .update({ status: 'failed', error_message: 'Échec envoi API' })
