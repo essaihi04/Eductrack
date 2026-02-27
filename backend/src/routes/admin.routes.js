@@ -896,7 +896,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
           for (const contact of recipients) {
             try {
               const recipientLog = await supabaseAdmin
-                .from('whatsapp_recipients')
+                .from('whatsapp_message_recipients')
                 .insert({
                   message_id: msgLog.id,
                   phone_e164: contact.phone_e164,
@@ -921,13 +921,13 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
 
                 if (response.ok) {
                   await supabaseAdmin
-                    .from('whatsapp_recipients')
+                    .from('whatsapp_message_recipients')
                     .update({ status: 'sent', sent_at: new Date().toISOString() })
                     .eq('id', recipientLog.data.id);
                   sentCount++;
                 } else {
                   await supabaseAdmin
-                    .from('whatsapp_recipients')
+                    .from('whatsapp_message_recipients')
                     .update({ status: 'failed', error_message: 'Échec envoi API' })
                     .eq('id', recipientLog.data.id);
                 }
@@ -941,7 +941,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
 
           // Mettre à jour le statut du message
           const { data: recipientStats } = await supabaseAdmin
-            .from('whatsapp_recipients')
+            .from('whatsapp_message_recipients')
             .select('status')
             .eq('message_id', msgLog.id);
 
@@ -1069,7 +1069,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                   for (const contact of recipients) {
                     try {
                       const recipientLog = await supabaseAdmin
-                        .from('whatsapp_recipients')
+                        .from('whatsapp_message_recipients')
                         .insert({
                           message_id: msgLog.id,
                           phone_e164: contact.phone_e164,
@@ -1094,12 +1094,12 @@ router.post('/students/:id/reset-password', async (req, res) => {
 
                         if (response.ok) {
                           await supabaseAdmin
-                            .from('whatsapp_recipients')
+                            .from('whatsapp_message_recipients')
                             .update({ status: 'sent', sent_at: new Date().toISOString() })
                             .eq('id', recipientLog.data.id);
                         } else {
                           await supabaseAdmin
-                            .from('whatsapp_recipients')
+                            .from('whatsapp_message_recipients')
                             .update({ status: 'failed', error_message: 'Échec envoi API' })
                             .eq('id', recipientLog.data.id);
                         }
@@ -1112,7 +1112,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                   }
 
                   const { data: recipientStats } = await supabaseAdmin
-                    .from('whatsapp_recipients')
+                    .from('whatsapp_message_recipients')
                     .select('status')
                     .eq('message_id', msgLog.id);
 
@@ -1903,10 +1903,11 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
         if (msgLog) {
           // Créer le log du destinataire
           const recipientLog = await supabaseAdmin
-            .from('whatsapp_recipients')
+            .from('whatsapp_message_recipients')
             .insert({
               message_id: msgLog.id,
               phone_e164: phoneNumber,
+              parent_id: null,
               status: 'pending'
             })
             .select()
@@ -1928,7 +1929,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
 
             if (response.ok) {
               await supabaseAdmin
-                .from('whatsapp_recipients')
+                .from('whatsapp_message_recipients')
                 .update({ status: 'sent', sent_at: new Date().toISOString() })
                 .eq('id', recipientLog.data.id);
               
@@ -1948,7 +1949,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
               });
 
               await supabaseAdmin
-                .from('whatsapp_recipients')
+                .from('whatsapp_message_recipients')
                 .update({ status: 'failed', error_message: 'Échec envoi API' })
                 .eq('id', recipientLog.data.id);
               
