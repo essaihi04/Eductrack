@@ -190,7 +190,7 @@ const TeachersPage = () => {
     }
   };
 
-  const resetPassword = async (teacherId) => {
+  const resetPassword = async (teacherId, firstName) => {
     if (!confirm('Êtes-vous sûr de vouloir réinitialiser le mot de passe de ce professeur ?')) {
       return;
     }
@@ -199,8 +199,21 @@ const TeachersPage = () => {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
       
-      // Générer un nouveau mot de passe
-      const newPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+      // Générer un nouveau mot de passe simple: Prénom + Année (ex: Ahmed2025)
+      const year = new Date().getFullYear();
+      let newPassword = `Prof${year}`;
+      
+      if (firstName) {
+        const cleanFirstName = firstName
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z]/g, '')
+          .trim();
+          
+        if (cleanFirstName) {
+          newPassword = cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year;
+        }
+      }
 
       const res = await fetch(`${apiUrl}/api/admin/teachers/${teacherId}/reset-password`, {
         method: 'POST',
@@ -928,7 +941,7 @@ const TeachersPage = () => {
 
                       <div className="flex gap-2 pt-2 border-t">
                         <button
-                          onClick={() => resetPassword(teacher.id)}
+                          onClick={() => resetPassword(teacher.id, teacher.first_name)}
                           className="flex-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm flex items-center justify-center gap-2"
                         >
                           <RefreshCw className="w-4 h-4" />
