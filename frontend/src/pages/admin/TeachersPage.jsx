@@ -25,6 +25,7 @@ const TeachersPage = () => {
   const [subjectFilter, setSubjectFilter] = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [classes, setClasses] = useState([]);
+  const [teacherClasses, setTeacherClasses] = useState({});
   const [editFormData, setEditFormData] = useState({
     firstName: '',
     lastName: '',
@@ -97,6 +98,36 @@ const TeachersPage = () => {
       // Charger les matières pour chaque professeur
       for (const teacher of teachersData) {
         fetchTeacherSubjects(teacher.id, token);
+      }
+
+      // Charger les classes assignées pour chaque professeur
+      if (Array.isArray(classesData) && classesData.length > 0) {
+        const classTeacherPairs = await Promise.all(
+          classesData.map(async (cls) => {
+            try {
+              const res = await fetch(`${apiUrl}/api/admin/classes/${cls.id}/teachers`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              const data = await res.json();
+              return { classItem: cls, teachers: Array.isArray(data) ? data : [] };
+            } catch {
+              return { classItem: cls, teachers: [] };
+            }
+          })
+        );
+
+        const classMap = {};
+        for (const pair of classTeacherPairs) {
+          for (const assignment of pair.teachers) {
+            const teacherId = assignment.teacher_id;
+            if (!teacherId) continue;
+            if (!classMap[teacherId]) classMap[teacherId] = [];
+            classMap[teacherId].push({ id: pair.classItem.id, name: pair.classItem.name });
+          }
+        }
+        setTeacherClasses(classMap);
+      } else {
+        setTeacherClasses({});
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -945,14 +976,24 @@ const TeachersPage = () => {
                   // Filtrer par matière
                   if (subjectFilter) {
                     const teacherSubjectsList = teacherSubjects[teacher.id] || [];
-                    if (!teacherSubjectsList.some(s => s.id === subjectFilter)) {
+                    const hasSubject = teacherSubjectsList.some(s =>
+                      (s.subject_id && String(s.subject_id) === String(subjectFilter)) ||
+                      (s.subjects?.id && String(s.subjects.id) === String(subjectFilter))
+                    );
+                    if (!hasSubject) {
                       return false;
                     }
                   }
+
                   // Filtrer par classe
-                  if (classFilter && teacher.class_id !== classFilter) {
-                    return false;
+                  if (classFilter) {
+                    const assignedClasses = teacherClasses[teacher.id] || [];
+                    const hasClass = assignedClasses.some(c => String(c.id) === String(classFilter));
+                    if (!hasClass) {
+                      return false;
+                    }
                   }
+
                   return true;
                 })
                 .map((teacher) => (
