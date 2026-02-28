@@ -33,7 +33,6 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     const parentInfo = await getParentByPhone(normalizedPhone, sessionSchoolId);
     if (!parentInfo) {
       console.log('[Chatbot] Numéro non autorisé:', normalizedPhone);
-      // Ne pas répondre aux numéros non enregistrés
       return;
     }
     
@@ -53,28 +52,60 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       .select()
       .single();
     
-    // 4. Identifier l'élève concerné par le message (via IA)
+    // 4. Vérifier si le message nécessite une réponse IA
+    const needsAIResponse = await shouldRespondWithAI(messageText, normalizedPhone, parentInfo.parent_id);
+    
+    if (!needsAIResponse.respond) {
+      console.log('[Chatbot] Message ne nécessite pas de réponse IA:', needsAIResponse.reason);
+      
+      // Envoyer une réponse simple si c'est une salutation
+      if (needsAIResponse.reason === 'greeting') {
+        await sendWhatsAppResponse(normalizedPhone, `السلام عليكم ${parentInfo.parent_name.split(' ')[0]} 👋\n\nكيف يمكنني مساعدتك اليوم؟`, parentInfo.school_id);
+      } else if (needsAIResponse.reason === 'thanks') {
+        await sendWhatsAppResponse(normalizedPhone, `العفو! نحن دائماً في خدمتكم 🙏`, parentInfo.school_id);
+      }
+      
+      await supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .update({ processed: true, ai_response_sent: false })
+        .eq('id', incomingMsg.id);
+      return;
+    }
+    
+    // 5. Identifier l'élève concerné par le message (via IA)
     const studentInfo = await identifyStudentFromMessage(messageText, parentInfo);
     
     if (!studentInfo) {
       console.log('[Chatbot] Impossible d\'identifier l\'élève dans le message');
-      // Envoyer un message demandant de préciser
       await sendClarificationMessage(normalizedPhone, parentInfo, messageText);
       return;
     }
     
     console.log('[Chatbot] Élève identifié:', studentInfo.first_name, studentInfo.last_name);
     
-    // 5. Collecter les données de l'élève
+    // 6. Collecter les données complètes de l'élève
     const studentData = await collectStudentData(studentInfo.id, parentInfo.school_id);
     
-    // 6. Générer la réponse IA
-    const aiResponse = await generateAIResponse(messageText, studentInfo, studentData, parentInfo);
+    // 7. Générer la réponse IA avec historique
+    const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
+    const aiResponse = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory);
     
-    // 7. Envoyer la réponse via WhatsApp
+    // 8. Envoyer la réponse via WhatsApp
     await sendWhatsAppResponse(normalizedPhone, aiResponse, parentInfo.school_id);
     
-    // 8. Mettre à jour le message comme traité
+    // 9. Enregistrer la conversation
+    await supabaseAdmin
+      .from('whatsapp_conversations')
+      .insert({
+        parent_id: parentInfo.parent_id,
+        student_id: studentInfo.id,
+        school_id: parentInfo.school_id,
+        parent_message: messageText,
+        ai_response: aiResponse,
+        phone_e164: normalizedPhone
+      });
+    
+    // 10. Mettre à jour le message comme traité
     await supabaseAdmin
       .from('whatsapp_incoming_messages')
       .update({
@@ -112,6 +143,62 @@ function normalizePhoneNumber(phone) {
   }
   
   return cleaned;
+}
+
+// Vérifier si le message nécessite une réponse IA
+async function shouldRespondWithAI(messageText, phone, parentId) {
+  const lowerText = messageText.toLowerCase().trim();
+  
+  // Messages qui ne nécessitent pas de réponse IA
+  const greetings = ['سلام', 'مرحبا', 'صباح', 'مساء', 'bonjour', 'bonsoir', 'salut', 'hello', 'hi'];
+  const thanks = ['شكرا', 'merci', 'thanks', 'thank you', 'بارك الله فيك'];
+  const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes'];
+  
+  // Vérifier les salutations simples
+  if (greetings.some(g => lowerText.includes(g)) && lowerText.length < 20) {
+    return { respond: false, reason: 'greeting' };
+  }
+  
+  // Vérifier les remerciements
+  if (thanks.some(t => lowerText.includes(t)) && lowerText.length < 30) {
+    return { respond: false, reason: 'thanks' };
+  }
+  
+  // Vérifier les réponses simples
+  if (simple.some(s => lowerText === s)) {
+    return { respond: false, reason: 'simple_response' };
+  }
+  
+  // Vérifier le cooldown (max 1 requête IA toutes les 5 minutes par parent)
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const { data: recentMessages } = await supabaseAdmin
+    .from('whatsapp_incoming_messages')
+    .select('created_at')
+    .eq('parent_id', parentId)
+    .eq('ai_response_sent', true)
+    .gte('created_at', fiveMinutesAgo)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  
+  if (recentMessages && recentMessages.length > 0) {
+    console.log('[Chatbot] Cooldown actif - dernière réponse IA il y a moins de 5 minutes');
+    return { respond: false, reason: 'cooldown' };
+  }
+  
+  return { respond: true, reason: 'needs_ai' };
+}
+
+// Récupérer l'historique de conversation
+async function getConversationHistory(phone, parentId, studentId, limit = 5) {
+  const { data: history } = await supabaseAdmin
+    .from('whatsapp_conversations')
+    .select('parent_message, ai_response, created_at')
+    .eq('parent_id', parentId)
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  
+  return history || [];
 }
 
 // Récupérer les informations du parent par numéro de téléphone
@@ -242,13 +329,14 @@ Réponds UNIQUEMENT avec le prénom de l'enfant mentionné, ou "TOUS" si le pare
   }
 }
 
-// Collecter les données de l'élève (notes, présence, comportement, etc.)
+// Collecter les données complètes de l'élève
 async function collectStudentData(studentId, schoolId) {
   const today = new Date().toISOString().split('T')[0];
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
-  // Récupérer les données des 7 derniers jours
-  const [studentProfile, recentSessions, recentTracking, recentGrades, recentHomework] = await Promise.all([
+  // Récupérer toutes les données de l'élève
+  const [studentProfile, recentSessions, recentTracking, recentGrades, recentHomework, allGrades, absences] = await Promise.all([
     // Profil de l'élève
     supabaseAdmin
       .from('profiles')
@@ -289,7 +377,23 @@ async function collectStudentData(studentId, schoolId) {
       .eq('student_id', studentId)
       .gte('homework.due_date', oneWeekAgo)
       .order('homework.due_date', { ascending: false })
-      .limit(10)
+      .limit(10),
+    
+    // Toutes les notes (pour calculer les moyennes)
+    supabaseAdmin
+      .from('control_notes')
+      .select('*, controls(title, date, subjects(name))')
+      .eq('student_id', studentId)
+      .gte('controls.date', oneMonthAgo)
+      .order('controls.date', { ascending: false }),
+    
+    // Absences du mois
+    supabaseAdmin
+      .from('session_tracking')
+      .select('*, sessions!inner(date, subjects(name))')
+      .eq('student_id', studentId)
+      .eq('presence', 'absent')
+      .gte('sessions.date', oneMonthAgo)
   ]);
   
   return {
@@ -297,30 +401,43 @@ async function collectStudentData(studentId, schoolId) {
     sessions: recentSessions.data || [],
     tracking: recentTracking.data || [],
     grades: recentGrades.data || [],
-    homework: recentHomework.data || []
+    homework: recentHomework.data || [],
+    allGrades: allGrades.data || [],
+    absences: absences.data || []
   };
 }
 
-// Générer la réponse IA personnalisée
-async function generateAIResponse(question, studentInfo, studentData, parentInfo) {
+// Générer la réponse IA personnalisée avec historique
+async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory = []) {
   try {
     // Préparer le contexte pour l'IA
     const context = buildContextForAI(studentInfo, studentData);
+    
+    // Préparer l'historique de conversation
+    let historyContext = '';
+    if (conversationHistory.length > 0) {
+      historyContext = '\n\nHISTORIQUE DE CONVERSATION (messages récents):\n';
+      conversationHistory.reverse().forEach((conv, idx) => {
+        historyContext += `\n${idx + 1}. Parent: ${conv.parent_message}\n   Réponse: ${conv.ai_response.substring(0, 100)}...\n`;
+      });
+    }
     
     const systemPrompt = `Tu es un conseiller pédagogique expert travaillant pour ${parentInfo.school_name}. 
 Tu réponds aux questions des parents concernant leurs enfants de manière professionnelle, bienveillante et précise.
 
 RÈGLES IMPORTANTES:
 - Réponds UNIQUEMENT avec les données réelles fournies
-- Si tu n'as pas l'information, dis-le clairement
+- Si tu n'as pas l'information, dis-le clairement et propose de contacter l'enseignant
 - Sois encourageant et constructif
 - Utilise un ton professionnel mais chaleureux
 - Réponds en français ou en arabe selon la langue de la question
 - Limite ta réponse à 10-15 lignes maximum
 - Utilise des emojis appropriés pour rendre le message agréable
+- Tiens compte de l'historique de conversation pour éviter de répéter les mêmes informations
+- Sois précis et réponds directement à la question posée
 
 DONNÉES DE L'ÉLÈVE:
-${context}
+${context}${historyContext}
 
 Réponds maintenant à la question du parent de manière claire et précise.`;
     
