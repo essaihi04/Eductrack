@@ -770,26 +770,26 @@ async function collectStudentData(studentId, schoolId) {
       .lte('date', today)
       .order('date', { ascending: false }),
     
-    // Tout le tracking (3 derniers mois)
+    // Tout le tracking (3 derniers mois) avec incidents
     supabaseAdmin
       .from('session_tracking')
-      .select('*, sessions!inner(date, subjects(name))')
+      .select('presence, participation, discipline, vigilance, cahier, incidents, sessions!inner(date, topic, subjects(name))')
       .eq('student_id', studentId)
       .gte('sessions.date', threeMonthsAgo)
       .order('sessions.date', { ascending: false }),
     
-    // Tracking récent (7 jours)
+    // Tracking récent (7 jours) avec incidents
     supabaseAdmin
       .from('session_tracking')
-      .select('*, sessions!inner(date, subjects(name))')
+      .select('presence, participation, discipline, vigilance, cahier, incidents, sessions!inner(date, topic, subjects(name))')
       .eq('student_id', studentId)
       .gte('sessions.date', oneWeekAgo)
       .lte('sessions.date', today),
     
-    // Notes récentes (sans relation subjects - récupérer séparément)
+    // Notes récentes
     supabaseAdmin
       .from('control_notes')
-      .select('note, control_id, controls_plan!inner(title, date, subject_id)')
+      .select('note, control_id, controls_plan!inner(date, subject_id)')
       .eq('student_id', studentId)
       .gte('controls_plan.date', oneWeekAgo)
       .limit(10),
@@ -805,7 +805,7 @@ async function collectStudentData(studentId, schoolId) {
     // Toutes les notes (pour calculer les moyennes)
     supabaseAdmin
       .from('control_notes')
-      .select('note, control_id, controls_plan!inner(title, date, subject_id)')
+      .select('note, control_id, controls_plan!inner(date, subject_id)')
       .eq('student_id', studentId)
       .gte('controls_plan.date', threeMonthsAgo),
     
@@ -1016,7 +1016,7 @@ function buildContextForAI(studentInfo, studentData) {
     
     context += `📊 STATISTIQUES D'AUJOURD'HUI (${today}):\n\n`;
     context += `📊 Présence: ${generateProgressBar(presencePercent)} ${presencePercent}%\n`;
-    if (participationAvg > 0) context += `🙋 Participation: ${generateProgressBar(participationAvg)} ${participationAvg}%\n`;
+    if (participationAvg > 0) context += `� Participation: ${generateProgressBar(participationAvg)} ${participationAvg}%\n`;
     if (vigilanceAvg > 0) context += `👁️ Vigilance: ${generateProgressBar(vigilanceAvg)} ${vigilanceAvg}%\n`;
     if (cahierAvg > 0) context += `📓 Cahier: ${generateProgressBar(cahierAvg)} ${cahierAvg}%\n`;
     context += `\n`;
@@ -1031,15 +1031,23 @@ function buildContextForAI(studentInfo, studentData) {
       context += `\n`;
     }
     
-    // Résumé de la journée (pour l'IA)
+    // Résumé de la journée avec titres des leçons
     context += `📝 Résumé de la journée:\n`;
     todayTracking.forEach(t => {
-      context += `- ${t.sessions?.subjects?.name || 'N/A'}:\n`;
+      const subjectName = t.sessions?.subjects?.name || 'N/A';
+      const lessonTopic = t.sessions?.topic;
+      
+      context += `- ${subjectName}${lessonTopic ? `: ${lessonTopic}` : ''}\n`;
       context += `  Présence: ${t.presence === 'present' ? '✅' : t.presence === 'absent' ? '❌' : '⚠️'}\n`;
       if (t.participation) context += `  Participation: ${t.participation}\n`;
       if (t.discipline) context += `  Discipline: ${t.discipline}\n`;
       if (t.vigilance) context += `  Vigilance: ${t.vigilance}\n`;
       if (t.cahier) context += `  Cahier: ${t.cahier}\n`;
+      
+      // Afficher les incidents s'il y en a
+      if (t.incidents && t.incidents.length > 0) {
+        context += `  ⚠️ Incidents: ${t.incidents.join(', ')}\n`;
+      }
     });
     context += `\n`;
     
