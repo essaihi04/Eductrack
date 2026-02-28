@@ -156,17 +156,28 @@ async function getParentByPhone(phoneNumber, schoolId = null) {
 // Identifier l'élève mentionné dans le message via IA
 async function identifyStudentFromMessage(messageText, parentInfo) {
   try {
-    // Récupérer tous les enfants de ce parent
-    const { data: children } = await supabaseAdmin
-      .from('profiles')
-      .select('id, first_name, last_name, class_id, classes(name, level)')
-      .eq('parent_id', parentInfo.parent_id)
-      .eq('role', 'student');
+    // Récupérer tous les enfants de ce parent via la table student_parents
+    const { data: studentParents } = await supabaseAdmin
+      .from('student_parents')
+      .select(`
+        student_id,
+        students:profiles!student_parents_student_id_fkey(
+          id,
+          first_name,
+          last_name,
+          class_id,
+          classes(name, level)
+        )
+      `)
+      .eq('parent_id', parentInfo.parent_id);
     
-    if (!children || children.length === 0) {
+    if (!studentParents || studentParents.length === 0) {
       console.log('[Chatbot] Aucun enfant trouvé pour ce parent');
       return null;
     }
+    
+    // Extraire les profils des élèves
+    const children = studentParents.map(sp => sp.students).filter(Boolean);
     
     // Si un seul enfant, le retourner directement
     if (children.length === 1) {
