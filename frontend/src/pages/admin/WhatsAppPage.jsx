@@ -51,8 +51,10 @@ const WhatsAppPage = () => {
   // ===================== TAB: TEACHERS =====================
   const [teachers, setTeachers] = useState([]);
   const [selectedTeachers, setSelectedTeachers] = useState([]);
-  const [teacherFiliereFilter, setTeacherFiliereFilter] = useState('');
+  const [teacherSubjectFilter, setTeacherSubjectFilter] = useState('');
   const [teacherClassFilter, setTeacherClassFilter] = useState('');
+  const [subjects, setSubjects] = useState([]);
+  const [teacherSubjects, setTeacherSubjects] = useState({});
   const [teacherCount, setTeacherCount] = useState(0);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [teacherMessageText, setTeacherMessageText] = useState('');
@@ -149,12 +151,14 @@ const WhatsAppPage = () => {
     const loadData = async () => {
       try {
         const token = await getAuthToken();
-        const [classesRes, teachersRes] = await Promise.all([
+        const [classesRes, teachersRes, subjectsRes] = await Promise.all([
           fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${apiUrl}/api/admin/teachers`, { headers: { Authorization: `Bearer ${token}` } })
+          fetch(`${apiUrl}/api/admin/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${apiUrl}/api/admin/subjects`, { headers: { Authorization: `Bearer ${token}` } })
         ]);
         const classesData = await classesRes.json();
         const teachersData = await teachersRes.json();
+        const subjectsData = await subjectsRes.json();
         
         const cls = Array.isArray(classesData) ? classesData : [];
         setClasses(cls);
@@ -165,6 +169,25 @@ const WhatsAppPage = () => {
         const tchs = Array.isArray(teachersData) ? teachersData : [];
         setTeachers(tchs);
         setSelectedTeachers(tchs.map(t => t.id));
+        
+        const subs = Array.isArray(subjectsData) ? subjectsData : [];
+        setSubjects(subs);
+        
+        // Charger les matières pour chaque professeur
+        for (const teacher of tchs) {
+          try {
+            const res = await fetch(`${apiUrl}/api/admin/teachers/${teacher.id}/subjects`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            const data = await res.json();
+            setTeacherSubjects(prev => ({
+              ...prev,
+              [teacher.id]: Array.isArray(data) ? data : []
+            }));
+          } catch (err) {
+            console.error(`Erreur chargement matières prof ${teacher.id}:`, err);
+          }
+        }
       } catch (error) {
         console.error('Erreur chargement données:', error);
       }
@@ -1237,12 +1260,12 @@ const WhatsAppPage = () => {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-gray-600 block mb-1">Filière</label>
-                  <select value={teacherFiliereFilter} onChange={(e) => setTeacherFiliereFilter(e.target.value)}
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Matière</label>
+                  <select value={teacherSubjectFilter} onChange={(e) => setTeacherSubjectFilter(e.target.value)}
                     className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
-                    <option value="">Toutes les filières</option>
-                    {[...new Set(classes.map(c => c.filiere).filter(Boolean))].map(f => (
-                      <option key={f} value={f}>{f}</option>
+                    <option value="">Toutes les matières</option>
+                    {subjects.map(subject => (
+                      <option key={subject.id} value={subject.id}>{subject.name}</option>
                     ))}
                   </select>
                 </div>
@@ -1251,17 +1274,15 @@ const WhatsAppPage = () => {
                   <select value={teacherClassFilter} onChange={(e) => setTeacherClassFilter(e.target.value)}
                     className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
                     <option value="">Toutes les classes</option>
-                    {classes
-                      .filter(c => !teacherFiliereFilter || c.filiere === teacherFiliereFilter)
-                      .map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
+                    {classes.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="flex items-end">
                   <button
                     onClick={() => {
-                      setTeacherFiliereFilter('');
+                      setTeacherSubjectFilter('');
                       setTeacherClassFilter('');
                       setSelectedTeachers(teachers.map(t => t.id));
                     }}
@@ -1276,18 +1297,39 @@ const WhatsAppPage = () => {
             <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
               <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-700">
-                  Professeurs ({teachers.filter(t => 
-                    (!teacherFiliereFilter || classes.find(c => c.teacher_id === t.id)?.filiere === teacherFiliereFilter) &&
-                    (!teacherClassFilter || classes.find(c => c.teacher_id === t.id)?.id === teacherClassFilter)
-                  ).length})
+                  Professeurs ({teachers.filter(t => {
+                    if (teacherSubjectFilter) {
+                      const tSubjects = teacherSubjects[t.id] || [];
+                      const hasSubject = tSubjects.some(s => 
+                        (s.subject_id && String(s.subject_id) === String(teacherSubjectFilter)) ||
+                        (s.subjects?.id && String(s.subjects.id) === String(teacherSubjectFilter))
+                      );
+                      if (!hasSubject) return false;
+                    }
+                    if (teacherClassFilter) {
+                      // Filtrer par classe si nécessaire
+                      return true; // À implémenter si besoin
+                    }
+                    return true;
+                  }).length})
                 </h3>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => {
-                      const filtered = teachers.filter(t => 
-                        (!teacherFiliereFilter || classes.find(c => c.teacher_id === t.id)?.filiere === teacherFiliereFilter) &&
-                        (!teacherClassFilter || classes.find(c => c.teacher_id === t.id)?.id === teacherClassFilter)
-                      );
+                      const filtered = teachers.filter(t => {
+                        if (teacherSubjectFilter) {
+                          const tSubjects = teacherSubjects[t.id] || [];
+                          const hasSubject = tSubjects.some(s => 
+                            (s.subject_id && String(s.subject_id) === String(teacherSubjectFilter)) ||
+                            (s.subjects?.id && String(s.subjects.id) === String(teacherSubjectFilter))
+                          );
+                          if (!hasSubject) return false;
+                        }
+                        if (teacherClassFilter) {
+                          return true; // À implémenter si besoin
+                        }
+                        return true;
+                      });
                       setSelectedTeachers(filtered.map(t => t.id));
                     }}
                     className="text-xs text-green-600 hover:text-green-700 font-medium">
@@ -1302,10 +1344,20 @@ const WhatsAppPage = () => {
               </div>
               <div className="max-h-96 overflow-y-auto">
                 {teachers
-                  .filter(t => 
-                    (!teacherFiliereFilter || classes.find(c => c.teacher_id === t.id)?.filiere === teacherFiliereFilter) &&
-                    (!teacherClassFilter || classes.find(c => c.teacher_id === t.id)?.id === teacherClassFilter)
-                  )
+                  .filter(t => {
+                    if (teacherSubjectFilter) {
+                      const tSubjects = teacherSubjects[t.id] || [];
+                      const hasSubject = tSubjects.some(s => 
+                        (s.subject_id && String(s.subject_id) === String(teacherSubjectFilter)) ||
+                        (s.subjects?.id && String(s.subjects.id) === String(teacherSubjectFilter))
+                      );
+                      if (!hasSubject) return false;
+                    }
+                    if (teacherClassFilter) {
+                      return true; // À implémenter si besoin
+                    }
+                    return true;
+                  })
                   .map(teacher => (
                     <label key={teacher.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-0">
                       <input
@@ -1446,7 +1498,7 @@ const WhatsAppPage = () => {
                         body: JSON.stringify({
                           filter: {
                             teacher_ids: teachersWithPhone,
-                            filiere: teacherFiliereFilter,
+                            subjectId: teacherSubjectFilter,
                             classId: teacherClassFilter
                           },
                           message: teacherMessageText,

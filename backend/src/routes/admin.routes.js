@@ -1819,10 +1819,10 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
     const { filter, message, messageType = 'text', mediaUrl, fileName } = req.body;
     const schoolId = getSchoolId(req);
 
-    // Récupérer tous les professeurs avec leurs classes
+    // Récupérer tous les professeurs
     let teachersQuery = supabaseAdmin
       .from('profiles')
-      .select('id, email, first_name, last_name, phone, classes!fk_profiles_class(id, name, filiere)')
+      .select('id, email, first_name, last_name, phone')
       .eq('role', 'teacher');
 
     if (schoolId) {
@@ -1844,14 +1844,26 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       filteredTeachers = filteredTeachers.filter(t => filter.teacher_ids.includes(t.id));
     }
     
-    // Filtrer par filière
-    if (filter?.filiere) {
-      filteredTeachers = filteredTeachers.filter(t => t.classes?.filiere === filter.filiere);
+    // Filtrer par matière
+    if (filter?.subjectId) {
+      const { data: teacherSubjectsData } = await supabaseAdmin
+        .from('teacher_subjects')
+        .select('teacher_id')
+        .eq('subject_id', filter.subjectId);
+      
+      const teacherIdsWithSubject = teacherSubjectsData?.map(ts => ts.teacher_id) || [];
+      filteredTeachers = filteredTeachers.filter(t => teacherIdsWithSubject.includes(t.id));
     }
     
     // Filtrer par classe
     if (filter?.classId) {
-      filteredTeachers = filteredTeachers.filter(t => t.classes?.id === filter.classId);
+      const { data: classTeachersData } = await supabaseAdmin
+        .from('class_teachers')
+        .select('teacher_id')
+        .eq('class_id', filter.classId);
+      
+      const teacherIdsWithClass = classTeachersData?.map(ct => ct.teacher_id) || [];
+      filteredTeachers = filteredTeachers.filter(t => teacherIdsWithClass.includes(t.id));
     }
 
     // Normaliser les numéros puis garder uniquement les professeurs avec numéro valide
@@ -1884,19 +1896,26 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       try {
         const phoneNumber = teacher.normalized_phone;
 
-        // Utiliser le message personnalisé (texte ou média) ou générer les identifiants par défaut
+        // Utiliser le message personnalisé ou générer les identifiants par défaut
         let messageText, message_type, content, media_url, file_name;
-        const hasCustomMessage = Boolean((message && message.trim()) || mediaUrl);
-
-        if (hasCustomMessage) {
-          // Message personnalisé avec support média (même si texte vide)
-          messageText = (message || '').trim();
+        
+        // Si un message personnalisé est fourni (texte, image ou document), l'utiliser tel quel
+        if (message && message.trim()) {
+          // Message personnalisé - NE PAS générer les identifiants
+          messageText = message;
+          message_type = messageType;
+          content = message;
           media_url = mediaUrl || null;
           file_name = fileName || null;
-          message_type = media_url ? (messageType || 'document') : 'text';
-          content = messageText;
+        } else if (mediaUrl) {
+          // Si seulement un média est fourni sans texte - NE PAS générer les identifiants
+          messageText = '';
+          message_type = messageType;
+          content = '';
+          media_url = mediaUrl;
+          file_name = fileName || null;
         } else {
-          // Générer identifiants par défaut (comportement existant)
+          // SEULEMENT si aucun message ni média n'est fourni : générer les identifiants
           const year = new Date().getFullYear();
           const cleanFirstName = teacher.first_name
             .normalize('NFD')
@@ -1958,12 +1977,12 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             // Préparer le payload Wasender selon le type
             let wasenderPayload = { to: phoneNumber };
             
-            if (message_type === 'image' && media_url) {
-              wasenderPayload.imageUrl = media_url;
+            if (messageType === 'image' && mediaUrl) {
+              wasenderPayload.imageUrl = mediaUrl;
               if (messageText) wasenderPayload.text = messageText;
-            } else if (message_type === 'document' && media_url) {
-              wasenderPayload.documentUrl = media_url;
-              if (file_name) wasenderPayload.fileName = file_name;
+            } else if (messageType === 'document' && mediaUrl) {
+              wasenderPayload.documentUrl = mediaUrl;
+              if (fileName) wasenderPayload.fileName = fileName;
               if (messageText) wasenderPayload.text = messageText;
             } else {
               wasenderPayload.text = messageText;
