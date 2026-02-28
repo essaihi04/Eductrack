@@ -60,7 +60,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       
       // Envoyer une réponse simple si c'est une salutation
       if (needsAIResponse.reason === 'greeting') {
-        await sendWhatsAppResponse(normalizedPhone, `السلام عليكم ${parentInfo.parent_name.split(' ')[0]} 👋\n\nكيف يمكنني مساعدتك اليوم؟`, parentInfo.school_id);
+        const menuMessage = await buildWelcomeMenu(parentInfo, normalizedPhone);
+        await sendWhatsAppResponse(normalizedPhone, menuMessage, parentInfo.school_id);
       } else if (needsAIResponse.reason === 'thanks') {
         await sendWhatsAppResponse(normalizedPhone, `العفو! نحن دائماً في خدمتكم 🙏`, parentInfo.school_id);
       }
@@ -72,23 +73,43 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       return;
     }
     
-    // 5. Identifier l'élève concerné par le message (via IA)
+    // 5. Vérifier si c'est une sélection d'enfant (numéro)
+    const childSelection = await handleChildSelection(messageText, normalizedPhone, parentInfo);
+    if (childSelection.handled) {
+      await supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .update({ processed: true, ai_response_sent: false })
+        .eq('id', incomingMsg.id);
+      return;
+    }
+    
+    // 6. Vérifier si c'est une question prédéfinie
+    const predefinedQuestion = detectPredefinedQuestion(messageText);
+    
+    // 7. Identifier l'élève concerné par le message
     const studentInfo = await identifyStudentFromMessage(messageText, parentInfo);
     
     if (!studentInfo) {
       console.log('[Chatbot] Impossible d\'identifier l\'élève dans le message');
-      await sendClarificationMessage(normalizedPhone, parentInfo, messageText);
+      await sendChildSelectionMenu(normalizedPhone, parentInfo);
       return;
     }
     
     console.log('[Chatbot] Élève identifié:', studentInfo.first_name, studentInfo.last_name);
     
-    // 6. Collecter les données complètes de l'élève
+    // 8. Collecter les données complètes de l'élève
     const studentData = await collectStudentData(studentInfo.id, parentInfo.school_id);
     
-    // 7. Générer la réponse IA avec historique
+    // 9. Générer la réponse IA avec historique
     const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
-    const aiResponse = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory);
+    const aiResponse = await generateAIResponse(
+      predefinedQuestion || messageText, 
+      studentInfo, 
+      studentData, 
+      parentInfo, 
+      conversationHistory,
+      predefinedQuestion ? 'predefined' : 'custom'
+    );
     
     // 8. Envoyer la réponse via WhatsApp
     await sendWhatsAppResponse(normalizedPhone, aiResponse, parentInfo.school_id);
@@ -199,6 +220,195 @@ async function getConversationHistory(phone, parentId, studentId, limit = 5) {
     .limit(limit);
   
   return history || [];
+}
+
+// Construire le menu de bienvenue avec enfants et questions
+async function buildWelcomeMenu(parentInfo, phone) {
+  // Récupérer les enfants du parent
+  const { data: children } = await supabaseAdmin
+    .from('parent_students')
+    .select(`
+      student_id,
+      students:profiles!parent_students_student_id_fkey(
+        id,
+        first_name,
+        last_name,
+        classes!fk_profiles_class(name)
+      )
+    `)
+    .eq('parent_id', parentInfo.parent_id);
+  
+  const isArabic = parentInfo.parent_name && /[\u0600-\u06FF]/.test(parentInfo.parent_name);
+  
+  let message = isArabic 
+    ? `السلام عليكم ${parentInfo.parent_name.split(' ')[0]} 👋\n\n` 
+    : `Bonjour ${parentInfo.parent_name.split(' ')[0]} 👋\n\n`;
+  
+  if (children && children.length > 0) {
+    message += isArabic ? '📚 *أبناؤك:*\n' : '📚 *Vos enfants:*\n';
+    children.forEach((child, idx) => {
+      const student = child.students;
+      message += `${idx + 1}. ${student.first_name} ${student.last_name} - ${student.classes?.name || 'N/A'}\n`;
+    });
+    message += '\n';
+  }
+  
+  message += isArabic 
+    ? '*📋 أسئلة سريعة:*\n\n'
+    : '*📋 Questions rapides:*\n\n';
+  
+  if (isArabic) {
+    message += 'أ. كيف حال ولدي اليوم؟\n';
+    message += 'ب. ما هي الدروس المدروسة؟\n';
+    message += 'ج. هل هناك واجبات منزلية؟\n';
+    message += 'د. ما هي آخر النقط؟\n';
+    message += 'ه. كيف سلوكه في القسم؟\n';
+  } else {
+    message += 'A. Comment va mon enfant aujourd\'hui ?\n';
+    message += 'B. Quelles leçons ont été étudiées ?\n';
+    message += 'C. Y a-t-il des devoirs ?\n';
+    message += 'D. Quelles sont les dernières notes ?\n';
+    message += 'E. Comment est son comportement ?\n';
+  }
+  
+  message += '\n' + (isArabic 
+    ? '💬 أو اكتب سؤالك مباشرة' 
+    : '💬 Ou écrivez votre question directement');
+  
+  return message;
+}
+
+// Gérer la sélection d'enfant
+async function handleChildSelection(messageText, phone, parentInfo) {
+  const trimmed = messageText.trim();
+  
+  // Vérifier si c'est un numéro (1, 2, 3...)
+  if (/^[0-9]$/.test(trimmed)) {
+    const childIndex = parseInt(trimmed) - 1;
+    
+    // Récupérer les enfants
+    const { data: children } = await supabaseAdmin
+      .from('parent_students')
+      .select(`
+        student_id,
+        students:profiles!parent_students_student_id_fkey(
+          id,
+          first_name,
+          last_name,
+          classes!fk_profiles_class(name)
+        )
+      `)
+      .eq('parent_id', parentInfo.parent_id);
+    
+    if (children && children[childIndex]) {
+      const student = children[childIndex].students;
+      
+      // Enregistrer la sélection dans une table temporaire ou session
+      await supabaseAdmin
+        .from('whatsapp_conversations')
+        .insert({
+          parent_id: parentInfo.parent_id,
+          student_id: student.id,
+          school_id: parentInfo.school_id,
+          parent_message: `Sélection: ${student.first_name}`,
+          ai_response: 'Enfant sélectionné',
+          phone_e164: phone
+        });
+      
+      const isArabic = /[\u0600-\u06FF]/.test(student.first_name);
+      const quickMenu = isArabic
+        ? `✅ تم اختيار: *${student.first_name} ${student.last_name}*\n\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\n\n💬 أو اكتب سؤالك`
+        : `✅ Sélectionné: *${student.first_name} ${student.last_name}*\n\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\n\n💬 Ou écrivez votre question`;
+      
+      await sendWhatsAppResponse(phone, quickMenu, parentInfo.school_id);
+      return { handled: true };
+    }
+  }
+  
+  return { handled: false };
+}
+
+// Envoyer le menu de sélection d'enfant
+async function sendChildSelectionMenu(phone, parentInfo) {
+  const { data: children } = await supabaseAdmin
+    .from('parent_students')
+    .select(`
+      student_id,
+      students:profiles!parent_students_student_id_fkey(
+        id,
+        first_name,
+        last_name,
+        classes!fk_profiles_class(name)
+      )
+    `)
+    .eq('parent_id', parentInfo.parent_id);
+  
+  if (!children || children.length === 0) {
+    await sendWhatsAppResponse(phone, 'Aucun enfant trouvé.', parentInfo.school_id);
+    return;
+  }
+  
+  if (children.length === 1) {
+    // Un seul enfant, pas besoin de menu
+    return;
+  }
+  
+  const isArabic = /[\u0600-\u06FF]/.test(children[0].students.first_name);
+  let message = isArabic 
+    ? '👨‍👩‍👧‍👦 *اختر الطفل:*\n\n' 
+    : '👨‍👩‍👧‍👦 *Choisissez l\'enfant:*\n\n';
+  
+  children.forEach((child, idx) => {
+    const student = child.students;
+    message += `${idx + 1}. ${student.first_name} ${student.last_name} - ${student.classes?.name || 'N/A'}\n`;
+  });
+  
+  message += '\n' + (isArabic 
+    ? '📝 أرسل الرقم (1، 2، 3...)' 
+    : '📝 Envoyez le numéro (1, 2, 3...)');
+  
+  await sendWhatsAppResponse(phone, message, parentInfo.school_id);
+}
+
+// Détecter les questions prédéfinies
+function detectPredefinedQuestion(messageText) {
+  const lower = messageText.toLowerCase().trim();
+  
+  // Questions en arabe
+  if (lower === 'أ' || lower.includes('كيف حال') || lower.includes('كيف داير')) {
+    return 'Comment va mon enfant aujourd\'hui ? Donne-moi un résumé de sa journée.';
+  }
+  if (lower === 'ب' || lower.includes('الدروس المدروسة') || lower.includes('ماذا درس')) {
+    return 'Quelles leçons ont été étudiées aujourd\'hui ?';
+  }
+  if (lower === 'ج' || lower.includes('واجبات') || lower.includes('فروض منزلية')) {
+    return 'Y a-t-il des devoirs à faire ?';
+  }
+  if (lower === 'د' || lower.includes('النقط') || lower.includes('العلامات')) {
+    return 'Quelles sont les dernières notes de mon enfant ?';
+  }
+  if (lower === 'ه' || lower.includes('سلوك') || lower.includes('تصرف')) {
+    return 'Comment est le comportement de mon enfant en classe ?';
+  }
+  
+  // Questions en français
+  if (lower === 'a' || (lower.includes('comment') && lower.includes('aujourd'))) {
+    return 'Comment va mon enfant aujourd\'hui ? Donne-moi un résumé de sa journée.';
+  }
+  if (lower === 'b' || (lower.includes('leçon') || lower.includes('étudié'))) {
+    return 'Quelles leçons ont été étudiées aujourd\'hui ?';
+  }
+  if (lower === 'c' || lower.includes('devoir')) {
+    return 'Y a-t-il des devoirs à faire ?';
+  }
+  if (lower === 'd' || (lower.includes('note') || lower.includes('résultat'))) {
+    return 'Quelles sont les dernières notes de mon enfant ?';
+  }
+  if (lower === 'e' || lower.includes('comportement')) {
+    return 'Comment est le comportement de mon enfant en classe ?';
+  }
+  
+  return null;
 }
 
 // Récupérer les informations du parent par numéro de téléphone
@@ -408,7 +618,7 @@ async function collectStudentData(studentId, schoolId) {
 }
 
 // Générer la réponse IA personnalisée avec historique
-async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory = []) {
+async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory = [], questionType = 'custom') {
   try {
     // Préparer le contexte pour l'IA
     const context = buildContextForAI(studentInfo, studentData);
@@ -430,22 +640,24 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
 Tu réponds aux questions des parents concernant leurs enfants de manière professionnelle, bienveillante et précise.
 
 RÈGLES IMPORTANTES:
-- Réponds UNIQUEMENT avec les données réelles fournies
-- Si tu n'as pas l'information, dis-le clairement et propose de contacter l'enseignant
+- Réponds UNIQUEMENT avec les données réelles fournies dans le contexte
+- Si tu n'as pas l'information demandée, dis-le clairement sans inventer
 - Sois encourageant et constructif
 - Utilise un ton professionnel mais chaleureux
 - IMPORTANT: Réponds OBLIGATOIREMENT en ${language} (la langue du parent)
-- Limite ta réponse à 10-15 lignes maximum
-- Utilise des emojis appropriés pour rendre le message agréable
-- Tiens compte de l'historique de conversation pour éviter de répéter les mêmes informations
-- Sois précis et réponds directement à la question posée
-- Mentionne les leçons étudiées si disponibles
-- Signale les incidents comportementaux (téléphone, sommeil) s'il y en a
+- SOIS COURT ET PRÉCIS: Maximum 8-10 lignes
+- Ne donne QUE les informations demandées, pas plus
+- Utilise des emojis appropriés (2-3 maximum)
+- Tiens compte de l'historique pour éviter les répétitions
+- Réponds DIRECTEMENT à la question sans introduction longue
+- Mentionne les leçons étudiées si la question le demande
+- Signale les incidents UNIQUEMENT s'ils existent et sont pertinents
+- ${questionType === 'predefined' ? 'Question prédéfinie: réponds de manière concise et structurée' : ''}
 
 DONNÉES DE L'ÉLÈVE:
 ${context}${historyContext}
 
-Réponds maintenant à la question du parent de manière claire et précise EN ${language.toUpperCase()}.`;
+Réponds maintenant de manière COURTE et PRÉCISE EN ${language.toUpperCase()}.`;
     
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
