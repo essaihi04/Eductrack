@@ -2059,20 +2059,42 @@ router.post('/teachers/:id/reset-password', async (req, res) => {
     const { id } = req.params;
     const { newPassword } = req.body;
 
+    console.log('[ResetPassword] Tentative de réinitialisation pour user:', id);
+    console.log('[ResetPassword] Nouveau mot de passe longueur:', newPassword?.length);
+
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
     }
 
-    // Mettre à jour le mot de passe dans Auth
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(id, {
-      password: newPassword
+    // Vérifier que l'utilisateur existe
+    const { data: user, error: getUserError } = await supabaseAdmin.auth.admin.getUserById(id);
+    if (getUserError || !user) {
+      console.error('[ResetPassword] Utilisateur non trouvé:', getUserError);
+      return res.status(404).json({ error: 'Utilisateur non trouvé' });
+    }
+
+    console.log('[ResetPassword] Email utilisateur:', user.user.email);
+
+    // Mettre à jour le mot de passe dans Auth avec email_confirm à false
+    const { data: updateData, error: updateError } = await supabaseAdmin.auth.admin.updateUserById(id, {
+      password: newPassword,
+      email_confirm: true // Confirmer l'email automatiquement
     });
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      console.error('[ResetPassword] Erreur mise à jour:', updateError);
+      throw updateError;
+    }
 
-    res.json({ message: 'Mot de passe réinitialisé avec succès', password: newPassword });
+    console.log('[ResetPassword] Mot de passe mis à jour avec succès pour:', user.user.email);
+
+    res.json({ 
+      message: 'Mot de passe réinitialisé avec succès', 
+      password: newPassword,
+      email: user.user.email
+    });
   } catch (error) {
-    console.error('Erreur:', error);
+    console.error('[ResetPassword] Erreur:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
