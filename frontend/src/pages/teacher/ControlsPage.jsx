@@ -1951,7 +1951,12 @@ const ControlsPage = () => {
           <div className="bg-white rounded-lg w-full max-w-4xl max-h-[95vh] flex flex-col">
             <div className="flex items-center justify-between p-2 sm:p-4 border-b flex-shrink-0">
               <div className="min-w-0 flex-1 pr-2">
-                <h2 className="text-sm sm:text-xl font-bold flex items-center gap-1 sm:gap-2 truncate">
+                <h2 className="text-sm sm:text-xl font-bold findex-Cv8VOZy7.js:47 Uncaught Error: Missing Supabase environment variables
+    at index-Cv8VOZy7.js:47:35188
+contentScript.js:2 i18next: languageChanged fr-FR
+contentScript.js:2 i18next: initialized 
+{debug: true, initImmediate: true, ns: Array(1), defaultNS: Array(1), fallbackLng: Array(1), …}
+content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-center gap-1 sm:gap-2 truncate">
                   <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
                   <span className="truncate">Notes – {selectedControlForNotes.name}</span>
                 </h2>

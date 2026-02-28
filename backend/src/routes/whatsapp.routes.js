@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { processDailyReports, generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
@@ -984,23 +985,48 @@ router.post('/sessions', async (req, res) => {
       return res.status(400).json({ error: 'Nom et numéro de téléphone requis' });
     }
 
-    // Create session on Wasender
+    // Générer un secret webhook unique pour cette session
+    const webhookSecret = crypto.randomBytes(32).toString('hex');
+    const webhookUrl = process.env.WEBHOOK_BASE_URL || 'https://etrack.ma';
+    const fullWebhookUrl = `${webhookUrl}/api/webhooks/whatsapp/incoming`;
+
+    // Détecter si on est en localhost (webhook ne fonctionnera pas)
+    const isLocalhost = webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1');
+    const webhookEnabled = !isLocalhost;
+
+    if (isLocalhost) {
+      console.warn('[WhatsApp] ⚠️  ATTENTION: Webhook désactivé car environnement localhost');
+      console.warn('[WhatsApp] 💡 Pour activer le webhook en dev, utilisez ngrok:');
+      console.warn('[WhatsApp]    1. ngrok http 3000');
+      console.warn('[WhatsApp]    2. Ajoutez WEBHOOK_BASE_URL=https://xxx.ngrok.io dans .env');
+      console.warn('[WhatsApp]    3. Redémarrez le serveur');
+    }
+
+    const sessionPayload = {
+      name,
+      phone_number,
+      account_protection: true,
+      log_messages: true,
+      read_incoming_messages: false,
+      webhook_url: webhookEnabled ? fullWebhookUrl : undefined,
+      webhook_enabled: webhookEnabled,
+      webhook_events: webhookEnabled ? ['messages.received', 'messages.update'] : undefined
+    };
+
+    console.log('[WhatsApp] 🔧 Création session avec payload:', JSON.stringify(sessionPayload, null, 2));
+
+    // Create session on Wasender with webhook configuration
     const waRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${globalKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        phone_number,
-        account_protection: true,
-        log_messages: true,
-        read_incoming_messages: false
-      })
+      body: JSON.stringify(sessionPayload)
     });
 
     const waData = await safeJson(waRes);
+    console.log('[WhatsApp] 📥 Réponse WasenderAPI:', JSON.stringify(waData, null, 2));
 
     if (waData.success && waData.data) {
-      // Save the mapping: school_id → wasender session id
+      // Save the mapping: school_id → wasender session id with webhook info
       const { error: mapError } = await supabaseAdmin
         .from('whatsapp_school_sessions')
         .upsert({
@@ -1008,17 +1034,90 @@ router.post('/sessions', async (req, res) => {
           wasender_session_id: waData.data.id,
           session_name: name,
           phone_number: phone_number,
+          webhook_url: fullWebhookUrl,
+          webhook_secret: webhookSecret,
+          webhook_enabled: true,
           updated_at: new Date().toISOString()
         }, { onConflict: 'school_id' });
 
-      if (mapError) console.error('Error saving session mapping:', mapError);
+      if (mapError) console.error('[WhatsApp] ❌ Error saving session mapping:', mapError);
 
-      res.json({ success: true, session: waData.data });
+      console.log(`[WhatsApp] ✅ Session créée`);
+      console.log(`[WhatsApp] 📍 Webhook URL: ${webhookEnabled ? fullWebhookUrl : 'Désactivé (localhost)'}`);
+      console.log(`[WhatsApp] 🔑 Webhook dans réponse: ${waData.data.webhook_enabled ? 'OUI' : 'NON'}`);
+      
+      res.json({ 
+        success: true, 
+        session: waData.data, 
+        webhook_configured: waData.data.webhook_enabled || false,
+        webhook_url: webhookEnabled ? fullWebhookUrl : null,
+        localhost_warning: isLocalhost ? 'Le chatbot IA ne fonctionnera qu\'après déploiement en production ou avec ngrok' : null
+      });
     } else {
+      console.error('[WhatsApp] ❌ Erreur création session:', waData.message);
       res.status(400).json({ error: waData.message || 'Erreur création session' });
     }
   } catch (error) {
     console.error('Erreur création session:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /sessions/:sessionId/webhook — update webhook configuration for existing session
+router.put('/sessions/:sessionId/webhook', async (req, res) => {
+  try {
+    const globalKey = getGlobalApiKey();
+    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée' });
+
+    const schoolId = getSchoolId(req);
+    const { sessionId } = req.params;
+
+    // Verify this session belongs to this school
+    const mappedSessionId = await getSchoolSessionId(schoolId);
+    if (String(mappedSessionId) !== String(sessionId)) {
+      return res.status(403).json({ error: 'Cette session ne vous appartient pas.' });
+    }
+
+    // Generate webhook configuration
+    const webhookUrl = process.env.WEBHOOK_BASE_URL || 'https://etrack.ma';
+    const fullWebhookUrl = `${webhookUrl}/api/webhooks/whatsapp/incoming`;
+
+    // Update session on WasenderAPI
+    const waRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${globalKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        webhook_url: fullWebhookUrl,
+        webhook_enabled: true,
+        webhook_events: ['messages.received', 'messages.update']
+      })
+    });
+
+    const waData = await safeJson(waRes);
+
+    if (waData.success) {
+      // Update our database
+      await supabaseAdmin
+        .from('whatsapp_school_sessions')
+        .update({
+          webhook_url: fullWebhookUrl,
+          webhook_enabled: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('school_id', schoolId);
+
+      console.log(`[WhatsApp] Webhook activé pour session ${sessionId}: ${fullWebhookUrl}`);
+      res.json({ 
+        success: true, 
+        message: 'Webhook activé avec succès',
+        webhook_url: fullWebhookUrl,
+        webhook_secret: waData.data?.webhook_secret
+      });
+    } else {
+      res.status(400).json({ error: waData.message || 'Erreur mise à jour webhook' });
+    }
+  } catch (error) {
+    console.error('Erreur mise à jour webhook:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

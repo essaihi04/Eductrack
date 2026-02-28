@@ -18,6 +18,7 @@ import controlsPlanRoutes from './routes/controlsPlan.routes.js';
 import documentsRoutes from './routes/documents.routes.js';
 import superadminRoutes from './routes/superadmin.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
+import webhooksRoutes from './routes/webhooks.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 
 dotenv.config();
@@ -40,6 +41,9 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static('uploads'));
 
 // Routes
+// Webhooks (sans authentification JWT - doit être avant les autres routes)
+app.use('/api/webhooks', webhooksRoutes);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/teacher', teacherRoutes);
