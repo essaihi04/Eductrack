@@ -723,11 +723,12 @@ Réponds UNIQUEMENT avec le prénom de l'enfant mentionné, ou "TOUS" si le pare
   }
 }
 
-// Collecter les données complètes de l'élève
+// Collecter les données complètes de l'élève (TOUTES LES PÉRIODES)
 async function collectStudentData(studentId, schoolId) {
   const today = new Date().toISOString().split('T')[0];
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const threeMonthsAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
   console.log('[collectStudentData] Début collecte pour student_id:', studentId);
   
@@ -758,8 +759,8 @@ async function collectStudentData(studentId, schoolId) {
     };
   }
   
-  // 2. Récupérer toutes les autres données en parallèle
-  const [recentSessions, recentTracking, recentGrades, recentHomework, allGrades, absences] = await Promise.all([
+  // 2. Récupérer toutes les autres données en parallèle (TOUTES LES PÉRIODES)
+  const [recentSessions, allTracking, recentTracking, recentGrades, recentHomework, allGrades, absences, allSessions] = await Promise.all([
     // Sessions récentes de sa classe
     supabaseAdmin
       .from('sessions')
@@ -769,7 +770,15 @@ async function collectStudentData(studentId, schoolId) {
       .lte('date', today)
       .order('date', { ascending: false }),
     
-    // Tracking de présence et comportement avec incidents
+    // Tout le tracking (3 derniers mois)
+    supabaseAdmin
+      .from('session_tracking')
+      .select('*, sessions!inner(date, subjects(name))')
+      .eq('student_id', studentId)
+      .gte('sessions.date', threeMonthsAgo)
+      .order('sessions.date', { ascending: false }),
+    
+    // Tracking récent (7 jours)
     supabaseAdmin
       .from('session_tracking')
       .select('*, sessions!inner(date, subjects(name))')
@@ -777,10 +786,10 @@ async function collectStudentData(studentId, schoolId) {
       .gte('sessions.date', oneWeekAgo)
       .lte('sessions.date', today),
     
-    // Notes récentes
+    // Notes récentes (sans relation subjects - récupérer séparément)
     supabaseAdmin
       .from('control_notes')
-      .select('note, controls_plan!inner(title, date, subject_id, subjects(name))')
+      .select('note, control_id, controls_plan!inner(title, date, subject_id)')
       .eq('student_id', studentId)
       .gte('controls_plan.date', oneWeekAgo)
       .limit(10),
@@ -796,17 +805,26 @@ async function collectStudentData(studentId, schoolId) {
     // Toutes les notes (pour calculer les moyennes)
     supabaseAdmin
       .from('control_notes')
-      .select('note, controls_plan!inner(title, date, subject_id, subjects(name))')
+      .select('note, control_id, controls_plan!inner(title, date, subject_id)')
       .eq('student_id', studentId)
-      .gte('controls_plan.date', oneMonthAgo),
+      .gte('controls_plan.date', threeMonthsAgo),
     
-    // Absences du mois
+    // Absences (3 derniers mois)
     supabaseAdmin
       .from('session_tracking')
       .select('*, sessions!inner(date, subjects(name))')
       .eq('student_id', studentId)
       .eq('presence', 'absent')
-      .gte('sessions.date', oneMonthAgo)
+      .gte('sessions.date', threeMonthsAgo),
+    
+    // Toutes les sessions (3 derniers mois)
+    supabaseAdmin
+      .from('sessions')
+      .select('id, date, topic, type, subjects(name)')
+      .eq('class_id', classId)
+      .gte('date', threeMonthsAgo)
+      .lte('date', today)
+      .order('date', { ascending: false })
   ]);
   
   console.log('[collectStudentData] Résultats:', {
@@ -827,7 +845,9 @@ async function collectStudentData(studentId, schoolId) {
   return {
     profile: studentProfile,
     sessions: recentSessions.data || [],
+    allSessions: allSessions.data || [],
     tracking: recentTracking.data || [],
+    allTracking: allTracking.data || [],
     grades: recentGrades.data || [],
     homework: recentHomework.data || [],
     allGrades: allGrades.data || [],
@@ -873,7 +893,7 @@ Tu réponds aux questions des parents concernant leurs enfants de manière profe
    - Avant de parler de leçons, vérifie "Leçon étudiée"
 
 3. RÉPONSES COURTES ET PRÉCISES:
-   - Maximum 8-10 lignes
+   - Maximum 10-12 lignes
    - Réponds UNIQUEMENT à la question posée
    - Pas d'informations supplémentaires non demandées
    - 2-3 emojis maximum
@@ -886,7 +906,12 @@ Tu réponds aux questions des parents concernant leurs enfants de manière profe
    - Structure claire avec tirets ou numéros si plusieurs points
    - ${questionType === 'predefined' ? 'Question prédéfinie: réponds de manière concise et structurée' : ''}
 
-6. SI DONNÉES MANQUANTES:
+6. RECOMMANDATIONS OBLIGATOIRES:
+   - Si des INCIDENTS sont présents, tu DOIS donner 2-3 recommandations concrètes pour les éviter
+   - Recommandations basées sur les incidents spécifiques détectés
+   - Conseils pratiques et applicables
+
+7. SI DONNÉES MANQUANTES:
    - Dis clairement: "Je n'ai pas cette information pour le moment"
    - Propose de contacter l'enseignant pour plus de détails
    - N'invente JAMAIS de données
@@ -1054,9 +1079,34 @@ function buildContextForAI(studentInfo, studentData) {
   const absentCount = studentData.tracking.filter(t => t.presence === 'absent').length;
   
   if (totalSessions > 0) {
-    context += `📊 PRÉSENCE (7 derniers jours):\n`;
+    context += `📊 PRÉSENCE (toutes périodes):\n`;
     context += `- Présent: ${presentCount}/${totalSessions} séances\n`;
     context += `- Absent: ${absentCount}/${totalSessions} séances\n\n`;
+  }
+  
+  // Statistiques du mois
+  const monthTracking = studentData.allTracking || [];
+  const monthTotal = monthTracking.length;
+  const monthPresent = monthTracking.filter(t => t.presence === 'present').length;
+  const monthAbsent = monthTracking.filter(t => t.presence === 'absent').length;
+  const monthIncidents = monthTracking.flatMap(t => t.incidents || []);
+  
+  if (monthTotal > 0) {
+    context += `📊 STATISTIQUES DU MOIS:\n`;
+    context += `- Total séances: ${monthTotal}\n`;
+    context += `- Présences: ${monthPresent} (${Math.round(monthPresent/monthTotal*100)}%)\n`;
+    context += `- Absences: ${monthAbsent}\n`;
+    if (monthIncidents.length > 0) {
+      const incidentCounts = {};
+      monthIncidents.forEach(inc => {
+        incidentCounts[inc] = (incidentCounts[inc] || 0) + 1;
+      });
+      context += `- Incidents du mois:\n`;
+      Object.entries(incidentCounts).forEach(([inc, count]) => {
+        context += `  • ${inc}: ${count} fois\n`;
+      });
+    }
+    context += `\n`;
   }
   
   // Comportement et participation (moyenne)
