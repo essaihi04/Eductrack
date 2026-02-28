@@ -156,12 +156,12 @@ async function getParentByPhone(phoneNumber, schoolId = null) {
 // Identifier l'élève mentionné dans le message via IA
 async function identifyStudentFromMessage(messageText, parentInfo) {
   try {
-    // Récupérer tous les enfants de ce parent via la table student_parents
+    // Récupérer tous les enfants de ce parent via la table parent_students
     const { data: studentParents } = await supabaseAdmin
-      .from('student_parents')
+      .from('parent_students')
       .select(`
         student_id,
-        students:profiles!student_parents_student_id_fkey(
+        students:profiles!parent_students_student_id_fkey(
           id,
           first_name,
           last_name,
