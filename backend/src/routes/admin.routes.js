@@ -1884,16 +1884,17 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       try {
         const phoneNumber = teacher.normalized_phone;
 
-        // Utiliser le message personnalisé ou générer les identifiants par défaut
+        // Utiliser le message personnalisé (texte ou média) ou générer les identifiants par défaut
         let messageText, message_type, content, media_url, file_name;
-        
-        if (message && message.trim()) {
-          // Message personnalisé avec support média
-          messageText = message;
-          message_type = messageType;
-          content = message;
+        const hasCustomMessage = Boolean((message && message.trim()) || mediaUrl);
+
+        if (hasCustomMessage) {
+          // Message personnalisé avec support média (même si texte vide)
+          messageText = (message || '').trim();
           media_url = mediaUrl || null;
           file_name = fileName || null;
+          message_type = media_url ? (messageType || 'document') : 'text';
+          content = messageText;
         } else {
           // Générer identifiants par défaut (comportement existant)
           const year = new Date().getFullYear();
@@ -1957,12 +1958,12 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             // Préparer le payload Wasender selon le type
             let wasenderPayload = { to: phoneNumber };
             
-            if (messageType === 'image' && mediaUrl) {
-              wasenderPayload.imageUrl = mediaUrl;
+            if (message_type === 'image' && media_url) {
+              wasenderPayload.imageUrl = media_url;
               if (messageText) wasenderPayload.text = messageText;
-            } else if (messageType === 'document' && mediaUrl) {
-              wasenderPayload.documentUrl = mediaUrl;
-              if (fileName) wasenderPayload.fileName = fileName;
+            } else if (message_type === 'document' && media_url) {
+              wasenderPayload.documentUrl = media_url;
+              if (file_name) wasenderPayload.fileName = file_name;
               if (messageText) wasenderPayload.text = messageText;
             } else {
               wasenderPayload.text = messageText;
