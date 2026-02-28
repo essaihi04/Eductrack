@@ -734,7 +734,7 @@ async function collectStudentData(studentId, schoolId) {
   // 1. D'abord récupérer le profil pour avoir class_id
   const { data: studentProfile, error: profileError } = await supabaseAdmin
     .from('profiles')
-    .select('*, classes(name, level, school_type)')
+    .select('*, classes!fk_profiles_class(name, level, school_type)')
     .eq('id', studentId)
     .single();
   
