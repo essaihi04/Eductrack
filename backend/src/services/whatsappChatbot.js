@@ -157,7 +157,9 @@ async function getParentByPhone(phoneNumber, schoolId = null) {
 async function identifyStudentFromMessage(messageText, parentInfo) {
   try {
     // Récupérer tous les enfants de ce parent via la table parent_students
-    const { data: studentParents } = await supabaseAdmin
+    console.log('[Chatbot] Recherche enfants pour parent_id:', parentInfo.parent_id);
+    
+    const { data: studentParents, error: childrenError } = await supabaseAdmin
       .from('parent_students')
       .select(`
         student_id,
@@ -170,6 +172,16 @@ async function identifyStudentFromMessage(messageText, parentInfo) {
         )
       `)
       .eq('parent_id', parentInfo.parent_id);
+    
+    console.log('[Chatbot] Résultat requête enfants:', { 
+      count: studentParents?.length || 0, 
+      error: childrenError,
+      data: studentParents 
+    });
+    
+    if (childrenError) {
+      console.error('[Chatbot] Erreur récupération enfants:', childrenError);
+    }
     
     if (!studentParents || studentParents.length === 0) {
       console.log('[Chatbot] Aucun enfant trouvé pour ce parent');
