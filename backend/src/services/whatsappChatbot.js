@@ -168,7 +168,7 @@ async function identifyStudentFromMessage(messageText, parentInfo) {
           first_name,
           last_name,
           class_id,
-          classes(name, level)
+          classes!fk_profiles_class(name, level)
         )
       `)
       .eq('parent_id', parentInfo.parent_id);
