@@ -451,6 +451,17 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     if (Number.isNaN(parsed.getTime())) return '';
     return parsed.toISOString().slice(0, 7);
   };
+  const toSparkline = (values) => {
+    const blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    if (!values || values.length === 0) return '';
+    return values
+      .map((v) => {
+        const normalized = Math.max(0, Math.min(100, Number(v) || 0));
+        const idx = Math.min(7, Math.floor(normalized / 12.5));
+        return blocks[idx];
+      })
+      .join('');
+  };
   
   let response = '';
 
@@ -470,6 +481,9 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     // Fallback: si le format de date est hétérogène, ne pas perdre les métriques
     if (monthTracking.length === 0 && (studentData.allTracking || []).length > 0) {
       monthTracking = studentData.allTracking || [];
+    }
+    if (monthTracking.length === 0 && (studentData.tracking || []).length > 0) {
+      monthTracking = studentData.tracking || [];
     }
     if (monthGrades.length === 0 && (studentData.allGrades || []).length > 0) {
       monthGrades = studentData.allGrades || [];
@@ -526,6 +540,50 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         response += isArabic
           ? `• معدل النقط هذا الشهر: *${avgNote}/20*\n`
           : `• Moyenne des notes du mois: *${avgNote}/20*\n`;
+      }
+
+      // Courbe d'évolution (4 semaines) basée sur présence + participation
+      const weekBuckets = {};
+      monthTracking.forEach((t) => {
+        const rawDate = t.sessions?.date;
+        if (!rawDate) return;
+        const d = new Date(rawDate);
+        if (Number.isNaN(d.getTime())) return;
+        const weekIndex = Math.floor((d.getUTCDate() - 1) / 7) + 1;
+        const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-S${weekIndex}`;
+        if (!weekBuckets[key]) {
+          weekBuckets[key] = { total: 0, present: 0, partSum: 0, partCount: 0 };
+        }
+        weekBuckets[key].total += 1;
+        if (t.presence === 'present') weekBuckets[key].present += 1;
+        if (t.participation) {
+          const map = { excellent: 5, good: 4, average: 3, poor: 2, weak: 2 };
+          const score = map[String(t.participation).toLowerCase()] || 0;
+          if (score > 0) {
+            weekBuckets[key].partSum += score;
+            weekBuckets[key].partCount += 1;
+          }
+        }
+      });
+
+      const sortedWeeks = Object.keys(weekBuckets).sort();
+      if (sortedWeeks.length > 0) {
+        const lastWeeks = sortedWeeks.slice(-4);
+        const presenceSeries = lastWeeks.map((w) => Math.round((weekBuckets[w].present / Math.max(1, weekBuckets[w].total)) * 100));
+        const participationSeries = lastWeeks.map((w) => {
+          if (weekBuckets[w].partCount === 0) return 0;
+          return Math.round((weekBuckets[w].partSum / weekBuckets[w].partCount / 5) * 100);
+        });
+
+        response += isArabic
+          ? `\n📈 تطور الأسابيع (${lastWeeks.length}):\n`
+          : `\n📈 Courbe d'évolution (${lastWeeks.length} semaines):\n`;
+        response += isArabic
+          ? `• الحضور: ${toSparkline(presenceSeries)} (${presenceSeries.join('% - ')}%)\n`
+          : `• Présence: ${toSparkline(presenceSeries)} (${presenceSeries.join('% - ')}%)\n`;
+        response += isArabic
+          ? `• المشاركة: ${toSparkline(participationSeries)} (${participationSeries.join('% - ')}%)\n`
+          : `• Participation: ${toSparkline(participationSeries)} (${participationSeries.join('% - ')}%)\n`;
       }
 
       response += isArabic
@@ -931,6 +989,7 @@ async function collectStudentData(studentId, schoolId) {
     profile: !!studentProfile,
     sessions: recentSessions.data?.length || 0,
     tracking: recentTracking.data?.length || 0,
+    allTracking: allTracking.data?.length || 0,
     grades: recentGrades.data?.length || 0,
     homework: recentHomework.data?.length || 0,
     allGrades: allGrades.data?.length || 0,
@@ -938,8 +997,10 @@ async function collectStudentData(studentId, schoolId) {
   });
   
   if (recentSessions.error) console.error('[collectStudentData] Erreur sessions:', recentSessions.error);
+  if (allTracking.error) console.error('[collectStudentData] Erreur allTracking:', allTracking.error);
   if (recentTracking.error) console.error('[collectStudentData] Erreur tracking:', recentTracking.error);
   if (recentGrades.error) console.error('[collectStudentData] Erreur grades:', recentGrades.error);
+  if (allGrades.error) console.error('[collectStudentData] Erreur allGrades:', allGrades.error);
   if (recentHomework.error) console.error('[collectStudentData] Erreur homework:', recentHomework.error);
   
   return {
