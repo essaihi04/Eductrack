@@ -383,6 +383,18 @@ async function sendChildSelectionMenu(phone, parentInfo) {
 // CLASSIFICATEUR DE QUESTIONS - Architecture hybride
 function classifyQuestion(messageText) {
   const lower = messageText.toLowerCase().trim();
+
+  // Priorité: questions mensuelles => réponse factuelle directe
+  if (
+    lower.includes('ce mois') ||
+    lower.includes('du mois') ||
+    lower.includes('mensuel') ||
+    lower.includes('mois') ||
+    lower.includes('الشهر') ||
+    lower.includes('شهري')
+  ) {
+    return 'FACTUAL';
+  }
   
   // Mots-clés pour questions ANALYTIQUES (nécessitent IA)
   const analyticalKeywords = [
@@ -431,11 +443,84 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const lower = question.toLowerCase().trim();
   const isArabic = /[\u0600-\u06FF]/.test(question);
   const today = new Date().toISOString().split('T')[0];
+  const currentMonth = today.slice(0, 7);
   
   let response = '';
+
+  // BILAN DU MOIS
+  if (
+    lower.includes('ce mois') ||
+    lower.includes('du mois') ||
+    lower.includes('mensuel') ||
+    lower.includes('mois') ||
+    lower.includes('الشهر') ||
+    lower.includes('شهري')
+  ) {
+    const monthTracking = (studentData.allTracking || []).filter(t => (t.sessions?.date || '').startsWith(currentMonth));
+    const monthAbsences = (studentData.absences || []).filter(a => (a.sessions?.date || '').startsWith(currentMonth));
+    const monthGrades = (studentData.allGrades || []).filter(g => (g.controls_plan?.date || '').startsWith(currentMonth));
+
+    if (monthTracking.length === 0 && monthGrades.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد بيانات كافية لهذا الشهر حتى الآن.`
+        : `ℹ️ Pas encore assez de données pour ce mois.`;
+    } else {
+      const totalSessions = monthTracking.length;
+      const presentCount = monthTracking.filter(t => t.presence === 'present').length;
+      const absentCount = monthTracking.filter(t => t.presence === 'absent').length;
+      const lateCount = monthTracking.filter(t => t.presence === 'late').length;
+      const homeworkReadyCount = monthTracking.filter(t => t.cahier_present === true).length;
+
+      const incidents = [];
+      monthTracking.forEach(t => {
+        if (t.phone_use) incidents.push('téléphone');
+        if (t.sleeping) incidents.push('somnolence');
+      });
+      const incidentCount = incidents.length;
+
+      const avgNote = monthGrades.length > 0
+        ? (monthGrades.reduce((sum, g) => sum + (g.note || 0), 0) / monthGrades.length).toFixed(2)
+        : null;
+
+      response = isArabic
+        ? `📅 *ملخص الشهر الحالي (${currentMonth}):*\n\n`
+        : `📅 *Bilan du mois (${currentMonth}):*\n\n`;
+
+      if (totalSessions > 0) {
+        response += isArabic
+          ? `• الحضور: *${presentCount}/${totalSessions}*\n`
+          : `• Présence: *${presentCount}/${totalSessions}*\n`;
+        response += isArabic
+          ? `• الغيابات: *${absentCount}*\n`
+          : `• Absences: *${absentCount}*\n`;
+        response += isArabic
+          ? `• التأخر: *${lateCount}*\n`
+          : `• Retards: *${lateCount}*\n`;
+        response += isArabic
+          ? `• حضور الدفتر: *${homeworkReadyCount}/${totalSessions}*\n`
+          : `• Cahier présent: *${homeworkReadyCount}/${totalSessions}*\n`;
+      }
+
+      if (monthAbsences.length > 0) {
+        response += isArabic
+          ? `• عدد أيام الغياب المسجلة: *${monthAbsences.length}*\n`
+          : `• Jours d'absence enregistrés: *${monthAbsences.length}*\n`;
+      }
+
+      if (avgNote !== null) {
+        response += isArabic
+          ? `• معدل النقط هذا الشهر: *${avgNote}/20*\n`
+          : `• Moyenne des notes du mois: *${avgNote}/20*\n`;
+      }
+
+      response += isArabic
+        ? `• الحوادث: *${incidentCount}*`
+        : `• Incidents relevés: *${incidentCount}*`;
+    }
+  }
   
   // ABSENCES
-  if (lower.includes('absence') || lower.includes('غياب') || lower.includes('combien') && lower.includes('absent')) {
+  else if (lower.includes('absence') || lower.includes('غياب') || lower.includes('combien') && lower.includes('absent')) {
     const absenceCount = studentData.absences?.length || 0;
     response = isArabic
       ? `📊 *عدد الغيابات:*\n\n${studentInfo.first_name} لديه *${absenceCount} غياب* هذا الشهر.`
@@ -891,6 +976,8 @@ Tu réponds aux questions des parents concernant leurs enfants de manière profe
    - Avant de parler de présence, vérifie "PRÉSENCE" ou "AUJOURD'HUI"
    - Avant de mentionner un incident, vérifie "INCIDENTS"
    - Avant de parler de leçons, vérifie "Leçon étudiée"
+   - Si le contexte contient "STATISTIQUES DU MOIS", tu DOIS l'utiliser pour répondre aux questions mensuelles
+   - Tu ne dois JAMAIS dire "je n'ai pas cette information" pour le mois si "STATISTIQUES DU MOIS" est présent
 
 3. RÉPONSES COURTES ET PRÉCISES:
    - Maximum 10-12 lignes
