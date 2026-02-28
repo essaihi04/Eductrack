@@ -114,10 +114,12 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     // 8. Envoyer la réponse via WhatsApp
     await sendWhatsAppResponse(normalizedPhone, aiResponse, parentInfo.school_id);
     
-    // 9. Enregistrer la conversation
+    // 9. Enregistrer la conversation avec conversation_id
+    const conversationId = `${parentInfo.parent_id}_${studentInfo.id}_${Date.now()}`;
     await supabaseAdmin
       .from('whatsapp_conversations')
       .insert({
+        conversation_id: conversationId,
         parent_id: parentInfo.parent_id,
         student_id: studentInfo.id,
         school_id: parentInfo.school_id,
@@ -190,30 +192,16 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
     return { respond: false, reason: 'simple_response' };
   }
   
-  // Vérifier le cooldown (max 1 requête IA toutes les 5 minutes par parent)
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const { data: recentMessages } = await supabaseAdmin
-    .from('whatsapp_incoming_messages')
-    .select('created_at')
-    .eq('parent_id', parentId)
-    .eq('ai_response_sent', true)
-    .gte('created_at', fiveMinutesAgo)
-    .order('created_at', { ascending: false })
-    .limit(1);
-  
-  if (recentMessages && recentMessages.length > 0) {
-    console.log('[Chatbot] Cooldown actif - dernière réponse IA il y a moins de 5 minutes');
-    return { respond: false, reason: 'cooldown' };
-  }
+  // Cooldown supprimé - réponse immédiate pour toutes les questions
   
   return { respond: true, reason: 'needs_ai' };
 }
 
-// Récupérer l'historique de conversation
-async function getConversationHistory(phone, parentId, studentId, limit = 5) {
+// Récupérer l'historique de conversation (5-10 derniers messages)
+async function getConversationHistory(phone, parentId, studentId, limit = 10) {
   const { data: history } = await supabaseAdmin
     .from('whatsapp_conversations')
-    .select('parent_message, ai_response, created_at')
+    .select('conversation_id, parent_message, ai_response, created_at')
     .eq('parent_id', parentId)
     .eq('student_id', studentId)
     .order('created_at', { ascending: false })
@@ -639,25 +627,49 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
     const systemPrompt = `Tu es un conseiller pédagogique expert travaillant pour ${parentInfo.school_name}. 
 Tu réponds aux questions des parents concernant leurs enfants de manière professionnelle, bienveillante et précise.
 
-RÈGLES IMPORTANTES:
-- Réponds UNIQUEMENT avec les données réelles fournies dans le contexte
-- Si tu n'as pas l'information demandée, dis-le clairement sans inventer
-- Sois encourageant et constructif
-- Utilise un ton professionnel mais chaleureux
-- IMPORTANT: Réponds OBLIGATOIREMENT en ${language} (la langue du parent)
-- SOIS COURT ET PRÉCIS: Maximum 8-10 lignes
-- Ne donne QUE les informations demandées, pas plus
-- Utilise des emojis appropriés (2-3 maximum)
-- Tiens compte de l'historique pour éviter les répétitions
-- Réponds DIRECTEMENT à la question sans introduction longue
-- Mentionne les leçons étudiées si la question le demande
-- Signale les incidents UNIQUEMENT s'ils existent et sont pertinents
-- ${questionType === 'predefined' ? 'Question prédéfinie: réponds de manière concise et structurée' : ''}
+🚨 RÈGLES STRICTES - SYSTÈME RAG (Retrieval-Augmented Generation):
 
-DONNÉES DE L'ÉLÈVE:
-${context}${historyContext}
+1. SOURCE DE DONNÉES UNIQUE:
+   - Tu DOIS répondre UNIQUEMENT à partir des données fournies ci-dessous
+   - INTERDICTION ABSOLUE d'inventer, supposer ou extrapoler des informations
+   - Si une donnée n'est PAS dans le contexte, tu DOIS dire "Je n'ai pas cette information"
 
-Réponds maintenant de manière COURTE et PRÉCISE EN ${language.toUpperCase()}.`;
+2. VÉRIFICATION DES DONNÉES:
+   - Avant de mentionner une note, vérifie qu'elle existe dans "NOTES RÉCENTES"
+   - Avant de parler de présence, vérifie "PRÉSENCE" ou "AUJOURD'HUI"
+   - Avant de mentionner un incident, vérifie "INCIDENTS"
+   - Avant de parler de leçons, vérifie "Leçon étudiée"
+
+3. RÉPONSES COURTES ET PRÉCISES:
+   - Maximum 8-10 lignes
+   - Réponds UNIQUEMENT à la question posée
+   - Pas d'informations supplémentaires non demandées
+   - 2-3 emojis maximum
+
+4. LANGUE:
+   - Réponds OBLIGATOIREMENT en ${language}
+
+5. FORMAT:
+   - Réponds DIRECTEMENT sans introduction longue
+   - Structure claire avec tirets ou numéros si plusieurs points
+   - ${questionType === 'predefined' ? 'Question prédéfinie: réponds de manière concise et structurée' : ''}
+
+6. SI DONNÉES MANQUANTES:
+   - Dis clairement: "Je n'ai pas cette information pour le moment"
+   - Propose de contacter l'enseignant pour plus de détails
+   - N'invente JAMAIS de données
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DONNÉES INJECTÉES (SOURCE UNIQUE DE VÉRITÉ):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${context}
+
+${historyContext}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Réponds maintenant UNIQUEMENT avec les données ci-dessus, de manière COURTE et PRÉCISE EN ${language.toUpperCase()}.`;
     
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
