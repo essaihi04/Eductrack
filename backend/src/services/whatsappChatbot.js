@@ -444,6 +444,13 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const isArabic = /[\u0600-\u06FF]/.test(question);
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
+  const toMonthKey = (value) => {
+    if (!value) return '';
+    if (typeof value === 'string') return value.slice(0, 7);
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return parsed.toISOString().slice(0, 7);
+  };
   
   let response = '';
 
@@ -456,9 +463,17 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     lower.includes('الشهر') ||
     lower.includes('شهري')
   ) {
-    const monthTracking = (studentData.allTracking || []).filter(t => (t.sessions?.date || '').startsWith(currentMonth));
-    const monthAbsences = (studentData.absences || []).filter(a => (a.sessions?.date || '').startsWith(currentMonth));
-    const monthGrades = (studentData.allGrades || []).filter(g => (g.controls_plan?.date || '').startsWith(currentMonth));
+    let monthTracking = (studentData.allTracking || []).filter(t => toMonthKey(t.sessions?.date) === currentMonth);
+    const monthAbsences = (studentData.absences || []).filter(a => toMonthKey(a.sessions?.date) === currentMonth);
+    let monthGrades = (studentData.allGrades || []).filter(g => toMonthKey(g.controls_plan?.date) === currentMonth);
+
+    // Fallback: si le format de date est hétérogène, ne pas perdre les métriques
+    if (monthTracking.length === 0 && (studentData.allTracking || []).length > 0) {
+      monthTracking = studentData.allTracking || [];
+    }
+    if (monthGrades.length === 0 && (studentData.allGrades || []).length > 0) {
+      monthGrades = studentData.allGrades || [];
+    }
 
     if (monthTracking.length === 0 && monthGrades.length === 0) {
       response = isArabic
