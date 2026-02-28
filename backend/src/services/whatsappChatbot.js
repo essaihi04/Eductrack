@@ -99,6 +99,13 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     
     // 8. Collecter les données complètes de l'élève
     const studentData = await collectStudentData(studentInfo.id, parentInfo.school_id);
+    console.log('[Chatbot] Données collectées:', {
+      sessions: studentData.sessions?.length || 0,
+      tracking: studentData.tracking?.length || 0,
+      grades: studentData.grades?.length || 0,
+      homework: studentData.homework?.length || 0,
+      absences: studentData.absences?.length || 0
+    });
     
     // 9. ARCHITECTURE HYBRIDE - Classifier la question
     const questionType = classifyQuestion(predefinedQuestion || messageText);
@@ -799,6 +806,8 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
   try {
     // Préparer le contexte pour l'IA
     const context = buildContextForAI(studentInfo, studentData);
+    console.log('[Chatbot] Contexte IA généré, longueur:', context.length, 'caractères');
+    console.log('[Chatbot] Aperçu contexte:', context.substring(0, 500));
     
     // Préparer l'historique de conversation
     let historyContext = '';
@@ -860,6 +869,7 @@ ${historyContext}
 
 Réponds maintenant UNIQUEMENT avec les données ci-dessus, de manière COURTE et PRÉCISE EN ${language.toUpperCase()}.`;
     
+    console.log('[Chatbot] Envoi requête à DeepSeek...');
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages: [
@@ -869,6 +879,7 @@ Réponds maintenant UNIQUEMENT avec les données ci-dessus, de manière COURTE e
       temperature: 0.7,
       max_tokens: 500
     });
+    console.log('[Chatbot] Réponse DeepSeek reçue');
     
     let aiResponse = response.choices[0]?.message?.content || 'Désolé, je n\'ai pas pu générer une réponse.';
     
@@ -886,6 +897,15 @@ Réponds maintenant UNIQUEMENT avec les données ci-dessus, de manière COURTE e
 // Construire le contexte pour l'IA
 function buildContextForAI(studentInfo, studentData) {
   const today = new Date().toISOString().split('T')[0];
+  
+  console.log('[buildContextForAI] Construction du contexte pour:', studentInfo.first_name);
+  console.log('[buildContextForAI] Données disponibles:', {
+    profile: !!studentData.profile,
+    sessions: studentData.sessions?.length || 0,
+    tracking: studentData.tracking?.length || 0,
+    grades: studentData.grades?.length || 0,
+    homework: studentData.homework?.length || 0
+  });
   
   let context = `Élève: ${studentInfo.first_name} ${studentInfo.last_name}\n`;
   context += `Classe: ${studentData.profile?.classes?.name || 'N/A'}\n`;
