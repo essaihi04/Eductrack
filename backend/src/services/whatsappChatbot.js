@@ -100,16 +100,31 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     // 8. Collecter les données complètes de l'élève
     const studentData = await collectStudentData(studentInfo.id, parentInfo.school_id);
     
-    // 9. Générer la réponse IA avec historique
-    const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
-    const aiResponse = await generateAIResponse(
-      predefinedQuestion || messageText, 
-      studentInfo, 
-      studentData, 
-      parentInfo, 
-      conversationHistory,
-      predefinedQuestion ? 'predefined' : 'custom'
-    );
+    // 9. ARCHITECTURE HYBRIDE - Classifier la question
+    const questionType = classifyQuestion(predefinedQuestion || messageText);
+    console.log('[Chatbot] Type de question:', questionType);
+    
+    let response;
+    
+    if (questionType === 'FACTUAL') {
+      // Réponse directe depuis la DB (pas d'IA)
+      console.log('[Chatbot] Question factuelle - Réponse directe');
+      response = await generateDirectResponse(messageText, studentInfo, studentData, parentInfo);
+    } else {
+      // Question complexe - Activation de l'IA
+      console.log('[Chatbot] Question analytique - Activation IA');
+      const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
+      response = await generateAIResponse(
+        predefinedQuestion || messageText, 
+        studentInfo, 
+        studentData, 
+        parentInfo, 
+        conversationHistory,
+        predefinedQuestion ? 'predefined' : 'custom'
+      );
+    }
+    
+    const aiResponse = response;
     
     // 8. Envoyer la réponse via WhatsApp
     await sendWhatsAppResponse(normalizedPhone, aiResponse, parentInfo.school_id);
@@ -358,13 +373,187 @@ async function sendChildSelectionMenu(phone, parentInfo) {
   await sendWhatsAppResponse(phone, message, parentInfo.school_id);
 }
 
+// CLASSIFICATEUR DE QUESTIONS - Architecture hybride
+function classifyQuestion(messageText) {
+  const lower = messageText.toLowerCase().trim();
+  
+  // Mots-clés pour questions ANALYTIQUES (nécessitent IA)
+  const analyticalKeywords = [
+    // Français
+    'pourquoi', 'comment', 'analyse', 'évolution', 'progression', 'risque',
+    'conseille', 'recommande', 'amélioration', 'prédiction', 'tendance',
+    'comparaison', 'évaluation', 'diagnostic', 'stratégie', 'solution',
+    'explication', 'interprétation', 'cause', 'conséquence', 'impact',
+    
+    // Arabe
+    'لماذا', 'كيف', 'تحليل', 'تطور', 'تقدم', 'خطر',
+    'نصيحة', 'توصية', 'تحسين', 'توقع', 'اتجاه',
+    'مقارنة', 'تقييم', 'تشخيص', 'استراتيجية', 'حل',
+    'تفسير', 'سبب', 'نتيجة', 'تأثير'
+  ];
+  
+  // Mots-clés pour questions FACTUELLES (réponse directe)
+  const factualKeywords = [
+    // Français
+    'combien', 'quel', 'quelle', 'quels', 'quelles', 'nombre',
+    'absence', 'présence', 'note', 'moyenne', 'devoir', 'leçon',
+    'date', 'heure', 'classe', 'matière', 'incident',
+    
+    // Arabe  
+    'كم', 'ما', 'أي', 'عدد',
+    'غياب', 'حضور', 'نقطة', 'معدل', 'واجب', 'درس',
+    'تاريخ', 'وقت', 'قسم', 'مادة', 'حادثة'
+  ];
+  
+  // Vérifier les mots-clés analytiques
+  if (analyticalKeywords.some(keyword => lower.includes(keyword))) {
+    return 'ANALYTICAL';
+  }
+  
+  // Vérifier les mots-clés factuels
+  if (factualKeywords.some(keyword => lower.includes(keyword))) {
+    return 'FACTUAL';
+  }
+  
+  // Par défaut, utiliser l'IA pour être sûr
+  return 'ANALYTICAL';
+}
+
+// Générer une réponse directe (sans IA) pour questions factuelles
+async function generateDirectResponse(question, studentInfo, studentData, parentInfo) {
+  const lower = question.toLowerCase().trim();
+  const isArabic = /[\u0600-\u06FF]/.test(question);
+  const today = new Date().toISOString().split('T')[0];
+  
+  let response = '';
+  
+  // ABSENCES
+  if (lower.includes('absence') || lower.includes('غياب') || lower.includes('combien') && lower.includes('absent')) {
+    const absenceCount = studentData.absences?.length || 0;
+    response = isArabic
+      ? `📊 *عدد الغيابات:*\n\n${studentInfo.first_name} لديه *${absenceCount} غياب* هذا الشهر.`
+      : `📊 *Nombre d'absences:*\n\n${studentInfo.first_name} a *${absenceCount} absence(s)* ce mois.`;
+    
+    if (absenceCount > 0 && studentData.absences.length <= 3) {
+      response += '\n\n' + (isArabic ? '📅 *التواريخ:*\n' : '📅 *Dates:*\n');
+      studentData.absences.forEach(abs => {
+        response += `• ${abs.sessions?.date} - ${abs.sessions?.subjects?.name || 'N/A'}\n`;
+      });
+    }
+  }
+  
+  // PRÉSENCE AUJOURD'HUI
+  else if (lower.includes('présent') || lower.includes('حاضر') || lower.includes('aujourd\'hui') || lower.includes('اليوم')) {
+    const todayTracking = studentData.tracking.filter(t => t.sessions?.date === today);
+    
+    if (todayTracking.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد بيانات حضور لهذا اليوم بعد.`
+        : `ℹ️ Pas encore de données de présence pour aujourd'hui.`;
+    } else {
+      const presentCount = todayTracking.filter(t => t.presence === 'present').length;
+      const totalSessions = todayTracking.length;
+      
+      response = isArabic
+        ? `✅ *الحضور اليوم:*\n\n${studentInfo.first_name} حاضر في *${presentCount}/${totalSessions}* حصص.`
+        : `✅ *Présence aujourd'hui:*\n\n${studentInfo.first_name} est présent dans *${presentCount}/${totalSessions}* séances.`;
+    }
+  }
+  
+  // NOTES / MOYENNE
+  else if (lower.includes('note') || lower.includes('نقطة') || lower.includes('moyenne') || lower.includes('معدل')) {
+    if (!studentData.grades || studentData.grades.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد نقط حديثة متاحة.`
+        : `ℹ️ Pas de notes récentes disponibles.`;
+    } else {
+      const recentGrades = studentData.grades.slice(0, 5);
+      response = isArabic
+        ? `📝 *آخر النقط:*\n\n`
+        : `📝 *Dernières notes:*\n\n`;
+      
+      recentGrades.forEach(grade => {
+        response += `• ${grade.controls?.subjects?.name || 'N/A'}: *${grade.note}/20*\n`;
+      });
+      
+      // Calculer moyenne si possible
+      if (studentData.allGrades && studentData.allGrades.length > 0) {
+        const avg = (studentData.allGrades.reduce((sum, g) => sum + (g.note || 0), 0) / studentData.allGrades.length).toFixed(2);
+        response += '\n' + (isArabic
+          ? `📊 المعدل العام: *${avg}/20*`
+          : `📊 Moyenne générale: *${avg}/20*`);
+      }
+    }
+  }
+  
+  // DEVOIRS
+  else if (lower.includes('devoir') || lower.includes('واجب')) {
+    if (!studentData.homework || studentData.homework.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد واجبات منزلية حالياً.`
+        : `ℹ️ Pas de devoirs en cours actuellement.`;
+    } else {
+      const pendingHomework = studentData.homework.filter(hw => hw.status !== 'submitted');
+      
+      if (pendingHomework.length === 0) {
+        response = isArabic
+          ? `✅ جميع الواجبات مسلمة!`
+          : `✅ Tous les devoirs sont rendus !`;
+      } else {
+        response = isArabic
+          ? `📚 *الواجبات المنزلية:*\n\n`
+          : `📚 *Devoirs à faire:*\n\n`;
+        
+        pendingHomework.slice(0, 3).forEach(hw => {
+          response += `• ${hw.homework?.subjects?.name || 'N/A'}: ${hw.homework?.title}\n`;
+          response += `  ${isArabic ? 'الموعد النهائي' : 'Échéance'}: ${hw.homework?.due_date}\n`;
+        });
+      }
+    }
+  }
+  
+  // LEÇONS
+  else if (lower.includes('leçon') || lower.includes('درس') || lower.includes('étudié') || lower.includes('درس')) {
+    const todaySessions = studentData.sessions.filter(s => s.date === today);
+    
+    if (todaySessions.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد دروس مسجلة لهذا اليوم.`
+        : `ℹ️ Pas de leçons enregistrées pour aujourd'hui.`;
+    } else {
+      response = isArabic
+        ? `📖 *الدروس اليوم:*\n\n`
+        : `📖 *Leçons d'aujourd'hui:*\n\n`;
+      
+      todaySessions.forEach(session => {
+        response += `• ${session.subjects?.name || 'N/A'}\n`;
+        if (session.lesson_content) {
+          response += `  ${session.lesson_content}\n`;
+        }
+      });
+    }
+  }
+  
+  // Si aucune correspondance, réponse générique
+  else {
+    response = isArabic
+      ? `ℹ️ عذراً، لم أفهم السؤال. يرجى المحاولة مرة أخرى.`
+      : `ℹ️ Désolé, je n'ai pas compris la question. Veuillez réessayer.`;
+  }
+  
+  // Ajouter signature
+  response += `\n\n━━━━━━━━━━━━━━━\n👥 *L'équipe pédagogique*\n🏫 *${parentInfo.school_name}*`;
+  
+  return response;
+}
+
 // Détecter les questions prédéfinies
 function detectPredefinedQuestion(messageText) {
   const lower = messageText.toLowerCase().trim();
   
-  // Questions en arabe
+  // Questions en arabe (analytiques - nécessitent IA)
   if (lower === 'أ' || lower.includes('كيف حال') || lower.includes('كيف داير')) {
-    return 'Comment va mon enfant aujourd\'hui ? Donne-moi un résumé de sa journée.';
+    return 'Comment va mon enfant aujourd\'hui ? Analyse sa journée et donne-moi un résumé détaillé avec recommandations.';
   }
   if (lower === 'ب' || lower.includes('الدروس المدروسة') || lower.includes('ماذا درس')) {
     return 'Quelles leçons ont été étudiées aujourd\'hui ?';
@@ -379,9 +568,9 @@ function detectPredefinedQuestion(messageText) {
     return 'Comment est le comportement de mon enfant en classe ?';
   }
   
-  // Questions en français
+  // Questions en français (analytiques - nécessitent IA)
   if (lower === 'a' || (lower.includes('comment') && lower.includes('aujourd'))) {
-    return 'Comment va mon enfant aujourd\'hui ? Donne-moi un résumé de sa journée.';
+    return 'Comment va mon enfant aujourd\'hui ? Analyse sa journée et donne-moi un résumé détaillé avec recommandations.';
   }
   if (lower === 'b' || (lower.includes('leçon') || lower.includes('étudié'))) {
     return 'Quelles leçons ont été étudiées aujourd\'hui ?';
