@@ -117,6 +117,20 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       // Réponse directe depuis la DB (pas d'IA)
       console.log('[Chatbot] Question factuelle - Réponse directe');
       response = await generateDirectResponse(messageText, studentInfo, studentData, parentInfo);
+
+      // Fallback intelligent: si la réponse factuelle ne comprend pas, basculer vers l'IA
+      if (!response) {
+        console.log('[Chatbot] Fallback IA - question factuelle non comprise');
+        const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
+        response = await generateAIResponse(
+          predefinedQuestion || messageText,
+          studentInfo,
+          studentData,
+          parentInfo,
+          conversationHistory,
+          predefinedQuestion ? 'predefined' : 'custom'
+        );
+      }
     } else {
       // Question complexe - Activation de l'IA
       console.log('[Chatbot] Question analytique - Activation IA');
@@ -462,6 +476,30 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
       })
       .join('');
   };
+  const inferControlSubject = (grade) => {
+    const allSessions = studentData.allSessions || [];
+    const subjectPool = [...new Set(allSessions.map((s) => s?.subjects?.name).filter(Boolean))];
+    const controlName = String(grade?.controls_plan?.name || '').toLowerCase();
+
+    // 1) Essayer d'inférer via le nom du contrôle
+    const matchedByName = subjectPool.find((subject) => controlName.includes(String(subject).toLowerCase()));
+    if (matchedByName) return matchedByName;
+
+    // 2) Essayer via la date du contrôle (matières de cette date)
+    const controlDate = grade?.controls_plan?.date;
+    if (controlDate) {
+      const sameDaySubjects = [...new Set(
+        allSessions
+          .filter((s) => s?.date === controlDate)
+          .map((s) => s?.subjects?.name)
+          .filter(Boolean)
+      )];
+      if (sameDaySubjects.length === 1) return sameDaySubjects[0];
+      if (sameDaySubjects.length > 1) return sameDaySubjects.join(' / ');
+    }
+
+    return null;
+  };
   
   let response = '';
 
@@ -638,7 +676,9 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         : `📝 *Dernières notes:*\n\n`;
       
       recentGrades.forEach(grade => {
-        response += `• ${grade.controls_plan?.name || 'Contrôle'}: *${grade.note}/20*\n`;
+        const inferredSubject = inferControlSubject(grade);
+        const controlTitle = grade.controls_plan?.name || 'Contrôle';
+        response += `• ${controlTitle}${inferredSubject ? ` (${inferredSubject})` : ''}: *${grade.note}/20*\n`;
       });
       
       // Calculer moyenne si possible
@@ -648,6 +688,34 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
           ? `📊 المعدل العام: *${avg}/20*`
           : `📊 Moyenne générale: *${avg}/20*`);
       }
+    }
+  }
+
+  // MATIÈRE DU CONTRÔLE
+  else if (
+    lower.includes('matière') ||
+    lower.includes('matiere') ||
+    lower.includes('مادة') ||
+    (lower.includes('contrôle') && lower.includes('quel')) ||
+    (lower.includes('controle') && lower.includes('quel'))
+  ) {
+    if (!studentData.grades || studentData.grades.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد نقط حديثة لربطها بالمادة.`
+        : `ℹ️ Pas de notes récentes pour identifier la matière du contrôle.`;
+    } else {
+      const recentGrades = studentData.grades.slice(0, 5);
+      response = isArabic
+        ? `📚 *مواد الاختبارات الأخيرة:*\n\n`
+        : `📚 *Matières des derniers contrôles:*\n\n`;
+
+      recentGrades.forEach((grade) => {
+        const subject = inferControlSubject(grade);
+        const controlTitle = grade.controls_plan?.name || 'Contrôle';
+        response += isArabic
+          ? `• ${controlTitle}: ${subject || 'غير محددة'} (${grade.note}/20)\n`
+          : `• ${controlTitle}: ${subject || 'Non précisée'} (${grade.note}/20)\n`;
+      });
     }
   }
   
@@ -701,9 +769,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // Si aucune correspondance, réponse générique
   else {
-    response = isArabic
-      ? `ℹ️ عذراً، لم أفهم السؤال. يرجى المحاولة مرة أخرى.`
-      : `ℹ️ Désolé, je n'ai pas compris la question. Veuillez réessayer.`;
+    return null;
   }
   
   // Ajouter signature
@@ -933,8 +999,7 @@ async function collectStudentData(studentId, schoolId) {
       .from('session_tracking')
       .select('presence, participation, discipline, cahier_present, sleeping, phone_use, notes, sessions!inner(date, topic, subjects(name))')
       .eq('student_id', studentId)
-      .gte('sessions.date', threeMonthsAgo)
-      .order('sessions.date', { ascending: false }),
+      .gte('sessions.date', threeMonthsAgo),
     
     // Tracking récent (7 jours) avec incidents
     supabaseAdmin
