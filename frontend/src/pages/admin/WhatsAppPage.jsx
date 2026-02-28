@@ -1027,55 +1027,102 @@ const WhatsAppPage = () => {
 
   // ===================== TABS CONFIG =====================
   const tabs = [
-    { key: 'send', label: 'Parents', icon: Send },
-    { key: 'teachers', label: 'Professeurs', icon: Users },
-    { key: 'inbox', label: 'Boîte de messages', icon: Inbox },
-    { key: 'reports', label: 'Rapports IA', icon: Bot },
-    { key: 'connection', label: 'Connexion', icon: Smartphone }
+    { key: 'send', label: 'Parents', icon: Send, desc: 'Envoyer aux parents' },
+    { key: 'teachers', label: 'Professeurs', icon: Users, desc: 'Envoyer aux profs' },
+    { key: 'inbox', label: 'Messages', icon: Inbox, desc: 'Boîte de réception' },
+    { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
+    { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
   ];
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col">
-      {/* Header + Tabs */}
-      <div className="bg-white border-b border-gray-200 flex-shrink-0">
-        <div className="px-4 pt-3 pb-0 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
-              <MessageSquare className="w-4 h-4 text-green-600" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-900">WhatsApp</h1>
-            </div>
+    <div className="h-[calc(100vh-4rem)] flex overflow-hidden">
+      {/* ===== SIDEBAR NAVIGATION ===== */}
+      <div className="w-16 md:w-56 flex-shrink-0 bg-gray-900 flex flex-col">
+        {/* Logo */}
+        <div className="px-3 py-4 border-b border-gray-700 flex items-center gap-3">
+          <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center flex-shrink-0">
+            <MessageSquare className="w-4 h-4 text-white" />
           </div>
-          {/* Connection status indicator */}
-          {sessionStatus && (
-            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${sessionStatus.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-              <div className={`w-2 h-2 rounded-full ${sessionStatus.connected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-              {sessionStatus.connected ? 'Connecté' : 'Déconnecté'}
+          <span className="hidden md:block text-white font-bold text-sm truncate">WhatsApp</span>
+        </div>
+
+        {/* Status badge */}
+        <div className="px-3 py-2 border-b border-gray-700">
+          {sessionStatus ? (
+            <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${sessionStatus.connected ? 'bg-green-900/50' : 'bg-gray-800'}`}>
+              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${sessionStatus.connected ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`}></div>
+              <span className={`hidden md:block text-xs font-medium ${sessionStatus.connected ? 'text-green-300' : 'text-gray-400'}`}>
+                {sessionStatus.connected ? 'Connecté' : 'Déconnecté'}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <div className="w-2 h-2 rounded-full bg-gray-600 flex-shrink-0"></div>
+              <span className="hidden md:block text-xs text-gray-500">...</span>
             </div>
           )}
         </div>
-        {/* Tab bar */}
-        <div className="px-4 flex gap-0 mt-2">
+
+        {/* Nav items */}
+        <nav className="flex-1 py-3 space-y-1 px-2">
           {tabs.map(tab => {
             const Icon = tab.icon;
+            const active = activeTab === tab.key;
             return (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === tab.key
-                    ? 'border-green-600 text-green-700'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                title={tab.label}
+                className={`w-full flex items-center gap-3 px-2 py-2.5 rounded-lg transition-all text-left group ${
+                  active
+                    ? 'bg-green-600 text-white shadow-lg'
+                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                {tab.label}
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                <span className="hidden md:block text-sm font-medium truncate">{tab.label}</span>
               </button>
             );
           })}
+        </nav>
+
+        {/* Bottom info */}
+        <div className="px-3 py-3 border-t border-gray-700">
+          <p className="hidden md:block text-xs text-gray-500 text-center">EduTrack WhatsApp</p>
         </div>
       </div>
+
+      {/* ===== MAIN CONTENT ===== */}
+      <div className="flex-1 flex flex-col min-w-0 bg-gray-50">
+        {/* Page header bar */}
+        <div className="bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h1 className="text-base font-bold text-gray-900">
+              {activeTab === 'send' && 'Envoyer aux parents'}
+              {activeTab === 'teachers' && 'Envoyer aux professeurs'}
+              {activeTab === 'inbox' && 'Boîte de messages'}
+              {activeTab === 'reports' && 'Rapports IA quotidiens'}
+              {activeTab === 'connection' && 'Connexion WhatsApp'}
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {activeTab === 'send' && 'Composez et envoyez des messages aux parents d\'élèves'}
+              {activeTab === 'teachers' && 'Envoyez des messages ou documents aux professeurs'}
+              {activeTab === 'inbox' && 'Consultez l\'historique de toutes vos conversations'}
+              {activeTab === 'reports' && 'Rapports de suivi générés automatiquement par IA'}
+              {activeTab === 'connection' && 'Gérez la session WhatsApp de votre établissement'}
+            </p>
+          </div>
+          {sessionStatus && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${
+              sessionStatus.connected
+                ? 'bg-green-50 text-green-700 border-green-200'
+                : 'bg-red-50 text-red-600 border-red-200'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${sessionStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`}></div>
+              {sessionStatus.connected ? 'WhatsApp connecté' : 'WhatsApp déconnecté'}
+            </div>
+          )}
+        </div>
 
       {/* Tab Content */}
       {activeTab === 'send' && (
@@ -2638,6 +2685,7 @@ const WhatsAppPage = () => {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };
