@@ -760,10 +760,10 @@ async function collectStudentData(studentId, schoolId) {
   
   // 2. Récupérer toutes les autres données en parallèle
   const [recentSessions, recentTracking, recentGrades, recentHomework, allGrades, absences] = await Promise.all([
-    // Sessions récentes de sa classe avec cahier de texte
+    // Sessions récentes de sa classe
     supabaseAdmin
       .from('sessions')
-      .select('id, date, topic, type, lesson_content, subjects(name)')
+      .select('id, date, topic, type, subjects(name)')
       .eq('class_id', classId)
       .gte('date', oneWeekAgo)
       .lte('date', today)
@@ -772,7 +772,7 @@ async function collectStudentData(studentId, schoolId) {
     // Tracking de présence et comportement avec incidents
     supabaseAdmin
       .from('session_tracking')
-      .select('*, sessions!inner(date, subjects(name), lesson_content)')
+      .select('*, sessions!inner(date, subjects(name))')
       .eq('student_id', studentId)
       .gte('sessions.date', oneWeekAgo)
       .lte('sessions.date', today),
@@ -780,28 +780,25 @@ async function collectStudentData(studentId, schoolId) {
     // Notes récentes
     supabaseAdmin
       .from('control_notes')
-      .select('*, controls(title, date, subjects(name))')
+      .select('*, controls!inner(title, date, subjects(name))')
       .eq('student_id', studentId)
       .gte('controls.date', oneWeekAgo)
-      .order('controls.date', { ascending: false })
       .limit(10),
     
     // Devoirs récents
     supabaseAdmin
       .from('homework_submissions')
-      .select('*, homework(title, due_date, subjects(name))')
+      .select('*, homework!inner(title, due_date, subjects(name))')
       .eq('student_id', studentId)
       .gte('homework.due_date', oneWeekAgo)
-      .order('homework.due_date', { ascending: false })
       .limit(10),
     
     // Toutes les notes (pour calculer les moyennes)
     supabaseAdmin
       .from('control_notes')
-      .select('*, controls(title, date, subjects(name))')
+      .select('*, controls!inner(title, date, subjects(name))')
       .eq('student_id', studentId)
-      .gte('controls.date', oneMonthAgo)
-      .order('controls.date', { ascending: false }),
+      .gte('controls.date', oneMonthAgo),
     
     // Absences du mois
     supabaseAdmin
