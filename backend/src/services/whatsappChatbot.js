@@ -729,20 +729,42 @@ async function collectStudentData(studentId, schoolId) {
   const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   
-  // Récupérer toutes les données de l'élève
-  const [studentProfile, recentSessions, recentTracking, recentGrades, recentHomework, allGrades, absences] = await Promise.all([
-    // Profil de l'élève
-    supabaseAdmin
-      .from('profiles')
-      .select('*, classes(name, level, school_type)')
-      .eq('id', studentId)
-      .single(),
-    
+  console.log('[collectStudentData] Début collecte pour student_id:', studentId);
+  
+  // 1. D'abord récupérer le profil pour avoir class_id
+  const { data: studentProfile, error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .select('*, classes(name, level, school_type)')
+    .eq('id', studentId)
+    .single();
+  
+  if (profileError) {
+    console.error('[collectStudentData] Erreur profil:', profileError);
+  }
+  
+  const classId = studentProfile?.class_id;
+  console.log('[collectStudentData] class_id:', classId);
+  
+  if (!classId) {
+    console.warn('[collectStudentData] Pas de class_id trouvé pour l\'élève');
+    return {
+      profile: studentProfile,
+      sessions: [],
+      tracking: [],
+      grades: [],
+      homework: [],
+      allGrades: [],
+      absences: []
+    };
+  }
+  
+  // 2. Récupérer toutes les autres données en parallèle
+  const [recentSessions, recentTracking, recentGrades, recentHomework, allGrades, absences] = await Promise.all([
     // Sessions récentes de sa classe avec cahier de texte
     supabaseAdmin
       .from('sessions')
       .select('id, date, topic, type, lesson_content, subjects(name)')
-      .eq('class_id', (await supabaseAdmin.from('profiles').select('class_id').eq('id', studentId).single()).data?.class_id)
+      .eq('class_id', classId)
       .gte('date', oneWeekAgo)
       .lte('date', today)
       .order('date', { ascending: false }),
@@ -790,8 +812,23 @@ async function collectStudentData(studentId, schoolId) {
       .gte('sessions.date', oneMonthAgo)
   ]);
   
+  console.log('[collectStudentData] Résultats:', {
+    profile: !!studentProfile,
+    sessions: recentSessions.data?.length || 0,
+    tracking: recentTracking.data?.length || 0,
+    grades: recentGrades.data?.length || 0,
+    homework: recentHomework.data?.length || 0,
+    allGrades: allGrades.data?.length || 0,
+    absences: absences.data?.length || 0
+  });
+  
+  if (recentSessions.error) console.error('[collectStudentData] Erreur sessions:', recentSessions.error);
+  if (recentTracking.error) console.error('[collectStudentData] Erreur tracking:', recentTracking.error);
+  if (recentGrades.error) console.error('[collectStudentData] Erreur grades:', recentGrades.error);
+  if (recentHomework.error) console.error('[collectStudentData] Erreur homework:', recentHomework.error);
+  
   return {
-    profile: studentProfile.data,
+    profile: studentProfile,
     sessions: recentSessions.data || [],
     tracking: recentTracking.data || [],
     grades: recentGrades.data || [],
