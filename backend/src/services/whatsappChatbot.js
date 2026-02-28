@@ -349,11 +349,29 @@ Réponds maintenant à la question du parent de manière claire et précise.`;
 
 // Construire le contexte pour l'IA
 function buildContextForAI(studentInfo, studentData) {
+  const today = new Date().toISOString().split('T')[0];
+  
   let context = `Élève: ${studentInfo.first_name} ${studentInfo.last_name}\n`;
   context += `Classe: ${studentData.profile?.classes?.name || 'N/A'}\n`;
   context += `Niveau: ${studentData.profile?.classes?.level || 'N/A'}\n\n`;
   
-  // Statistiques de présence
+  // Données d'aujourd'hui
+  const todayTracking = studentData.tracking.filter(t => t.sessions?.date === today);
+  if (todayTracking.length > 0) {
+    context += `📅 AUJOURD'HUI (${today}):\n`;
+    todayTracking.forEach(t => {
+      context += `- Matière: ${t.sessions?.subjects?.name || 'N/A'}\n`;
+      context += `  • Présence: ${t.presence === 'present' ? '✅ Présent' : t.presence === 'absent' ? '❌ Absent' : '⚠️ Retard'}\n`;
+      if (t.participation) context += `  • Participation: ${t.participation}\n`;
+      if (t.discipline) context += `  • Discipline: ${t.discipline}\n`;
+      if (t.vigilance) context += `  • Vigilance: ${t.vigilance}\n`;
+      if (t.cahier) context += `  • Cahier: ${t.cahier}\n`;
+      if (t.incidents && t.incidents.length > 0) context += `  • Incidents: ${t.incidents.join(', ')}\n`;
+    });
+    context += `\n`;
+  }
+  
+  // Statistiques de présence (7 derniers jours)
   const totalSessions = studentData.tracking.length;
   const presentCount = studentData.tracking.filter(t => t.presence === 'present').length;
   const absentCount = studentData.tracking.filter(t => t.presence === 'absent').length;
@@ -364,12 +382,12 @@ function buildContextForAI(studentInfo, studentData) {
     context += `- Absent: ${absentCount}/${totalSessions} séances\n\n`;
   }
   
-  // Comportement et participation
+  // Comportement et participation (moyenne)
   const avgParticipation = calculateAverage(studentData.tracking, 'participation');
   const avgDiscipline = calculateAverage(studentData.tracking, 'discipline');
   
   if (avgParticipation || avgDiscipline) {
-    context += `👤 COMPORTEMENT:\n`;
+    context += `👤 COMPORTEMENT (moyenne):\n`;
     if (avgParticipation) context += `- Participation: ${avgParticipation}\n`;
     if (avgDiscipline) context += `- Discipline: ${avgDiscipline}\n\n`;
   }
