@@ -44,10 +44,11 @@ router.post('/whatsapp/incoming', async (req, res) => {
           from: messageData.key?.cleanedSenderPn || messageData.key?.remoteJid,
           text: messageData.messageBody || messageData.message?.conversation || '',
           timestamp: payload.timestamp,
-          remoteJid: messageData.key?.remoteJid
+          remoteJid: messageData.key?.remoteJid,
+          sessionId: payload.data?.session_id || payload.session_id
         };
         
-        console.log('[Webhook] Message de:', messageInfo.from, '- Texte:', messageInfo.text);
+        console.log('[Webhook] Message de:', messageInfo.from, '- Texte:', messageInfo.text, '- Session:', messageInfo.sessionId);
         
         // Traiter le message en arrière-plan (ne pas bloquer le webhook)
         handleIncomingWhatsAppMessage(messageInfo)

@@ -10,7 +10,7 @@ const WASENDER_BASE = 'https://www.wasenderapi.com';
 
 // Fonction principale appelée par le webhook
 export async function handleIncomingWhatsAppMessage(messageInfo) {
-  const { from: phoneNumber, text: messageText, id: messageId } = messageInfo;
+  const { from: phoneNumber, text: messageText, id: messageId, sessionId } = messageInfo;
   
   console.log(`[Chatbot] Traitement message de ${phoneNumber}: ${messageText}`);
   
@@ -18,8 +18,19 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     // 1. Normaliser le numéro de téléphone (format international)
     const normalizedPhone = normalizePhoneNumber(phoneNumber);
     
+    // 1.5. Récupérer le school_id de la session WhatsApp si disponible
+    let sessionSchoolId = null;
+    if (sessionId) {
+      const { data: session } = await supabaseAdmin
+        .from('whatsapp_school_sessions')
+        .select('school_id')
+        .eq('wasender_session_id', sessionId)
+        .single();
+      sessionSchoolId = session?.school_id;
+    }
+    
     // 2. Identifier le parent et l'école
-    const parentInfo = await getParentByPhone(normalizedPhone);
+    const parentInfo = await getParentByPhone(normalizedPhone, sessionSchoolId);
     if (!parentInfo) {
       console.log('[Chatbot] Numéro non autorisé:', normalizedPhone);
       // Ne pas répondre aux numéros non enregistrés
@@ -104,8 +115,8 @@ function normalizePhoneNumber(phone) {
 }
 
 // Récupérer les informations du parent par numéro de téléphone
-async function getParentByPhone(phoneNumber) {
-  const { data: parent } = await supabaseAdmin
+async function getParentByPhone(phoneNumber, schoolId = null) {
+  let query = supabaseAdmin
     .from('profiles')
     .select(`
       id,
@@ -116,10 +127,23 @@ async function getParentByPhone(phoneNumber) {
       schools(id, name)
     `)
     .eq('role', 'parent')
-    .eq('phone', phoneNumber)
-    .single();
+    .eq('phone', phoneNumber);
   
-  if (!parent) return null;
+  // Si school_id fourni, filtrer par école
+  if (schoolId) {
+    query = query.eq('school_id', schoolId);
+  }
+  
+  const { data: parents } = await query;
+  
+  if (!parents || parents.length === 0) return null;
+  
+  // Prendre le premier parent trouvé
+  const parent = parents[0];
+  
+  if (parents.length > 1) {
+    console.log(`[Chatbot] ⚠️  Plusieurs parents trouvés avec le numéro ${phoneNumber}, utilisation du premier`);
+  }
   
   return {
     parent_id: parent.id,
