@@ -344,19 +344,19 @@ async function collectStudentData(studentId, schoolId) {
       .eq('id', studentId)
       .single(),
     
-    // Sessions récentes de sa classe
+    // Sessions récentes de sa classe avec cahier de texte
     supabaseAdmin
       .from('sessions')
-      .select('id, date, topic, type, subjects(name)')
+      .select('id, date, topic, type, lesson_content, subjects(name)')
       .eq('class_id', (await supabaseAdmin.from('profiles').select('class_id').eq('id', studentId).single()).data?.class_id)
       .gte('date', oneWeekAgo)
       .lte('date', today)
       .order('date', { ascending: false }),
     
-    // Tracking de présence et comportement
+    // Tracking de présence et comportement avec incidents
     supabaseAdmin
       .from('session_tracking')
-      .select('*, sessions!inner(date, subjects(name))')
+      .select('*, sessions!inner(date, subjects(name), lesson_content)')
       .eq('student_id', studentId)
       .gte('sessions.date', oneWeekAgo)
       .lte('sessions.date', today),
@@ -422,6 +422,10 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
       });
     }
     
+    // Détecter la langue du message
+    const isArabic = /[\u0600-\u06FF]/.test(question);
+    const language = isArabic ? 'arabe' : 'français';
+    
     const systemPrompt = `Tu es un conseiller pédagogique expert travaillant pour ${parentInfo.school_name}. 
 Tu réponds aux questions des parents concernant leurs enfants de manière professionnelle, bienveillante et précise.
 
@@ -430,16 +434,18 @@ RÈGLES IMPORTANTES:
 - Si tu n'as pas l'information, dis-le clairement et propose de contacter l'enseignant
 - Sois encourageant et constructif
 - Utilise un ton professionnel mais chaleureux
-- Réponds en français ou en arabe selon la langue de la question
+- IMPORTANT: Réponds OBLIGATOIREMENT en ${language} (la langue du parent)
 - Limite ta réponse à 10-15 lignes maximum
 - Utilise des emojis appropriés pour rendre le message agréable
 - Tiens compte de l'historique de conversation pour éviter de répéter les mêmes informations
 - Sois précis et réponds directement à la question posée
+- Mentionne les leçons étudiées si disponibles
+- Signale les incidents comportementaux (téléphone, sommeil) s'il y en a
 
 DONNÉES DE L'ÉLÈVE:
 ${context}${historyContext}
 
-Réponds maintenant à la question du parent de manière claire et précise.`;
+Réponds maintenant à la question du parent de manière claire et précise EN ${language.toUpperCase()}.`;
     
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
@@ -478,12 +484,35 @@ function buildContextForAI(studentInfo, studentData) {
     context += `📅 AUJOURD'HUI (${today}):\n`;
     todayTracking.forEach(t => {
       context += `- Matière: ${t.sessions?.subjects?.name || 'N/A'}\n`;
+      if (t.sessions?.lesson_content) context += `  • Leçon étudiée: ${t.sessions.lesson_content}\n`;
       context += `  • Présence: ${t.presence === 'present' ? '✅ Présent' : t.presence === 'absent' ? '❌ Absent' : '⚠️ Retard'}\n`;
       if (t.participation) context += `  • Participation: ${t.participation}\n`;
       if (t.discipline) context += `  • Discipline: ${t.discipline}\n`;
       if (t.vigilance) context += `  • Vigilance: ${t.vigilance}\n`;
       if (t.cahier) context += `  • Cahier: ${t.cahier}\n`;
-      if (t.incidents && t.incidents.length > 0) context += `  • Incidents: ${t.incidents.join(', ')}\n`;
+      
+      // Incidents comportementaux détaillés
+      if (t.incidents && t.incidents.length > 0) {
+        const incidentDetails = [];
+        if (t.incidents.includes('telephone')) incidentDetails.push('📱 Utilisation du téléphone');
+        if (t.incidents.includes('sommeil')) incidentDetails.push('😴 Sommeil en classe');
+        if (t.incidents.includes('bavardage')) incidentDetails.push('💬 Bavardage');
+        if (t.incidents.includes('retard')) incidentDetails.push('⏰ Retard');
+        if (t.incidents.includes('absence_materiel')) incidentDetails.push('📚 Absence de matériel');
+        if (t.incidents.includes('insolence')) incidentDetails.push('😠 Insolence');
+        if (t.incidents.includes('violence')) incidentDetails.push('⚠️ Violence');
+        
+        // Ajouter les incidents non mappés
+        t.incidents.forEach(inc => {
+          if (!['telephone', 'sommeil', 'bavardage', 'retard', 'absence_materiel', 'insolence', 'violence'].includes(inc)) {
+            incidentDetails.push(`⚠️ ${inc}`);
+          }
+        });
+        
+        if (incidentDetails.length > 0) {
+          context += `  • ⚠️ INCIDENTS: ${incidentDetails.join(', ')}\n`;
+        }
+      }
     });
     context += `\n`;
   }
