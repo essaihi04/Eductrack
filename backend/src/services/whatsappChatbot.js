@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import OpenAI from 'openai';
-import { extractDateFromMessage } from './dateExtractor.js';
+import { extractDateFromMessage, extractMonthFromMessage } from './dateExtractor.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -533,10 +533,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const mappedQuestion = predefinedMap[lower];
   const searchText = mappedQuestion || lower;
   
-  // Extraire une date spécifique du message
+  // Extraire une date ou un mois spécifique du message
   const extractedDate = extractDateFromMessage(question);
+  const extractedMonth = !extractedDate ? extractMonthFromMessage(question) : null;
   const targetDate = extractedDate || today;
-  console.log('[generateDirectResponse] Date extraite:', extractedDate, '| Date cible:', targetDate);
+  console.log('[generateDirectResponse] Date extraite:', extractedDate, '| Mois extrait:', extractedMonth, '| Date cible:', targetDate);
   
   const normalizeText = (value) =>
     String(value || '')
@@ -1028,39 +1029,81 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
   
-  // LEÇONS (aujourd'hui, hier ou date spécifique)
+  // LEÇONS (aujourd'hui, hier, date spécifique ou mois entier)
   else if (
     searchText.includes('leçon') || searchText.includes('درس') || searchText.includes('الدروس') || searchText.includes('دروس') || searchText.includes('étudié') ||
     searchText.includes('cours') || searchText.includes('البارحة') || searchText.includes('hier') ||
     searchText.includes('أمس') || searchText.includes('yesterday') || searchText.includes('titres')
   ) {
-    const targetSessions = studentData.sessions.filter(s => s.date === targetDate);
-    
-    // Formater la date pour l'affichage
-    const dateLabel = extractedDate 
-      ? new Date(extractedDate + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
-      : (isArabic ? 'اليوم' : 'aujourd\'hui');
-    
-    if (targetSessions.length === 0) {
-      response = isArabic
-        ? `ℹ️ لا توجد دروس مسجلة لـ ${dateLabel}.`
-        : `ℹ️ Pas de leçons enregistrées pour ${dateLabel}.`;
-    } else {
-      response = isArabic
-        ? `📖 *الدروس (${dateLabel}):*\n\n`
-        : `📖 *Leçons du ${dateLabel}:*\n\n`;
-      
-      targetSessions.forEach(session => {
-        response += `📚 *${session.subjects?.name || 'N/A'}*\n`;
-        if (session.topic) {
-          response += `   📌 ${session.topic}\n`;
-        }
-        if (session.notes) {
-          const content = session.notes.substring(0, 150);
-          response += `   📝 ${content}${session.notes.length > 150 ? '...' : ''}\n`;
-        }
-        response += `\n`;
+    if (extractedMonth) {
+      // Affichage par MOIS entier
+      const { month, year } = extractedMonth;
+      const allSessions = studentData.allSessions || [];
+      const monthSessions = allSessions.filter(s => {
+        if (!s.date) return false;
+        const d = new Date(s.date + 'T00:00:00');
+        return d.getMonth() + 1 === month && d.getFullYear() === year;
       });
+      const monthNames = isArabic
+        ? ['يناير','فبراير','مارس','أبريل','ماي','يونيو','يوليوز','غشت','شتنبر','أكتوبر','نونبر','دجنبر']
+        : ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+      const monthLabel = `${monthNames[month - 1]} ${year}`;
+
+      if (monthSessions.length === 0) {
+        response = isArabic
+          ? `ℹ️ لا توجد دروس مسجلة لشهر ${monthLabel}.`
+          : `ℹ️ Pas de leçons enregistrées pour ${monthLabel}.`;
+      } else {
+        response = isArabic
+          ? `📖 *دروس شهر ${monthLabel}:*\n\n`
+          : `📖 *Leçons de ${monthLabel}:*\n\n`;
+        // Regrouper par date
+        const byDate = {};
+        monthSessions.forEach(s => {
+          if (!byDate[s.date]) byDate[s.date] = [];
+          byDate[s.date].push(s);
+        });
+        Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).forEach(([date, sessions]) => {
+          const dayLabel = new Date(date + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+          response += `📅 *${dayLabel}*\n`;
+          sessions.forEach(session => {
+            response += `  📚 *${session.subjects?.name || 'N/A'}*`;
+            if (session.topic) response += ` - ${session.topic}`;
+            response += `\n`;
+          });
+          response += `\n`;
+        });
+      }
+    } else {
+      // Affichage par DATE (jour précis)
+      const targetSessions = (extractedDate ? (studentData.allSessions || []) : studentData.sessions)
+        .filter(s => s.date === targetDate);
+      
+      const dateLabel = extractedDate 
+        ? new Date(extractedDate + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+        : (isArabic ? 'اليوم' : 'aujourd\'hui');
+      
+      if (targetSessions.length === 0) {
+        response = isArabic
+          ? `ℹ️ لا توجد دروس مسجلة لـ ${dateLabel}.`
+          : `ℹ️ Pas de leçons enregistrées pour ${dateLabel}.`;
+      } else {
+        response = isArabic
+          ? `📖 *الدروس (${dateLabel}):*\n\n`
+          : `📖 *Leçons du ${dateLabel}:*\n\n`;
+        
+        targetSessions.forEach(session => {
+          response += `📚 *${session.subjects?.name || 'N/A'}*\n`;
+          if (session.topic) {
+            response += `   📌 ${session.topic}\n`;
+          }
+          if (session.notes) {
+            const content = session.notes.substring(0, 150);
+            response += `   📝 ${content}${session.notes.length > 150 ? '...' : ''}\n`;
+          }
+          response += `\n`;
+        });
+      }
     }
   }
   

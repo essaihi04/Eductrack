@@ -167,4 +167,66 @@ function extractDateFromMessage(message) {
   return null;
 }
 
-export { extractDateFromMessage };
+// Extraire un mois spécifique d'un message (pour les requêtes mensuelles)
+// Retourne { month: 1-12, year: YYYY } ou null
+function extractMonthFromMessage(message) {
+  const lower = message.toLowerCase().trim();
+  const today = new Date();
+
+  const monthsFr = {
+    'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4,
+    'mai': 5, 'juin': 6, 'juillet': 7, 'août': 8, 'aout': 8,
+    'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12
+  };
+  const monthsAr = {
+    'يناير': 1, 'فبراير': 2, 'مارس': 3, 'أبريل': 4, 'ابريل': 4,
+    'ماي': 5, 'يونيو': 6, 'يوليوز': 7, 'غشت': 8, 'شتنبر': 9,
+    'أكتوبر': 10, 'اكتوبر': 10, 'نونبر': 11, 'دجنبر': 12
+  };
+
+  // Patterns: "mois 2", "mois de 2", "شهر 2"
+  const numMatch = lower.match(/(?:mois|شهر|شهر رقم)\s+(?:de\s+)?(\d{1,2})/);
+  if (numMatch) {
+    const month = parseInt(numMatch[1], 10);
+    if (month >= 1 && month <= 12) {
+      return { month, year: today.getFullYear() };
+    }
+  }
+
+  // "tout le mois de février", "tt le mois 2", "pour le mois de mars"
+  const keywordsMonth = /(?:tout|tt|pour|كل|طول)\s+(?:le\s+)?(?:mois\s+)?(?:de\s+)?(\d{1,2})/;
+  const kwMatch = lower.match(keywordsMonth);
+  if (kwMatch) {
+    const month = parseInt(kwMatch[1], 10);
+    if (month >= 1 && month <= 12) {
+      return { month, year: today.getFullYear() };
+    }
+  }
+
+  // Nom de mois en lettres français: "tout février", "le mois de mars"
+  for (const [monthName, monthNum] of Object.entries(monthsFr)) {
+    if (lower.includes(monthName)) {
+      // Vérifier qu'il y a un contexte mensuel (pas une date précise avec un jour)
+      const hasDay = lower.match(new RegExp(`\\d{1,2}\\s+${monthName}`));
+      if (!hasDay) {
+        const yearMatch = lower.match(/\d{4}/);
+        const year = yearMatch ? parseInt(yearMatch[0], 10) : today.getFullYear();
+        return { month: monthNum, year };
+      }
+    }
+  }
+
+  // Nom de mois en arabe
+  for (const [monthName, monthNum] of Object.entries(monthsAr)) {
+    if (message.includes(monthName)) {
+      const hasDay = message.match(new RegExp(`\\d{1,2}\\s+${monthName}`));
+      if (!hasDay) {
+        return { month: monthNum, year: today.getFullYear() };
+      }
+    }
+  }
+
+  return null;
+}
+
+export { extractDateFromMessage, extractMonthFromMessage };
