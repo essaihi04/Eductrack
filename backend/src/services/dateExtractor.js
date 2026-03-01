@@ -28,6 +28,55 @@ function extractDateFromMessage(message) {
     return dayBefore.toISOString().split('T')[0];
   }
   
+  // Noms de mois en français et arabe → numéro
+  const monthsFr = {
+    'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4,
+    'mai': 5, 'juin': 6, 'juillet': 7, 'août': 8, 'aout': 8,
+    'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12
+  };
+  const monthsAr = {
+    'يناير': 1, 'فبراير': 2, 'مارس': 3, 'أبريل': 4, 'ابريل': 4,
+    'ماي': 5, 'يونيو': 6, 'يوليوز': 7, 'غشت': 8, 'شتنبر': 9,
+    'أكتوبر': 10, 'اكتوبر': 10, 'نونبر': 11, 'دجنبر': 12
+  };
+
+  // Chercher "DD mois" ou "DD mois YYYY" en français
+  for (const [monthName, monthNum] of Object.entries(monthsFr)) {
+    const patterns = [
+      new RegExp(`(\\d{1,2})\\s+${monthName}\\s+(\\d{4})`),  // DD mois YYYY
+      new RegExp(`(\\d{1,2})\\s+${monthName}(?!\\w)`)         // DD mois (sans année)
+    ];
+    for (const pattern of patterns) {
+      const match = lower.match(pattern);
+      if (match) {
+        const day = parseInt(match[1], 10);
+        const year = match[2] ? parseInt(match[2], 10) : today.getFullYear();
+        if (day >= 1 && day <= 31) {
+          const date = new Date(year, monthNum - 1, day);
+          if (!isNaN(date.getTime())) {
+            return date.toISOString().split('T')[0];
+          }
+        }
+      }
+    }
+  }
+
+  // Chercher "DD mois" en arabe
+  for (const [monthName, monthNum] of Object.entries(monthsAr)) {
+    const pattern = new RegExp(`(\\d{1,2})\\s+${monthName}`);
+    const match = message.match(pattern);
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const year = today.getFullYear();
+      if (day >= 1 && day <= 31) {
+        const date = new Date(year, monthNum - 1, day);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split('T')[0];
+        }
+      }
+    }
+  }
+
   // Jours de la semaine en français
   const daysOfWeekFr = {
     'lundi': 1, 'mardi': 2, 'mercredi': 3, 'jeudi': 4, 'vendredi': 5, 'samedi': 6, 'dimanche': 0
