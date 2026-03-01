@@ -434,57 +434,34 @@ async function sendChildSelectionMenu(phone, parentInfo) {
 function classifyQuestion(messageText) {
   const lower = messageText.toLowerCase().trim();
 
-  // Priorité: questions mensuelles => réponse factuelle directe
-  if (
-    lower.includes('ce mois') ||
-    lower.includes('du mois') ||
-    lower.includes('mensuel') ||
-    lower.includes('mois') ||
-    lower.includes('الشهر') ||
-    lower.includes('شهري')
-  ) {
-    return 'FACTUAL';
-  }
-  
-  // Mots-clés pour questions ANALYTIQUES (nécessitent IA)
-  const analyticalKeywords = [
-    // Français
-    'pourquoi', 'comment', 'analyse', 'évolution', 'progression', 'risque',
-    'conseille', 'recommande', 'amélioration', 'prédiction', 'tendance',
-    'comparaison', 'évaluation', 'diagnostic', 'stratégie', 'solution',
-    'explication', 'interprétation', 'cause', 'conséquence', 'impact',
-    
-    // Arabe
-    'لماذا', 'كيف', 'تحليل', 'تطور', 'تقدم', 'خطر',
-    'نصيحة', 'توصية', 'تحسين', 'توقع', 'اتجاه',
-    'مقارنة', 'تقييم', 'تشخيص', 'استراتيجية', 'حل',
-    'تفسير', 'سبب', 'نتيجة', 'تأثير'
+  // Intents purement factuels (base de données directe)
+  const factualPatterns = [
+    // Présence / absences
+    /غياب|حضور|غاب|حاضر|absence|présence|absent|retard|تأخر/,
+    // Notes
+    /نقط|نقطة|معدل|note|moyenne|résultat|نتيجة/,
+    // Devoirs
+    /واجب|واجبات|devoir|devoirs|فرض|فروض/,
+    // Leçons / cours
+    /درس|دروس|cours|leçon|leçons|قرأ|يقرا|étudié/,
+    // Comportement / discipline
+    /سلوك|انضباط|هاتف|نعاس|comportement|discipline|téléphone|incident|مشكل|حادث/,
+    // Notes par matière
+    /ضعيف|faible|matière|مادة|difficile/,
+    // Bilan / planning
+    /بيلان|bilan|ملخص|résumé|semaine|أسبوع|planning|برنامج/,
+    // Stats classe
+    /القسم|classe.*note|note.*classe|moyenne.*classe/,
+    // Contact
+    /أستاذ|professeur|enseignant|contact|اتصل/
   ];
-  
-  // Mots-clés pour questions FACTUELLES (réponse directe)
-  const factualKeywords = [
-    // Français
-    'combien', 'quel', 'quelle', 'quels', 'quelles', 'nombre',
-    'absence', 'présence', 'note', 'moyenne', 'devoir', 'leçon',
-    'date', 'heure', 'classe', 'matière', 'incident',
-    
-    // Arabe  
-    'كم', 'ما', 'أي', 'عدد',
-    'غياب', 'حضور', 'نقطة', 'معدل', 'واجب', 'درس',
-    'تاريخ', 'وقت', 'قسم', 'مادة', 'حادثة'
-  ];
-  
-  // Vérifier les mots-clés analytiques
-  if (analyticalKeywords.some(keyword => lower.includes(keyword))) {
-    return 'ANALYTICAL';
-  }
-  
-  // Vérifier les mots-clés factuels
-  if (factualKeywords.some(keyword => lower.includes(keyword))) {
-    return 'FACTUAL';
-  }
-  
-  // Par défaut, utiliser l'IA pour être sûr
+
+  if (factualPatterns.some(p => p.test(lower))) return 'FACTUAL';
+
+  // Mots-clés mensuels → toujours factuel
+  if (/الشهر|شهري|ce mois|du mois|mensuel/.test(lower)) return 'FACTUAL';
+
+  // Tout le reste → IA analytique
   return 'ANALYTICAL';
 }
 
@@ -1006,7 +983,155 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
   
-  // Si aucune correspondance, réponse générique
+  // COMPORTEMENT / DISCIPLINE / INCIDENTS
+  else if (
+    lower.includes('سلوك') || lower.includes('comportement') ||
+    lower.includes('discipline') || lower.includes('انضباط') ||
+    lower.includes('هاتف') || lower.includes('téléphone') ||
+    lower.includes('نعاس') || lower.includes('somnol') ||
+    lower.includes('incident') || lower.includes('حادث') || lower.includes('مشكل') ||
+    lower.includes('retard') || lower.includes('تأخر')
+  ) {
+    const allTracking = studentData.allTracking || studentData.tracking || [];
+    const phoneCount = allTracking.filter(t => t.phone_use).length;
+    const sleepCount = allTracking.filter(t => t.sleeping).length;
+    const lateCount = allTracking.filter(t => t.presence === 'late').length;
+    const totalIncidents = phoneCount + sleepCount + lateCount;
+
+    const participationMap = { excellent: 5, good: 4, average: 3, poor: 2, weak: 1 };
+    const partScores = allTracking.filter(t => t.participation).map(t => participationMap[String(t.participation).toLowerCase()] || 3);
+    const partAvg = partScores.length > 0 ? partScores.reduce((a, b) => a + b, 0) / partScores.length : 0;
+    const partLabel = partAvg >= 4.5 ? (isArabic ? 'ممتاز' : 'Excellent') :
+      partAvg >= 3.5 ? (isArabic ? 'جيد' : 'Bon') :
+      partAvg >= 2.5 ? (isArabic ? 'متوسط' : 'Moyen') :
+      (isArabic ? 'يحتاج تحسين' : 'À améliorer');
+
+    const discScores = allTracking.filter(t => t.discipline).map(t => participationMap[String(t.discipline).toLowerCase()] || 3);
+    const discAvg = discScores.length > 0 ? discScores.reduce((a, b) => a + b, 0) / discScores.length : 0;
+    const discLabel = discAvg >= 4.5 ? (isArabic ? 'ممتاز' : 'Excellent') :
+      discAvg >= 3.5 ? (isArabic ? 'جيد' : 'Bon') :
+      discAvg >= 2.5 ? (isArabic ? 'متوسط' : 'Moyen') :
+      (isArabic ? 'يحتاج تحسين' : 'À améliorer');
+
+    if (isArabic) {
+      response = `🎭 *سلوك ${studentInfo.first_name} في القسم:*\n\n`;
+      response += `• المشاركة: *${partLabel}*\n`;
+      response += `• الانضباط: *${discLabel}*\n`;
+      if (totalIncidents > 0) {
+        response += `\n⚠️ *الحوادث (${allTracking.length > 7 ? '3 أشهر' : '7 أيام'}):*\n`;
+        if (phoneCount > 0) response += `• استخدام الهاتف: *${phoneCount} مرة*\n`;
+        if (sleepCount > 0) response += `• النعاس في القسم: *${sleepCount} مرة*\n`;
+        if (lateCount > 0) response += `• التأخر: *${lateCount} مرة*\n`;
+      } else {
+        response += `\n✅ لا توجد حوادث مسجلة.\n`;
+      }
+    } else {
+      response = `🎭 *Comportement de ${studentInfo.first_name}:*\n\n`;
+      response += `• Participation: *${partLabel}*\n`;
+      response += `• Discipline: *${discLabel}*\n`;
+      if (totalIncidents > 0) {
+        response += `\n⚠️ *Incidents (${allTracking.length > 7 ? '3 mois' : '7 jours'}):*\n`;
+        if (phoneCount > 0) response += `• Utilisation téléphone: *${phoneCount} fois*\n`;
+        if (sleepCount > 0) response += `• Somnolence en classe: *${sleepCount} fois*\n`;
+        if (lateCount > 0) response += `• Retards: *${lateCount} fois*\n`;
+      } else {
+        response += `\n✅ Aucun incident signalé.\n`;
+      }
+    }
+  }
+
+  // PLANNING / PROGRAMME DE LA SEMAINE
+  else if (
+    lower.includes('semaine') || lower.includes('أسبوع') ||
+    lower.includes('planning') || lower.includes('برنامج') ||
+    lower.includes('bilan') && lower.includes('semaine') ||
+    lower.includes('ملخص') && lower.includes('أسبوع')
+  ) {
+    const weekSessions = studentData.sessions || [];
+    if (weekSessions.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد حصص مسجلة هذا الأسبوع.`
+        : `ℹ️ Pas de séances enregistrées cette semaine.`;
+    } else {
+      response = isArabic
+        ? `📅 *برنامج الأسبوع (7 أيام):*\n\n`
+        : `📅 *Programme de la semaine (7 jours):*\n\n`;
+      const byDate = {};
+      weekSessions.forEach(s => {
+        const d = s.date || 'N/A';
+        if (!byDate[d]) byDate[d] = [];
+        byDate[d].push(s);
+      });
+      Object.keys(byDate).sort().slice(-5).forEach(date => {
+        const dayName = new Date(date).toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+        response += `📆 *${dayName}*\n`;
+        byDate[date].forEach(s => {
+          response += `  • ${s.subjects?.name || 'N/A'}${s.topic ? `: ${s.topic}` : ''}\n`;
+        });
+      });
+    }
+  }
+
+  // DEVOIRS RENDUS / SOUMISSIONS
+  else if (
+    lower.includes('واجب') || lower.includes('devoir') ||
+    lower.includes('فرض') || lower.includes('سلم') || lower.includes('rendu') ||
+    lower.includes('soumis') || lower.includes('travail')
+  ) {
+    const hw = studentData.homework || [];
+    if (hw.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد واجبات مسجلة حالياً.`
+        : `ℹ️ Aucun devoir enregistré actuellement.`;
+    } else {
+      const submitted = hw.filter(h => h.status === 'submitted');
+      const pending = hw.filter(h => h.status !== 'submitted');
+      if (isArabic) {
+        response = `📋 *الواجبات المنزلية:*\n\n`;
+        response += `✅ مسلمة: *${submitted.length}/${hw.length}*\n`;
+        if (pending.length > 0) {
+          response += `\n⏳ *غير مسلمة:*\n`;
+          pending.slice(0, 4).forEach(h => {
+            response += `• ${h.homework?.subjects?.name || 'N/A'}: ${h.homework?.title || 'N/A'}\n`;
+            if (h.homework?.due_date) response += `  الموعد: ${h.homework.due_date}\n`;
+          });
+        }
+      } else {
+        response = `📋 *Devoirs:*\n\n`;
+        response += `✅ Rendus: *${submitted.length}/${hw.length}*\n`;
+        if (pending.length > 0) {
+          response += `\n⏳ *Non rendus:*\n`;
+          pending.slice(0, 4).forEach(h => {
+            response += `• ${h.homework?.subjects?.name || 'N/A'}: ${h.homework?.title || 'N/A'}\n`;
+            if (h.homework?.due_date) response += `  Échéance: ${h.homework.due_date}\n`;
+          });
+        }
+      }
+    }
+  }
+
+  // CONTACT PROFESSEUR
+  else if (
+    lower.includes('أستاذ') || lower.includes('professeur') ||
+    lower.includes('enseignant') || lower.includes('contact') ||
+    lower.includes('اتصل') || lower.includes('تواصل') || lower.includes('joindre')
+  ) {
+    const className = studentData.profile?.classes?.name || 'N/A';
+    response = isArabic
+      ? `📞 *التواصل مع الفريق التربوي:*\n\n${studentInfo.first_name} في القسم *${className}*.\n\nللتواصل مع الأساتذة أو الإدارة، يرجى:\n• التوجه إلى ${parentInfo.school_name} مباشرة\n• طلب موعد عبر الإدارة\n• انتظار التقارير الدورية عبر هذا التطبيق`
+      : `📞 *Contacter l'équipe pédagogique:*\n\n${studentInfo.first_name} est en classe *${className}*.\n\nPour contacter les enseignants ou l'administration:\n• Rendez-vous directement à ${parentInfo.school_name}\n• Demandez un rendez-vous via l'administration\n• Consultez les rapports périodiques via cette application`;
+  }
+
+  // RÉSUMÉ GLOBAL (demande générale sur l'élève)
+  else if (
+    lower.includes('كيفاش') || lower.includes('كيف داير') || lower.includes('كيف حال') ||
+    lower.includes('comment va') || lower.includes('comment il va') ||
+    lower.includes('résumé') || lower.includes('ملخص') || lower.includes('بيلان')
+  ) {
+    return null; // → Toujours IA pour le résumé global
+  }
+
+  // Si aucune correspondance → fallback IA
   else {
     return null;
   }
@@ -1374,20 +1499,28 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
 - Reste dans le fil de la conversation`;
     }
 
-    const systemPrompt = `Tu es un conseiller pédagogique expert de ${parentInfo.school_name}.
-Tu accompagnes les parents pour le suivi scolaire de leurs enfants.
+    const systemPrompt = `Tu es Nour, conseiller pédagogique expert de ${parentInfo.school_name}.
+Ton rôle: accompagner les parents avec bienveillance, expertise et précision pour le suivi scolaire.
 
 ${modeInstructions}
 
-📋 RÈGLES GÉNÉRALES:
-1. Réponds OBLIGATOIREMENT en ${language}
-2. Maximum 10-12 lignes, direct et concis
-3. 2-3 emojis maximum
-4. Structure claire (tirets ou numéros si plusieurs points)
-5. Ne commence JAMAIS par "Bien sûr", "D'accord", "Voici" ou toute intro inutile
+📋 RÈGLES ABSOLUES:
+1. Réponds OBLIGATOIREMENT en ${language}. Si le parent écrit en darija marocaine, réponds en darija ou arabe standard fluide.
+2. Maximum 12 lignes. Sois direct, humain et chaleureux - comme un vrai conseiller.
+3. 2-3 emojis contextuels maximum - pas de surcharge.
+4. Ne commence JAMAIS par "Bien sûr", "D'accord", "Voici", "بالطبع" ou toute formule vide.
+5. Tu parles TOUJOURS des données réelles de l'élève. Jamais de généralités sans lien avec les données.
+6. Si tu donnes des conseils, ils doivent être ADAPTÉS aux problèmes spécifiques détectés dans les données.
+7. N'invente JAMAIS de données. Si une info manque, dis-le clairement et propose une alternative.
+8. Ton ton: professionnel mais proche, encourage le parent, ne le culpabilise pas.
+
+💡 LOGIQUE DE RÉPONSE SELON LE MODE:
+- DATA: Chiffres exacts + interprétation courte ("12/15 présences = bien, mais 3 absences méritent attention")
+- ADVICE: Observe les INCIDENTS et COMPORTEMENT dans les données, puis donne 2-3 conseils CONCRETS et PERSONNALISÉS
+- FOLLOWUP: Continue la conversation naturellement, enrichis avec de nouvelles informations si pertinent
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DONNÉES DE L'ÉLÈVE ${studentInfo.first_name.toUpperCase()} (SOURCE DE VÉRITÉ):
+DOSSIER DE L'ÉLÈVE ${studentInfo.first_name.toUpperCase()} ${studentInfo.last_name?.toUpperCase() || ''}:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${context}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
@@ -1406,12 +1539,12 @@ ${context}
     // Question actuelle
     messages.push({ role: 'user', content: question });
     
-    console.log('[Chatbot] Envoi requête à DeepSeek (mode:', convMode, ')...');
+    console.log('[Chatbot] Envoi requête à DeepSeek (mode:', convMode, ', messages:', messages.length, ')...');
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages,
-      temperature: convMode === 'DATA' ? 0.2 : 0.7,
-      max_tokens: 600
+      temperature: convMode === 'DATA' ? 0.15 : 0.75,
+      max_tokens: 700
     });
     console.log('[Chatbot] Réponse DeepSeek reçue');
     
@@ -1561,61 +1694,79 @@ function buildContextForAI(studentInfo, studentData) {
   const totalSessions = studentData.tracking.length;
   const presentCount = studentData.tracking.filter(t => t.presence === 'present').length;
   const absentCount = studentData.tracking.filter(t => t.presence === 'absent').length;
-  
+  const lateCount7 = studentData.tracking.filter(t => t.presence === 'late').length;
+
   if (totalSessions > 0) {
+    const pct = Math.round(presentCount / totalSessions * 100);
+    const icon = pct >= 90 ? '✅' : pct >= 75 ? '🔶' : '❌';
     context += `📊 PRÉSENCE (7 derniers jours):\n`;
-    context += `- Présent: ${presentCount}/${totalSessions} séances\n`;
-    context += `- Absent: ${absentCount}/${totalSessions} séances\n\n`;
+    context += `${icon} Présent: ${presentCount}/${totalSessions} (${pct}%)\n`;
+    if (absentCount > 0) context += `❌ Absent: ${absentCount} séance(s)\n`;
+    if (lateCount7 > 0) context += `⏰ Retard: ${lateCount7} fois\n`;
+    context += `\n`;
   }
-  
-  // Statistiques du mois
+
+  // Statistiques du mois avec analyse
   const monthTracking = studentData.allTracking || [];
   const monthTotal = monthTracking.length;
   const monthPresent = monthTracking.filter(t => t.presence === 'present').length;
   const monthAbsent = monthTracking.filter(t => t.presence === 'absent').length;
-  const monthIncidents = monthTracking.flatMap(t => {
-    const incidents = [];
-    if (t.phone_use) incidents.push('utilisation téléphone');
-    if (t.sleeping) incidents.push('somnolence');
-    if (t.presence === 'late') incidents.push('retard');
-    return incidents;
-  });
-  
+  const monthLate = monthTracking.filter(t => t.presence === 'late').length;
+  const monthPhoneUse = monthTracking.filter(t => t.phone_use).length;
+  const monthSleeping = monthTracking.filter(t => t.sleeping).length;
+  const totalMonthIncidents = monthPhoneUse + monthSleeping;
+
   if (monthTotal > 0) {
-    context += `📊 STATISTIQUES DU MOIS:\n`;
-    context += `- Total séances: ${monthTotal}\n`;
-    context += `- Présences: ${monthPresent} (${Math.round(monthPresent/monthTotal*100)}%)\n`;
+    const monthPct = Math.round(monthPresent / monthTotal * 100);
+    const presenceStatus = monthPct >= 90 ? 'Excellent' : monthPct >= 75 ? 'Correct' : 'Préoccupant';
+    context += `📊 STATISTIQUES DU MOIS (${monthTotal} séances):\n`;
+    context += `- Présences: ${monthPresent} (${monthPct}%) - ${presenceStatus}\n`;
     context += `- Absences: ${monthAbsent}\n`;
-    if (monthIncidents.length > 0) {
-      const incidentCounts = {};
-      monthIncidents.forEach(inc => {
-        incidentCounts[inc] = (incidentCounts[inc] || 0) + 1;
-      });
-      context += `- Incidents du mois:\n`;
-      Object.entries(incidentCounts).forEach(([inc, count]) => {
-        context += `  • ${inc}: ${count} fois\n`;
-      });
+    if (monthLate > 0) context += `- Retards: ${monthLate}\n`;
+    if (totalMonthIncidents > 0) {
+      context += `- INCIDENTS CE MOIS:\n`;
+      if (monthPhoneUse > 0) context += `  ⚠️ Téléphone en classe: ${monthPhoneUse} fois\n`;
+      if (monthSleeping > 0) context += `  ⚠️ Somnolence: ${monthSleeping} fois\n`;
+    } else {
+      context += `- Incidents: Aucun \u2705\n`;
     }
     context += `\n`;
   }
-  
-  // Comportement et participation (moyenne)
-  const avgParticipation = calculateAverage(studentData.tracking, 'participation');
-  const avgDiscipline = calculateAverage(studentData.tracking, 'discipline');
-  
-  if (avgParticipation || avgDiscipline) {
-    context += `👤 COMPORTEMENT (moyenne):\n`;
-    if (avgParticipation) context += `- Participation: ${avgParticipation}\n`;
-    if (avgDiscipline) context += `- Discipline: ${avgDiscipline}\n\n`;
+
+  // Comportement détaillé
+  const allBehaviorData = studentData.allTracking || studentData.tracking || [];
+  const avgParticipation = calculateAverage(allBehaviorData, 'participation');
+  const avgDiscipline = calculateAverage(allBehaviorData, 'discipline');
+  const cahierCount = allBehaviorData.filter(t => t.cahier_present === true).length;
+  const cahierPct = allBehaviorData.length > 0 ? Math.round(cahierCount / allBehaviorData.length * 100) : 0;
+
+  context += `👤 COMPORTEMENT ET ATTITUDE:\n`;
+  if (avgParticipation) context += `- Participation: ${avgParticipation}\n`;
+  if (avgDiscipline) context += `- Discipline: ${avgDiscipline}\n`;
+  context += `- Cahier présent: ${cahierPct}% des séances\n`;
+  const totalIncidentsAll = allBehaviorData.filter(t => t.phone_use || t.sleeping).length;
+  if (totalIncidentsAll > 0) {
+    context += `- ⚠️ ALERTE: ${totalIncidentsAll} séance(s) avec incidents (téléphone/somnolence)\n`;
   }
-  
-  // Devoirs
+  context += `\n`;
+
+  // Devoirs avec détails
   const homeworkDone = studentData.homework.filter(h => h.status === 'submitted').length;
   const homeworkTotal = studentData.homework.length;
-  
+  const homeworkPending = studentData.homework.filter(h => h.status !== 'submitted');
+
   if (homeworkTotal > 0) {
+    const hwPct = Math.round(homeworkDone / homeworkTotal * 100);
+    const hwStatus = hwPct >= 80 ? 'Bon' : hwPct >= 50 ? 'Moyen' : 'Insuffisant';
     context += `📝 DEVOIRS (7 derniers jours):\n`;
-    context += `- Rendus: ${homeworkDone}/${homeworkTotal}\n\n`;
+    context += `- Rendus: ${homeworkDone}/${homeworkTotal} (${hwPct}%) - ${hwStatus}\n`;
+    if (homeworkPending.length > 0) {
+      context += `- Non rendus:\n`;
+      homeworkPending.slice(0, 3).forEach(h => {
+        context += `  • ${h.homework?.subjects?.name || 'N/A'}: ${h.homework?.title || 'N/A'} (${h.homework?.due_date || 'N/A'})\n`;
+      });
+    }
+    context += `\n`;
   }
   
   // Notes récentes avec matière inférée
