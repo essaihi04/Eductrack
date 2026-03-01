@@ -573,8 +573,64 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   let response = '';
 
-  // BILAN DU MOIS
+  // Mots-clés indiquant une demande de leçons/cours (à vérifier AVANT le bilan mensuel)
+  const lessonsKeywords = [
+    'درس', 'دروس', 'cours', 'leçon', 'leçons', 'lesson',
+    'قرأ', 'يقرا', 'يدرس', 'دراسة', 'étudié', 'étudi',
+    'عنوان', 'موضوع', 'topic', 'programme', 'contenu'
+  ];
+  const isLessonsQuery = lessonsKeywords.some(kw => lower.includes(kw));
+
+  // LEÇONS / COURS DU MOIS (doit être vérifié AVANT le bilan mensuel)
   if (
+    isLessonsQuery &&
+    (
+      lower.includes('الشهر') || lower.includes('هد الشهر') || lower.includes('هذا الشهر') ||
+      lower.includes('ce mois') || lower.includes('du mois') || lower.includes('mensuel') ||
+      lower.includes('مدروسة') || lower.includes('درست') || lower.includes('دراسة')
+    )
+  ) {
+    const allSessions = studentData.allSessions || [];
+    const currentMonthSessions = allSessions.filter(s => toMonthKey(s.date) === currentMonth);
+    const sourceSessions = currentMonthSessions.length > 0 ? currentMonthSessions : allSessions.slice(0, 20);
+
+    // Grouper les topics par matière
+    const subjectTopics = {};
+    sourceSessions.forEach(s => {
+      const subject = s?.subjects?.name || 'Autre';
+      if (!subjectTopics[subject]) subjectTopics[subject] = [];
+      if (s.topic && !subjectTopics[subject].includes(s.topic)) {
+        subjectTopics[subject].push(s.topic);
+      }
+    });
+
+    const subjectList = Object.keys(subjectTopics);
+    if (subjectList.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد دروس مسجلة هذا الشهر.`
+        : `ℹ️ Aucune leçon enregistrée ce mois.`;
+    } else {
+      const period = currentMonthSessions.length > 0 ? currentMonth : 'récente';
+      response = isArabic
+        ? `📚 *الدروس المدروسة (${period}):*\n\n`
+        : `📚 *Leçons étudiées (${period}):*\n\n`;
+
+      subjectList.forEach(subject => {
+        const topics = subjectTopics[subject];
+        response += `📌 *${subject}*\n`;
+        if (topics.length > 0) {
+          topics.slice(0, 4).forEach(t => {
+            response += `  • ${t}\n`;
+          });
+        } else {
+          response += isArabic ? `  • (لا عنوان مسجل)\n` : `  • (pas de titre enregistré)\n`;
+        }
+      });
+    }
+  }
+
+  // BILAN DU MOIS
+  else if (
     lower.includes('ce mois') ||
     lower.includes('du mois') ||
     lower.includes('mensuel') ||
