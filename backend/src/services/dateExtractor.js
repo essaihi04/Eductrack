@@ -184,8 +184,8 @@ function extractMonthFromMessage(message) {
     'أكتوبر': 10, 'اكتوبر': 10, 'نونبر': 11, 'دجنبر': 12
   };
 
-  // Patterns: "mois 2", "mois de 2", "شهر 2"
-  const numMatch = lower.match(/(?:mois|شهر|شهر رقم)\s+(?:de\s+)?(\d{1,2})/);
+  // Patterns: "mois 2", "moi 2" (faute de frappe), "شهر 2"
+  const numMatch = lower.match(/\b(?:mois|moi|شهر|شهر رقم)\b\s*(?:de\s+)?(\d{1,2})\b/);
   if (numMatch) {
     const month = parseInt(numMatch[1], 10);
     if (month >= 1 && month <= 12) {
@@ -194,7 +194,7 @@ function extractMonthFromMessage(message) {
   }
 
   // "tout le mois de février", "tt le mois 2", "pour le mois de mars"
-  const keywordsMonth = /(?:tout|tt|pour|كل|طول)\s+(?:le\s+)?(?:mois\s+)?(?:de\s+)?(\d{1,2})/;
+  const keywordsMonth = /\b(?:tout|tt|pour|كل|طول)\b.{0,10}\b(?:mois|moi)\b.{0,5}(\d{1,2})\b/;
   const kwMatch = lower.match(keywordsMonth);
   if (kwMatch) {
     const month = parseInt(kwMatch[1], 10);
@@ -203,9 +203,10 @@ function extractMonthFromMessage(message) {
     }
   }
 
-  // Nom de mois en lettres français: "tout février", "le mois de mars"
+  // Nom de mois en lettres français: avec word boundary pour éviter faux positifs (mai dans semaine)
   for (const [monthName, monthNum] of Object.entries(monthsFr)) {
-    if (lower.includes(monthName)) {
+    const monthRegex = new RegExp(`\\b${monthName}\\b`);
+    if (monthRegex.test(lower)) {
       // Vérifier qu'il y a un contexte mensuel (pas une date précise avec un jour)
       const hasDay = lower.match(new RegExp(`\\d{1,2}\\s+${monthName}`));
       if (!hasDay) {
@@ -216,9 +217,10 @@ function extractMonthFromMessage(message) {
     }
   }
 
-  // Nom de mois en arabe
+  // Nom de mois en arabe (avec word boundary)
   for (const [monthName, monthNum] of Object.entries(monthsAr)) {
-    if (message.includes(monthName)) {
+    const monthRegex = new RegExp(`(?:^|\\s)${monthName}(?:\\s|$)`);
+    if (monthRegex.test(message)) {
       const hasDay = message.match(new RegExp(`\\d{1,2}\\s+${monthName}`));
       if (!hasDay) {
         return { month: monthNum, year: today.getFullYear() };
