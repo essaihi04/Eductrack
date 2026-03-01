@@ -458,6 +458,12 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const isArabic = /[\u0600-\u06FF]/.test(question);
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
+  const normalizeText = (value) =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
   const toMonthKey = (value) => {
     if (!value) return '';
     if (typeof value === 'string') return value.slice(0, 7);
@@ -479,10 +485,13 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const inferControlSubject = (grade) => {
     const allSessions = studentData.allSessions || [];
     const subjectPool = [...new Set(allSessions.map((s) => s?.subjects?.name).filter(Boolean))];
-    const controlName = String(grade?.controls_plan?.name || '').toLowerCase();
+    const controlName = normalizeText(grade?.controls_plan?.name);
 
     // 1) Essayer d'inférer via le nom du contrôle
-    const matchedByName = subjectPool.find((subject) => controlName.includes(String(subject).toLowerCase()));
+    const matchedByName = subjectPool.find((subject) => {
+      const normalizedSubject = normalizeText(subject);
+      return normalizedSubject && (controlName.includes(normalizedSubject) || normalizedSubject.includes(controlName));
+    });
     if (matchedByName) return matchedByName;
 
     // 2) Essayer via la date du contrôle (matières de cette date)
@@ -496,7 +505,32 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
       )];
       if (sameDaySubjects.length === 1) return sameDaySubjects[0];
       if (sameDaySubjects.length > 1) return sameDaySubjects.join(' / ');
+
+      const controlTs = new Date(controlDate).getTime();
+      if (!Number.isNaN(controlTs)) {
+        const closestSessions = allSessions
+          .map((s) => ({
+            subject: s?.subjects?.name,
+            distance: Math.abs(new Date(s?.date).getTime() - controlTs)
+          }))
+          .filter((x) => x.subject && Number.isFinite(x.distance))
+          .sort((a, b) => a.distance - b.distance);
+
+        if (closestSessions.length > 0) {
+          const minDistance = closestSessions[0].distance;
+          const nearbySubjects = [...new Set(
+            closestSessions
+              .filter((x) => x.distance === minDistance && x.distance <= 7 * 24 * 60 * 60 * 1000)
+              .map((x) => x.subject)
+          )];
+          if (nearbySubjects.length === 1) return nearbySubjects[0];
+          if (nearbySubjects.length > 1) return nearbySubjects.join(' / ');
+        }
+      }
     }
+
+    // 3) S'il n'y a qu'une seule matière observée, on la retourne
+    if (subjectPool.length === 1) return subjectPool[0];
 
     return null;
   };
@@ -663,6 +697,52 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
   
+  // STATISTIQUES DE CLASSE (moyenne / meilleure note)
+  else if (
+    (lower.includes('classe') || lower.includes('القسم')) &&
+    (
+      lower.includes('moyenne') ||
+      lower.includes('moyen') ||
+      lower.includes('meilleure') ||
+      lower.includes('meilleur') ||
+      lower.includes('max') ||
+      (lower.includes('note') && lower.includes('classe')) ||
+      lower.includes('معدل') ||
+      lower.includes('أفضل')
+    )
+  ) {
+    const classGrades = studentData.classGrades || [];
+    if (classGrades.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد نقاط كافية للقسم حالياً.`
+        : `ℹ️ Pas encore assez de notes de classe disponibles.`;
+    } else {
+      const classAverage = (classGrades.reduce((sum, g) => sum + (Number(g.note) || 0), 0) / classGrades.length).toFixed(2);
+      const bestGrade = classGrades.reduce((best, current) => {
+        if (!best) return current;
+        return (Number(current.note) || 0) > (Number(best.note) || 0) ? current : best;
+      }, null);
+
+      if (isArabic) {
+        response = `🏫 *إحصائيات القسم:*
+
+• معدل القسم: *${classAverage}/20*`;
+        if (bestGrade) {
+          response += `
+• أفضل نقطة: *${bestGrade.note}/20* (${bestGrade.controls_plan?.name || 'اختبار'})`;
+        }
+      } else {
+        response = `🏫 *Statistiques de la classe:*
+
+• Note moyenne de la classe: *${classAverage}/20*`;
+        if (bestGrade) {
+          response += `
+• Meilleure note de la classe: *${bestGrade.note}/20* (${bestGrade.controls_plan?.name || 'Contrôle'})`;
+        }
+      }
+    }
+  }
+
   // NOTES / MOYENNE
   else if (lower.includes('note') || lower.includes('نقطة') || lower.includes('moyenne') || lower.includes('معدل')) {
     if (!studentData.grades || studentData.grades.length === 0) {
@@ -975,16 +1055,19 @@ async function collectStudentData(studentId, schoolId) {
     return {
       profile: studentProfile,
       sessions: [],
+      allSessions: [],
       tracking: [],
+      allTracking: [],
       grades: [],
       homework: [],
       allGrades: [],
+      classGrades: [],
       absences: []
     };
   }
   
   // 2. Récupérer toutes les autres données en parallèle (TOUTES LES PÉRIODES)
-  const [recentSessions, allTracking, recentTracking, recentGrades, recentHomework, allGrades, absences, allSessions] = await Promise.all([
+  const [recentSessions, allTracking, recentTracking, recentGrades, recentHomework, allGrades, absences, allSessions, classGrades] = await Promise.all([
     // Sessions récentes de sa classe
     supabaseAdmin
       .from('sessions')
@@ -1048,6 +1131,14 @@ async function collectStudentData(studentId, schoolId) {
       .gte('date', threeMonthsAgo)
       .lte('date', today)
       .order('date', { ascending: false })
+    ,
+
+    // Notes de la classe (3 derniers mois) pour stats comparatives
+    supabaseAdmin
+      .from('control_notes')
+      .select('note, student_id, controls_plan!inner(class_id, name, date)')
+      .eq('controls_plan.class_id', classId)
+      .gte('controls_plan.date', threeMonthsAgo)
   ]);
   
   console.log('[collectStudentData] Résultats:', {
@@ -1066,6 +1157,7 @@ async function collectStudentData(studentId, schoolId) {
   if (recentTracking.error) console.error('[collectStudentData] Erreur tracking:', recentTracking.error);
   if (recentGrades.error) console.error('[collectStudentData] Erreur grades:', recentGrades.error);
   if (allGrades.error) console.error('[collectStudentData] Erreur allGrades:', allGrades.error);
+  if (classGrades.error) console.error('[collectStudentData] Erreur classGrades:', classGrades.error);
   if (recentHomework.error) console.error('[collectStudentData] Erreur homework:', recentHomework.error);
   
   return {
@@ -1077,6 +1169,7 @@ async function collectStudentData(studentId, schoolId) {
     grades: recentGrades.data || [],
     homework: recentHomework.data || [],
     allGrades: allGrades.data || [],
+    classGrades: classGrades.data || [],
     absences: absences.data || []
   };
 }
