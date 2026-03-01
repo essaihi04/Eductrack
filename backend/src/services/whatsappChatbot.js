@@ -107,10 +107,7 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       return;
     }
     
-    // 7. Vérifier si c'est une question prédéfinie
-    const predefinedQuestion = detectPredefinedQuestion(messageText);
-    
-    // 8. Identifier l'élève concerné par le message
+    // 7. Identifier l'élève concerné par le message
     const studentInfo = await identifyStudentFromMessage(messageText, parentInfo);
     
     if (!studentInfo) {
@@ -131,8 +128,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       absences: studentData.absences?.length || 0
     });
     
-    // 10. ARCHITECTURE HYBRIDE - Classifier la question
-    const questionType = classifyQuestion(predefinedQuestion || messageText);
+    // 8. ARCHITECTURE HYBRIDE - Classifier la question
+    const questionType = classifyQuestion(messageText);
     console.log('[Chatbot] Type de question:', questionType);
     
     let response;
@@ -147,12 +144,11 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
         console.log('[Chatbot] Fallback IA - question factuelle non comprise');
         const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
         response = await generateAIResponse(
-          predefinedQuestion || messageText,
+          messageText,
           studentInfo,
           studentData,
           parentInfo,
-          conversationHistory,
-          predefinedQuestion ? 'predefined' : 'custom'
+          conversationHistory
         );
       }
     } else {
@@ -160,12 +156,11 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       console.log('[Chatbot] Question analytique - Activation IA');
       const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
       response = await generateAIResponse(
-        predefinedQuestion || messageText, 
+        messageText, 
         studentInfo, 
         studentData, 
         parentInfo, 
-        conversationHistory,
-        predefinedQuestion ? 'predefined' : 'custom'
+        conversationHistory
       );
     }
     
@@ -1187,53 +1182,6 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   return response;
 }
 
-// Détecter les questions prédéfinies
-function detectPredefinedQuestion(messageText) {
-  const lower = messageText.toLowerCase().trim();
-  
-  // Questions en arabe (analytiques - nécessitent IA)
-  if (lower === 'أ' || lower.includes('كيف حال') || lower.includes('كيف داير')) {
-    return 'Comment va mon enfant aujourd\'hui ? Analyse sa journée et donne-moi un résumé détaillé avec recommandations.';
-  }
-  if (lower === 'ب' || lower.includes('الدروس المدروسة') || lower.includes('ماذا درس')) {
-    return 'Quelles leçons ont été étudiées aujourd\'hui ?';
-  }
-  if (lower === 'ج' || lower.includes('واجبات') || lower.includes('فروض منزلية')) {
-    return 'Y a-t-il des devoirs à faire ?';
-  }
-  if (lower === 'د' || lower.includes('النقط') || lower.includes('العلامات')) {
-    return 'Quelles sont les dernières notes de mon enfant ?';
-  }
-  if (lower === 'ه' || lower.includes('سلوك') || lower.includes('تصرف')) {
-    return 'Comment est le comportement de mon enfant en classe ?';
-  }
-  if (lower === 'و' || lower.includes('برنامج') || lower.includes('الأسبوع')) {
-    return 'Quel est le programme de la semaine ?';
-  }
-  
-  // Questions en français (analytiques - nécessitent IA)
-  if (lower === 'a' || (lower.includes('comment') && lower.includes('aujourd'))) {
-    return 'Comment va mon enfant aujourd\'hui ? Analyse sa journée et donne-moi un résumé détaillé avec recommandations.';
-  }
-  if (lower === 'b' || (lower.includes('leçon') || lower.includes('étudié'))) {
-    return 'Quelles leçons ont été étudiées aujourd\'hui ?';
-  }
-  if (lower === 'c' || lower.includes('devoir')) {
-    return 'Y a-t-il des devoirs à faire ?';
-  }
-  if (lower === 'd' || (lower.includes('note') || lower.includes('résultat'))) {
-    return 'Quelles sont les dernières notes de mon enfant ?';
-  }
-  if (lower === 'e' || lower.includes('comportement')) {
-    return 'Comment est le comportement de mon enfant en classe ?';
-  }
-  if (lower === 'f' || (lower.includes('programme') && lower.includes('semaine'))) {
-    return 'Quel est le programme de la semaine ?';
-  }
-  
-  return null;
-}
-
 // Récupérer les informations du parent par numéro de téléphone
 async function getParentByPhone(phoneNumber, schoolId = null) {
   let query = supabaseAdmin
@@ -1509,8 +1457,8 @@ async function collectStudentData(studentId, schoolId) {
   };
 }
 
-// Générer la réponse IA personnalisée avec historique
-async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory = [], questionType = 'custom') {
+// Générer la réponse IA personnalisée// Générer une réponse IA
+async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory) {
   try {
     // Préparer le contexte pour l'IA
     const context = buildContextForAI(studentInfo, studentData);
