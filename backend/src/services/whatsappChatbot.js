@@ -466,34 +466,47 @@ async function sendChildSelectionMenu(phone, parentInfo) {
 function classifyQuestion(messageText) {
   const lower = messageText.toLowerCase().trim();
 
-  // Intents purement factuels (base de données directe)
+  // PRIORITÉ 1: Questions analytiques (IA obligatoire)
+  const analyticalPatterns = [
+    // Questions "comment" analytiques
+    /كيف يمكن|كيف نقدر|كيفاش ن|كيف أساعد|كيف نحسن|comment puis-je|comment faire|comment l'aider|comment améliorer/,
+    // Questions "pourquoi"
+    /لماذا|علاش|pourquoi|pour quelle raison/,
+    // Questions de prédiction/possibilité
+    /هل يمكن|هل سي|هل يستطيع|هل سينجح|peut-il|pourra-t-il|va-t-il réussir|risque de/,
+    // Conseils et recommandations
+    /نصيحة|ماذا أفعل|ماذا يجب|شنو خاصني|conseil|recommandation|que dois-je|que faire/,
+    // Analyse et évaluation
+    /تحليل|تقييم|مقارنة|analyse|évaluation|comparaison|évolution/,
+    // Questions ouvertes complexes
+    /كيف دالك|كيف داير|كيف حال|comment va|comment se passe/
+  ];
+
+  if (analyticalPatterns.some(p => p.test(lower))) return 'ANALYTICAL';
+
+  // PRIORITÉ 2: Questions factuelles simples (DB directe)
   const factualPatterns = [
-    // Présence / absences
-    /غياب|حضور|غاب|حاضر|absence|présence|absent|retard|تأخر/,
-    // Notes
-    /نقط|نقطة|معدل|note|moyenne|résultat|نتيجة/,
-    // Devoirs
-    /واجب|واجبات|devoir|devoirs|فرض|فروض/,
-    // Leçons / cours
-    /درس|دروس|cours|leçon|leçons|قرأ|يقرا|étudié/,
-    // Comportement / discipline
-    /سلوك|انضباط|هاتف|نعاس|comportement|discipline|téléphone|incident|مشكل|حادث/,
-    // Notes par matière
-    /ضعيف|faible|matière|مادة|difficile/,
-    // Bilan / planning
-    /بيلان|bilan|ملخص|résumé|semaine|أسبوع|planning|برنامج/,
-    // Stats classe
-    /القسم|classe.*note|note.*classe|moyenne.*classe/,
-    // Contact
-    /أستاذ|professeur|enseignant|contact|اتصل/
+    // Présence / absences (sans "comment" ni "pourquoi")
+    /^(كم|ما|combien|quel).{0,20}(غياب|حضور|absence|présence)/,
+    // Notes simples
+    /^(كم|ما|شنو|combien|quel).{0,20}(نقط|معدل|note|moyenne)/,
+    // Devoirs simples
+    /^(هل|واش|y a-t-il|a-t-il).{0,20}(واجب|devoir)/,
+    // Leçons simples
+    /^(ما|شنو|quel).{0,20}(درس|leçon|étudié)/,
+    // Planning/programme
+    /^(ما|شنو|quel).{0,20}(برنامج|programme|planning)/,
+    // Bilan mensuel
+    /بيلان.*الشهر|bilan.*mois|résumé.*mois/
   ];
 
   if (factualPatterns.some(p => p.test(lower))) return 'FACTUAL';
 
-  // Mots-clés mensuels → toujours factuel
-  if (/الشهر|شهري|ce mois|du mois|mensuel/.test(lower)) return 'FACTUAL';
+  // PRIORITÉ 3: Mots-clés factuels isolés (sans contexte analytique)
+  const simpleFactualKeywords = /^و$|^[a-f]$|^أ$|^ب$|^ج$|^د$|^ه$/;
+  if (simpleFactualKeywords.test(lower)) return 'FACTUAL';
 
-  // Tout le reste → IA analytique
+  // Par défaut → IA analytique pour être sûr
   return 'ANALYTICAL';
 }
 
