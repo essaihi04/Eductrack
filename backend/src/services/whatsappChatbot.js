@@ -243,7 +243,43 @@ async function getConversationHistory(phone, parentId, studentId, limit = 10) {
     .order('created_at', { ascending: false })
     .limit(limit);
   
-  return history || [];
+  return (history || []).reverse(); // Chronologique: plus ancien en premier
+}
+
+// Détecter le mode conversationnel de la question
+function detectConversationMode(messageText, conversationHistory) {
+  const lower = messageText.toLowerCase().trim();
+  const isArabic = /[\u0600-\u06FF]/.test(messageText);
+
+  // Mode SUIVI: question de suivi d'une réponse précédente
+  const followUpIndicators = [
+    'كيفاش', 'كيف نقدر', 'واش', 'اش كنعمل', 'شنو خاصني', 'علاش', 'فكيفاش',
+    'comment faire', 'que faire', 'comment je peux', 'comment l\'aider',
+    'et alors', 'et donc', 'et ensuite', 'qu\'est-ce que je dois',
+    'نتحاور', 'نساعده', 'ندير', 'نعمل معاه'
+  ];
+  const isFollowUp = followUpIndicators.some(kw => lower.includes(kw)) ||
+    (conversationHistory.length > 0 && lower.length < 60 && !lower.includes('note') && !lower.includes('absence'));
+
+  // Mode DONNÉES: question factuelle sur notes, absences, présence
+  const dataIndicators = [
+    'note', 'نقطة', 'نقط', 'absence', 'غياب', 'présence', 'حضور',
+    'moyenne', 'معدل', 'matière', 'مادة', 'devoir', 'واجب',
+    'ضعيف', 'faible', 'résultat', 'نتيجة', 'classe', 'القسم'
+  ];
+  const isData = dataIndicators.some(kw => lower.includes(kw));
+
+  // Mode CONSEIL: demande de conseils pédagogiques
+  const adviceIndicators = [
+    'نصيحة', 'conseil', 'recommande', 'améliorer', 'يقرا', 'مردودية',
+    'motivation', 'تحفيز', 'pourquoi', 'لماذا', 'soutien', 'مساعدة',
+    'comportement', 'سلوك', 'باغيش', 'يرفض', 'يكره'
+  ];
+  const isAdvice = adviceIndicators.some(kw => lower.includes(kw));
+
+  if (isData && !isAdvice) return 'DATA';
+  if (isAdvice || isFollowUp) return 'ADVICE';
+  return 'ADVICE'; // Défaut vers conseil
 }
 
 // Construire le menu de bienvenue avec enfants et questions
@@ -771,11 +807,78 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
 
+  // MATIÈRE FAIBLE / DIFFICILE
+  else if (
+    lower.includes('ضعيف') ||
+    lower.includes('faible') ||
+    lower.includes('difficile') ||
+    lower.includes('mauvais') ||
+    lower.includes('مشكل') ||
+    (lower.includes('matière') && (lower.includes('faible') || lower.includes('ضعيف') || lower.includes('difficile')))
+  ) {
+    const allGrades = studentData.allGrades || [];
+    if (allGrades.length === 0) {
+      response = isArabic
+        ? `ℹ️ لا توجد نقط كافية لتحديد المادة الأضعف.`
+        : `ℹ️ Pas assez de notes pour identifier la matière faible.`;
+    } else {
+      // Grouper les notes par matière inférée
+      const subjectNotes = {};
+      allGrades.forEach((grade) => {
+        const subjectName = (() => {
+          const allSessions = studentData.allSessions || [];
+          const subjectPool = [...new Set(allSessions.map((s) => s?.subjects?.name).filter(Boolean))];
+          const controlName = String(grade?.controls_plan?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+          const matched = subjectPool.find((s) => {
+            const ns = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+            return ns && (controlName.includes(ns) || ns.includes(controlName));
+          });
+          if (matched) return matched;
+          const controlDate = grade?.controls_plan?.date;
+          if (controlDate) {
+            const sameDay = [...new Set(allSessions.filter((s) => s?.date === controlDate).map((s) => s?.subjects?.name).filter(Boolean))];
+            if (sameDay.length === 1) return sameDay[0];
+          }
+          if (subjectPool.length === 1) return subjectPool[0];
+          return null;
+        })();
+        if (!subjectName) return;
+        if (!subjectNotes[subjectName]) subjectNotes[subjectName] = [];
+        subjectNotes[subjectName].push(Number(grade.note) || 0);
+      });
+
+      const subjectAverages = Object.entries(subjectNotes).map(([subject, notes]) => ({
+        subject,
+        avg: notes.reduce((s, n) => s + n, 0) / notes.length,
+        count: notes.length
+      })).sort((a, b) => a.avg - b.avg);
+
+      if (subjectAverages.length === 0) {
+        response = isArabic
+          ? `ℹ️ لا يمكن ربط النقط بالمواد حالياً.`
+          : `ℹ️ Impossible de relier les notes aux matières actuellement.`;
+      } else {
+        const weakest = subjectAverages[0];
+        response = isArabic
+          ? `📉 *المادة الأضعف:*\n\n• *${weakest.subject}*: معدل ${weakest.avg.toFixed(2)}/20 (${weakest.count} اختبار)\n`
+          : `📉 *Matière la plus faible:*\n\n• *${weakest.subject}*: moyenne ${weakest.avg.toFixed(2)}/20 (${weakest.count} contrôle(s))\n`;
+
+        if (subjectAverages.length > 1) {
+          response += isArabic ? `\n📊 *كل المواد:*\n` : `\n📊 *Toutes les matières:*\n`;
+          subjectAverages.forEach(({ subject, avg }) => {
+            response += `• ${subject}: ${avg.toFixed(2)}/20\n`;
+          });
+        }
+      }
+    }
+  }
+
   // MATIÈRE DU CONTRÔLE
   else if (
     lower.includes('matière') ||
     lower.includes('matiere') ||
     lower.includes('مادة') ||
+    lower.includes('شناهي المادة') ||
     (lower.includes('contrôle') && lower.includes('quel')) ||
     (lower.includes('controle') && lower.includes('quel'))
   ) {
@@ -1180,84 +1283,79 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
     // Préparer le contexte pour l'IA
     const context = buildContextForAI(studentInfo, studentData);
     console.log('[Chatbot] Contexte IA généré, longueur:', context.length, 'caractères');
-    console.log('[Chatbot] Aperçu contexte:', context.substring(0, 500));
     
-    // Préparer l'historique de conversation
-    let historyContext = '';
-    if (conversationHistory.length > 0) {
-      historyContext = '\n\nHISTORIQUE DE CONVERSATION (messages récents):\n';
-      conversationHistory.reverse().forEach((conv, idx) => {
-        historyContext += `\n${idx + 1}. Parent: ${conv.parent_message}\n   Réponse: ${conv.ai_response.substring(0, 100)}...\n`;
-      });
-    }
-    
+    // Détecter le mode conversationnel
+    const convMode = detectConversationMode(question, conversationHistory);
+    console.log('[Chatbot] Mode conversationnel:', convMode);
+
     // Détecter la langue du message
     const isArabic = /[\u0600-\u06FF]/.test(question);
-    const language = isArabic ? 'arabe' : 'français';
-    
-    const systemPrompt = `Tu es un conseiller pédagogique expert travaillant pour ${parentInfo.school_name}. 
-Tu réponds aux questions des parents concernant leurs enfants de manière professionnelle, bienveillante et précise.
+    const language = isArabic ? 'arabe (dialecte marocain darija ou arabe standard)' : 'français';
 
-🚨 RÈGLES STRICTES - SYSTÈME RAG (Retrieval-Augmented Generation):
+    // Construire l'historique pour les messages OpenAI (multi-turn)
+    const messages = [];
 
-1. SOURCE DE DONNÉES UNIQUE:
-   - Tu DOIS répondre UNIQUEMENT à partir des données fournies ci-dessous
-   - INTERDICTION ABSOLUE d'inventer, supposer ou extrapoler des informations
-   - Si une donnée n'est PAS dans le contexte, tu DOIS dire "Je n'ai pas cette information"
+    // Instructions selon le mode
+    let modeInstructions = '';
+    if (convMode === 'DATA') {
+      modeInstructions = `MODE: EXTRACTION DE DONNÉES
+- Réponds UNIQUEMENT avec les données du contexte ci-dessous
+- Cite les chiffres exacts (notes, taux de présence, dates)
+- Si la donnée n'existe pas, dis-le clairement
+- INTERDICTION d'inventer ou d'extrapoler`;
+    } else if (convMode === 'ADVICE') {
+      modeInstructions = `MODE: CONSEIL PÉDAGOGIQUE
+- Utilise les données du contexte pour APPUYER tes conseils
+- Donne des conseils CONCRETS, PRATIQUES et APPLICABLES
+- Adapte les conseils aux incidents et comportements observés
+- Reste bienveillant et positif, encourage le parent
+- Tu PEUX enrichir avec des conseils pédagogiques généraux basés sur les problèmes détectés`;
+    } else {
+      modeInstructions = `MODE: SUIVI CONVERSATIONNEL
+- C'est une question de suivi de la conversation précédente
+- Tiens compte du contexte de la discussion
+- Donne des conseils pratiques et personnalisés
+- Reste dans le fil de la conversation`;
+    }
 
-2. VÉRIFICATION DES DONNÉES:
-   - Avant de mentionner une note, vérifie qu'elle existe dans "NOTES RÉCENTES"
-   - Avant de parler de présence, vérifie "PRÉSENCE" ou "AUJOURD'HUI"
-   - Avant de mentionner un incident, vérifie "INCIDENTS"
-   - Avant de parler de leçons, vérifie "Leçon étudiée"
-   - Si le contexte contient "STATISTIQUES DU MOIS", tu DOIS l'utiliser pour répondre aux questions mensuelles
-   - Tu ne dois JAMAIS dire "je n'ai pas cette information" pour le mois si "STATISTIQUES DU MOIS" est présent
+    const systemPrompt = `Tu es un conseiller pédagogique expert de ${parentInfo.school_name}.
+Tu accompagnes les parents pour le suivi scolaire de leurs enfants.
 
-3. RÉPONSES COURTES ET PRÉCISES:
-   - Maximum 10-12 lignes
-   - Réponds UNIQUEMENT à la question posée
-   - Pas d'informations supplémentaires non demandées
-   - 2-3 emojis maximum
+${modeInstructions}
 
-4. LANGUE:
-   - Réponds OBLIGATOIREMENT en ${language}
+📋 RÈGLES GÉNÉRALES:
+1. Réponds OBLIGATOIREMENT en ${language}
+2. Maximum 10-12 lignes, direct et concis
+3. 2-3 emojis maximum
+4. Structure claire (tirets ou numéros si plusieurs points)
+5. Ne commence JAMAIS par "Bien sûr", "D'accord", "Voici" ou toute intro inutile
 
-5. FORMAT:
-   - Réponds DIRECTEMENT sans introduction longue
-   - Structure claire avec tirets ou numéros si plusieurs points
-   - ${questionType === 'predefined' ? 'Question prédéfinie: réponds de manière concise et structurée' : ''}
-
-6. RECOMMANDATIONS OBLIGATOIRES:
-   - Si des INCIDENTS sont présents, tu DOIS donner 2-3 recommandations concrètes pour les éviter
-   - Recommandations basées sur les incidents spécifiques détectés
-   - Conseils pratiques et applicables
-
-7. SI DONNÉES MANQUANTES:
-   - Dis clairement: "Je n'ai pas cette information pour le moment"
-   - Propose de contacter l'enseignant pour plus de détails
-   - N'invente JAMAIS de données
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DONNÉES INJECTÉES (SOURCE UNIQUE DE VÉRITÉ):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DONNÉES DE L'ÉLÈVE ${studentInfo.first_name.toUpperCase()} (SOURCE DE VÉRITÉ):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${context}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
-${historyContext}
+    messages.push({ role: 'system', content: systemPrompt });
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Injecter l'historique dans les messages (multi-turn réel)
+    if (conversationHistory.length > 0) {
+      const recentHistory = conversationHistory.slice(-5); // 5 derniers échanges
+      recentHistory.forEach((conv) => {
+        messages.push({ role: 'user', content: conv.parent_message });
+        messages.push({ role: 'assistant', content: conv.ai_response.replace(/\n\n━━━.*$/s, '').trim() });
+      });
+    }
 
-Réponds maintenant UNIQUEMENT avec les données ci-dessus, de manière COURTE et PRÉCISE EN ${language.toUpperCase()}.`;
+    // Question actuelle
+    messages.push({ role: 'user', content: question });
     
-    console.log('[Chatbot] Envoi requête à DeepSeek...');
+    console.log('[Chatbot] Envoi requête à DeepSeek (mode:', convMode, ')...');
     const response = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: question }
-      ],
-      temperature: 0.7,
-      max_tokens: 500
+      messages,
+      temperature: convMode === 'DATA' ? 0.2 : 0.7,
+      max_tokens: 600
     });
     console.log('[Chatbot] Réponse DeepSeek reçue');
     
@@ -1464,11 +1562,42 @@ function buildContextForAI(studentInfo, studentData) {
     context += `- Rendus: ${homeworkDone}/${homeworkTotal}\n\n`;
   }
   
-  // Notes récentes
-  if (studentData.grades.length > 0) {
-    context += `📈 NOTES RÉCENTES:\n`;
-    studentData.grades.slice(0, 5).forEach(grade => {
-      context += `- ${grade.note}/20 (${grade.controls_plan?.name || 'Contrôle'})\n`;
+  // Notes récentes avec matière inférée
+  if (studentData.grades.length > 0 || (studentData.allGrades && studentData.allGrades.length > 0)) {
+    const gradesToShow = (studentData.allGrades && studentData.allGrades.length > 0 ? studentData.allGrades : studentData.grades).slice(0, 8);
+    const allSessions = studentData.allSessions || [];
+    const subjectPool = [...new Set(allSessions.map((s) => s?.subjects?.name).filter(Boolean))];
+
+    // Calculer moyennes par matière
+    const subjectMap = {};
+    gradesToShow.forEach(grade => {
+      const controlName = String(grade?.controls_plan?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      let subjectName = subjectPool.find((s) => {
+        const ns = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        return ns && (controlName.includes(ns) || ns.includes(controlName));
+      });
+      if (!subjectName) {
+        const controlDate = grade?.controls_plan?.date;
+        if (controlDate) {
+          const sameDay = [...new Set(allSessions.filter((s) => s?.date === controlDate).map((s) => s?.subjects?.name).filter(Boolean))];
+          if (sameDay.length === 1) subjectName = sameDay[0];
+        }
+      }
+      if (!subjectName && subjectPool.length === 1) subjectName = subjectPool[0];
+      const key = subjectName || grade.controls_plan?.name || 'Contrôle';
+      if (!subjectMap[key]) subjectMap[key] = [];
+      subjectMap[key].push(Number(grade.note) || 0);
+    });
+
+    context += `📈 NOTES PAR MATIÈRE:\n`;
+    Object.entries(subjectMap).sort((a, b) => {
+      const avgA = a[1].reduce((s, n) => s + n, 0) / a[1].length;
+      const avgB = b[1].reduce((s, n) => s + n, 0) / b[1].length;
+      return avgA - avgB; // Plus faible en premier
+    }).forEach(([subject, notes]) => {
+      const avg = (notes.reduce((s, n) => s + n, 0) / notes.length).toFixed(2);
+      const icon = Number(avg) >= 14 ? '✅' : Number(avg) >= 10 ? '🔶' : '❌';
+      context += `- ${icon} ${subject}: ${avg}/20 (${notes.length} contrôle${notes.length > 1 ? 's' : ''})\n`;
     });
     context += `\n`;
   }
