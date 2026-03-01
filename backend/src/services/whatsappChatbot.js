@@ -73,7 +73,31 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       return;
     }
     
-    // 5. Vérifier si c'est une sélection d'enfant (numéro)
+    // 5. Vérifier salutations/remerciements simples
+    const aiCheck = await shouldRespondWithAI(messageText, normalizedPhone, parentInfo.parent_id);
+    if (!aiCheck.respond) {
+      const isArabic = /[\u0600-\u06FF]/.test(messageText);
+      let simpleResponse = '';
+      if (aiCheck.reason === 'greeting') {
+        simpleResponse = isArabic 
+          ? `وعليكم السلام 👋\n\nكيف يمكنني مساعدتك؟`
+          : `Bonjour 👋\n\nComment puis-je vous aider ?`;
+      } else if (aiCheck.reason === 'thanks') {
+        simpleResponse = isArabic
+          ? `العفو 🙏 نحن هنا لمساعدتك دائماً`
+          : `De rien 🙏 Nous sommes toujours là pour vous aider`;
+      } else {
+        simpleResponse = isArabic ? `حسناً 👍` : `D'accord 👍`;
+      }
+      await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
+      await supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .update({ processed: true, ai_response_sent: true, ai_response_text: simpleResponse })
+        .eq('id', incomingMsg.id);
+      return;
+    }
+
+    // 6. Vérifier si c'est une sélection d'enfant (numéro)
     const childSelection = await handleChildSelection(messageText, normalizedPhone, parentInfo);
     if (childSelection.handled) {
       await supabaseAdmin
@@ -83,10 +107,10 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       return;
     }
     
-    // 6. Vérifier si c'est une question prédéfinie
+    // 7. Vérifier si c'est une question prédéfinie
     const predefinedQuestion = detectPredefinedQuestion(messageText);
     
-    // 7. Identifier l'élève concerné par le message
+    // 8. Identifier l'élève concerné par le message
     const studentInfo = await identifyStudentFromMessage(messageText, parentInfo);
     
     if (!studentInfo) {
@@ -97,7 +121,7 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     
     console.log('[Chatbot] Élève identifié:', studentInfo.first_name, studentInfo.last_name);
     
-    // 8. Collecter les données complètes de l'élève
+    // 9. Collecter les données complètes de l'élève
     const studentData = await collectStudentData(studentInfo.id, parentInfo.school_id);
     console.log('[Chatbot] Données collectées:', {
       sessions: studentData.sessions?.length || 0,
@@ -107,7 +131,7 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       absences: studentData.absences?.length || 0
     });
     
-    // 9. ARCHITECTURE HYBRIDE - Classifier la question
+    // 10. ARCHITECTURE HYBRIDE - Classifier la question
     const questionType = classifyQuestion(predefinedQuestion || messageText);
     console.log('[Chatbot] Type de question:', questionType);
     
@@ -145,8 +169,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       );
     }
     
-    // Ajouter le menu de questions rapides après la réponse
-    const isArabic = /[\u0600-\u06FF]/.test(studentInfo.first_name);
+    // Ajouter le menu de questions rapides après la réponse (langue du parent)
+    const isArabic = /[\u0600-\u06FF]/.test(messageText);
     const quickMenu = isArabic
       ? `\n\n━━━━━━━━━━━━━━━\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
       : `\n\n━━━━━━━━━━━━━━━\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`;
@@ -1170,6 +1194,9 @@ function detectPredefinedQuestion(messageText) {
   if (lower === 'ه' || lower.includes('سلوك') || lower.includes('تصرف')) {
     return 'Comment est le comportement de mon enfant en classe ?';
   }
+  if (lower === 'و' || lower.includes('برنامج') || lower.includes('الأسبوع')) {
+    return 'Quel est le programme de la semaine ?';
+  }
   
   // Questions en français (analytiques - nécessitent IA)
   if (lower === 'a' || (lower.includes('comment') && lower.includes('aujourd'))) {
@@ -1186,6 +1213,9 @@ function detectPredefinedQuestion(messageText) {
   }
   if (lower === 'e' || lower.includes('comportement')) {
     return 'Comment est le comportement de mon enfant en classe ?';
+  }
+  if (lower === 'f' || (lower.includes('programme') && lower.includes('semaine'))) {
+    return 'Quel est le programme de la semaine ?';
   }
   
   return null;
