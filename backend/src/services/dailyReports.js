@@ -499,16 +499,27 @@ Continuez ainsi ! 💪`;
     if (!content) return null;
 
     if (language === 'both') {
-      // Regex flexible: detecte ━━━ (variable length) ou --- (3+) comme séparateur bilingue
-      const separatorRegex = /━{3,}|---{3,}/;
-      const parts = content.split(separatorRegex);
-      const frPart = parts[0]?.trim() || '';
-      const arPart = parts.slice(1).join('').trim();
-      console.log(`[DailyReports] Bilingual split: fr=${frPart.length} chars, ar=${arPart.length} chars, parts=${parts.length}`);
-      return {
-        fr: frPart || content,
-        ar: arPart || ''
-      };
+      // Chercher le séparateur principal entre les deux langues (ligne vide + ━━━ + ligne vide)
+      // Cela évite de splitter sur les séparateurs décoratifs internes
+      const mainSeparatorRegex = /\n\s*━{10,}\s*\n/;
+      const parts = content.split(mainSeparatorRegex);
+      
+      if (parts.length >= 2) {
+        const frPart = parts[0]?.trim() || '';
+        const arPart = parts[1]?.trim() || '';
+        console.log(`[DailyReports] Bilingual split: fr=${frPart.length} chars, ar=${arPart.length} chars`);
+        return {
+          fr: frPart,
+          ar: arPart
+        };
+      } else {
+        // Fallback: si pas de séparateur principal trouvé, retourner tout en FR
+        console.warn('[DailyReports] No main separator found, returning full content as FR only');
+        return {
+          fr: content.trim(),
+          ar: ''
+        };
+      }
     }
 
     return { [language]: content.trim() };
