@@ -1003,7 +1003,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // LEÇONS (aujourd'hui ou hier)
   else if (
-    lower.includes('leçon') || lower.includes('درس') || lower.includes('étudié') ||
+    lower.includes('leçon') || lower.includes('درس') || lower.includes('الدروس') || lower.includes('دروس') || lower.includes('étudié') ||
     lower.includes('cours') || lower.includes('البارحة') || lower.includes('hier') ||
     lower.includes('أمس') || lower.includes('yesterday') || lower.includes('titres')
   ) {
