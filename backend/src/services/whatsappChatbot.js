@@ -145,7 +145,13 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       );
     }
     
-    const aiResponse = response;
+    // Ajouter le menu de questions rapides après la réponse
+    const isArabic = /[\u0600-\u06FF]/.test(studentInfo.first_name);
+    const quickMenu = isArabic
+      ? `\n\n━━━━━━━━━━━━━━━\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
+      : `\n\n━━━━━━━━━━━━━━━\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`;
+    
+    const aiResponse = response + quickMenu;
     
     // 8. Envoyer la réponse via WhatsApp
     await sendWhatsAppResponse(normalizedPhone, aiResponse, parentInfo.school_id);
@@ -323,12 +329,14 @@ async function buildWelcomeMenu(parentInfo, phone) {
     message += 'ج. هل هناك واجبات منزلية؟\n';
     message += 'د. ما هي آخر النقط؟\n';
     message += 'ه. كيف سلوكه في القسم؟\n';
+    message += 'و. برنامج الأسبوع؟\n';
   } else {
     message += 'A. Comment va mon enfant aujourd\'hui ?\n';
     message += 'B. Quelles leçons ont été étudiées ?\n';
     message += 'C. Y a-t-il des devoirs ?\n';
     message += 'D. Quelles sont les dernières notes ?\n';
     message += 'E. Comment est son comportement ?\n';
+    message += 'F. Programme de la semaine ?\n';
   }
   
   message += '\n' + (isArabic 
@@ -377,8 +385,8 @@ async function handleChildSelection(messageText, phone, parentInfo) {
       
       const isArabic = /[\u0600-\u06FF]/.test(student.first_name);
       const quickMenu = isArabic
-        ? `✅ تم اختيار: *${student.first_name} ${student.last_name}*\n\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\n\n💬 أو اكتب سؤالك`
-        : `✅ Sélectionné: *${student.first_name} ${student.last_name}*\n\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\n\n💬 Ou écrivez votre question`;
+        ? `✅ تم اختيار: *${student.first_name} ${student.last_name}*\n\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
+        : `✅ Sélectionné: *${student.first_name} ${student.last_name}*\n\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`;
       
       await sendWhatsAppResponse(phone, quickMenu, parentInfo.school_id);
       return { handled: true };
