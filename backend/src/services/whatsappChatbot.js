@@ -1031,11 +1031,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
       targetSessions.forEach(session => {
         response += `📚 *${session.subjects?.name || 'N/A'}*\n`;
         if (session.topic) {
-          response += `   📌 Titre: ${session.topic}\n`;
+          response += `   📌 ${session.topic}\n`;
         }
-        if (session.lesson_content) {
-          const content = session.lesson_content.substring(0, 150);
-          response += `   📝 ${content}${session.lesson_content.length > 150 ? '...' : ''}\n`;
+        if (session.notes) {
+          const content = session.notes.substring(0, 150);
+          response += `   📝 ${content}${session.notes.length > 150 ? '...' : ''}\n`;
         }
         response += `\n`;
       });
@@ -1373,7 +1373,7 @@ async function collectStudentData(studentId, schoolId) {
     // Sessions récentes de sa classe
     supabaseAdmin
       .from('sessions')
-      .select('id, date, topic, lesson_content, type, subjects(name)')
+      .select('id, date, topic, notes, type, subjects(name)')
       .eq('class_id', classId)
       .gte('date', oneWeekAgo)
       .lte('date', today)
@@ -1428,7 +1428,7 @@ async function collectStudentData(studentId, schoolId) {
     // Toutes les sessions (3 derniers mois)
     supabaseAdmin
       .from('sessions')
-      .select('id, date, topic, lesson_content, type, subjects(name)')
+      .select('id, date, topic, notes, type, subjects(name)')
       .eq('class_id', classId)
       .gte('date', threeMonthsAgo)
       .lte('date', today)
