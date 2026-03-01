@@ -484,13 +484,14 @@ Continuez ainsi ! 💪`;
   console.log('[DailyReports] First 500 chars of dataSummary:', dataSummary.substring(0, 500));
 
   try {
+    const maxTokens = language === 'both' ? 2000 : 1000;
     const completion = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: dataSummary }
       ],
-      max_tokens: 1000,
+      max_tokens: maxTokens,
       temperature: 0.7
     });
 
@@ -498,10 +499,15 @@ Continuez ainsi ! 💪`;
     if (!content) return null;
 
     if (language === 'both') {
-      const parts = content.split('━━━━━━━━━━━━━━━');
+      // Regex flexible: detecte ━━━ (variable length) ou --- (3+) comme séparateur bilingue
+      const separatorRegex = /━{3,}|---{3,}/;
+      const parts = content.split(separatorRegex);
+      const frPart = parts[0]?.trim() || '';
+      const arPart = parts.slice(1).join('').trim();
+      console.log(`[DailyReports] Bilingual split: fr=${frPart.length} chars, ar=${arPart.length} chars, parts=${parts.length}`);
       return {
-        fr: parts[0]?.trim() || content,
-        ar: parts[1]?.trim() || ''
+        fr: frPart || content,
+        ar: arPart || ''
       };
     }
 
