@@ -235,12 +235,12 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
   const lowerText = messageText.toLowerCase().trim();
   
   // Messages qui ne nécessitent pas de réponse IA
-  const greetings = ['سلام', 'مرحبا', 'صباح', 'مساء', 'bonjour', 'bonsoir', 'salut', 'hello', 'hi'];
+  const greetings = ['سلام', 'مرحبا', 'صباح', 'مساء', 'bonjour', 'bonsoir', 'salut', 'hello'];
   const thanks = ['شكرا', 'merci', 'thanks', 'thank you', 'بارك الله فيك'];
   const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes'];
   
-  // Vérifier les salutations simples
-  if (greetings.some(g => lowerText.includes(g)) && lowerText.length < 20) {
+  // Vérifier les salutations simples (mais pas "hier" qui contient "hi")
+  if (greetings.some(g => lowerText.includes(g)) && lowerText.length < 20 && !lowerText.includes('hier') && !lowerText.includes('leçon') && !lowerText.includes('cours')) {
     return { respond: false, reason: 'greeting' };
   }
   
@@ -1030,9 +1030,9 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // LEÇONS (aujourd'hui, hier ou date spécifique)
   else if (
-    lower.includes('leçon') || lower.includes('درس') || lower.includes('الدروس') || lower.includes('دروس') || lower.includes('étudié') ||
-    lower.includes('cours') || lower.includes('البارحة') || lower.includes('hier') ||
-    lower.includes('أمس') || lower.includes('yesterday') || lower.includes('titres')
+    searchText.includes('leçon') || searchText.includes('درس') || searchText.includes('الدروس') || searchText.includes('دروس') || searchText.includes('étudié') ||
+    searchText.includes('cours') || searchText.includes('البارحة') || searchText.includes('hier') ||
+    searchText.includes('أمس') || searchText.includes('yesterday') || searchText.includes('titres')
   ) {
     const targetSessions = studentData.sessions.filter(s => s.date === targetDate);
     
