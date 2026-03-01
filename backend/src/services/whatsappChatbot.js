@@ -511,6 +511,27 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const isArabic = /[\u0600-\u06FF]/.test(question);
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
+  
+  // Mapper les lettres prédéfinies aux questions complètes
+  const predefinedMap = {
+    'أ': 'كيف حاله اليوم',
+    'ب': 'الدروس',
+    'ج': 'واجبات',
+    'د': 'النقط',
+    'ه': 'سلوك',
+    'و': 'برنامج الأسبوع',
+    'a': 'comment va aujourd\'hui',
+    'b': 'leçons',
+    'c': 'devoirs',
+    'd': 'notes',
+    'e': 'comportement',
+    'f': 'programme semaine'
+  };
+  
+  // Si c'est une lettre prédéfinie, utiliser la question mappée
+  const mappedQuestion = predefinedMap[lower];
+  const searchText = mappedQuestion || lower;
+  
   const normalizeText = (value) =>
     String(value || '')
       .normalize('NFD')
