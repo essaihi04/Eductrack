@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import OpenAI from 'openai';
+const { extractDateFromMessage } = require('./dateExtractor');
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -532,6 +533,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const mappedQuestion = predefinedMap[lower];
   const searchText = mappedQuestion || lower;
   
+  // Extraire une date spécifique du message
+  const extractedDate = extractDateFromMessage(question);
+  const targetDate = extractedDate || today;
+  console.log('[generateDirectResponse] Date extraite:', extractedDate, '| Date cible:', targetDate);
+  
   const normalizeText = (value) =>
     String(value || '')
       .normalize('NFD')
@@ -1022,32 +1028,27 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
   
-  // LEÇONS (aujourd'hui ou hier)
+  // LEÇONS (aujourd'hui, hier ou date spécifique)
   else if (
     lower.includes('leçon') || lower.includes('درس') || lower.includes('الدروس') || lower.includes('دروس') || lower.includes('étudié') ||
     lower.includes('cours') || lower.includes('البارحة') || lower.includes('hier') ||
     lower.includes('أمس') || lower.includes('yesterday') || lower.includes('titres')
   ) {
-    // Détecter si c'est pour hier ou aujourd'hui
-    const isYesterday = lower.includes('hier') || lower.includes('البارحة') || lower.includes('أمس') || lower.includes('yesterday');
-    const targetDate = isYesterday 
-      ? new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-      : today;
-    
     const targetSessions = studentData.sessions.filter(s => s.date === targetDate);
+    
+    // Formater la date pour l'affichage
+    const dateLabel = extractedDate 
+      ? new Date(extractedDate + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+      : (isArabic ? 'اليوم' : 'aujourd\'hui');
     
     if (targetSessions.length === 0) {
       response = isArabic
-        ? `ℹ️ لا توجد دروس مسجلة ${isYesterday ? 'للبارحة' : 'لهذا اليوم'}.`
-        : `ℹ️ Pas de leçons enregistrées ${isYesterday ? 'pour hier' : 'pour aujourd\'hui'}.`;
+        ? `ℹ️ لا توجد دروس مسجلة لـ ${dateLabel}.`
+        : `ℹ️ Pas de leçons enregistrées pour ${dateLabel}.`;
     } else {
-      const dateLabel = isYesterday 
-        ? (isArabic ? 'البارحة' : 'hier')
-        : (isArabic ? 'اليوم' : 'aujourd\'hui');
-      
       response = isArabic
-        ? `📖 *الدروس ${dateLabel}:*\n\n`
-        : `📖 *Leçons ${dateLabel}:*\n\n`;
+        ? `📖 *الدروس (${dateLabel}):*\n\n`
+        : `📖 *Leçons du ${dateLabel}:*\n\n`;
       
       targetSessions.forEach(session => {
         response += `📚 *${session.subjects?.name || 'N/A'}*\n`;
