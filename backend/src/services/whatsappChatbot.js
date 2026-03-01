@@ -1925,7 +1925,7 @@ async function sendClarificationMessage(phoneNumber, parentInfo, originalMessage
 }
 
 // Envoyer la réponse via WhatsApp
-async function sendWhatsAppResponse(phoneNumber, message, schoolId) {
+export async function sendWhatsAppResponse(phoneNumber, message, schoolId) {
   try {
     // Récupérer la session API key de l'école
     const sessionApiKey = await getSchoolSessionApiKey(schoolId);
@@ -1965,7 +1965,7 @@ async function sendWhatsAppResponse(phoneNumber, message, schoolId) {
 }
 
 // Récupérer la clé API de session pour une école
-async function getSchoolSessionApiKey(schoolId) {
+export async function getSchoolSessionApiKey(schoolId) {
   const globalKey = process.env.WASENDER_API_KEY;
   if (!globalKey) return null;
   

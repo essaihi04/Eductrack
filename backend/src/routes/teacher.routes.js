@@ -3,6 +3,7 @@ import { supabaseAdmin, createAuthenticatedClient } from '../config/supabase.js'
 import { authenticate, authorize } from '../middleware/auth.js';
 import multer from 'multer';
 import XLSX from 'xlsx';
+import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -683,6 +684,52 @@ router.post('/session-tracking', async (req, res) => {
 
     if (error) throw error;
     res.status(201).json(data);
+
+    // Notification WhatsApp automatique si l'élève est marqué absent
+    if (presence === 'absent') {
+      try {
+        // Récupérer les infos de la session (date, matière)
+        const { data: sessionInfo } = await supabaseAdmin
+          .from('sessions')
+          .select('date, topic, school_id, subjects(name)')
+          .eq('id', session_id)
+          .single();
+
+        // Récupérer le(s) parent(s) de l'élève et leur numéro WhatsApp
+        const { data: parentLinks } = await supabaseAdmin
+          .from('parent_students')
+          .select('profiles!parent_id(first_name, phone)')
+          .eq('student_id', student_id);
+
+        // Récupérer le nom de l'élève
+        const { data: studentProfile } = await supabaseAdmin
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', student_id)
+          .single();
+
+        if (sessionInfo && studentProfile && parentLinks?.length > 0) {
+          const studentName = `${studentProfile.first_name} ${studentProfile.last_name}`.trim();
+          const sessionDate = new Date(sessionInfo.date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const subjectName = sessionInfo.subjects?.name || '';
+          const schoolId = sessionInfo.school_id;
+
+          const message = `⚠️ *Absence signalée*\n\nBonjour,\n\nNous vous informons que *${studentName}* a été marqué(e) *absent(e)* lors de la séance du *${sessionDate}*${subjectName ? ` (${subjectName})` : ''}.\n\nPour toute question, n'hésitez pas à contacter l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+
+          for (const link of parentLinks) {
+            const parentPhone = link.profiles?.phone;
+            if (parentPhone) {
+              const e164Phone = parentPhone.startsWith('+') ? parentPhone : `+${parentPhone}`;
+              await sendWhatsAppResponse(e164Phone, message, schoolId);
+              console.log(`[Tracking] Notification absence envoyée au parent (${e164Phone}) pour l'élève ${studentName}`);
+            }
+          }
+        }
+      } catch (notifError) {
+        console.error('[Tracking] Erreur notification absence WhatsApp:', notifError);
+      }
+    }
+
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
