@@ -487,8 +487,8 @@ function classifyQuestion(messageText) {
     /^(كم|ما|شنو|combien|quel).{0,20}(نقط|معدل|note|moyenne)/,
     // Devoirs simples
     /^(هل|واش|y a-t-il|a-t-il).{0,20}(واجب|devoir)/,
-    // Leçons simples
-    /^(ما|شنو|quel).{0,20}(درس|leçon|étudié)/,
+    // Leçons (aujourd'hui, hier, titres)
+    /الدروس|درس|دروس|leçon|leçons|cours|البارحة.*درس|hier.*leçon|titres.*leçon|étudié/,
     // Planning/programme
     /^(ما|شنو|quel).{0,20}(برنامج|programme|planning)/,
     // Bilan mensuel
@@ -498,7 +498,7 @@ function classifyQuestion(messageText) {
   if (factualPatterns.some(p => p.test(lower))) return 'FACTUAL';
 
   // PRIORITÉ 3: Mots-clés factuels isolés (sans contexte analytique)
-  const simpleFactualKeywords = /^و$|^[a-f]$|^أ$|^ب$|^ج$|^د$|^ه$/;
+  const simpleFactualKeywords = /^و$|^[a-f]$|^أ$|^ب$|^ج$|^د$|^ه$|^الدروس$|^دروس$/;
   if (simpleFactualKeywords.test(lower)) return 'FACTUAL';
 
   // Par défaut → IA analytique pour être sûr
