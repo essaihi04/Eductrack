@@ -1001,24 +1001,43 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
   
-  // LEÇONS
-  else if (lower.includes('leçon') || lower.includes('درس') || lower.includes('étudié') || lower.includes('درس')) {
-    const todaySessions = studentData.sessions.filter(s => s.date === today);
+  // LEÇONS (aujourd'hui ou hier)
+  else if (
+    lower.includes('leçon') || lower.includes('درس') || lower.includes('étudié') ||
+    lower.includes('cours') || lower.includes('البارحة') || lower.includes('hier') ||
+    lower.includes('أمس') || lower.includes('yesterday') || lower.includes('titres')
+  ) {
+    // Détecter si c'est pour hier ou aujourd'hui
+    const isYesterday = lower.includes('hier') || lower.includes('البارحة') || lower.includes('أمس') || lower.includes('yesterday');
+    const targetDate = isYesterday 
+      ? new Date(new Date(today).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      : today;
     
-    if (todaySessions.length === 0) {
+    const targetSessions = studentData.sessions.filter(s => s.date === targetDate);
+    
+    if (targetSessions.length === 0) {
       response = isArabic
-        ? `ℹ️ لا توجد دروس مسجلة لهذا اليوم.`
-        : `ℹ️ Pas de leçons enregistrées pour aujourd'hui.`;
+        ? `ℹ️ لا توجد دروس مسجلة ${isYesterday ? 'للبارحة' : 'لهذا اليوم'}.`
+        : `ℹ️ Pas de leçons enregistrées ${isYesterday ? 'pour hier' : 'pour aujourd\'hui'}.`;
     } else {
-      response = isArabic
-        ? `📖 *الدروس اليوم:*\n\n`
-        : `📖 *Leçons d'aujourd'hui:*\n\n`;
+      const dateLabel = isYesterday 
+        ? (isArabic ? 'البارحة' : 'hier')
+        : (isArabic ? 'اليوم' : 'aujourd\'hui');
       
-      todaySessions.forEach(session => {
-        response += `• ${session.subjects?.name || 'N/A'}\n`;
+      response = isArabic
+        ? `📖 *الدروس ${dateLabel}:*\n\n`
+        : `📖 *Leçons ${dateLabel}:*\n\n`;
+      
+      targetSessions.forEach(session => {
+        response += `📚 *${session.subjects?.name || 'N/A'}*\n`;
         if (session.topic) {
-          response += `  ${session.topic}\n`;
+          response += `   📌 Titre: ${session.topic}\n`;
         }
+        if (session.lesson_content) {
+          const content = session.lesson_content.substring(0, 150);
+          response += `   📝 ${content}${session.lesson_content.length > 150 ? '...' : ''}\n`;
+        }
+        response += `\n`;
       });
     }
   }
@@ -1354,7 +1373,7 @@ async function collectStudentData(studentId, schoolId) {
     // Sessions récentes de sa classe
     supabaseAdmin
       .from('sessions')
-      .select('id, date, topic, type, subjects(name)')
+      .select('id, date, topic, lesson_content, type, subjects(name)')
       .eq('class_id', classId)
       .gte('date', oneWeekAgo)
       .lte('date', today)
@@ -1409,7 +1428,7 @@ async function collectStudentData(studentId, schoolId) {
     // Toutes les sessions (3 derniers mois)
     supabaseAdmin
       .from('sessions')
-      .select('id, date, topic, type, subjects(name)')
+      .select('id, date, topic, lesson_content, type, subjects(name)')
       .eq('class_id', classId)
       .gte('date', threeMonthsAgo)
       .lte('date', today)
