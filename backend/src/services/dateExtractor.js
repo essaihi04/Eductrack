@@ -118,4 +118,4 @@ function extractDateFromMessage(message) {
   return null;
 }
 
-module.exports = { extractDateFromMessage };
+export { extractDateFromMessage };

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import OpenAI from 'openai';
-const { extractDateFromMessage } = require('./dateExtractor');
+import { extractDateFromMessage } from './dateExtractor.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
