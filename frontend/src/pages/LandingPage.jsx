@@ -54,6 +54,12 @@ const LandingPage = () => {
               >
                 Bénéfices
               </button>
+              <button
+                onClick={() => document.getElementById('downloads')?.scrollIntoView({ behavior: 'smooth' })}
+                className="text-gray-600 dark:text-gray-300 hover:text-primary transition-colors"
+              >
+                Téléchargements
+              </button>
             </div>
 
             {/* Login Button */}
@@ -87,7 +93,9 @@ const LandingPage = () => {
         
         <Stats />
         
-        <CTA />
+        <div id="downloads">
+          <CTA />
+        </div>
       </main>
 
       {/* Footer */}

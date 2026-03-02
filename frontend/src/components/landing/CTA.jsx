@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { ArrowRight, MessageCircle, CheckCircle } from 'lucide-react';
+import { ArrowRight, MessageCircle, CheckCircle, Smartphone, Monitor, Download } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 
@@ -8,6 +8,30 @@ const features = [
   'Sans engagement',
   'Support dédié en français',
   'Formation incluse'
+];
+
+const apkLink = 'https://drive.google.com/file/d/1Mais1usf4RstKcTIDK7bVCe4cK7PrFNN/view?usp=sharing';
+const desktopLink = 'https://drive.google.com/file/d/1QEYjZmYIgmaxzcMwDQ9OE6h46Uf8Ynen/view?usp=sharing';
+
+const platformCards = [
+  {
+    title: 'Application Android (APK)',
+    subtitle: 'Pour parents, élèves et professeurs en mobilité',
+    image: '/images/landing-mobile.svg',
+    icon: Smartphone,
+    cta: 'Télécharger APK',
+    href: apkLink,
+    badge: 'Nouveau'
+  },
+  {
+    title: 'Application Desktop (Windows)',
+    subtitle: 'Pour administration et pilotage complet de l’école',
+    image: '/images/landing-desktop.svg',
+    icon: Monitor,
+    cta: 'Télécharger Desktop',
+    href: desktopLink,
+    badge: 'Stable'
+  }
 ];
 
 const CTA = () => {
@@ -46,7 +70,8 @@ const CTA = () => {
                 transition={{ delay: 0.3 }}
                 className="text-xl text-blue-100 mb-8 max-w-2xl mx-auto"
               >
-                Rejoignez les écoles qui ont déjà transformé leur gestion avec EduTrack
+                Rejoignez les écoles qui ont déjà transformé leur gestion avec EduTrack.
+                Présence, devoirs, contrôles, documents pédagogiques et notifications WhatsApp dans une seule plateforme.
               </motion.p>
 
               <motion.div
@@ -99,6 +124,44 @@ const CTA = () => {
                     Demander une Démo
                   </Button>
                 </motion.div>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.55 }}
+                className="mt-10 grid md:grid-cols-2 gap-6 text-left"
+              >
+                {platformCards.map((card, index) => (
+                  <div
+                    key={index}
+                    className="bg-white/10 border border-white/20 rounded-2xl overflow-hidden shadow-xl"
+                  >
+                    <img
+                      src={card.image}
+                      alt={card.title}
+                      className="w-full h-44 object-cover"
+                    />
+                    <div className="p-5">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-white font-semibold text-lg">{card.title}</h3>
+                        <span className="text-xs px-2 py-1 rounded-full bg-white/20 text-blue-100">{card.badge}</span>
+                      </div>
+                      <p className="text-blue-100 text-sm mb-4">{card.subtitle}</p>
+                      <a
+                        href={card.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors"
+                      >
+                        <card.icon className="w-4 h-4" />
+                        <Download className="w-4 h-4" />
+                        {card.cta}
+                      </a>
+                    </div>
+                  </div>
+                ))}
               </motion.div>
 
               <motion.p
