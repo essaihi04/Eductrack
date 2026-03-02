@@ -1033,7 +1033,8 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         
         pendingHomework.slice(0, 5).forEach(hw => {
           const dueDate = new Date(hw.due_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-          response += `• ${hw.subjects?.name || 'N/A'}: ${hw.title}\n`;
+          const typeLabel = hw.type ? (isArabic ? hw.type : hw.type.charAt(0).toUpperCase() + hw.type.slice(1)) : 'Devoir';
+          response += `• ${typeLabel}: ${hw.title}\n`;
           response += `  ${isArabic ? 'الموعد النهائي' : 'Échéance'}: ${dueDate}\n`;
           if (hw.description) response += `  ${isArabic ? 'الوصف' : 'Description'}: ${hw.description}\n`;
         });
@@ -1482,7 +1483,7 @@ async function collectStudentData(studentId, schoolId) {
     // Devoirs assignés à la classe (avec ou sans soumission)
     supabaseAdmin
       .from('homework')
-      .select('id, title, due_date, description, subjects(name), homework_submissions!left(student_id, status, submission_date)')
+      .select('id, title, due_date, description, type, homework_submissions!left(student_id, status, submission_date)')
       .eq('class_id', classId)
       .gte('due_date', oneWeekAgo)
       .order('due_date', { ascending: true })
