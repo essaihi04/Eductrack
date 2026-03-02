@@ -1004,13 +1004,23 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   }
   
   // DEVOIRS
-  else if (lower.includes('devoir') || lower.includes('واجب')) {
+  else if (searchText.includes('devoir') || searchText.includes('واجب')) {
     if (!studentData.homework || studentData.homework.length === 0) {
       response = isArabic
         ? `ℹ️ لا توجد واجبات منزلية حالياً.`
         : `ℹ️ Pas de devoirs en cours actuellement.`;
     } else {
-      const pendingHomework = studentData.homework.filter(hw => hw.status !== 'submitted');
+      // Filtrer les devoirs pour cet élève spécifiquement
+      const homeworkList = studentData.homework.map(hw => {
+        const submission = hw.homework_submissions?.find(sub => sub.student_id === studentInfo.id);
+        return {
+          ...hw,
+          status: submission?.status || 'pending',
+          submission_date: submission?.submission_date
+        };
+      });
+      
+      const pendingHomework = homeworkList.filter(hw => hw.status !== 'submitted');
       
       if (pendingHomework.length === 0) {
         response = isArabic
@@ -1021,9 +1031,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
           ? `📚 *الواجبات المنزلية:*\n\n`
           : `📚 *Devoirs à faire:*\n\n`;
         
-        pendingHomework.slice(0, 3).forEach(hw => {
-          response += `• ${hw.homework?.subjects?.name || 'N/A'}: ${hw.homework?.title}\n`;
-          response += `  ${isArabic ? 'الموعد النهائي' : 'Échéance'}: ${hw.homework?.due_date}\n`;
+        pendingHomework.slice(0, 5).forEach(hw => {
+          const dueDate = new Date(hw.due_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+          response += `• ${hw.subjects?.name || 'N/A'}: ${hw.title}\n`;
+          response += `  ${isArabic ? 'الموعد النهائي' : 'Échéance'}: ${dueDate}\n`;
+          if (hw.description) response += `  ${isArabic ? 'الوصف' : 'Description'}: ${hw.description}\n`;
         });
       }
     }
@@ -1467,13 +1479,14 @@ async function collectStudentData(studentId, schoolId) {
       .gte('controls_plan.date', oneWeekAgo)
       .limit(10),
     
-    // Devoirs récents
+    // Devoirs assignés à la classe (avec ou sans soumission)
     supabaseAdmin
-      .from('homework_submissions')
-      .select('*, homework!inner(title, due_date, subjects(name))')
-      .eq('student_id', studentId)
-      .gte('homework.due_date', oneWeekAgo)
-      .limit(10),
+      .from('homework')
+      .select('id, title, due_date, description, subjects(name), homework_submissions!left(student_id, status, submission_date)')
+      .eq('class_id', classId)
+      .gte('due_date', oneWeekAgo)
+      .order('due_date', { ascending: true })
+      .limit(20),
     
     // Toutes les notes (pour calculer les moyennes)
     supabaseAdmin
