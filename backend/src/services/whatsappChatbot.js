@@ -527,7 +527,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
   
-  // Mapper les lettres prédéfinies aux questions complètes
+  // Mapper les lettres prédéfinies aux questions complètes (case-insensitive)
   const predefinedMap = {
     'أ': 'كيف حاله اليوم',
     'ب': 'الدروس',
@@ -544,7 +544,8 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   };
   
   // Si c'est une lettre prédéfinie, utiliser la question mappée
-  const mappedQuestion = predefinedMap[lower];
+  const trimmedLower = lower.trim();
+  const mappedQuestion = predefinedMap[trimmedLower];
   const searchText = mappedQuestion || lower;
   
   // Extraire une date ou un mois spécifique du message
@@ -932,22 +933,42 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
 
-  // NOTES / MOYENNE
+  // NOTES / MOYENNE (avec support filtrage par matière)
   else if (lower.includes('note') || lower.includes('نقطة') || lower.includes('moyenne') || lower.includes('معدل')) {
-    if (!studentData.grades || studentData.grades.length === 0) {
+    // Détecter si une matière spécifique est demandée
+    const allSessions = studentData.allSessions || [];
+    const subjectPool = [...new Set(allSessions.map(s => s?.subjects?.name).filter(Boolean))];
+    const requestedSubject = subjectPool.find(subject => {
+      const normalized = normalizeText(subject);
+      return normalized && lower.includes(normalized);
+    });
+
+    const allGrades = studentData.allGrades?.length ? studentData.allGrades : (studentData.grades || []);
+    
+    // Filtrer par matière si demandée
+    let relevantGrades = allGrades;
+    if (requestedSubject) {
+      relevantGrades = allGrades.filter(grade => {
+        const inferredSubject = inferControlSubject(grade);
+        return inferredSubject && normalizeText(inferredSubject).includes(normalizeText(requestedSubject));
+      });
+    }
+
+    if (relevantGrades.length === 0) {
       response = isArabic
-        ? `ℹ️ لا توجد نقط حديثة متاحة.`
-        : `ℹ️ Pas de notes récentes disponibles.`;
+        ? `ℹ️ لا توجد نقط${requestedSubject ? ` في ${requestedSubject}` : ' حديثة'} متاحة.`
+        : `ℹ️ Pas de notes${requestedSubject ? ` en ${requestedSubject}` : ' récentes'} disponibles.`;
     } else {
-      const recentGrades = studentData.grades.slice(0, 5);
+      const recentGrades = relevantGrades.slice(0, 5);
+      const subjectLabel = requestedSubject ? ` (${requestedSubject})` : '';
       response = isArabic
-        ? `📝 *آخر النقط:*\n\n`
-        : `📝 *Dernières notes:*\n\n`;
+        ? `📝 *آخر النقط${subjectLabel}:*\n\n`
+        : `📝 *Dernières notes${subjectLabel}:*\n\n`;
       
       recentGrades.forEach(grade => {
         const inferredSubject = inferControlSubject(grade);
         const controlTitle = grade.controls_plan?.name || 'Contrôle';
-        response += `• ${controlTitle}${inferredSubject ? ` (${inferredSubject})` : ''}: *${grade.note}/20*\n`;
+        response += `• ${controlTitle}${inferredSubject && !requestedSubject ? ` (${inferredSubject})` : ''}: *${grade.note}/20*\n`;
       });
 
       const trendSeries = recentGrades
@@ -960,11 +981,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
       }
       
       // Calculer moyenne si possible
-      if (studentData.allGrades && studentData.allGrades.length > 0) {
-        const avg = (studentData.allGrades.reduce((sum, g) => sum + (g.note || 0), 0) / studentData.allGrades.length).toFixed(2);
+      if (relevantGrades.length > 0) {
+        const avg = (relevantGrades.reduce((sum, g) => sum + (g.note || 0), 0) / relevantGrades.length).toFixed(2);
         response += '\n' + (isArabic
-          ? `📊 المعدل العام: *${avg}/20*`
-          : `📊 Moyenne générale: *${avg}/20*`);
+          ? `📊 المعدل${requestedSubject ? ` في ${requestedSubject}` : ' العام'}: *${avg}/20*`
+          : `📊 Moyenne${requestedSubject ? ` en ${requestedSubject}` : ' générale'}: *${avg}/20*`);
       }
     }
   }
@@ -1662,10 +1683,11 @@ RÈGLES DE RÉPONSE:
 8. 1-3 emojis seulement, placés intelligemment.
 9. N'invente JAMAIS de données absentes du dossier. Un booléen 'téléphone en classe' = signalement, pas 'il a quitté la séance'.
 10. RÈGLE ABSOLUE: Ne partage JAMAIS de données (notes, absences, comportement) que le parent n'a PAS demandées explicitement. Si la question est vague ou générale, demande ce qu'il veut savoir. Ne commence pas un résumé spontané.
-11. Termine par une question ouverte courte si pertinent.
+11. Si le parent mentionne une MATIÈRE (ex: 'SVT', 'maths') mais que le dossier ne contient AUCUNE donnée pour cette matière, dis simplement 'Pas de données disponibles pour [matière]'. N'invente PAS de leçons, notes ou comportements.
+12. Termine par une question ouverte courte si pertinent.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DOSSIER ${studentInfo.first_name.toUpperCase()} ${studentInfo.last_name?.toUpperCase() || ''}:
+DOSSIER ${studentInfo.first_name} ${studentInfo.last_name || ''}:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${context}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
