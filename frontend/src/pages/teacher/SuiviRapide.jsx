@@ -1053,6 +1053,26 @@ const SuiviRapide = () => {
                 {sessionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                 {sessionLoading ? 'Création...' : 'Créer'}
               </button>
+              <button
+                onClick={() => {
+                  // Réinitialiser tous les champs du formulaire
+                  setSessionType('normal');
+                  setControlName('');
+                  setControlDescription('');
+                  setLessonTitle('');
+                  setLessonDescription('');
+                  setStartTime('');
+                  setEndTime('');
+                  setSessionError('');
+                  setSessionInfo('');
+                  setTrackingOptions({ ...DEFAULT_TRACKING_OPTIONS });
+                }}
+                disabled={sessionLoading}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition whitespace-nowrap"
+              >
+                <Trash2 className="w-4 h-4" />
+                Annuler
+              </button>
             </div>
 
             {/* Cahier de texte (cours) */}

@@ -733,8 +733,16 @@ const ControlsPage = () => {
       const className = getClassName(control);
       console.log('Final class name:', className);
       
-      // Importation dynamique de jsPDF pour éviter les erreurs Vite
-      const { default: jsPDF } = await import('jspdf');
+      // Importation de jsPDF avec gestion d'erreur
+      let jsPDF;
+      try {
+        const module = await import('jspdf');
+        jsPDF = module.default;
+      } catch (error) {
+        console.error('Erreur lors du chargement de jsPDF:', error);
+        alert('Impossible de générer le PDF. Veuillez réessayer.');
+        return;
+      }
       const stats = calculateControlStats(control.id);
       
       // Créer un nouveau document PDF

@@ -211,8 +211,17 @@ const CahierDeTexte = () => {
   const generatePDF = async () => {
     setPdfGenerating(true);
     try {
-      const { default: jsPDF } = await import('jspdf');
-      const { autoTable } = await import('jspdf-autotable');
+      let jsPDF, autoTable;
+      try {
+        const jsPDFModule = await import('jspdf');
+        const autoTableModule = await import('jspdf-autotable');
+        jsPDF = jsPDFModule.default;
+        autoTable = autoTableModule.default;
+      } catch (error) {
+        console.error('Erreur lors du chargement de jsPDF:', error);
+        alert('Impossible de générer le PDF. Veuillez réessayer.');
+        return;
+      }
 
       const doc = new jsPDF('p', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();

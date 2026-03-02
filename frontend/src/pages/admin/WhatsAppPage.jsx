@@ -812,8 +812,17 @@ const WhatsAppPage = () => {
   const downloadReportPDF = async () => {
     if (!reportPreview?.report || !reportPeriodData) { alert('Aucun rapport à télécharger. Générez d\'abord un aperçu.'); return; }
     try {
-    const { default: jsPDF } = await import('jspdf');
-    const { default: autoTable } = await import('jspdf-autotable');
+    let jsPDF, autoTable;
+    try {
+      const jsPDFModule = await import('jspdf');
+      const autoTableModule = await import('jspdf-autotable');
+      jsPDF = jsPDFModule.default;
+      autoTable = autoTableModule.default;
+    } catch (error) {
+      console.error('Erreur lors du chargement de jsPDF:', error);
+      alert('Impossible de générer le PDF. Veuillez réessayer.');
+      return;
+    }
     const doc = new jsPDF();
     const st = reportPeriodData.student;
     const os = reportPeriodData.overallStats;
