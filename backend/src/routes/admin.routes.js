@@ -1730,7 +1730,9 @@ router.post('/teachers/import', async (req, res) => {
 
     const createdTeachers = [];
     const errors = [];
-    const sanitize = (str) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    const sanitize = (str) => {
+      return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    };
 
     for (const teacher of teachers) {
       const { firstName, lastName, phone, subjectName } = teacher;
@@ -1740,7 +1742,17 @@ router.post('/teachers/import', async (req, res) => {
         continue;
       }
 
-      const email = `${sanitize(firstName)}${sanitize(lastName)}@${schoolDomain}`;
+      // Générer email avec fallback pour noms arabes
+      const firstPart = sanitize(firstName);
+      const lastPart = sanitize(lastName);
+      let email;
+      if (!firstPart && !lastPart) {
+        const timestamp = Date.now().toString().slice(-6);
+        email = `prof${timestamp}@${schoolDomain}`;
+      } else {
+        email = `${firstPart}${lastPart}@${schoolDomain}`;
+      }
+
       const year = new Date().getFullYear();
       const cleanFirstName = firstName
         .normalize('NFD')
@@ -1749,7 +1761,7 @@ router.post('/teachers/import', async (req, res) => {
         .trim();
       const password = cleanFirstName ? 
         cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
-        `Prof${year}`;
+        `Prof${year}${Math.random().toString(36).slice(2, 6)}`;
 
       try {
         // Créer l'utilisateur dans Auth
