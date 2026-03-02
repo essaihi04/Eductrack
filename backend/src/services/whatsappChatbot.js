@@ -129,40 +129,25 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       absences: studentData.absences?.length || 0
     });
     
-    // 8. ARCHITECTURE HYBRIDE - Classifier la question
-    const questionType = classifyQuestion(messageText);
-    console.log('[Chatbot] Type de question:', questionType);
+    // 8. AGENT DÉCIDEUR IA - Analyse le message et décide comment répondre
+    const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
+    const agentDecision = await decideWithAgent(messageText, parentInfo, studentInfo, conversationHistory);
+    console.log('[Chatbot] Décision agent:', JSON.stringify(agentDecision));
     
     let response;
     
-    if (questionType === 'FACTUAL') {
-      // Réponse directe depuis la DB (pas d'IA)
-      console.log('[Chatbot] Question factuelle - Réponse directe');
+    if (agentDecision.mode === 'DIRECT') {
+      // Réponse directe scriptée (25%) - questions factuelles simples depuis la DB
+      console.log('[Chatbot] Mode DIRECT - Réponse scriptée depuis DB');
       response = await generateDirectResponse(messageText, studentInfo, studentData, parentInfo);
-
-      // Fallback intelligent: si la réponse factuelle ne comprend pas, basculer vers l'IA
       if (!response) {
-        console.log('[Chatbot] Fallback IA - question factuelle non comprise');
-        const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
-        response = await generateAIResponse(
-          messageText,
-          studentInfo,
-          studentData,
-          parentInfo,
-          conversationHistory
-        );
+        console.log('[Chatbot] Fallback IA depuis DIRECT');
+        response = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
       }
     } else {
-      // Question complexe - Activation de l'IA
-      console.log('[Chatbot] Question analytique - Activation IA');
-      const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
-      response = await generateAIResponse(
-        messageText, 
-        studentInfo, 
-        studentData, 
-        parentInfo, 
-        conversationHistory
-      );
+      // Mode IA (75%) - DeepSeek répond avec contexte ciblé
+      console.log('[Chatbot] Mode AI_FOCUSED - DeepSeek avec contexte ciblé:', agentDecision.intents);
+      response = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
     }
     
     // Ajouter le menu de questions rapides après la réponse (langue du parent)
@@ -458,52 +443,75 @@ async function sendChildSelectionMenu(phone, parentInfo) {
   await sendWhatsAppResponse(phone, message, parentInfo.school_id);
 }
 
-// CLASSIFICATEUR DE QUESTIONS - Architecture hybride
-function classifyQuestion(messageText) {
-  const lower = messageText.toLowerCase().trim();
+// ═══════════════════════════════════════════════════════
+// AGENT DÉCIDEUR - DeepSeek analyse l'intent et décide
+// ═══════════════════════════════════════════════════════
+async function decideWithAgent(messageText, parentInfo, studentInfo, conversationHistory) {
+  // Messages courts/prédéfinis → décision directe sans appel IA
+  const lower = messageText.trim().toLowerCase();
+  const predefinedDirect = /^([a-fأبجدهو]|\d)$/.test(lower);
+  if (predefinedDirect) {
+    return { mode: 'DIRECT', intents: ['predefined'], summary: 'Sélection menu prédéfini' };
+  }
 
-  // PRIORITÉ 1: Questions analytiques (IA obligatoire)
-  const analyticalPatterns = [
-    // Questions "comment" analytiques
-    /كيف يمكن|كيف نقدر|كيفاش ن|كيف أساعد|كيف نحسن|comment puis-je|comment faire|comment l'aider|comment améliorer/,
-    // Questions "pourquoi"
-    /لماذا|علاش|pourquoi|pour quelle raison/,
-    // Questions de prédiction/possibilité
-    /هل يمكن|هل سي|هل يستطيع|هل سينجح|peut-il|pourra-t-il|va-t-il réussir|risque de/,
-    // Conseils et recommandations
-    /نصيحة|ماذا أفعل|ماذا يجب|شنو خاصني|conseil|recommandation|que dois-je|que faire/,
-    // Analyse et évaluation
-    /تحليل|تقييم|مقارنة|analyse|évaluation|comparaison|évolution/,
-    // Questions ouvertes complexes
-    /كيف دالك|كيف داير|كيف حال|comment va|comment se passe/
-  ];
+  // Construire un résumé de l'historique récent pour l'agent
+  const historySnippet = conversationHistory.slice(-3).map(c =>
+    `Parent: ${c.parent_message.slice(0, 80)}\nAssistant: ${c.ai_response.slice(0, 100)}`
+  ).join('\n---\n');
 
-  if (analyticalPatterns.some(p => p.test(lower))) return 'ANALYTICAL';
+  const agentPrompt = `Tu es un agent classificateur pour un chatbot scolaire WhatsApp.
+Analyse le message d'un parent et retourne UNIQUEMENT un objet JSON valide.
 
-  // PRIORITÉ 2: Questions factuelles simples (DB directe)
-  const factualPatterns = [
-    // Présence / absences (sans "comment" ni "pourquoi")
-    /^(كم|ما|combien|quel).{0,20}(غياب|حضور|absence|présence)/,
-    // Notes simples
-    /^(كم|ما|شنو|combien|quel).{0,20}(نقط|معدل|note|moyenne)/,
-    // Devoirs simples
-    /^(هل|واش|y a-t-il|a-t-il).{0,20}(واجب|devoir)/,
-    // Leçons (aujourd'hui, hier, titres)
-    /الدروس|درس|دروس|leçon|leçons|cours|البارحة.*درس|hier.*leçon|titres.*leçon|étudié/,
-    // Planning/programme
-    /^(ما|شنو|quel).{0,20}(برنامج|programme|planning)/,
-    // Bilan mensuel
-    /بيلان.*الشهر|bilan.*mois|résumé.*mois/
-  ];
+Contexte:
+- Parent: ${parentInfo.parent_name}
+- Élève: ${studentInfo.first_name} ${studentInfo.last_name || ''}
+- École: ${parentInfo.school_name}
+${historySnippet ? `- Historique récent:\n${historySnippet}` : ''}
 
-  if (factualPatterns.some(p => p.test(lower))) return 'FACTUAL';
+Message reçu: "${messageText}"
 
-  // PRIORITÉ 3: Mots-clés factuels isolés (sans contexte analytique)
-  const simpleFactualKeywords = /^و$|^[a-f]$|^أ$|^ب$|^ج$|^د$|^ه$|^الدروس$|^دروس$/;
-  if (simpleFactualKeywords.test(lower)) return 'FACTUAL';
+Règles de décision:
+- mode "DIRECT": questions factuelles simples (notes exactes, absences du jour, liste devoirs, leçons du jour, programme semaine). Réponse depuis base de données.
+- mode "AI_FOCUSED": tout le reste (analyse, conseils, comportement, motivation, évolution, questions ouvertes, questions complexes, suivi conversation). Réponse par IA.
 
-  // Par défaut → IA analytique pour être sûr
-  return 'ANALYTICAL';
+intents possibles (tableau): ["presence", "absences", "grades", "homework", "lessons", "schedule", "behavior", "advice", "comparison", "wellbeing", "other"]
+
+Retourne STRICTEMENT ce JSON (rien d'autre):
+{
+  "mode": "DIRECT" ou "AI_FOCUSED",
+  "intents": [liste des intents détectés],
+  "needsToday": true/false,
+  "needsGrades": true/false,
+  "needsHomework": true/false,
+  "needsBehavior": true/false,
+  "needsSchedule": true/false,
+  "summary": "résumé en 1 phrase de ce que le parent veut savoir"
+}`;
+
+  try {
+    const result = await deepseek.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: agentPrompt }],
+      temperature: 0.1,
+      max_tokens: 200,
+      response_format: { type: 'json_object' }
+    });
+    const parsed = JSON.parse(result.choices[0]?.message?.content || '{}');
+    return {
+      mode: parsed.mode === 'DIRECT' ? 'DIRECT' : 'AI_FOCUSED',
+      intents: Array.isArray(parsed.intents) ? parsed.intents : ['other'],
+      needsToday: parsed.needsToday !== false,
+      needsGrades: parsed.needsGrades === true,
+      needsHomework: parsed.needsHomework === true,
+      needsBehavior: parsed.needsBehavior === true,
+      needsSchedule: parsed.needsSchedule === true,
+      summary: parsed.summary || ''
+    };
+  } catch (err) {
+    console.error('[Agent] Erreur décision:', err.message);
+    // Fallback : tout passer en AI_FOCUSED avec tout le contexte
+    return { mode: 'AI_FOCUSED', intents: ['other'], needsToday: true, needsGrades: true, needsHomework: true, needsBehavior: true, needsSchedule: false, summary: '' };
+  }
 }
 
 // Générer une réponse directe (sans IA) pour questions factuelles
@@ -1555,358 +1563,211 @@ async function collectStudentData(studentId, schoolId) {
   };
 }
 
-// Générer la réponse IA personnalisée// Générer une réponse IA
-async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory) {
+// ═══════════════════════════════════════════════════════
+// GÉNÉRATION IA - Réponse humaine naturelle
+// ═══════════════════════════════════════════════════════
+async function generateAIResponse(question, studentInfo, studentData, parentInfo, conversationHistory, agentDecision = null) {
   try {
-    // Préparer le contexte pour l'IA
-    const context = buildContextForAI(studentInfo, studentData);
-    console.log('[Chatbot] Contexte IA généré, longueur:', context.length, 'caractères');
-    
-    // Détecter le mode conversationnel
-    const convMode = detectConversationMode(question, conversationHistory);
-    console.log('[Chatbot] Mode conversationnel:', convMode);
+    // Construire un contexte CIBLÉ selon ce que l'agent a détecté
+    const context = buildTargetedContext(studentInfo, studentData, agentDecision);
+    console.log('[Chatbot] Contexte ciblé généré, longueur:', context.length, 'caractères');
 
-    // Détecter la langue du message
     const isArabic = /[\u0600-\u06FF]/.test(question);
-    const language = isArabic ? 'arabe (dialecte marocain darija ou arabe standard)' : 'français';
+    const language = isArabic ? 'darija marocaine ou arabe standard' : 'français';
+    const intents = agentDecision?.intents || [];
+    const summary = agentDecision?.summary || '';
 
-    // Construire l'historique pour les messages OpenAI (multi-turn)
-    const messages = [];
+    // Construire le prompt système humain et naturel
+    const systemPrompt = `Tu es Nour, conseiller pédagogique de ${parentInfo.school_name}.
+Tu parles directement au parent comme un ami professionnel — chaleureux, précis, jamais robotique.
 
-    // Instructions selon le mode
-    let modeInstructions = '';
-    if (convMode === 'DATA') {
-      modeInstructions = `MODE: EXTRACTION DE DONNÉES
-- Réponds UNIQUEMENT avec les données du contexte ci-dessous
-- Cite les chiffres exacts (notes, taux de présence, dates)
-- Si la donnée n'existe pas, dis-le clairement
-- INTERDICTION d'inventer ou d'extrapoler`;
-    } else if (convMode === 'ADVICE') {
-      modeInstructions = `MODE: CONSEIL PÉDAGOGIQUE
-- Utilise les données du contexte pour APPUYER tes conseils
-- Donne des conseils CONCRETS, PRATIQUES et APPLICABLES
-- Adapte les conseils aux incidents et comportements observés
-- Reste bienveillant et positif, encourage le parent
-- Tu PEUX enrichir avec des conseils pédagogiques généraux basés sur les problèmes détectés`;
-    } else {
-      modeInstructions = `MODE: SUIVI CONVERSATIONNEL
-- C'est une question de suivi de la conversation précédente
-- Tiens compte du contexte de la discussion
-- Donne des conseils pratiques et personnalisés
-- Reste dans le fil de la conversation`;
-    }
+🎯 Ce que le parent veut: ${summary || question}
+📌 Domaines concernés: ${intents.join(', ') || 'général'}
 
-    const systemPrompt = `Tu es Nour, conseiller pédagogique expert de ${parentInfo.school_name}.
-Ton rôle: accompagner les parents avec bienveillance, expertise et précision pour le suivi scolaire.
+RÈGLES DE RÉPONSE:
+1. Langue: réponds en ${language}. Si le parent écrit en darija, réponds en darija fluide et naturelle.
+2. Longueur: 4 à 10 lignes maximum. Pas de liste à puces inutile si une phrase suffit.
+3. Style: parle comme un humain, pas comme un rapport. Ex: "Youssef a bien été présent aujourd'hui, mais j'ai vu qu'il a eu du mal en maths" plutôt que "Présence: 100% - Mathématiques: 8/20".
+4. Données: utilise les chiffres réels pour appuyer, mais intègre-les naturellement dans la phrase.
+5. Jamais de formule vide en début: pas de "Bien sûr!", "Voici les informations", "بالطبع".
+6. Si tu donnes des conseils: max 2-3 conseils concrets, adaptés aux vraies données de l'élève.
+7. Si une info manque dans le dossier: dis-le simplement sans t'excuser.
+8. 1-3 emojis seulement, placés intelligemment.
+9. N'invente JAMAIS de données absentes du dossier.
+10. Termine par une phrase d'encouragement courte ou une question ouverte si pertinent.
 
-${modeInstructions}
-
-📋 RÈGLES ABSOLUES:
-1. Réponds OBLIGATOIREMENT en ${language}. Si le parent écrit en darija marocaine, réponds en darija ou arabe standard fluide.
-2. Maximum 12 lignes. Sois direct, humain et chaleureux - comme un vrai conseiller.
-3. 2-3 emojis contextuels maximum - pas de surcharge.
-4. Ne commence JAMAIS par "Bien sûr", "D'accord", "Voici", "بالطبع" ou toute formule vide.
-5. Tu parles TOUJOURS des données réelles de l'élève. Jamais de généralités sans lien avec les données.
-6. Si tu donnes des conseils, ils doivent être ADAPTÉS aux problèmes spécifiques détectés dans les données.
-7. N'invente JAMAIS de données. Si une info manque, dis-le clairement et propose une alternative.
-8. Ton ton: professionnel mais proche, encourage le parent, ne le culpabilise pas.
-
-💡 LOGIQUE DE RÉPONSE SELON LE MODE:
-- DATA: Chiffres exacts + interprétation courte ("12/15 présences = bien, mais 3 absences méritent attention")
-- ADVICE: Observe les INCIDENTS et COMPORTEMENT dans les données, puis donne 2-3 conseils CONCRETS et PERSONNALISÉS
-- FOLLOWUP: Continue la conversation naturellement, enrichis avec de nouvelles informations si pertinent
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DOSSIER DE L'ÉLÈVE ${studentInfo.first_name.toUpperCase()} ${studentInfo.last_name?.toUpperCase() || ''}:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DOSSIER ${studentInfo.first_name.toUpperCase()} ${studentInfo.last_name?.toUpperCase() || ''}:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${context}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
-    messages.push({ role: 'system', content: systemPrompt });
+    const messages = [{ role: 'system', content: systemPrompt }];
 
-    // Injecter l'historique dans les messages (multi-turn réel)
+    // Historique conversationnel (5 derniers échanges, sans le menu en bas)
     if (conversationHistory.length > 0) {
-      const recentHistory = conversationHistory.slice(-5); // 5 derniers échanges
-      recentHistory.forEach((conv) => {
+      conversationHistory.slice(-5).forEach(conv => {
         messages.push({ role: 'user', content: conv.parent_message });
         messages.push({ role: 'assistant', content: conv.ai_response.replace(/\n\n━━━.*$/s, '').trim() });
       });
     }
 
-    // Question actuelle
     messages.push({ role: 'user', content: question });
-    
-    console.log('[Chatbot] Envoi requête à DeepSeek (mode:', convMode, ', messages:', messages.length, ')...');
-    const response = await deepseek.chat.completions.create({
+
+    console.log('[Chatbot] Appel DeepSeek (intents:', intents.join(','), ', messages:', messages.length, ')...');
+    const result = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages,
-      temperature: convMode === 'DATA' ? 0.15 : 0.75,
-      max_tokens: 700
+      temperature: intents.includes('advice') || intents.includes('behavior') ? 0.8 : 0.4,
+      max_tokens: 600
     });
     console.log('[Chatbot] Réponse DeepSeek reçue');
-    
-    let aiResponse = response.choices[0]?.message?.content || 'Désolé, je n\'ai pas pu générer une réponse.';
-    
-    // Ajouter signature
-    aiResponse += `\n\n━━━━━━━━━━━━━━━\n👥 *L'équipe pédagogique*\n🏫 *${parentInfo.school_name}*`;
-    
+
+    let aiResponse = result.choices[0]?.message?.content?.trim() || 'Désolé, je n\'ai pas pu générer une réponse.';
+    aiResponse += `\n\n━━━━━━━━━━━━━━━\n👥 *${parentInfo.school_name}*`;
+
     return aiResponse;
-    
+
   } catch (error) {
     console.error('[Chatbot] Erreur génération IA:', error);
-    return `Bonjour,\n\nNous avons bien reçu votre message concernant ${studentInfo.first_name}. Notre équipe pédagogique reviendra vers vous dans les plus brefs délais.\n\nCordialement,\n👥 L'équipe pédagogique\n🏫 ${parentInfo.school_name}`;
+    return `Nous avons bien reçu votre message concernant ${studentInfo.first_name}. Notre équipe pédagogique reviendra vers vous très bientôt 🙏\n\n🏫 *${parentInfo.school_name}*`;
   }
 }
 
-// Construire le contexte pour l'IA avec rapport détaillé
-function buildContextForAI(studentInfo, studentData) {
+// ═══════════════════════════════════════════════════════
+// CONTEXTE CIBLÉ - Seulement les données pertinentes
+// ═══════════════════════════════════════════════════════
+function buildTargetedContext(studentInfo, studentData, agentDecision) {
   const today = new Date().toISOString().split('T')[0];
-  
-  console.log('[buildContextForAI] Construction du contexte pour:', studentInfo.first_name);
-  console.log('[buildContextForAI] Données disponibles:', {
-    profile: !!studentData.profile,
-    sessions: studentData.sessions?.length || 0,
-    tracking: studentData.tracking?.length || 0,
-    grades: studentData.grades?.length || 0,
-    homework: studentData.homework?.length || 0
-  });
-  
-  let context = `📋 RAPPORT JOURNALIER\n\n`;
-  context += `👤 Élève: ${studentInfo.first_name} ${studentInfo.last_name}\n`;
-  context += `🎓 Classe: ${studentData.profile?.classes?.name || 'N/A'}\n`;
-  context += `📚 Niveau: ${studentData.profile?.classes?.level || 'N/A'}\n\n`;
-  
-  // Données d'aujourd'hui avec statistiques visuelles
-  const todayTracking = studentData.tracking.filter(t => t.sessions?.date === today);
-  
-  if (todayTracking.length > 0) {
-    // Calculer les statistiques
-    const totalSessions = todayTracking.length;
-    const presentCount = todayTracking.filter(t => t.presence === 'present').length;
-    const presencePercent = Math.round((presentCount / totalSessions) * 100);
-    
-    // Calculer moyennes participation, discipline et cahier
-    const participationScores = todayTracking.filter(t => t.participation).map(t => {
-      if (t.participation === 'excellent') return 5;
-      if (t.participation === 'good') return 4;
-      if (t.participation === 'average') return 3;
-      if (t.participation === 'weak') return 2;
-      return 1;
-    });
-    const participationAvg = participationScores.length > 0 
-      ? Math.round((participationScores.reduce((a, b) => a + b, 0) / participationScores.length / 5) * 100)
-      : 0;
-    
-    const disciplineScores = todayTracking.filter(t => t.discipline).map(t => {
-      if (t.discipline === 'excellent') return 5;
-      if (t.discipline === 'good') return 4;
-      if (t.discipline === 'average') return 3;
-      if (t.discipline === 'poor' || t.discipline === 'weak') return 2;
-      return 1;
-    });
-    const vigilanceAvg = disciplineScores.length > 0
-      ? Math.round((disciplineScores.reduce((a, b) => a + b, 0) / disciplineScores.length / 5) * 100)
-      : 0;
-    
-    const cahierPresentCount = todayTracking.filter(t => t.cahier_present === true).length;
-    const cahierAvg = Math.round((cahierPresentCount / totalSessions) * 100);
-    
-    context += `📊 STATISTIQUES D'AUJOURD'HUI (${today}):\n\n`;
-    context += `📊 Présence: ${generateProgressBar(presencePercent)} ${presencePercent}%\n`;
-    if (participationAvg > 0) context += `🙋 Participation: ${generateProgressBar(participationAvg)} ${participationAvg}%\n`;
-    if (vigilanceAvg > 0) context += `👁️ Vigilance: ${generateProgressBar(vigilanceAvg)} ${vigilanceAvg}%\n`;
-    context += `📓 Cahier: ${generateProgressBar(cahierAvg)} ${cahierAvg}%\n`;
-    context += `\n`;
-    
-    // Matières d'aujourd'hui
-    const subjects = [...new Set(todayTracking.map(t => t.sessions?.subjects?.name).filter(Boolean))];
-    if (subjects.length > 0) {
-      context += `📚 Matières d'aujourd'hui:\n`;
-      subjects.forEach(subject => {
-        context += `✅ ${subject}\n`;
-      });
-      context += `\n`;
-    }
-    
-    // Résumé de la journée avec titres des leçons
-    context += `📝 Résumé de la journée:\n`;
-    todayTracking.forEach(t => {
-      const subjectName = t.sessions?.subjects?.name || 'N/A';
-      const lessonTopic = t.sessions?.topic;
-      
-      context += `- ${subjectName}${lessonTopic ? `: ${lessonTopic}` : ''}\n`;
-      context += `  Présence: ${t.presence === 'present' ? '✅' : t.presence === 'absent' ? '❌' : '⚠️'}\n`;
-      if (t.participation) context += `  Participation: ${t.participation}\n`;
-      if (t.discipline) context += `  Discipline: ${t.discipline}\n`;
-      if (t.cahier_present !== undefined) context += `  Cahier: ${t.cahier_present ? '✅ Présent' : '❌ Non présent'}\n`;
-      
-      // Afficher les incidents dérivés s'il y en a
-      const incidents = [];
-      if (t.phone_use) incidents.push('utilisation téléphone');
-      if (t.sleeping) incidents.push('somnolence');
-      if (t.presence === 'late') incidents.push('retard');
-      if (incidents.length > 0) {
-        context += `  ⚠️ Incidents: ${incidents.join(', ')}\n`;
+  const d = agentDecision || { needsToday: true, needsGrades: true, needsHomework: true, needsBehavior: true };
+
+  let context = `Élève: ${studentInfo.first_name} ${studentInfo.last_name || ''} | Classe: ${studentData.profile?.classes?.name || 'N/A'}\n\n`;
+
+  // Données du jour
+  if (d.needsToday) {
+    const todayTracking = (studentData.tracking || []).filter(t => t.sessions?.date === today);
+    if (todayTracking.length > 0) {
+      const present = todayTracking.filter(t => t.presence === 'present').length;
+      const total = todayTracking.length;
+      const subjects = [...new Set(todayTracking.map(t => t.sessions?.subjects?.name).filter(Boolean))];
+      const incidents = todayTracking.flatMap(t => [
+        t.phone_use ? 'téléphone' : null,
+        t.sleeping ? 'somnolence' : null,
+        t.presence === 'late' ? 'retard' : null
+      ].filter(Boolean));
+      const lessons = todayTracking.map(t => t.sessions?.topic).filter(Boolean);
+
+      context += `AUJOURD'HUI (${today}):\n`;
+      context += `- Présence: ${present}/${total} séances\n`;
+      if (subjects.length) context += `- Matières: ${subjects.join(', ')}\n`;
+      if (lessons.length) context += `- Leçons: ${lessons.join(', ')}\n`;
+      if (incidents.length) context += `- ⚠️ Incidents: ${incidents.join(', ')}\n`;
+      const partScores = todayTracking.map(t => ({ excellent: 5, good: 4, average: 3, weak: 2 })[t.participation] || 0).filter(s => s > 0);
+      if (partScores.length) {
+        const avg = Math.round(partScores.reduce((a, b) => a + b, 0) / partScores.length / 5 * 100);
+        context += `- Participation: ${avg}%\n`;
       }
-    });
-    context += `\n`;
-    
-    // Points positifs
-    const positivePoints = [];
-    if (presencePercent === 100) positivePoints.push('✅ Excellente présence tout au long de la journée');
-    if (participationAvg >= 80) positivePoints.push('✅ Bonne participation active en cours');
-    if (vigilanceAvg >= 80) positivePoints.push('✅ Excellente vigilance et attention');
-    if (cahierAvg >= 80) positivePoints.push('✅ Cahier toujours présent et bien tenu');
-    
-    if (positivePoints.length > 0) {
-      context += `⭐ Points positifs:\n`;
-      positivePoints.forEach(point => context += `${point}\n`);
       context += `\n`;
-    }
-    
-    // Incidents
-    const allIncidents = todayTracking.flatMap(t => {
-      const incidents = [];
-      if (t.phone_use) incidents.push('utilisation téléphone');
-      if (t.sleeping) incidents.push('somnolence');
-      if (t.presence === 'late') incidents.push('retard');
-      return incidents;
-    });
-    if (allIncidents.length > 0) {
-      context += `⚠️ INCIDENTS:\n`;
-      const incidentCounts = {};
-      allIncidents.forEach(inc => {
-        incidentCounts[inc] = (incidentCounts[inc] || 0) + 1;
-      });
-      Object.entries(incidentCounts).forEach(([inc, count]) => {
-        context += `- ${inc}: ${count} fois\n`;
-      });
-      context += `\n`;
-    }
-  } else {
-    context += `ℹ️ Pas de données de suivi pour aujourd'hui.\n\n`;
-  }
-  
-  // Statistiques de présence (7 derniers jours)
-  const totalSessions = studentData.tracking.length;
-  const presentCount = studentData.tracking.filter(t => t.presence === 'present').length;
-  const absentCount = studentData.tracking.filter(t => t.presence === 'absent').length;
-  const lateCount7 = studentData.tracking.filter(t => t.presence === 'late').length;
-
-  if (totalSessions > 0) {
-    const pct = Math.round(presentCount / totalSessions * 100);
-    const icon = pct >= 90 ? '✅' : pct >= 75 ? '🔶' : '❌';
-    context += `📊 PRÉSENCE (7 derniers jours):\n`;
-    context += `${icon} Présent: ${presentCount}/${totalSessions} (${pct}%)\n`;
-    if (absentCount > 0) context += `❌ Absent: ${absentCount} séance(s)\n`;
-    if (lateCount7 > 0) context += `⏰ Retard: ${lateCount7} fois\n`;
-    context += `\n`;
-  }
-
-  // Statistiques du mois avec analyse
-  const monthTracking = studentData.allTracking || [];
-  const monthTotal = monthTracking.length;
-  const monthPresent = monthTracking.filter(t => t.presence === 'present').length;
-  const monthAbsent = monthTracking.filter(t => t.presence === 'absent').length;
-  const monthLate = monthTracking.filter(t => t.presence === 'late').length;
-  const monthPhoneUse = monthTracking.filter(t => t.phone_use).length;
-  const monthSleeping = monthTracking.filter(t => t.sleeping).length;
-  const totalMonthIncidents = monthPhoneUse + monthSleeping;
-
-  if (monthTotal > 0) {
-    const monthPct = Math.round(monthPresent / monthTotal * 100);
-    const presenceStatus = monthPct >= 90 ? 'Excellent' : monthPct >= 75 ? 'Correct' : 'Préoccupant';
-    context += `📊 STATISTIQUES DU MOIS (${monthTotal} séances):\n`;
-    context += `- Présences: ${monthPresent} (${monthPct}%) - ${presenceStatus}\n`;
-    context += `- Absences: ${monthAbsent}\n`;
-    if (monthLate > 0) context += `- Retards: ${monthLate}\n`;
-    if (totalMonthIncidents > 0) {
-      context += `- INCIDENTS CE MOIS:\n`;
-      if (monthPhoneUse > 0) context += `  ⚠️ Téléphone en classe: ${monthPhoneUse} fois\n`;
-      if (monthSleeping > 0) context += `  ⚠️ Somnolence: ${monthSleeping} fois\n`;
     } else {
-      context += `- Incidents: Aucun \u2705\n`;
+      context += `AUJOURD'HUI: Pas encore de données enregistrées.\n\n`;
     }
-    context += `\n`;
-  }
 
-  // Comportement détaillé
-  const allBehaviorData = studentData.allTracking || studentData.tracking || [];
-  const avgParticipation = calculateAverage(allBehaviorData, 'participation');
-  const avgDiscipline = calculateAverage(allBehaviorData, 'discipline');
-  const cahierCount = allBehaviorData.filter(t => t.cahier_present === true).length;
-  const cahierPct = allBehaviorData.length > 0 ? Math.round(cahierCount / allBehaviorData.length * 100) : 0;
-
-  context += `👤 COMPORTEMENT ET ATTITUDE:\n`;
-  if (avgParticipation) context += `- Participation: ${avgParticipation}\n`;
-  if (avgDiscipline) context += `- Discipline: ${avgDiscipline}\n`;
-  context += `- Cahier présent: ${cahierPct}% des séances\n`;
-  const totalIncidentsAll = allBehaviorData.filter(t => t.phone_use || t.sleeping).length;
-  if (totalIncidentsAll > 0) {
-    context += `- ⚠️ ALERTE: ${totalIncidentsAll} séance(s) avec incidents (téléphone/somnolence)\n`;
-  }
-  context += `\n`;
-
-  // Devoirs avec détails
-  const homeworkDone = studentData.homework.filter(h => h.status === 'submitted').length;
-  const homeworkTotal = studentData.homework.length;
-  const homeworkPending = studentData.homework.filter(h => h.status !== 'submitted');
-
-  if (homeworkTotal > 0) {
-    const hwPct = Math.round(homeworkDone / homeworkTotal * 100);
-    const hwStatus = hwPct >= 80 ? 'Bon' : hwPct >= 50 ? 'Moyen' : 'Insuffisant';
-    context += `📝 DEVOIRS (7 derniers jours):\n`;
-    context += `- Rendus: ${homeworkDone}/${homeworkTotal} (${hwPct}%) - ${hwStatus}\n`;
-    if (homeworkPending.length > 0) {
-      context += `- Non rendus:\n`;
-      homeworkPending.slice(0, 3).forEach(h => {
-        context += `  • ${h.homework?.subjects?.name || 'N/A'}: ${h.homework?.title || 'N/A'} (${h.homework?.due_date || 'N/A'})\n`;
-      });
+    // Présence 7 jours
+    const tracking7 = studentData.tracking || [];
+    if (tracking7.length > 0) {
+      const p7 = tracking7.filter(t => t.presence === 'present').length;
+      const a7 = tracking7.filter(t => t.presence === 'absent').length;
+      const l7 = tracking7.filter(t => t.presence === 'late').length;
+      context += `PRÉSENCE (7 jours): ${p7}/${tracking7.length} présent${a7 > 0 ? `, ${a7} absent(s)` : ''}${l7 > 0 ? `, ${l7} retard(s)` : ''}\n\n`;
     }
-    context += `\n`;
   }
-  
-  // Notes récentes avec matière inférée
-  if (studentData.grades.length > 0 || (studentData.allGrades && studentData.allGrades.length > 0)) {
-    const gradesToShow = (studentData.allGrades && studentData.allGrades.length > 0 ? studentData.allGrades : studentData.grades).slice(0, 8);
-    const allSessions = studentData.allSessions || [];
-    const subjectPool = [...new Set(allSessions.map((s) => s?.subjects?.name).filter(Boolean))];
 
-    // Calculer moyennes par matière
-    const subjectMap = {};
-    gradesToShow.forEach(grade => {
-      const controlName = String(grade?.controls_plan?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      let subjectName = subjectPool.find((s) => {
-        const ns = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-        return ns && (controlName.includes(ns) || ns.includes(controlName));
-      });
-      if (!subjectName) {
-        const controlDate = grade?.controls_plan?.date;
-        if (controlDate) {
-          const sameDay = [...new Set(allSessions.filter((s) => s?.date === controlDate).map((s) => s?.subjects?.name).filter(Boolean))];
-          if (sameDay.length === 1) subjectName = sameDay[0];
+  // Notes
+  if (d.needsGrades) {
+    const grades = studentData.allGrades?.length ? studentData.allGrades : (studentData.grades || []);
+    if (grades.length > 0) {
+      const allSessions = studentData.allSessions || [];
+      const subjectPool = [...new Set(allSessions.map(s => s?.subjects?.name).filter(Boolean))];
+      const subjectMap = {};
+      grades.slice(0, 10).forEach(g => {
+        const cn = String(g?.controls_plan?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        let sub = subjectPool.find(s => { const ns = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); return ns && (cn.includes(ns) || ns.includes(cn)); });
+        if (!sub && g?.controls_plan?.date) {
+          const sd = [...new Set(allSessions.filter(s => s?.date === g.controls_plan.date).map(s => s?.subjects?.name).filter(Boolean))];
+          if (sd.length === 1) sub = sd[0];
         }
-      }
-      if (!subjectName && subjectPool.length === 1) subjectName = subjectPool[0];
-      const key = subjectName || grade.controls_plan?.name || 'Contrôle';
-      if (!subjectMap[key]) subjectMap[key] = [];
-      subjectMap[key].push(Number(grade.note) || 0);
-    });
-
-    context += `📈 NOTES PAR MATIÈRE:\n`;
-    Object.entries(subjectMap).sort((a, b) => {
-      const avgA = a[1].reduce((s, n) => s + n, 0) / a[1].length;
-      const avgB = b[1].reduce((s, n) => s + n, 0) / b[1].length;
-      return avgA - avgB; // Plus faible en premier
-    }).forEach(([subject, notes]) => {
-      const avg = (notes.reduce((s, n) => s + n, 0) / notes.length).toFixed(2);
-      const icon = Number(avg) >= 14 ? '✅' : Number(avg) >= 10 ? '🔶' : '❌';
-      context += `- ${icon} ${subject}: ${avg}/20 (${notes.length} contrôle${notes.length > 1 ? 's' : ''})\n`;
-    });
-    context += `\n`;
+        if (!sub && subjectPool.length === 1) sub = subjectPool[0];
+        const key = sub || g.controls_plan?.name || 'Contrôle';
+        if (!subjectMap[key]) subjectMap[key] = [];
+        subjectMap[key].push(Number(g.note) || 0);
+      });
+      context += `NOTES PAR MATIÈRE:\n`;
+      Object.entries(subjectMap).forEach(([sub, notes]) => {
+        const avg = (notes.reduce((a, b) => a + b, 0) / notes.length).toFixed(1);
+        const icon = Number(avg) >= 14 ? '✅' : Number(avg) >= 10 ? '🔶' : '❌';
+        context += `- ${icon} ${sub}: ${avg}/20 (${notes.length} contrôle${notes.length > 1 ? 's' : ''})\n`;
+      });
+      context += `\n`;
+    }
   }
-  
-  return context;
+
+  // Devoirs
+  if (d.needsHomework) {
+    const hw = studentData.homework || [];
+    if (hw.length > 0) {
+      const done = hw.filter(h => h.status === 'submitted').length;
+      const pending = hw.filter(h => h.status !== 'submitted').slice(0, 3);
+      context += `DEVOIRS: ${done}/${hw.length} rendus\n`;
+      if (pending.length) {
+        pending.forEach(h => {
+          context += `  - Non rendu: ${h.homework?.subjects?.name || 'N/A'} - "${h.homework?.title || 'N/A'}" (échéance: ${h.homework?.due_date || 'N/A'})\n`;
+        });
+      }
+      context += `\n`;
+    }
+  }
+
+  // Comportement
+  if (d.needsBehavior) {
+    const allTracking = studentData.allTracking || studentData.tracking || [];
+    if (allTracking.length > 0) {
+      const phoneUse = allTracking.filter(t => t.phone_use).length;
+      const sleeping = allTracking.filter(t => t.sleeping).length;
+      const cahier = Math.round(allTracking.filter(t => t.cahier_present).length / allTracking.length * 100);
+      const partValues = allTracking.map(t => ({ excellent: 5, good: 4, average: 3, weak: 2 })[t.participation] || 0).filter(s => s > 0);
+      const partAvg = partValues.length ? Math.round(partValues.reduce((a, b) => a + b, 0) / partValues.length / 5 * 100) : null;
+
+      context += `COMPORTEMENT (${allTracking.length} séances observées):\n`;
+      if (partAvg !== null) context += `- Participation moyenne: ${partAvg}%\n`;
+      context += `- Cahier présent: ${cahier}%\n`;
+      if (phoneUse > 0) context += `- ⚠️ Téléphone en classe: ${phoneUse} fois\n`;
+      if (sleeping > 0) context += `- ⚠️ Somnolence: ${sleeping} fois\n`;
+      if (phoneUse === 0 && sleeping === 0) context += `- Aucun incident signalé ✅\n`;
+      context += `\n`;
+    }
+  }
+
+  // Planning/programme si demandé
+  if (d.needsSchedule) {
+    const sessions = (studentData.allSessions || []).slice(0, 10);
+    if (sessions.length > 0) {
+      const upcoming = sessions.filter(s => s.date >= new Date().toISOString().split('T')[0]).slice(0, 5);
+      if (upcoming.length > 0) {
+        context += `PROGRAMME À VENIR:\n`;
+        upcoming.forEach(s => {
+          context += `- ${s.date}: ${s.subjects?.name || 'N/A'}${s.topic ? ` — ${s.topic}` : ''}\n`;
+        });
+        context += `\n`;
+      }
+    }
+  }
+
+  return context || `Aucune donnée disponible pour ${studentInfo.first_name}.`;
+}
+
+// buildContextForAI supprimée — remplacée par buildTargetedContext (contexte ciblé par agent)
+function buildContextForAI(studentInfo, studentData) {
+  return buildTargetedContext(studentInfo, studentData, null);
 }
 
 // Générer une barre de progression visuelle
