@@ -1946,35 +1946,60 @@ export async function sendWhatsAppResponse(phoneNumber, message, schoolId) {
     
     if (!sessionApiKey) {
       console.error('[Chatbot] Pas de session WhatsApp active pour cette école');
-      return;
+      return false;
     }
     
     // Formater le numéro (supprimer le +)
     const cleanPhone = phoneNumber.replace('+', '');
     
-    // Envoyer via WasenderAPI
-    const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${sessionApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        to: cleanPhone,
-        text: message
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      console.log('[Chatbot] Message envoyé avec succès à', phoneNumber);
-    } else {
-      console.error('[Chatbot] Erreur envoi message:', data);
+    const sendRequest = async () => {
+      const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${sessionApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to: cleanPhone,
+          text: message
+        })
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        data = { success: false, message: 'Réponse API non JSON' };
+      }
+      return { response, data };
+    };
+
+    let { data } = await sendRequest();
+
+    // Retry en cas de rate limit/account protection
+    for (let attempt = 0; attempt < 2 && !data?.success; attempt++) {
+      const lowerMsg = String(data?.message || '').toLowerCase();
+      const isRateLimited = Boolean(data?.retry_after) || lowerMsg.includes('account protection') || lowerMsg.includes('only send 1 message every 5 seconds');
+      if (!isRateLimited) break;
+
+      const retryAfterSec = Number(data?.retry_after);
+      const waitMs = Math.max((Number.isFinite(retryAfterSec) ? retryAfterSec : 0) * 1000, 5000);
+      console.warn(`[Chatbot] Rate limit WhatsApp, retry dans ${waitMs}ms pour ${phoneNumber}`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      ({ data } = await sendRequest());
     }
+
+    if (data?.success) {
+      console.log('[Chatbot] Message envoyé avec succès à', phoneNumber);
+      return true;
+    }
+
+    console.error('[Chatbot] Erreur envoi message:', data);
+    return false;
     
   } catch (error) {
     console.error('[Chatbot] Erreur envoi WhatsApp:', error);
+    return false;
   }
 }
 

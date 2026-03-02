@@ -236,11 +236,17 @@ router.post('/homework', async (req, res) => {
 
       const schoolId = classInfo?.school_id || req.user.school_id;
 
+      if (!targetStudentIds || targetStudentIds.length === 0) {
+        console.log('[Homework] Aucun élève ciblé pour ce devoir, notification WhatsApp ignorée');
+      }
+
       // Récupérer les parents des élèves concernés avec leur numéro
-      const { data: parentLinks } = await supabaseAdmin
-        .from('parent_students')
-        .select('profiles!parent_id(first_name, phone)')
-        .in('student_id', targetStudentIds);
+      const { data: parentLinks } = targetStudentIds?.length
+        ? await supabaseAdmin
+            .from('parent_students')
+            .select('profiles!parent_id(first_name, phone)')
+            .in('student_id', targetStudentIds)
+        : { data: [] };
 
       if (parentLinks && parentLinks.length > 0) {
         const dueDateFormatted = new Date(dueDate + 'T00:00:00').toLocaleDateString('fr-FR', {
@@ -262,8 +268,12 @@ router.post('/homework', async (req, res) => {
           if (!phone || sentPhones.has(phone)) continue;
           sentPhones.add(phone);
           const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-          await sendWhatsAppResponse(e164Phone, messageText, schoolId);
-          console.log(`[Homework] Notification devoir envoyée au parent (${e164Phone})`);
+          const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId);
+          if (sent) {
+            console.log(`[Homework] Notification devoir envoyée au parent (${e164Phone})`);
+          } else {
+            console.error(`[Homework] Échec envoi notification devoir au parent (${e164Phone})`);
+          }
         }
       } else {
         console.log('[Homework] Aucun parent trouvé pour les élèves concernés');
