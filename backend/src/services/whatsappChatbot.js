@@ -16,6 +16,17 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
   console.log(`[Chatbot] Traitement message de ${phoneNumber}: ${messageText}`);
   
   try {
+    // 0. Déduplication - ignorer les messages déjà traités
+    const { data: existingMsg } = await supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .select('id, processed')
+      .eq('wasender_message_id', messageId)
+      .single();
+    if (existingMsg?.processed) {
+      console.log('[Chatbot] Message déjà traité, ignoré:', messageId);
+      return;
+    }
+
     // 1. Normaliser le numéro de téléphone (format international)
     const normalizedPhone = normalizePhoneNumber(phoneNumber);
     
@@ -58,42 +69,25 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     
     if (!needsAIResponse.respond) {
       console.log('[Chatbot] Message ne nécessite pas de réponse IA:', needsAIResponse.reason);
+      const isArabicMsg = /[\u0600-\u06FF]/.test(messageText);
+      let simpleResponse = '';
       
-      // Envoyer une réponse simple si c'est une salutation
       if (needsAIResponse.reason === 'greeting') {
         const menuMessage = await buildWelcomeMenu(parentInfo, normalizedPhone);
         await sendWhatsAppResponse(normalizedPhone, menuMessage, parentInfo.school_id);
       } else if (needsAIResponse.reason === 'thanks') {
-        await sendWhatsAppResponse(normalizedPhone, `العفو! نحن دائماً في خدمتكم 🙏`, parentInfo.school_id);
+        simpleResponse = isArabicMsg
+          ? `العفو 🙏 نحن هنا لمساعدتك دائماً`
+          : `De rien 🙏 Nous sommes toujours là pour vous aider`;
+        await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
+      } else if (needsAIResponse.reason === 'short_accidental') {
+        // Message trop court/accidentel - ignorer silencieusement
+        console.log('[Chatbot] Message accidentel ignoré:', messageText);
       }
       
       await supabaseAdmin
         .from('whatsapp_incoming_messages')
         .update({ processed: true, ai_response_sent: false })
-        .eq('id', incomingMsg.id);
-      return;
-    }
-    
-    // 5. Vérifier salutations/remerciements simples
-    const aiCheck = await shouldRespondWithAI(messageText, normalizedPhone, parentInfo.parent_id);
-    if (!aiCheck.respond) {
-      const isArabic = /[\u0600-\u06FF]/.test(messageText);
-      let simpleResponse = '';
-      if (aiCheck.reason === 'greeting') {
-        simpleResponse = isArabic 
-          ? `وعليكم السلام 👋\n\nكيف يمكنني مساعدتك؟`
-          : `Bonjour 👋\n\nComment puis-je vous aider ?`;
-      } else if (aiCheck.reason === 'thanks') {
-        simpleResponse = isArabic
-          ? `العفو 🙏 نحن هنا لمساعدتك دائماً`
-          : `De rien 🙏 Nous sommes toujours là pour vous aider`;
-      } else {
-        simpleResponse = isArabic ? `حسناً 👍` : `D'accord 👍`;
-      }
-      await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
-      await supabaseAdmin
-        .from('whatsapp_incoming_messages')
-        .update({ processed: true, ai_response_sent: true, ai_response_text: simpleResponse })
         .eq('id', incomingMsg.id);
       return;
     }
@@ -150,11 +144,15 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       response = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
     }
     
-    // Ajouter le menu de questions rapides après la réponse (langue du parent)
+    // Ajouter le menu de questions rapides seulement toutes les 5 interactions
     const isArabic = /[\u0600-\u06FF]/.test(messageText);
-    const quickMenu = isArabic
-      ? `\n\n━━━━━━━━━━━━━━━\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
-      : `\n\n━━━━━━━━━━━━━━━\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`;
+    const messageCount = conversationHistory.length + 1;
+    const showMenu = messageCount <= 1 || messageCount % 5 === 0;
+    const quickMenu = showMenu
+      ? (isArabic
+          ? `\n\n━━━━━━━━━━━━━━━\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
+          : `\n\n━━━━━━━━━━━━━━━\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`)
+      : '';
     
     const aiResponse = response + quickMenu;
     
@@ -220,10 +218,20 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
   const lowerText = messageText.toLowerCase().trim();
   
   // Messages qui ne nécessitent pas de réponse IA
-  const greetings = ['سلام', 'مرحبا', 'صباح', 'مساء', 'bonjour', 'bonsoir', 'salut', 'hello'];
-  const thanks = ['شكرا', 'merci', 'thanks', 'thank you', 'بارك الله فيك'];
-  const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes'];
+  const greetings = [
+    'سلام', 'مرحبا', 'صباح', 'مساء',
+    'bonjour', 'bonsoir', 'salut', 'hello', 'hi',
+    'salam', 'slm', 'slt', 'wslm', 'assalam', // variantes darija/latin
+    'ahlan', 'mrhba', 'sbah'
+  ];
+  const thanks = ['شكرا', 'merci', 'thanks', 'thank you', 'بارك الله فيك', 'shukran', 'chokran', 'barak'];
+  const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes', 'waw', 'mzyn', 'mlih'];
   
+  // Messages accidentels très courts (1-2 chars, probablement envoi accidentel)
+  if (lowerText.length <= 2 && !/^[a-fأبجدهو]$/.test(lowerText)) {
+    return { respond: false, reason: 'short_accidental' };
+  }
+
   // Vérifier les salutations simples (mais pas "hier" qui contient "hi")
   if (greetings.some(g => lowerText.includes(g)) && lowerText.length < 20 && !lowerText.includes('hier') && !lowerText.includes('leçon') && !lowerText.includes('cours')) {
     return { respond: false, reason: 'greeting' };
@@ -238,8 +246,6 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
   if (simple.some(s => lowerText === s)) {
     return { respond: false, reason: 'simple_response' };
   }
-  
-  // Cooldown supprimé - réponse immédiate pour toutes les questions
   
   return { respond: true, reason: 'needs_ai' };
 }
@@ -1620,7 +1626,21 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
     console.log('[Chatbot] Contexte ciblé généré, longueur:', context.length, 'caractères');
 
     const isArabic = /[\u0600-\u06FF]/.test(question);
-    const language = isArabic ? 'darija marocaine ou arabe standard' : 'français';
+    
+    // Détecter la langue préférée du parent (persistance de langue)
+    let preferredLanguage = isArabic ? 'darija marocaine ou arabe standard' : 'français';
+    const parentAsksForFrench = /\b(b français|en français|b franc|parle.*français|dwi.*français|speak.*french)\b/i.test(question);
+    const parentAsksForArabic = /\b(b darija|b arabe|parle.*arabe|hdrt.*darija)\b/i.test(question);
+    if (parentAsksForFrench) {
+      preferredLanguage = 'français';
+    } else if (!parentAsksForArabic && conversationHistory.length > 0) {
+      // Vérifier si le parent a demandé le français dans les 3 derniers messages
+      const recentMessages = conversationHistory.slice(-3).map(c => c.parent_message.toLowerCase());
+      if (recentMessages.some(m => /\b(b français|en français|dwi.*français|speak.*french)\b/i.test(m))) {
+        preferredLanguage = 'français';
+      }
+    }
+
     const intents = agentDecision?.intents || [];
     const summary = agentDecision?.summary || '';
 
@@ -1632,7 +1652,7 @@ Tu parles directement au parent comme un ami professionnel — chaleureux, préc
 📌 Domaines concernés: ${intents.join(', ') || 'général'}
 
 RÈGLES DE RÉPONSE:
-1. Langue: réponds en ${language}. Si le parent écrit en darija, réponds en darija fluide et naturelle.
+1. Langue: réponds OBLIGATOIREMENT en ${preferredLanguage}. Ne change PAS de langue même si le dossier est en français.
 2. Longueur: 4 à 10 lignes maximum. Pas de liste à puces inutile si une phrase suffit.
 3. Style: parle comme un humain, pas comme un rapport. Ex: "Youssef a bien été présent aujourd'hui, mais j'ai vu qu'il a eu du mal en maths" plutôt que "Présence: 100% - Mathématiques: 8/20".
 4. Données: utilise les chiffres réels pour appuyer, mais intègre-les naturellement dans la phrase.
@@ -1640,8 +1660,9 @@ RÈGLES DE RÉPONSE:
 6. Si tu donnes des conseils: max 2-3 conseils concrets, adaptés aux vraies données de l'élève.
 7. Si une info manque dans le dossier: dis-le simplement sans t'excuser.
 8. 1-3 emojis seulement, placés intelligemment.
-9. N'invente JAMAIS de données absentes du dossier.
-10. Termine par une phrase d'encouragement courte ou une question ouverte si pertinent.
+9. N'invente JAMAIS de données absentes du dossier. Un booléen 'téléphone en classe' = signalement, pas 'il a quitté la séance'.
+10. RÈGLE ABSOLUE: Ne partage JAMAIS de données (notes, absences, comportement) que le parent n'a PAS demandées explicitement. Si la question est vague ou générale, demande ce qu'il veut savoir. Ne commence pas un résumé spontané.
+11. Termine par une question ouverte courte si pertinent.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOSSIER ${studentInfo.first_name.toUpperCase()} ${studentInfo.last_name?.toUpperCase() || ''}:
