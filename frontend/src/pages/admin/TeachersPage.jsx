@@ -1072,32 +1072,44 @@ const TeachersPage = () => {
                           <div className="flex items-center justify-between">
                             <div className="flex-1">
                               <label className="text-sm font-medium text-gray-700">Mot de passe:</label>
-                              <div className="flex items-center gap-2">
-                                <p className="text-sm text-gray-900 font-mono bg-white px-2 py-1 rounded border flex-1">
-                                  {visiblePasswords[teacher.id] ? (teacher.password || 'Non défini') : '•••••••••'}
-                                </p>
-                                <button
-                                  onClick={() => togglePasswordVisibility(teacher.id)}
-                                  className="p-1 hover:bg-gray-100 rounded transition-colors"
-                                  title={visiblePasswords[teacher.id] ? "Masquer le mot de passe" : "Afficher le mot de passe"}
-                                >
-                                  {visiblePasswords[teacher.id] ? (
-                                    <EyeOff className="w-4 h-4 text-gray-600" />
-                                  ) : (
-                                    <Eye className="w-4 h-4 text-gray-600" />
-                                  )}
-                                </button>
-                              </div>
+                              {teacher.password ? (
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm text-gray-900 font-mono bg-white px-2 py-1 rounded border flex-1">
+                                    {visiblePasswords[teacher.id] ? teacher.password : '•••••••••'}
+                                  </p>
+                                  <button
+                                    onClick={() => togglePasswordVisibility(teacher.id)}
+                                    className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                    title={visiblePasswords[teacher.id] ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                                  >
+                                    {visiblePasswords[teacher.id] ? (
+                                      <EyeOff className="w-4 h-4 text-gray-600" />
+                                    ) : (
+                                      <Eye className="w-4 h-4 text-gray-600" />
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => copyToClipboard(teacher.password)}
+                                    className="p-2 hover:bg-blue-100 rounded transition-colors"
+                                    title="Copier le mot de passe"
+                                  >
+                                    <Copy className="w-4 h-4 text-blue-600" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm text-gray-500 italic">
+                                    Le mot de passe n'est pas stocké pour des raisons de sécurité
+                                  </p>
+                                  <button
+                                    onClick={() => resetPassword(teacher.id, teacher.first_name)}
+                                    className="px-3 py-1 bg-orange-500 text-white text-sm rounded hover:bg-orange-600 transition-colors"
+                                  >
+                                    Réinitialiser
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                            {teacher.password && (
-                              <button
-                                onClick={() => copyToClipboard(teacher.password)}
-                                className="p-2 hover:bg-blue-100 rounded transition-colors"
-                                title="Copier le mot de passe"
-                              >
-                                <Copy className="w-4 h-4 text-blue-600" />
-                              </button>
-                            )}
                           </div>
                         </div>
                       </div>
