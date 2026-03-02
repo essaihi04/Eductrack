@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const APP_URL = 'http://edtrack.duckdns.org';
+const APP_URL = 'https://etrack.ma';
 
 function getLogoBase64() {
   try {
