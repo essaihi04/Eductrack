@@ -688,10 +688,10 @@ router.post('/session-tracking', async (req, res) => {
     // Notification WhatsApp automatique si l'élève est marqué absent
     if (presence === 'absent') {
       try {
-        // Récupérer les infos de la session (date, matière)
+        // Récupérer les infos de la session (date, matière, leçon, horaire)
         const { data: sessionInfo } = await supabaseAdmin
           .from('sessions')
-          .select('date, topic, school_id, subjects(name)')
+          .select('date, topic, start_time, end_time, school_id, subjects(name)')
           .eq('id', session_id)
           .single();
 
@@ -712,9 +712,17 @@ router.post('/session-tracking', async (req, res) => {
           const studentName = `${studentProfile.first_name} ${studentProfile.last_name}`.trim();
           const sessionDate = new Date(sessionInfo.date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
           const subjectName = sessionInfo.subjects?.name || '';
+          const lessonTopic = sessionInfo.topic || '';
+          const timeSlot = sessionInfo.start_time && sessionInfo.end_time 
+            ? `${sessionInfo.start_time.slice(0, 5)} - ${sessionInfo.end_time.slice(0, 5)}`
+            : '';
           const schoolId = sessionInfo.school_id;
 
-          const message = `⚠️ *Absence signalée*\n\nBonjour,\n\nNous vous informons que *${studentName}* a été marqué(e) *absent(e)* lors de la séance du *${sessionDate}*${subjectName ? ` (${subjectName})` : ''}.\n\nPour toute question, n'hésitez pas à contacter l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+          let message = `⚠️ *Absence signalée*\n\nBonjour,\n\nNous vous informons que *${studentName}* a été marqué(e) *absent(e)* lors de la séance du *${sessionDate}*`;
+          if (subjectName) message += `\n📚 Matière: ${subjectName}`;
+          if (lessonTopic) message += `\n📖 Leçon: ${lessonTopic}`;
+          if (timeSlot) message += `\n🕐 Horaire: ${timeSlot}`;
+          message += `\n\nPour toute question, n'hésitez pas à contacter l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
 
           for (const link of parentLinks) {
             const parentPhone = link.profiles?.phone;
