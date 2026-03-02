@@ -1590,16 +1590,11 @@ router.post('/teachers', async (req, res) => {
 
       if (!email) {
         const sanitize = (str) => {
-          const normalized = str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
-          // Si après nettoyage il ne reste rien (noms arabes), utiliser une translittération phonétique simple
-          if (!normalized) {
-            return str.replace(/\s+/g, '').slice(0, 8);
-          }
-          return normalized;
+          return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
         };
         const firstPart = sanitize(firstName);
         const lastPart = sanitize(lastName);
-        // Fallback si les deux parties sont vides
+        // Si les deux parties sont vides (noms arabes), générer un email avec timestamp
         if (!firstPart && !lastPart) {
           const timestamp = Date.now().toString().slice(-6);
           email = `prof${timestamp}@${schoolDomain}`;
