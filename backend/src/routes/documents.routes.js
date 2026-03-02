@@ -5,6 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
+import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
 
 const router = express.Router();
 
@@ -318,173 +319,54 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
       try {
         const studentIds = students.map(s => s.id);
 
-        // Récupérer les informations de la classe
-        const { data: classInfo } = await supabaseAdmin
+        const { data: classInfoWa } = await supabaseAdmin
           .from('classes')
-          .select('name')
+          .select('name, school_id')
           .eq('id', classId)
           .single();
 
-        // Récupérer les parents des élèves
+        const schoolId = classInfoWa?.school_id || req.user.school_id;
+
+        // Récupérer les parents avec leur numéro
         const { data: parentLinks } = await supabaseAdmin
           .from('parent_students')
-          .select('parent_id, student_id')
+          .select('profiles!parent_id(first_name, phone)')
           .in('student_id', studentIds);
 
         if (parentLinks && parentLinks.length > 0) {
-          const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
+          const documentTypeLabel = {
+            'cours': 'Cours',
+            'exercice': 'Exercice',
+            'correction': 'Correction',
+            'support': 'Support pédagogique',
+            'autre': 'Document'
+          }[documentType] || 'Document';
 
-          // Récupérer les contacts WhatsApp des parents
-          const { data: contacts } = await supabaseAdmin
-            .from('parent_contacts')
-            .select('parent_id, phone_e164, is_primary')
-            .in('parent_id', parentIds)
-            .eq('channel', 'whatsapp')
-            .order('is_primary', { ascending: false });
+          const messageText = `📄 *Nouveau document pédagogique*\n\n` +
+            `Classe: *${classInfoWa?.name || 'N/A'}*\n` +
+            `Professeur: ${teacherName}\n` +
+            (subjectName ? `Matière: ${subjectName}\n` : '') +
+            `Type: ${documentTypeLabel}\n\n` +
+            `📝 *${title}*\n` +
+            (description ? `${description}\n\n` : '\n') +
+            `📎 Fichier: ${req.file.originalname}\n` +
+            `ℹ️ Le document est disponible dans l'espace élève.\n\n` +
+            `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
 
-          if (contacts && contacts.length > 0) {
-            // Dédupliquer les numéros
-            const parentPhoneMap = {};
-            contacts.forEach(c => {
-              if (!parentPhoneMap[c.parent_id]) {
-                parentPhoneMap[c.parent_id] = c;
-              }
-            });
-
-            const uniquePhones = {};
-            Object.values(parentPhoneMap).forEach(c => {
-              if (!uniquePhones[c.phone_e164]) {
-                uniquePhones[c.phone_e164] = c;
-              }
-            });
-
-            const recipients = Object.values(uniquePhones);
-
-            if (recipients.length > 0) {
-              // Récupérer la clé API WhatsApp de l'école
-              const { data: school } = await supabaseAdmin
-                .from('schools')
-                .select('wasender_api_key')
-                .eq('id', req.user.school_id)
-                .single();
-
-              const sessionApiKey = school?.wasender_api_key;
-
-              if (sessionApiKey) {
-                // Formater le message
-                const documentTypeLabel = {
-                  'cours': 'Cours',
-                  'exercice': 'Exercice',
-                  'correction': 'Correction',
-                  'support': 'Support pédagogique',
-                  'autre': 'Document'
-                }[documentType] || 'Document';
-
-                const messageText = `📄 *Nouveau document pédagogique*\n\n` +
-                  `Classe: ${classInfo?.name || 'N/A'}\n` +
-                  `Professeur: ${teacherName}\n` +
-                  (subjectName ? `Matière: ${subjectName}\n` : '') +
-                  `Type: ${documentTypeLabel}\n\n` +
-                  `*${title}*\n\n` +
-                  (description ? `${description}\n\n` : '') +
-                  `📎 Fichier: ${req.file.originalname}\n\n` +
-                  `Le document est disponible dans l'espace élève.`;
-
-                // Créer le log du message
-                const { data: msgLog } = await supabaseAdmin
-                  .from('whatsapp_messages')
-                  .insert({
-                    school_id: req.user.school_id,
-                    sent_by: teacherId,
-                    message_type: 'document',
-                    content: messageText,
-                    file_name: req.file.originalname,
-                    total_recipients: recipients.length,
-                    status: 'sending'
-                  })
-                  .select()
-                  .single();
-
-                if (msgLog) {
-                  // Envoyer les messages en arrière-plan
-                  const sendPromises = recipients.map(async (contact) => {
-                    try {
-                      const recipientLog = await supabaseAdmin
-                        .from('whatsapp_recipients')
-                        .insert({
-                          message_id: msgLog.id,
-                          phone_e164: contact.phone_e164,
-                          parent_id: contact.parent_id,
-                          status: 'pending'
-                        })
-                        .select()
-                        .single();
-
-                      if (recipientLog.data) {
-                        // Envoyer le fichier via WhatsApp
-                        const fileBuffer = fs.readFileSync(req.file.path);
-                        const fileBase64 = fileBuffer.toString('base64');
-                        
-                        const response = await fetch('https://api.wasender.com/api/v1/messages/document', {
-                          method: 'POST',
-                          headers: {
-                            'Authorization': `Bearer ${sessionApiKey}`,
-                            'Content-Type': 'application/json'
-                          },
-                          body: JSON.stringify({
-                            phone: contact.phone_e164,
-                            document: fileBase64,
-                            filename: req.file.originalname,
-                            caption: messageText
-                          })
-                        });
-
-                        if (response.ok) {
-                          await supabaseAdmin
-                            .from('whatsapp_recipients')
-                            .update({ status: 'sent', sent_at: new Date().toISOString() })
-                            .eq('id', recipientLog.data.id);
-                        } else {
-                          const errorData = await response.text();
-                          console.error('Erreur envoi document WhatsApp:', errorData);
-                          await supabaseAdmin
-                            .from('whatsapp_recipients')
-                            .update({ status: 'failed', error_message: 'Échec envoi document' })
-                            .eq('id', recipientLog.data.id);
-                        }
-                      }
-                    } catch (err) {
-                      console.error('Erreur envoi WhatsApp:', err);
-                    }
-                  });
-
-                  // Exécuter tous les envois
-                  Promise.all(sendPromises).then(async () => {
-                    const { data: recipientStats } = await supabaseAdmin
-                      .from('whatsapp_recipients')
-                      .select('status')
-                      .eq('message_id', msgLog.id);
-
-                    const sentCount = recipientStats?.filter(r => r.status === 'sent').length || 0;
-                    const failedCount = recipientStats?.filter(r => r.status === 'failed').length || 0;
-
-                    await supabaseAdmin
-                      .from('whatsapp_messages')
-                      .update({
-                        status: failedCount === recipients.length ? 'failed' : 'sent',
-                        sent_count: sentCount,
-                        failed_count: failedCount
-                      })
-                      .eq('id', msgLog.id);
-                  });
-                }
-              }
-            }
+          const sentPhones = new Set();
+          for (const link of parentLinks) {
+            const phone = link.profiles?.phone;
+            if (!phone || sentPhones.has(phone)) continue;
+            sentPhones.add(phone);
+            const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
+            await sendWhatsAppResponse(e164Phone, messageText, schoolId);
+            console.log(`[Documents] Notification document envoyée au parent (${e164Phone})`);
           }
+        } else {
+          console.log('[Documents] Aucun parent trouvé pour les élèves de la classe');
         }
       } catch (whatsappError) {
         console.error('Erreur notification WhatsApp:', whatsappError);
-        // Ne pas bloquer l'upload du document si l'envoi WhatsApp échoue
       }
     } else {
       console.log('[DEBUG] No students found to notify');
