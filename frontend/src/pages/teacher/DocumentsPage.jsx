@@ -90,12 +90,17 @@ const DocumentsPage = () => {
   const loadControls = async (classId) => {
     try {
       const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/teacher/classes/${classId}/controls`, {
+      const res = await fetch(`${apiUrl}/api/teacher/controls-plan/class/${classId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         const data = await res.json();
         setControls(data);
+      } else {
+        console.warn('[DocumentsPage] Impossible de charger les contrôles', {
+          status: res.status,
+          classId
+        });
       }
     } catch (error) {
       console.error('Erreur:', error);
@@ -172,6 +177,15 @@ const DocumentsPage = () => {
     try {
       setUploading(true);
       const token = await getAuthToken();
+      const uploadUrl = `${apiUrl}/api/teacher/documents`;
+      const requestId = `front-doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      if (window?.location?.protocol === 'https:' && String(apiUrl).startsWith('http://')) {
+        console.warn('[DocumentsPage] Mixed-content risk: frontend HTTPS vers API HTTP', {
+          frontend: window.location.origin,
+          apiUrl
+        });
+      }
       
       const formDataToSend = new FormData();
       formDataToSend.append('classId', formData.classId);
@@ -181,11 +195,32 @@ const DocumentsPage = () => {
       formDataToSend.append('documentType', formData.documentType);
       formDataToSend.append('description', formData.description || '');
       formDataToSend.append('file', formData.file);
+
+      console.log('[DocumentsPage] Upload request start', {
+        requestId,
+        uploadUrl,
+        hasToken: Boolean(token),
+        classId: formData.classId,
+        subjectId: formData.subjectId,
+        controlId: formData.controlId,
+        titleLength: formData.title?.length || 0,
+        documentType: formData.documentType,
+        fileName: formData.file?.name,
+        fileSize: formData.file?.size,
+        fileType: formData.file?.type,
+        online: navigator.onLine
+      });
       
-      const res = await fetch(`${apiUrl}/api/teacher/documents`, {
+      const res = await fetch(uploadUrl, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formDataToSend
+      });
+
+      console.log('[DocumentsPage] Upload response', {
+        requestId,
+        status: res.status,
+        ok: res.ok
       });
       
       if (res.ok) {
@@ -202,11 +237,18 @@ const DocumentsPage = () => {
         });
         loadDocuments();
       } else {
-        const error = await res.json();
-        alert(`❌ Erreur: ${error.error}`);
+        const error = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
+        console.error('[DocumentsPage] Upload backend error', { requestId, error, status: res.status });
+        alert(`❌ Erreur: ${error.error || 'Échec upload document'}`);
       }
     } catch (error) {
-      console.error('Erreur:', error);
+      console.error('[DocumentsPage] Upload fetch failed', {
+        name: error?.name,
+        message: error?.message,
+        stack: error?.stack,
+        apiUrl,
+        online: navigator.onLine
+      });
       alert('❌ Erreur lors de l\'envoi du document');
     } finally {
       setUploading(false);
