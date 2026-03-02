@@ -5,7 +5,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { sendWhatsAppResponse, getSchoolSessionApiKey } from '../services/whatsappChatbot.js';
 
 const router = express.Router();
 
@@ -24,6 +24,27 @@ const storage = multer.diskStorage({
     cb(null, `doc-${uniqueSuffix}${ext}`);
   }
 });
+
+const uploadSingleDocument = (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      console.error('[Documents][Upload][MulterError]', {
+        message: err.message,
+        code: err.code,
+        field: err.field,
+        stack: err.stack
+      });
+
+      const isTooLarge = err.code === 'LIMIT_FILE_SIZE';
+      return res.status(isTooLarge ? 413 : 400).json({
+        error: isTooLarge
+          ? 'Le fichier dépasse la taille maximale autorisée (20 Mo).'
+          : (err.message || 'Erreur lors du traitement du fichier uploadé')
+      });
+    }
+    next();
+  });
+};
 
 const upload = multer({
   storage: storage,
@@ -177,10 +198,24 @@ router.get('/:id', authorize('teacher'), async (req, res) => {
 });
 
 // Uploader un nouveau document
-router.post('/', authorize('teacher'), upload.single('file'), async (req, res) => {
+router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) => {
   try {
+    const requestId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const teacherId = req.user.id;
     const { classId, subjectId, controlId, title, documentType, description } = req.body;
+
+    console.log(`[Documents][${requestId}] Upload start`, {
+      teacherId,
+      classId,
+      subjectId,
+      controlId,
+      titleLength: title?.length || 0,
+      documentType,
+      hasFile: Boolean(req.file),
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size,
+      fileType: req.file?.mimetype
+    });
 
     let resolvedSubjectId = subjectId || null;
     if (typeof resolvedSubjectId === 'string' && resolvedSubjectId.trim() === '') {
@@ -195,6 +230,7 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
     }
 
     if (!req.file) {
+      console.warn(`[Documents][${requestId}] Aucun fichier dans la requête`);
       return res.status(400).json({ error: 'Aucun fichier fourni' });
     }
 
@@ -207,6 +243,7 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
       .single();
 
     if (classError || !classTeacher) {
+      console.warn(`[Documents][${requestId}] Accès classe refusé`, { classId, teacherId, classError: classError?.message });
       return res.status(403).json({ error: 'Vous n\'avez pas accès à cette classe' });
     }
 
@@ -262,11 +299,11 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
       .single();
 
     if (error) {
-      console.error('[ERROR] Failed to insert document:', error);
+      console.error(`[Documents][${requestId}] Failed to insert document:`, error);
       throw error;
     }
 
-    console.log('[DEBUG] Document created:', {
+    console.log(`[Documents][${requestId}] Document created:`, {
       documentId: data.id,
       title: data.title,
       classId: data.class_id
@@ -300,7 +337,7 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
         read: false
       }));
 
-      console.log('[DEBUG] Creating notifications:', {
+      console.log(`[Documents][${requestId}] Creating notifications:`, {
         count: notifications.length,
         firstStudentId: notifications[0]?.user_id
       });
@@ -310,9 +347,9 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
         .insert(notifications);
 
       if (notifError) {
-        console.error('[ERROR] Failed to insert notifications:', notifError);
+        console.error(`[Documents][${requestId}] Failed to insert notifications:`, notifError);
       } else {
-        console.log('[DEBUG] Notifications created successfully:', notifications.length);
+        console.log(`[Documents][${requestId}] Notifications created successfully:`, notifications.length);
       }
 
       // Envoyer notification WhatsApp aux parents (asynchrone, sans bloquer la requête HTTP)
@@ -327,6 +364,17 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
             .single();
 
           const schoolId = classInfoWa?.school_id || req.user.school_id;
+          const sessionApiKey = await getSchoolSessionApiKey(schoolId);
+
+          console.log(`[Documents][${requestId}] WhatsApp session check`, {
+            schoolId,
+            hasSessionApiKey: Boolean(sessionApiKey)
+          });
+
+          if (!sessionApiKey) {
+            console.warn(`[Documents][${requestId}] WhatsApp session non connectée, notifications WhatsApp ignorées`);
+            return;
+          }
 
           // Récupérer les parents avec leur numéro
           const { data: parentLinks } = await supabaseAdmin
@@ -360,23 +408,30 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
               if (!phone || sentPhones.has(phone)) continue;
               sentPhones.add(phone);
               const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-              await sendWhatsAppResponse(e164Phone, messageText, schoolId);
-              console.log(`[Documents] Notification document envoyée au parent (${e164Phone})`);
+              const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId);
+              console.log(`[Documents][${requestId}] Notification document parent`, { phone: e164Phone, sent });
             }
           } else {
-            console.log('[Documents] Aucun parent trouvé pour les élèves de la classe');
+            console.log(`[Documents][${requestId}] Aucun parent trouvé pour les élèves de la classe`);
           }
         } catch (whatsappError) {
-          console.error('Erreur notification WhatsApp:', whatsappError);
+          console.error(`[Documents][${requestId}] Erreur notification WhatsApp:`, whatsappError);
         }
       })();
     } else {
-      console.log('[DEBUG] No students found to notify');
+      console.log(`[Documents][${requestId}] No students found to notify`);
     }
 
+    console.log(`[Documents][${requestId}] Upload success, response 201`);
     res.status(201).json(data);
   } catch (error) {
-    console.error('Erreur:', error);
+    console.error('[Documents] Erreur upload route:', {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      stack: error?.stack
+    });
     res.status(500).json({ error: 'Erreur lors de l\'upload du document' });
   }
 });
