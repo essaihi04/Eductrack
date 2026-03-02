@@ -1589,8 +1589,23 @@ router.post('/teachers', async (req, res) => {
       }
 
       if (!email) {
-        const sanitize = (str) => str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
-        email = `${sanitize(firstName)}${sanitize(lastName)}@${schoolDomain}`;
+        const sanitize = (str) => {
+          const normalized = str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+          // Si après nettoyage il ne reste rien (noms arabes), utiliser une translittération phonétique simple
+          if (!normalized) {
+            return str.replace(/\s+/g, '').slice(0, 8);
+          }
+          return normalized;
+        };
+        const firstPart = sanitize(firstName);
+        const lastPart = sanitize(lastName);
+        // Fallback si les deux parties sont vides
+        if (!firstPart && !lastPart) {
+          const timestamp = Date.now().toString().slice(-6);
+          email = `prof${timestamp}@${schoolDomain}`;
+        } else {
+          email = `${firstPart}${lastPart}@${schoolDomain}`;
+        }
       }
       if (!password) {
         const year = new Date().getFullYear();
@@ -1599,9 +1614,10 @@ router.post('/teachers', async (req, res) => {
           .replace(/[\u0300-\u036f]/g, '')
           .replace(/[^a-zA-Z]/g, '')
           .trim();
+        // Si le prénom nettoyé est vide (arabe), utiliser un mot de passe générique
         password = cleanFirstName ? 
           cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + year :
-          `Prof${year}`;
+          `Prof${year}${Math.random().toString(36).slice(2, 6)}`;
       }
     }
 
