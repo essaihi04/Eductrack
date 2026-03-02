@@ -17,7 +17,7 @@ const platformCards = [
   {
     title: 'Application Android (APK)',
     subtitle: 'Pour parents, élèves et professeurs en mobilité',
-    image: '/images/landing-mobile.svg',
+    image: '/images/arabe-discussion.png',
     icon: Smartphone,
     cta: 'Télécharger APK',
     href: apkLink,
@@ -26,7 +26,7 @@ const platformCards = [
   {
     title: 'Application Desktop (Windows)',
     subtitle: 'Pour administration et pilotage complet de l’école',
-    image: '/images/landing-desktop.svg',
+    image: '/images/dahboard-centralise.png',
     icon: Monitor,
     cta: 'Télécharger Desktop',
     href: desktopLink,

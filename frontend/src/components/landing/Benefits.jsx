@@ -2,6 +2,13 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, Users, GraduationCap, Heart } from 'lucide-react';
 
+const roleImages = {
+  'Administration': '/images/dahboard-centralise.png',
+  'Professeurs': '/images/suivie-rapide-prof.png',
+  'Parents': '/images/arabe-discussion.png',
+  'Élèves': '/images/rapport-journalier.png'
+};
+
 const benefitsData = [
   {
     role: 'Administration',
@@ -109,24 +116,46 @@ const Benefits = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
-            className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto"
+            className="grid lg:grid-cols-2 gap-10 max-w-5xl mx-auto items-center"
           >
-            {benefitsData[activeTab].benefits.map((item, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-                className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 hover:shadow-lg transition-shadow"
-              >
-                <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-                  {item.title}
-                </h4>
-                <p className="text-gray-600 dark:text-gray-400">
-                  {item.description}
+            {/* Benefits list */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {benefitsData[activeTab].benefits.map((item, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 hover:shadow-lg transition-shadow"
+                >
+                  <h4 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+                    {item.title}
+                  </h4>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {item.description}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Screenshot for active role */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.4 }}
+              className="hidden lg:block rounded-2xl overflow-hidden shadow-2xl border border-gray-100 dark:border-gray-700"
+            >
+              <img
+                src={roleImages[benefitsData[activeTab].role]}
+                alt={`EduTrack - ${benefitsData[activeTab].role}`}
+                className="w-full h-72 object-cover object-top"
+              />
+              <div className="bg-white dark:bg-gray-800 px-4 py-3 text-center">
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  {benefitsData[activeTab].role} — Interface dédiée
                 </p>
-              </motion.div>
-            ))}
+              </div>
+            </motion.div>
           </motion.div>
         </AnimatePresence>
       </div>

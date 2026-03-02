@@ -100,57 +100,28 @@ const Hero = () => {
             </motion.div>
           </motion.div>
 
-          {/* Right illustration */}
+          {/* Right illustration — vrai screenshot dashboard */}
           <motion.div
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, delay: 0.2 }}
-            className="hidden md:block"
+            className="hidden md:flex flex-col items-center gap-4"
           >
-            <div className="relative">
-              <div className="absolute -top-8 -right-8 w-40 h-40 bg-blue-300/20 rounded-full blur-2xl"></div>
-              <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-indigo-300/20 rounded-full blur-2xl"></div>
-
-              {/* Product visual mockup */}
-              <motion.div
-                animate={{ y: [0, -10, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-4"
-              >
-                <img
-                  src="/images/landing-desktop.svg"
-                  alt="Tableau de bord EduTrack"
-                  className="w-full rounded-2xl border border-gray-100 dark:border-gray-700"
-                />
-              </motion.div>
-
-              <motion.div
-                animate={{ y: [0, -6, 0] }}
-                transition={{ duration: 4.4, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }}
-                className="absolute -bottom-8 -right-10 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-3 w-48"
-              >
-                <img
-                  src="/images/landing-mobile.svg"
-                  alt="Application mobile EduTrack"
-                  className="w-full rounded-xl"
-                />
-              </motion.div>
-
-              <div className="mt-10 grid grid-cols-3 gap-3">
-                <div className="bg-white/90 dark:bg-gray-800/90 rounded-xl p-3 text-center shadow-lg">
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">87%</p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Taux de réussite</p>
-                </div>
-                <div className="bg-white/90 dark:bg-gray-800/90 rounded-xl p-3 text-center shadow-lg">
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">24h</p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Alertes WhatsApp</p>
-                </div>
-                <div className="bg-white/90 dark:bg-gray-800/90 rounded-xl p-3 text-center shadow-lg">
-                  <p className="text-xl font-bold text-gray-900 dark:text-white">+30</p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Jours d’essai</p>
-                </div>
+            <motion.div
+              animate={{ y: [0, -10, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+              className="relative w-full"
+            >
+              <img
+                src="/images/dahboard-centralise.png"
+                alt="Dashboard centralisé EduTrack"
+                className="w-full rounded-2xl shadow-2xl border-4 border-white/60 dark:border-gray-700"
+              />
+              <div className="absolute -bottom-4 -right-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl px-4 py-2 flex items-center gap-2">
+                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Tableau de bord en direct</span>
               </div>
-            </div>
+            </motion.div>
           </motion.div>
         </div>
       </div>

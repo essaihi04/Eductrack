@@ -1,6 +1,24 @@
 import { motion } from 'framer-motion';
 import { Clock, BookOpen, MessageCircle, TrendingUp, Calendar, Award } from 'lucide-react';
 
+const screenshots = [
+  {
+    src: '/images/suivie-rapide-prof.png',
+    title: 'Suivi Rapide Professeur',
+    desc: 'Interface intuitive pour enregistrer présences et comportements en quelques clics'
+  },
+  {
+    src: '/images/rapport-journalier.png',
+    title: 'Rapport Journalier',
+    desc: 'Rapports automatiques générés chaque jour pour un suivi précis'
+  },
+  {
+    src: '/images/discussion-parent.png',
+    title: 'Communication Parents',
+    desc: 'Espace dédié à la communication directe avec les familles'
+  }
+];
+
 const features = [
   {
     icon: Clock,
@@ -49,29 +67,6 @@ const Features = () => {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
-          className="mb-10 grid md:grid-cols-3 gap-4"
-        >
-          <div className="md:col-span-2 rounded-2xl overflow-hidden shadow-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-            <img
-              src="/images/landing-desktop.svg"
-              alt="Vue desktop EduTrack"
-              className="w-full h-56 object-cover"
-            />
-          </div>
-          <div className="rounded-2xl overflow-hidden shadow-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-            <img
-              src="/images/landing-mobile.svg"
-              alt="Vue mobile EduTrack"
-              className="w-full h-56 object-cover"
-            />
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
           className="text-center mb-16"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
@@ -105,6 +100,42 @@ const Features = () => {
             </motion.div>
           ))}
         </div>
+
+        {/* Screenshots galerie */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="mt-20"
+        >
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white text-center mb-10">
+            L'application en action
+          </h3>
+          <div className="grid md:grid-cols-3 gap-6">
+            {screenshots.map((shot, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, scale: 0.95 }}
+                whileInView={{ opacity: 1, scale: 1 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: index * 0.15 }}
+                whileHover={{ y: -6, transition: { duration: 0.2 } }}
+                className="rounded-2xl overflow-hidden shadow-xl bg-white dark:bg-gray-800"
+              >
+                <img
+                  src={shot.src}
+                  alt={shot.title}
+                  className="w-full h-52 object-cover object-top"
+                />
+                <div className="p-4">
+                  <h4 className="font-bold text-gray-900 dark:text-white mb-1">{shot.title}</h4>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{shot.desc}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
       </div>
     </section>
   );
