@@ -123,25 +123,46 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       absences: studentData.absences?.length || 0
     });
     
-    // 8. AGENT DÉCIDEUR IA - Analyse le message et décide comment répondre
+    // 8. AGENT 1: MÉMOIRE - Construire l'état de la conversation
     const conversationHistory = await getConversationHistory(normalizedPhone, parentInfo.parent_id, studentInfo.id);
-    const agentDecision = await decideWithAgent(messageText, parentInfo, studentInfo, conversationHistory);
+    const conversationState = buildConversationState(conversationHistory);
+    console.log('[Chatbot] État conversation:', JSON.stringify({ lang: conversationState.preferredLanguage, topic: conversationState.lastTopic, subject: conversationState.activeSubject, msgs: conversationState.messageCount }));
+
+    // 9. AGENT 2: RÉSOLVEUR - Enrichir les messages courts/ambigus avec le contexte
+    const enrichedMessage = resolveFollowUpContext(messageText, conversationHistory, conversationState);
+    if (enrichedMessage !== messageText) {
+      console.log(`[Chatbot] Message enrichi: "${messageText}" → "${enrichedMessage}"`);
+    }
+
+    // 10. AGENT DÉCIDEUR IA - Analyse le message enrichi et décide comment répondre
+    const agentDecision = await decideWithAgent(enrichedMessage, parentInfo, studentInfo, conversationHistory);
     console.log('[Chatbot] Décision agent:', JSON.stringify(agentDecision));
     
     let response;
     
     if (agentDecision.mode === 'DIRECT') {
-      // Réponse directe scriptée (25%) - questions factuelles simples depuis la DB
+      // Réponse directe scriptée - questions factuelles simples depuis la DB
       console.log('[Chatbot] Mode DIRECT - Réponse scriptée depuis DB');
-      response = await generateDirectResponse(messageText, studentInfo, studentData, parentInfo);
+      response = await generateDirectResponse(enrichedMessage, studentInfo, studentData, parentInfo);
       if (!response) {
         console.log('[Chatbot] Fallback IA depuis DIRECT');
-        response = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+        response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
       }
     } else {
-      // Mode IA (75%) - DeepSeek répond avec contexte ciblé
+      // Mode IA - DeepSeek répond avec contexte ciblé
       console.log('[Chatbot] Mode AI_FOCUSED - DeepSeek avec contexte ciblé:', agentDecision.intents);
-      response = await generateAIResponse(messageText, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+      response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+    }
+
+    // 11. AGENT 3: GARDE-FOU - Vérifier la réponse IA contre les données réelles
+    if (agentDecision.mode !== 'DIRECT') {
+      const validation = validateAIResponse(response, studentData, studentInfo);
+      if (!validation.valid && validation.severity === 'high') {
+        console.warn('[Chatbot] Réponse IA rejetée par le garde-fou, régénération...');
+        // Régénérer avec un prompt plus strict
+        const strictDecision = { ...agentDecision, intents: [...agentDecision.intents], summary: agentDecision.summary + ' [STRICT: données vérifiées uniquement]' };
+        response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, strictDecision);
+      }
     }
     
     // Ajouter le menu de questions rapides seulement toutes les 5 interactions
@@ -297,6 +318,218 @@ function detectConversationMode(messageText, conversationHistory) {
   if (isData && !isAdvice) return 'DATA';
   if (isAdvice || isFollowUp) return 'ADVICE';
   return 'ADVICE'; // Défaut vers conseil
+}
+
+// ═══════════════════════════════════════════════════════
+// AGENT 1: MÉMOIRE CONVERSATIONNELLE - État de la discussion
+// ═══════════════════════════════════════════════════════
+function buildConversationState(conversationHistory) {
+  const state = {
+    preferredLanguage: null, // 'fr', 'ar', 'darija'
+    lastTopic: null,         // dernier sujet discuté
+    lastIntents: [],         // derniers intents détectés
+    activeSubject: null,     // matière en cours de discussion
+    messageCount: conversationHistory.length,
+    isReturningUser: conversationHistory.length > 3
+  };
+
+  if (conversationHistory.length === 0) return state;
+
+  // Analyser les 5 derniers échanges pour extraire l'état
+  const recent = conversationHistory.slice(-5);
+
+  // Détecter la langue préférée
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const msg = recent[i].parent_message.toLowerCase();
+    if (/\b(b français|en français|dwi.*français|parle.*français)\b/i.test(msg)) {
+      state.preferredLanguage = 'fr';
+      break;
+    }
+    if (/\b(b darija|b arabe|hdrt.*darija)\b/i.test(msg)) {
+      state.preferredLanguage = 'darija';
+      break;
+    }
+  }
+  // Si pas de demande explicite, détecter depuis le dernier message
+  if (!state.preferredLanguage) {
+    const lastParentMsg = recent[recent.length - 1]?.parent_message || '';
+    state.preferredLanguage = /[\u0600-\u06FF]/.test(lastParentMsg) ? 'darija' : 'fr';
+  }
+
+  // Extraire le dernier sujet discuté (depuis la dernière réponse IA)
+  const lastResponse = recent[recent.length - 1]?.ai_response?.toLowerCase() || '';
+  const lastMsg = recent[recent.length - 1]?.parent_message?.toLowerCase() || '';
+  
+  const topicKeywords = {
+    'notes': ['note', 'نقط', 'moyenne', 'معدل', 'contrôle'],
+    'presence': ['présence', 'حضور', 'absent', 'غياب', 'présent'],
+    'homework': ['devoir', 'واجب', 'exercice', 'rendu'],
+    'lessons': ['leçon', 'درس', 'cours', 'دروس', 'étudi'],
+    'behavior': ['comportement', 'سلوك', 'discipline', 'participation', 'téléphone'],
+    'schedule': ['programme', 'برنامج', 'semaine', 'أسبوع']
+  };
+
+  for (const [topic, keywords] of Object.entries(topicKeywords)) {
+    if (keywords.some(kw => lastMsg.includes(kw) || lastResponse.includes(kw))) {
+      state.lastTopic = topic;
+      break;
+    }
+  }
+
+  // Détecter une matière active dans les derniers messages
+  const subjectPatterns = [
+    'math', 'physique', 'svt', 'sciences', 'français', 'arabe', 'anglais',
+    'histoire', 'géo', 'philosophie', 'informatique', 'sport', 'éducation',
+    'islamique', 'رياضيات', 'فيزياء', 'علوم', 'فرنسية', 'عربية', 'إنجليزية'
+  ];
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const msg = recent[i].parent_message.toLowerCase();
+    const found = subjectPatterns.find(s => msg.includes(s));
+    if (found) {
+      state.activeSubject = found;
+      break;
+    }
+  }
+
+  return state;
+}
+
+// ═══════════════════════════════════════════════════════
+// AGENT 2: RÉSOLVEUR DE CONTEXTE - Comprend les follow-ups
+// ═══════════════════════════════════════════════════════
+function resolveFollowUpContext(messageText, conversationHistory, conversationState) {
+  const lower = messageText.toLowerCase().trim();
+  
+  // Si le message est assez long et explicite, pas besoin d'enrichir
+  if (lower.length > 40) return messageText;
+  
+  // Si pas d'historique, rien à résoudre
+  if (conversationHistory.length === 0) return messageText;
+
+  const lastParentMsg = conversationHistory[conversationHistory.length - 1]?.parent_message?.toLowerCase() || '';
+  const lastAiResponse = conversationHistory[conversationHistory.length - 1]?.ai_response?.toLowerCase() || '';
+
+  // Cas 1: Juste un nom de matière → lier au dernier sujet
+  const subjectNames = [
+    'math', 'maths', 'physique', 'svt', 'sciences', 'français', 'arabe', 
+    'anglais', 'histoire', 'géo', 'philo', 'informatique', 'sport',
+    'رياضيات', 'فيزياء', 'علوم', 'فرنسية', 'عربية', 'إنجليزية'
+  ];
+  const isJustSubject = subjectNames.some(s => lower === s || lower === s + 's');
+  if (isJustSubject && conversationState.lastTopic) {
+    const topicToQuestion = {
+      'notes': `note de ${messageText}`,
+      'lessons': `leçons de ${messageText}`,
+      'homework': `devoirs de ${messageText}`,
+      'behavior': `comportement en ${messageText}`,
+      'presence': `présence en ${messageText}`,
+      'schedule': `programme de ${messageText}`
+    };
+    const enriched = topicToQuestion[conversationState.lastTopic] || `${conversationState.lastTopic} ${messageText}`;
+    console.log(`[FollowUp] Message enrichi: "${messageText}" → "${enriched}" (topic: ${conversationState.lastTopic})`);
+    return enriched;
+  }
+
+  // Cas 2: Questions de suivi courtes qui font référence au contexte précédent
+  const followUpPatterns = [
+    { pattern: /^et (les |la |le |l')?(.+)\??$/i, resolve: (m) => m[2] },
+    { pattern: /^(wach|wash|est.?ce qu|ya?til|kayn)\s+(.+)/i, resolve: (m) => m[2] },
+    { pattern: /^(combien|chhal|ch7al)\s+(.+)/i, resolve: (m) => `combien ${m[2]}` },
+    { pattern: /^(dernière?|akher|آخر)\s+(.+)/i, resolve: (m) => `dernière ${m[2]}` },
+  ];
+  
+  for (const { pattern, resolve } of followUpPatterns) {
+    const match = lower.match(pattern);
+    if (match) {
+      const resolved = resolve(match);
+      console.log(`[FollowUp] Pattern détecté: "${messageText}" → enrichi avec contexte`);
+      return messageText; // Garde le message original mais le log aide au debug
+    }
+  }
+
+  // Cas 3: Message très court (< 15 chars) sans mot-clé clair → ajouter le contexte du dernier sujet
+  if (lower.length < 15 && conversationState.activeSubject && !isJustSubject) {
+    // Vérifier si le message est une question implicite
+    const questionIndicators = ['wch', 'chno', 'kif', 'fin', 'quoi', 'quel', 'comment', 'كيف', 'شنو', 'فين'];
+    if (questionIndicators.some(q => lower.includes(q))) {
+      const enriched = `${messageText} (en rapport avec ${conversationState.activeSubject})`;
+      console.log(`[FollowUp] Question enrichie: "${messageText}" → "${enriched}"`);
+      return enriched;
+    }
+  }
+
+  return messageText;
+}
+
+// ═══════════════════════════════════════════════════════
+// AGENT 3: GARDE-FOU - Vérifie la réponse IA contre les données réelles
+// ═══════════════════════════════════════════════════════
+function validateAIResponse(response, studentData, studentInfo) {
+  const issues = [];
+  const lower = response.toLowerCase();
+
+  // 1. Vérifier les notes mentionnées - sont-elles dans les données réelles ?
+  const notePattern = /(\d{1,2})[\/\\]20/g;
+  const mentionedNotes = [];
+  let match;
+  while ((match = notePattern.exec(response)) !== null) {
+    mentionedNotes.push(Number(match[1]));
+  }
+  
+  if (mentionedNotes.length > 0) {
+    const realNotes = [
+      ...(studentData.grades || []).map(g => Number(g.note)),
+      ...(studentData.allGrades || []).map(g => Number(g.note))
+    ].filter(n => !isNaN(n));
+    
+    for (const note of mentionedNotes) {
+      if (realNotes.length > 0 && !realNotes.includes(note)) {
+        issues.push(`note_inventée:${note}/20`);
+      }
+    }
+  }
+
+  // 2. Vérifier les pourcentages de présence extrêmes
+  const presencePattern = /(\d{2,3})%\s*(de\s+)?pr[ée]sence/i;
+  const presenceMatch = response.match(presencePattern);
+  if (presenceMatch) {
+    const mentionedPct = Number(presenceMatch[1]);
+    const tracking = studentData.tracking || [];
+    if (tracking.length > 0) {
+      const realPresent = tracking.filter(t => t.presence === 'present').length;
+      const realPct = Math.round(realPresent / tracking.length * 100);
+      if (Math.abs(mentionedPct - realPct) > 15) {
+        issues.push(`présence_incohérente:${mentionedPct}% vs réel ${realPct}%`);
+      }
+    }
+  }
+
+  // 3. Vérifier si la réponse contient des noms de chapitres/leçons non dans les données
+  const allTopics = [
+    ...(studentData.sessions || []).map(s => s.topic),
+    ...(studentData.allSessions || []).map(s => s.topic)
+  ].filter(Boolean).map(t => t.toLowerCase());
+
+  // Détection basique de chapitres inventés (entre guillemets)
+  const quotedPattern = /["«»""]([^"«»""]+)["«»""]/g;
+  let quotedMatch;
+  while ((quotedMatch = quotedPattern.exec(response)) !== null) {
+    const quoted = quotedMatch[1].toLowerCase().trim();
+    if (quoted.length > 5 && !allTopics.some(t => t.includes(quoted) || quoted.includes(t))) {
+      // Pourrait être un chapitre inventé
+      issues.push(`chapitre_suspect:"${quotedMatch[1]}"`);
+    }
+  }
+
+  if (issues.length > 0) {
+    console.warn('[Guard] ⚠️ Problèmes détectés dans la réponse IA:', issues.join(', '));
+  }
+  
+  return {
+    valid: issues.length === 0,
+    issues,
+    severity: issues.some(i => i.startsWith('note_inventée')) ? 'high' : 'low'
+  };
 }
 
 // Construire le menu de bienvenue avec enfants et questions
