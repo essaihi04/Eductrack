@@ -49,6 +49,29 @@ const Features = () => {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
+          className="mb-10 grid md:grid-cols-3 gap-4"
+        >
+          <div className="md:col-span-2 rounded-2xl overflow-hidden shadow-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <img
+              src="/images/landing-desktop.svg"
+              alt="Vue desktop EduTrack"
+              className="w-full h-56 object-cover"
+            />
+          </div>
+          <div className="rounded-2xl overflow-hidden shadow-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <img
+              src="/images/landing-mobile.svg"
+              alt="Vue mobile EduTrack"
+              className="w-full h-56 object-cover"
+            />
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
           className="text-center mb-16"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">

@@ -108,54 +108,48 @@ const Hero = () => {
             className="hidden md:block"
           >
             <div className="relative">
-              {/* Floating cards animation */}
-              <motion.div
-                animate={{ y: [0, -20, 0] }}
-                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 mb-4"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">✓</span>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">Présence enregistrée</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">23/25 élèves présents</p>
-                  </div>
-                </div>
-              </motion.div>
+              <div className="absolute -top-8 -right-8 w-40 h-40 bg-blue-300/20 rounded-full blur-2xl"></div>
+              <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-indigo-300/20 rounded-full blur-2xl"></div>
 
-              <motion.div
-                animate={{ y: [0, -15, 0] }}
-                transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 mb-4"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">📊</span>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">Statistiques en temps réel</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Taux de réussite: 87%</p>
-                  </div>
-                </div>
-              </motion.div>
-
+              {/* Product visual mockup */}
               <motion.div
                 animate={{ y: [0, -10, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6"
+                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+                className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl p-4"
               >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center">
-                    <span className="text-2xl">💬</span>
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white">Communication parents</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">12 messages envoyés</p>
-                  </div>
-                </div>
+                <img
+                  src="/images/landing-desktop.svg"
+                  alt="Tableau de bord EduTrack"
+                  className="w-full rounded-2xl border border-gray-100 dark:border-gray-700"
+                />
               </motion.div>
+
+              <motion.div
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 4.4, repeat: Infinity, ease: 'easeInOut', delay: 0.4 }}
+                className="absolute -bottom-8 -right-10 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-3 w-48"
+              >
+                <img
+                  src="/images/landing-mobile.svg"
+                  alt="Application mobile EduTrack"
+                  className="w-full rounded-xl"
+                />
+              </motion.div>
+
+              <div className="mt-10 grid grid-cols-3 gap-3">
+                <div className="bg-white/90 dark:bg-gray-800/90 rounded-xl p-3 text-center shadow-lg">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">87%</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Taux de réussite</p>
+                </div>
+                <div className="bg-white/90 dark:bg-gray-800/90 rounded-xl p-3 text-center shadow-lg">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">24h</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Alertes WhatsApp</p>
+                </div>
+                <div className="bg-white/90 dark:bg-gray-800/90 rounded-xl p-3 text-center shadow-lg">
+                  <p className="text-xl font-bold text-gray-900 dark:text-white">+30</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">Jours d’essai</p>
+                </div>
+              </div>
             </div>
           </motion.div>
         </div>
