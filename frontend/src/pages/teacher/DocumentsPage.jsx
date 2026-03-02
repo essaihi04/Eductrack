@@ -151,10 +151,26 @@ const DocumentsPage = () => {
         'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
       ];
       
-      if (!allowedTypes.includes(file.type)) {
+      // Accepter fichiers sans MIME type détecté (validation par extension backend)
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const validExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'doc', 'docx', 'ppt', 'pptx'];
+      
+      if (file.type && !allowedTypes.includes(file.type) && !validExtensions.includes(ext)) {
+        console.warn('[DocumentsPage] Fichier rejeté', { 
+          fileName: file.name, 
+          fileType: file.type, 
+          ext 
+        });
         alert('❌ Type de fichier non autorisé. Types acceptés: PDF, images, documents Word/PowerPoint');
         return;
       }
+      
+      console.log('[DocumentsPage] Fichier accepté', { 
+        fileName: file.name, 
+        fileType: file.type, 
+        ext,
+        size: file.size 
+      });
       
       setFormData({ ...formData, file });
     }
