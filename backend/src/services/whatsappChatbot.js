@@ -545,6 +545,9 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   const extractedDate = extractDateFromMessage(question);
   const extractedMonth = !extractedDate ? extractMonthFromMessage(question) : null;
   const targetDate = extractedDate || today;
+  const targetMonthKey = extractedMonth
+    ? `${extractedMonth.year}-${String(extractedMonth.month).padStart(2, '0')}`
+    : currentMonth;
   console.log('[generateDirectResponse] Date extraite:', extractedDate, '| Mois extrait:', extractedMonth, '| Date cible:', targetDate);
   
   const normalizeText = (value) =>
@@ -571,6 +574,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
       })
       .join('');
   };
+  const pct = (value, total) => Math.round((value / Math.max(1, total)) * 100);
   const inferControlSubject = (grade) => {
     const allSessions = studentData.allSessions || [];
     const subjectPool = [...new Set(allSessions.map((s) => s?.subjects?.name).filter(Boolean))];
@@ -644,7 +648,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     )
   ) {
     const allSessions = studentData.allSessions || [];
-    const currentMonthSessions = allSessions.filter(s => toMonthKey(s.date) === currentMonth);
+    const currentMonthSessions = allSessions.filter(s => toMonthKey(s.date) === targetMonthKey);
     const sourceSessions = currentMonthSessions.length > 0 ? currentMonthSessions : allSessions.slice(0, 20);
 
     // Grouper les topics par matière
@@ -663,7 +667,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         ? `ℹ️ لا توجد دروس مسجلة هذا الشهر.`
         : `ℹ️ Aucune leçon enregistrée ce mois.`;
     } else {
-      const period = currentMonthSessions.length > 0 ? currentMonth : 'récente';
+      const period = currentMonthSessions.length > 0 ? targetMonthKey : 'récente';
       response = isArabic
         ? `📚 *الدروس المدروسة (${period}):*\n\n`
         : `📚 *Leçons étudiées (${period}):*\n\n`;
@@ -684,6 +688,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
 
   // BILAN DU MOIS
   else if (
+    extractedMonth ||
     lower.includes('ce mois') ||
     lower.includes('du mois') ||
     lower.includes('mensuel') ||
@@ -691,18 +696,19 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     lower.includes('الشهر') ||
     lower.includes('شهري')
   ) {
-    let monthTracking = (studentData.allTracking || []).filter(t => toMonthKey(t.sessions?.date) === currentMonth);
-    const monthAbsences = (studentData.absences || []).filter(a => toMonthKey(a.sessions?.date) === currentMonth);
-    let monthGrades = (studentData.allGrades || []).filter(g => toMonthKey(g.controls_plan?.date) === currentMonth);
+    const monthLabel = targetMonthKey;
+    let monthTracking = (studentData.allTracking || []).filter(t => toMonthKey(t.sessions?.date) === targetMonthKey);
+    const monthAbsences = (studentData.absences || []).filter(a => toMonthKey(a.sessions?.date) === targetMonthKey);
+    let monthGrades = (studentData.allGrades || []).filter(g => toMonthKey(g.controls_plan?.date) === targetMonthKey);
 
     // Fallback: si le format de date est hétérogène, ne pas perdre les métriques
-    if (monthTracking.length === 0 && (studentData.allTracking || []).length > 0) {
+    if (!extractedMonth && monthTracking.length === 0 && (studentData.allTracking || []).length > 0) {
       monthTracking = studentData.allTracking || [];
     }
-    if (monthTracking.length === 0 && (studentData.tracking || []).length > 0) {
+    if (!extractedMonth && monthTracking.length === 0 && (studentData.tracking || []).length > 0) {
       monthTracking = studentData.tracking || [];
     }
-    if (monthGrades.length === 0 && (studentData.allGrades || []).length > 0) {
+    if (!extractedMonth && monthGrades.length === 0 && (studentData.allGrades || []).length > 0) {
       monthGrades = studentData.allGrades || [];
     }
 
@@ -729,22 +735,24 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         : null;
 
       response = isArabic
-        ? `📅 *ملخص الشهر الحالي (${currentMonth}):*\n\n`
-        : `📅 *Bilan du mois (${currentMonth}):*\n\n`;
+        ? `📅 *ملخص الشهر (${monthLabel}):*\n\n`
+        : `📅 *Bilan du mois (${monthLabel}):*\n\n`;
 
       if (totalSessions > 0) {
+        const presencePct = pct(presentCount, totalSessions);
+        const cahierPct = pct(homeworkReadyCount, totalSessions);
         response += isArabic
-          ? `• الحضور: *${presentCount}/${totalSessions}*\n`
-          : `• Présence: *${presentCount}/${totalSessions}*\n`;
+          ? `• ✅ الحضور: *${presentCount}/${totalSessions}* (${presencePct}%) ${generateProgressBar(presencePct)}\n`
+          : `• ✅ Présence: *${presentCount}/${totalSessions}* (${presencePct}%) ${generateProgressBar(presencePct)}\n`;
         response += isArabic
-          ? `• الغيابات: *${absentCount}*\n`
-          : `• Absences: *${absentCount}*\n`;
+          ? `• ❌ الغيابات: *${absentCount}*\n`
+          : `• ❌ Absences: *${absentCount}*\n`;
         response += isArabic
-          ? `• التأخر: *${lateCount}*\n`
-          : `• Retards: *${lateCount}*\n`;
+          ? `• ⏰ التأخر: *${lateCount}*\n`
+          : `• ⏰ Retards: *${lateCount}*\n`;
         response += isArabic
-          ? `• حضور الدفتر: *${homeworkReadyCount}/${totalSessions}*\n`
-          : `• Cahier présent: *${homeworkReadyCount}/${totalSessions}*\n`;
+          ? `• 📘 حضور الدفتر: *${homeworkReadyCount}/${totalSessions}* (${cahierPct}%) ${generateProgressBar(cahierPct)}\n`
+          : `• 📘 Cahier présent: *${homeworkReadyCount}/${totalSessions}* (${cahierPct}%) ${generateProgressBar(cahierPct)}\n`;
       }
 
       if (monthAbsences.length > 0) {
@@ -811,34 +819,64 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // ABSENCES
   else if (lower.includes('absence') || lower.includes('غياب') || lower.includes('combien') && lower.includes('absent')) {
-    const absenceCount = studentData.absences?.length || 0;
-    response = isArabic
-      ? `📊 *عدد الغيابات:*\n\n${studentInfo.first_name} لديه *${absenceCount} غياب* هذا الشهر.`
-      : `📊 *Nombre d'absences:*\n\n${studentInfo.first_name} a *${absenceCount} absence(s)* ce mois.`;
-    
-    if (absenceCount > 0 && studentData.absences.length <= 3) {
+    const allAbsences = studentData.absences || [];
+    const absencesByDate = extractedDate
+      ? allAbsences.filter(abs => abs.sessions?.date === extractedDate)
+      : allAbsences;
+    const absencesByMonth = !extractedDate && extractedMonth
+      ? allAbsences.filter(abs => toMonthKey(abs.sessions?.date) === targetMonthKey)
+      : absencesByDate;
+    const finalAbsences = absencesByMonth;
+    const absenceCount = finalAbsences.length;
+
+    if (extractedDate) {
+      const dateLabel = new Date(extractedDate + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      response = isArabic
+        ? `📅 *غيابات ${dateLabel}:*\n\n${absenceCount > 0 ? `❌ مسجل *${absenceCount}* غياب.` : '✅ لا يوجد غياب في هذا التاريخ.'}`
+        : `📅 *Absences du ${dateLabel}:*\n\n${absenceCount > 0 ? `❌ *${absenceCount}* absence(s) enregistrée(s).` : '✅ Aucune absence à cette date.'}`;
+    } else {
+      const scopeLabel = extractedMonth ? targetMonthKey : (isArabic ? 'هذا الشهر' : 'ce mois');
+      response = isArabic
+        ? `📊 *عدد الغيابات (${scopeLabel}):*\n\n${studentInfo.first_name} لديه *${absenceCount} غياب*.`
+        : `📊 *Nombre d'absences (${scopeLabel}):*\n\n${studentInfo.first_name} a *${absenceCount} absence(s)*.`;
+    }
+
+    if (absenceCount > 0 && absenceCount <= 5) {
       response += '\n\n' + (isArabic ? '📅 *التواريخ:*\n' : '📅 *Dates:*\n');
-      studentData.absences.forEach(abs => {
+      finalAbsences.forEach(abs => {
         response += `• ${abs.sessions?.date} - ${abs.sessions?.subjects?.name || 'N/A'}\n`;
       });
     }
   }
   
   // PRÉSENCE AUJOURD'HUI
-  else if (lower.includes('présent') || lower.includes('حاضر') || lower.includes('aujourd\'hui') || lower.includes('اليوم')) {
-    const todayTracking = studentData.tracking.filter(t => t.sessions?.date === today);
-    
-    if (todayTracking.length === 0) {
+  else if (
+    lower.includes('présent') ||
+    lower.includes('présence') ||
+    lower.includes('presence') ||
+    lower.includes('حاضر') ||
+    lower.includes('حضور') ||
+    lower.includes('aujourd\'hui') ||
+    lower.includes('اليوم')
+  ) {
+    const sourceTracking = extractedDate ? (studentData.allTracking || []) : (studentData.tracking || []);
+    const dayTracking = sourceTracking.filter(t => t.sessions?.date === targetDate);
+    const dateLabel = extractedDate
+      ? new Date(targetDate + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })
+      : (isArabic ? 'اليوم' : 'aujourd\'hui');
+
+    if (dayTracking.length === 0) {
       response = isArabic
-        ? `ℹ️ لا توجد بيانات حضور لهذا اليوم بعد.`
-        : `ℹ️ Pas encore de données de présence pour aujourd'hui.`;
+        ? `ℹ️ لا توجد بيانات حضور لـ ${dateLabel}.`
+        : `ℹ️ Pas de données de présence pour ${dateLabel}.`;
     } else {
-      const presentCount = todayTracking.filter(t => t.presence === 'present').length;
-      const totalSessions = todayTracking.length;
+      const presentCount = dayTracking.filter(t => t.presence === 'present').length;
+      const totalSessions = dayTracking.length;
+      const presencePct = pct(presentCount, totalSessions);
       
       response = isArabic
-        ? `✅ *الحضور اليوم:*\n\n${studentInfo.first_name} حاضر في *${presentCount}/${totalSessions}* حصص.`
-        : `✅ *Présence aujourd'hui:*\n\n${studentInfo.first_name} est présent dans *${presentCount}/${totalSessions}* séances.`;
+        ? `✅ *الحضور (${dateLabel}):*\n\n${studentInfo.first_name} حاضر في *${presentCount}/${totalSessions}* حصص (${presencePct}%) ${generateProgressBar(presencePct)} 📈`
+        : `✅ *Présence (${dateLabel}):*\n\n${studentInfo.first_name} est présent dans *${presentCount}/${totalSessions}* séances (${presencePct}%) ${generateProgressBar(presencePct)} 📈`;
     }
   }
   
@@ -905,6 +943,15 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         const controlTitle = grade.controls_plan?.name || 'Contrôle';
         response += `• ${controlTitle}${inferredSubject ? ` (${inferredSubject})` : ''}: *${grade.note}/20*\n`;
       });
+
+      const trendSeries = recentGrades
+        .map((g) => Math.round(((Number(g.note) || 0) / 20) * 100))
+        .reverse();
+      if (trendSeries.length >= 2) {
+        response += '\n' + (isArabic
+          ? `📈 تطور آخر الفروض: ${toSparkline(trendSeries)} (${trendSeries.join('% - ')}%)\n`
+          : `📈 Progression derniers contrôles: ${toSparkline(trendSeries)} (${trendSeries.join('% - ')}%)\n`);
+      }
       
       // Calculer moyenne si possible
       if (studentData.allGrades && studentData.allGrades.length > 0) {

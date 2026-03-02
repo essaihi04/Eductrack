@@ -315,59 +315,61 @@ router.post('/', authorize('teacher'), upload.single('file'), async (req, res) =
         console.log('[DEBUG] Notifications created successfully:', notifications.length);
       }
 
-      // Envoyer notification WhatsApp aux parents
-      try {
-        const studentIds = students.map(s => s.id);
+      // Envoyer notification WhatsApp aux parents (asynchrone, sans bloquer la requête HTTP)
+      void (async () => {
+        try {
+          const studentIds = students.map(s => s.id);
 
-        const { data: classInfoWa } = await supabaseAdmin
-          .from('classes')
-          .select('name, school_id')
-          .eq('id', classId)
-          .single();
+          const { data: classInfoWa } = await supabaseAdmin
+            .from('classes')
+            .select('name, school_id')
+            .eq('id', classId)
+            .single();
 
-        const schoolId = classInfoWa?.school_id || req.user.school_id;
+          const schoolId = classInfoWa?.school_id || req.user.school_id;
 
-        // Récupérer les parents avec leur numéro
-        const { data: parentLinks } = await supabaseAdmin
-          .from('parent_students')
-          .select('profiles!parent_id(first_name, phone)')
-          .in('student_id', studentIds);
+          // Récupérer les parents avec leur numéro
+          const { data: parentLinks } = await supabaseAdmin
+            .from('parent_students')
+            .select('profiles!parent_id(first_name, phone)')
+            .in('student_id', studentIds);
 
-        if (parentLinks && parentLinks.length > 0) {
-          const documentTypeLabel = {
-            'cours': 'Cours',
-            'exercice': 'Exercice',
-            'correction': 'Correction',
-            'support': 'Support pédagogique',
-            'autre': 'Document'
-          }[documentType] || 'Document';
+          if (parentLinks && parentLinks.length > 0) {
+            const documentTypeLabel = {
+              'cours': 'Cours',
+              'exercice': 'Exercice',
+              'correction': 'Correction',
+              'support': 'Support pédagogique',
+              'autre': 'Document'
+            }[documentType] || 'Document';
 
-          const messageText = `📄 *Nouveau document pédagogique*\n\n` +
-            `Classe: *${classInfoWa?.name || 'N/A'}*\n` +
-            `Professeur: ${teacherName}\n` +
-            (subjectName ? `Matière: ${subjectName}\n` : '') +
-            `Type: ${documentTypeLabel}\n\n` +
-            `📝 *${title}*\n` +
-            (description ? `${description}\n\n` : '\n') +
-            `📎 Fichier: ${req.file.originalname}\n` +
-            `ℹ️ Le document est disponible dans l'espace élève.\n\n` +
-            `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+            const messageText = `📄 *Nouveau document pédagogique*\n\n` +
+              `Classe: *${classInfoWa?.name || 'N/A'}*\n` +
+              `Professeur: ${teacherName}\n` +
+              (subjectName ? `Matière: ${subjectName}\n` : '') +
+              `Type: ${documentTypeLabel}\n\n` +
+              `📝 *${title}*\n` +
+              (description ? `${description}\n\n` : '\n') +
+              `📎 Fichier: ${req.file.originalname}\n` +
+              `ℹ️ Le document est disponible dans l'espace élève.\n\n` +
+              `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
 
-          const sentPhones = new Set();
-          for (const link of parentLinks) {
-            const phone = link.profiles?.phone;
-            if (!phone || sentPhones.has(phone)) continue;
-            sentPhones.add(phone);
-            const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-            await sendWhatsAppResponse(e164Phone, messageText, schoolId);
-            console.log(`[Documents] Notification document envoyée au parent (${e164Phone})`);
+            const sentPhones = new Set();
+            for (const link of parentLinks) {
+              const phone = link.profiles?.phone;
+              if (!phone || sentPhones.has(phone)) continue;
+              sentPhones.add(phone);
+              const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
+              await sendWhatsAppResponse(e164Phone, messageText, schoolId);
+              console.log(`[Documents] Notification document envoyée au parent (${e164Phone})`);
+            }
+          } else {
+            console.log('[Documents] Aucun parent trouvé pour les élèves de la classe');
           }
-        } else {
-          console.log('[Documents] Aucun parent trouvé pour les élèves de la classe');
+        } catch (whatsappError) {
+          console.error('Erreur notification WhatsApp:', whatsappError);
         }
-      } catch (whatsappError) {
-        console.error('Erreur notification WhatsApp:', whatsappError);
-      }
+      })();
     } else {
       console.log('[DEBUG] No students found to notify');
     }
