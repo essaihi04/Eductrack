@@ -2475,6 +2475,25 @@ router.post('/students/import', async (req, res) => {
       });
 
       if (authError) {
+        // Si l'erreur indique que l'utilisateur existe déjà, le compter comme existant
+        if (authError.message && (authError.message.includes('already') || authError.message.includes('exists') || authError.message.includes('duplicate'))) {
+          console.log(`[Import] Utilisateur Auth existe déjà: ${email}`);
+          // Récupérer le profil existant
+          const { data: existingProfile } = await supabaseAdmin
+            .from('profiles')
+            .select('id, email, first_name, last_name')
+            .eq('email', email)
+            .single();
+          
+          if (existingProfile) {
+            existingStudents.push({
+              ...existingProfile,
+              password: '********'
+            });
+          }
+          continue;
+        }
+        
         console.error(`[Import] Erreur création utilisateur ${email}:`, authError);
         errors.push({ email, reason: authError.message });
         continue;
