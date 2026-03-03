@@ -134,34 +134,51 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       console.log(`[Chatbot] Message enrichi: "${messageText}" → "${enrichedMessage}"`);
     }
 
-    // 10. AGENT DÉCIDEUR IA - Analyse le message enrichi et décide comment répondre
-    const agentDecision = await decideWithAgent(enrichedMessage, parentInfo, studentInfo, conversationHistory);
-    console.log('[Chatbot] Décision agent:', JSON.stringify(agentDecision));
+    // 9.5 DÉTECTION LETTRES PRÉDÉFINIES - Bypass agent si c'est une lettre du menu rapide
+    const predefinedLetters = ['a', 'b', 'c', 'd', 'e', 'f', 'أ', 'ب', 'ج', 'د', 'ه', 'و'];
+    const trimmedMessage = messageText.trim().toLowerCase();
+    const isPredefinedLetter = predefinedLetters.includes(trimmedMessage);
     
     let response;
+    let agentDecision;
     
-    if (agentDecision.mode === 'DIRECT') {
-      // Réponse directe scriptée - questions factuelles simples depuis la DB
-      console.log('[Chatbot] Mode DIRECT - Réponse scriptée depuis DB');
+    if (isPredefinedLetter) {
+      // Forcer le mode DIRECT pour les lettres prédéfinies
+      console.log(`[Chatbot] Lettre prédéfinie détectée: "${trimmedMessage}" → Mode DIRECT forcé`);
+      agentDecision = { mode: 'DIRECT', intents: ['predefined'], summary: 'Menu rapide' };
       response = await generateDirectResponse(enrichedMessage, studentInfo, studentData, parentInfo);
       if (!response) {
-        console.log('[Chatbot] Fallback IA depuis DIRECT');
+        console.log('[Chatbot] Fallback IA depuis lettre prédéfinie');
         response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
       }
     } else {
-      // Mode IA - DeepSeek répond avec contexte ciblé
-      console.log('[Chatbot] Mode AI_FOCUSED - DeepSeek avec contexte ciblé:', agentDecision.intents);
-      response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
-    }
+      // 10. AGENT DÉCIDEUR IA - Analyse le message enrichi et décide comment répondre
+      agentDecision = await decideWithAgent(enrichedMessage, parentInfo, studentInfo, conversationHistory);
+      console.log('[Chatbot] Décision agent:', JSON.stringify(agentDecision));
+    
+      if (agentDecision.mode === 'DIRECT') {
+        // Réponse directe scriptée - questions factuelles simples depuis la DB
+        console.log('[Chatbot] Mode DIRECT - Réponse scriptée depuis DB');
+        response = await generateDirectResponse(enrichedMessage, studentInfo, studentData, parentInfo);
+        if (!response) {
+          console.log('[Chatbot] Fallback IA depuis DIRECT');
+          response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+        }
+      } else {
+        // Mode IA - DeepSeek répond avec contexte ciblé
+        console.log('[Chatbot] Mode AI_FOCUSED - DeepSeek avec contexte ciblé:', agentDecision.intents);
+        response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+      }
 
-    // 11. AGENT 3: GARDE-FOU - Vérifier la réponse IA contre les données réelles
-    if (agentDecision.mode !== 'DIRECT') {
-      const validation = validateAIResponse(response, studentData, studentInfo);
-      if (!validation.valid && validation.severity === 'high') {
-        console.warn('[Chatbot] Réponse IA rejetée par le garde-fou, régénération...');
-        // Régénérer avec un prompt plus strict
-        const strictDecision = { ...agentDecision, intents: [...agentDecision.intents], summary: agentDecision.summary + ' [STRICT: données vérifiées uniquement]' };
-        response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, strictDecision);
+      // 11. AGENT 3: GARDE-FOU - Vérifier la réponse IA contre les données réelles
+      if (agentDecision.mode !== 'DIRECT') {
+        const validation = validateAIResponse(response, studentData, studentInfo);
+        if (!validation.valid && validation.severity === 'high') {
+          console.warn('[Chatbot] Réponse IA rejetée par le garde-fou, régénération...');
+          // Régénérer avec un prompt plus strict
+          const strictDecision = { ...agentDecision, intents: [...agentDecision.intents], summary: agentDecision.summary + ' [STRICT: données vérifiées uniquement]' };
+          response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, strictDecision);
+        }
       }
     }
     
@@ -1059,8 +1076,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     }
   }
   
-  // ABSENCES
-  else if (lower.includes('absence') || lower.includes('غياب') || lower.includes('combien') && lower.includes('absent')) {
+  // ABSENCES (exclure si on demande les leçons pendant les absences)
+  else if (
+    (lower.includes('absence') || lower.includes('غياب') || (lower.includes('combien') && lower.includes('absent'))) &&
+    !(lower.includes('leçon') || lower.includes('cours') || lower.includes('درس') || lower.includes('دروس'))
+  ) {
     const allAbsences = studentData.absences || [];
     const absencesByDate = extractedDate
       ? allAbsences.filter(abs => abs.sessions?.date === extractedDate)
@@ -1361,9 +1381,10 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // LEÇONS PENDANT LES ABSENCES (nouveau cas spécifique)
   else if (
-    (searchText.includes('leçon') || searchText.includes('درس') || searchText.includes('الدروس') || searchText.includes('دروس')) &&
-    (searchText.includes('absence') || searchText.includes('غياب') || searchText.includes('absent') || searchText.includes('غائب') || 
-     searchText.includes('pendant') || searchText.includes('durant') || searchText.includes('lors') || searchText.includes('أثناء'))
+    (lower.includes('leçon') || lower.includes('cours') || lower.includes('درس') || lower.includes('دروس') || lower.includes('الدروس')) &&
+    (lower.includes('absence') || lower.includes('غياب') || lower.includes('absent') || lower.includes('غائب') || 
+     lower.includes('manqu') || lower.includes('raté') || lower.includes('فات') || lower.includes('ضاع') ||
+     lower.includes('pendant') || lower.includes('durant') || lower.includes('lors') || lower.includes('أثناء') || lower.includes('ces'))
   ) {
     const allAbsences = studentData.absences || [];
     const allSessions = studentData.allSessions || [];
@@ -1974,17 +1995,18 @@ Tu parles directement au parent comme un ami professionnel — chaleureux, préc
 
 RÈGLES DE RÉPONSE:
 1. Langue: réponds OBLIGATOIREMENT en ${preferredLanguage}. Ne change PAS de langue même si le dossier est en français.
-2. Longueur: 4 à 10 lignes maximum. Pas de liste à puces inutile si une phrase suffit.
-3. Style: parle comme un humain, pas comme un rapport. Ex: "Youssef a bien été présent aujourd'hui, mais j'ai vu qu'il a eu du mal en maths" plutôt que "Présence: 100% - Mathématiques: 8/20".
-4. Données: utilise les chiffres réels pour appuyer, mais intègre-les naturellement dans la phrase.
-5. Jamais de formule vide en début: pas de "Bien sûr!", "Voici les informations", "بالطبع".
-6. Si tu donnes des conseils: max 2-3 conseils concrets, adaptés aux vraies données de l'élève.
-7. Si une info manque dans le dossier: dis-le simplement sans t'excuser.
-8. 1-3 emojis seulement, placés intelligemment.
-9. N'invente JAMAIS de données absentes du dossier. Un booléen 'téléphone en classe' = signalement, pas 'il a quitté la séance'.
-10. RÈGLE ABSOLUE: Ne partage JAMAIS de données (notes, absences, comportement) que le parent n'a PAS demandées explicitement. Si la question est vague ou générale, demande ce qu'il veut savoir. Ne commence pas un résumé spontané.
-11. Si le parent mentionne une MATIÈRE (ex: 'SVT', 'maths') mais que le dossier ne contient AUCUNE donnée pour cette matière, dis simplement 'Pas de données disponibles pour [matière]'. N'invente PAS de leçons, notes ou comportements.
-12. Termine par une question ouverte courte si pertinent.
+2. NOM DE L'ÉLÈVE: utilise EXACTEMENT le prénom "${studentInfo.first_name}" tel quel. Ne traduis PAS, ne convertis PAS en majuscules, ne latinise PAS les noms arabes.
+3. Longueur: 4 à 10 lignes maximum. Pas de liste à puces inutile si une phrase suffit.
+4. Style: parle comme un humain, pas comme un rapport. Ex: "${studentInfo.first_name} a bien été présent aujourd'hui, mais j'ai vu qu'il a eu du mal en maths" plutôt que "Présence: 100% - Mathématiques: 8/20".
+5. Données: utilise les chiffres réels pour appuyer, mais intègre-les naturellement dans la phrase.
+6. Jamais de formule vide en début: pas de "Bien sûr!", "Voici les informations", "بالطبع".
+7. Si tu donnes des conseils: max 2-3 conseils concrets, adaptés aux vraies données de l'élève.
+8. Si une info manque dans le dossier: dis-le simplement sans t'excuser.
+9. 1-3 emojis seulement, placés intelligemment.
+10. N'invente JAMAIS de données absentes du dossier. Un booléen 'téléphone en classe' = signalement, pas 'il a quitté la séance'.
+11. RÈGLE ABSOLUE: Ne partage JAMAIS de données (notes, absences, comportement) que le parent n'a PAS demandées explicitement. Si la question est vague ou générale, demande ce qu'il veut savoir. Ne commence pas un résumé spontané.
+12. Si le parent mentionne une MATIÈRE (ex: 'SVT', 'maths') mais que le dossier ne contient AUCUNE donnée pour cette matière, dis simplement 'Pas de données disponibles pour [matière]'. N'invente PAS de leçons, notes ou comportements.
+13. Termine par une question ouverte courte si pertinent.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOSSIER ${studentInfo.first_name} ${studentInfo.last_name || ''}:
