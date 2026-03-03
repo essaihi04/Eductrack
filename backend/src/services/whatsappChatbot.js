@@ -895,15 +895,15 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
     'قرأ', 'يقرا', 'يدرس', 'دراسة', 'étudié', 'étudi',
     'عنوان', 'موضوع', 'topic', 'programme', 'contenu'
   ];
-  const isLessonsQuery = lessonsKeywords.some(kw => lower.includes(kw));
+  const isLessonsQuery = lessonsKeywords.some(kw => searchText.includes(kw));
 
   // LEÇONS / COURS DU MOIS (doit être vérifié AVANT le bilan mensuel)
   if (
     isLessonsQuery &&
     (
-      lower.includes('الشهر') || lower.includes('هد الشهر') || lower.includes('هذا الشهر') ||
-      lower.includes('ce mois') || lower.includes('du mois') || lower.includes('mensuel') ||
-      lower.includes('مدروسة') || lower.includes('درست') || lower.includes('دراسة')
+      searchText.includes('الشهر') || searchText.includes('هد الشهر') || searchText.includes('هذا الشهر') ||
+      searchText.includes('ce mois') || searchText.includes('du mois') || searchText.includes('mensuel') ||
+      searchText.includes('مدروسة') || searchText.includes('درست') || searchText.includes('دراسة')
     )
   ) {
     const allSessions = studentData.allSessions || [];
@@ -948,12 +948,12 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   // BILAN DU MOIS
   else if (
     extractedMonth ||
-    lower.includes('ce mois') ||
-    lower.includes('du mois') ||
-    lower.includes('mensuel') ||
-    lower.includes('mois') ||
-    lower.includes('الشهر') ||
-    lower.includes('شهري')
+    searchText.includes('ce mois') ||
+    searchText.includes('du mois') ||
+    searchText.includes('mensuel') ||
+    searchText.includes('mois') ||
+    searchText.includes('الشهر') ||
+    searchText.includes('شهري')
   ) {
     const monthLabel = targetMonthKey;
     let monthTracking = (studentData.allTracking || []).filter(t => toMonthKey(t.sessions?.date) === targetMonthKey);
@@ -1078,8 +1078,8 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // ABSENCES (exclure si on demande les leçons pendant les absences)
   else if (
-    (lower.includes('absence') || lower.includes('غياب') || (lower.includes('combien') && lower.includes('absent'))) &&
-    !(lower.includes('leçon') || lower.includes('cours') || lower.includes('درس') || lower.includes('دروس'))
+    (searchText.includes('absence') || searchText.includes('غياب') || (searchText.includes('combien') && searchText.includes('absent'))) &&
+    !(searchText.includes('leçon') || searchText.includes('cours') || searchText.includes('درس') || searchText.includes('دروس'))
   ) {
     const allAbsences = studentData.absences || [];
     const absencesByDate = extractedDate
@@ -1113,13 +1113,14 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // PRÉSENCE AUJOURD'HUI
   else if (
-    lower.includes('présent') ||
-    lower.includes('présence') ||
-    lower.includes('presence') ||
-    lower.includes('حاضر') ||
-    lower.includes('حضور') ||
-    lower.includes('aujourd\'hui') ||
-    lower.includes('اليوم')
+    searchText.includes('présent') ||
+    searchText.includes('présence') ||
+    searchText.includes('presence') ||
+    searchText.includes('حاضر') ||
+    searchText.includes('حضور') ||
+    searchText.includes('aujourd\'hui') ||
+    searchText.includes('اليوم') ||
+    searchText.includes('comment va')
   ) {
     const sourceTracking = extractedDate ? (studentData.allTracking || []) : (studentData.tracking || []);
     const dayTracking = sourceTracking.filter(t => t.sessions?.date === targetDate);
@@ -1144,16 +1145,16 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // STATISTIQUES DE CLASSE (moyenne / meilleure note)
   else if (
-    (lower.includes('classe') || lower.includes('القسم')) &&
+    (searchText.includes('classe') || searchText.includes('القسم')) &&
     (
-      lower.includes('moyenne') ||
-      lower.includes('moyen') ||
-      lower.includes('meilleure') ||
-      lower.includes('meilleur') ||
-      lower.includes('max') ||
-      (lower.includes('note') && lower.includes('classe')) ||
-      lower.includes('معدل') ||
-      lower.includes('أفضل')
+      searchText.includes('moyenne') ||
+      searchText.includes('moyen') ||
+      searchText.includes('meilleure') ||
+      searchText.includes('meilleur') ||
+      searchText.includes('max') ||
+      (searchText.includes('note') && searchText.includes('classe')) ||
+      searchText.includes('معدل') ||
+      searchText.includes('أفضل')
     )
   ) {
     const classGrades = studentData.classGrades || [];
@@ -1189,7 +1190,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   }
 
   // NOTES / MOYENNE (avec support filtrage par matière)
-  else if (lower.includes('note') || lower.includes('نقطة') || lower.includes('moyenne') || lower.includes('معدل')) {
+  else if (searchText.includes('note') || searchText.includes('نقطة') || searchText.includes('moyenne') || searchText.includes('معدل') || searchText.includes('النقط')) {
     // Détecter si une matière spécifique est demandée
     const allSessions = studentData.allSessions || [];
     const subjectPool = [...new Set(allSessions.map(s => s?.subjects?.name).filter(Boolean))];
@@ -1247,12 +1248,12 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
 
   // MATIÈRE FAIBLE / DIFFICILE
   else if (
-    lower.includes('ضعيف') ||
-    lower.includes('faible') ||
-    lower.includes('difficile') ||
-    lower.includes('mauvais') ||
-    lower.includes('مشكل') ||
-    (lower.includes('matière') && (lower.includes('faible') || lower.includes('ضعيف') || lower.includes('difficile')))
+    searchText.includes('ضعيف') ||
+    searchText.includes('faible') ||
+    searchText.includes('difficile') ||
+    searchText.includes('mauvais') ||
+    searchText.includes('مشكل') ||
+    (searchText.includes('matière') && (searchText.includes('faible') || searchText.includes('ضعيف') || searchText.includes('difficile')))
   ) {
     const allGrades = studentData.allGrades || [];
     if (allGrades.length === 0) {
@@ -1313,12 +1314,12 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
 
   // MATIÈRE DU CONTRÔLE
   else if (
-    lower.includes('matière') ||
-    lower.includes('matiere') ||
-    lower.includes('مادة') ||
-    lower.includes('شناهي المادة') ||
-    (lower.includes('contrôle') && lower.includes('quel')) ||
-    (lower.includes('controle') && lower.includes('quel'))
+    searchText.includes('matière') ||
+    searchText.includes('matiere') ||
+    searchText.includes('مادة') ||
+    searchText.includes('شناهي المادة') ||
+    (searchText.includes('contrôle') && searchText.includes('quel')) ||
+    (searchText.includes('controle') && searchText.includes('quel'))
   ) {
     if (!studentData.grades || studentData.grades.length === 0) {
       response = isArabic
@@ -1381,10 +1382,10 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // LEÇONS PENDANT LES ABSENCES (nouveau cas spécifique)
   else if (
-    (lower.includes('leçon') || lower.includes('cours') || lower.includes('درس') || lower.includes('دروس') || lower.includes('الدروس')) &&
-    (lower.includes('absence') || lower.includes('غياب') || lower.includes('absent') || lower.includes('غائب') || 
-     lower.includes('manqu') || lower.includes('raté') || lower.includes('فات') || lower.includes('ضاع') ||
-     lower.includes('pendant') || lower.includes('durant') || lower.includes('lors') || lower.includes('أثناء') || lower.includes('ces'))
+    (searchText.includes('leçon') || searchText.includes('cours') || searchText.includes('درس') || searchText.includes('دروس') || searchText.includes('الدروس')) &&
+    (searchText.includes('absence') || searchText.includes('غياب') || searchText.includes('absent') || searchText.includes('غائب') || 
+     searchText.includes('manqu') || searchText.includes('raté') || searchText.includes('فات') || searchText.includes('ضاع') ||
+     searchText.includes('pendant') || searchText.includes('durant') || searchText.includes('lors') || searchText.includes('أثناء') || searchText.includes('ces'))
   ) {
     const allAbsences = studentData.absences || [];
     const allSessions = studentData.allSessions || [];
@@ -1525,12 +1526,12 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
   
   // COMPORTEMENT / DISCIPLINE / INCIDENTS
   else if (
-    lower.includes('سلوك') || lower.includes('comportement') ||
-    lower.includes('discipline') || lower.includes('انضباط') ||
-    lower.includes('هاتف') || lower.includes('téléphone') ||
-    lower.includes('نعاس') || lower.includes('somnol') ||
-    lower.includes('incident') || lower.includes('حادث') || lower.includes('مشكل') ||
-    lower.includes('retard') || lower.includes('تأخر')
+    searchText.includes('سلوك') || searchText.includes('comportement') ||
+    searchText.includes('discipline') || searchText.includes('انضباط') ||
+    searchText.includes('هاتف') || searchText.includes('téléphone') ||
+    searchText.includes('نعاس') || searchText.includes('somnol') ||
+    searchText.includes('incident') || searchText.includes('حادث') || searchText.includes('مشكل') ||
+    searchText.includes('retard') || searchText.includes('تأخر')
   ) {
     const allTracking = studentData.allTracking || studentData.tracking || [];
     const phoneCount = allTracking.filter(t => t.phone_use).length;
@@ -1582,10 +1583,11 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
 
   // PLANNING / PROGRAMME DE LA SEMAINE
   else if (
-    lower.includes('semaine') || lower.includes('أسبوع') ||
-    lower.includes('planning') || lower.includes('برنامج') ||
-    lower.includes('bilan') && lower.includes('semaine') ||
-    lower.includes('ملخص') && lower.includes('أسبوع')
+    searchText.includes('semaine') || searchText.includes('أسبوع') ||
+    searchText.includes('planning') || searchText.includes('برنامج') ||
+    searchText.includes('bilan') && searchText.includes('semaine') ||
+    searchText.includes('ملخص') && searchText.includes('أسبوع') ||
+    searchText.includes('programme semaine')
   ) {
     const weekSessions = studentData.sessions || [];
     if (weekSessions.length === 0) {
@@ -1614,7 +1616,7 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
 
   // DEVOIRS RENDUS / SOUMISSIONS
   else if (
-    lower.includes('واجب') || lower.includes('devoir') ||
+    searchText.includes('واجب') || searchText.includes('devoir') ||
     lower.includes('فرض') || lower.includes('سلم') || lower.includes('rendu') ||
     lower.includes('soumis') || lower.includes('travail')
   ) {
