@@ -1917,29 +1917,59 @@ const SuiviRapide = () => {
               </button>
               
               <button
-                onClick={() => {
-                  // Réinitialiser le suivi pour tous les étudiants
-                  const resetTracking = {};
-                  students.forEach(student => {
-                    resetTracking[student.id] = {
-                      presence: false,
-                      participation: null,
-                      comprehension: null,
-                      behavior: null,
-                      homework_status: null,
-                      notes: ''
-                    };
-                  });
-                  setTracking(resetTracking);
-                  setSaving(false);
-                  setSaveError('');
-                  setSaveInfo('');
+                onClick={async () => {
+                  if (!currentSession?.id) return;
+                  
+                  // Confirmer l'annulation
+                  if (!window.confirm('Êtes-vous sûr de vouloir annuler cette séance ? Toutes les données seront supprimées.')) {
+                    return;
+                  }
+                  
+                  try {
+                    // Supprimer la séance
+                    await deleteSession(currentSession.id);
+                    
+                    // Réinitialiser toutes les données
+                    setCurrentSession(null);
+                    const resetTracking = {};
+                    students.forEach(student => {
+                      resetTracking[student.id] = {
+                        presence: false,
+                        participation: null,
+                        comprehension: null,
+                        behavior: null,
+                        homework_status: null,
+                        notes: ''
+                      };
+                    });
+                    setTracking(resetTracking);
+                    setSaving(false);
+                    setSaveError('');
+                    setSaveInfo('');
+                    setSessionType('normal');
+                    setControlName('');
+                    setControlDescription('');
+                    setLessonTitle('');
+                    setLessonDescription('');
+                    setStartTime('');
+                    setEndTime('');
+                    setSessionError('');
+                    setSessionInfo('');
+                    setTrackingOptions({ ...DEFAULT_TRACKING_OPTIONS });
+                    
+                    // Rediriger vers le suivi rapide (recharger la page)
+                    window.location.reload();
+                    
+                  } catch (error) {
+                    console.error('Erreur lors de l\'annulation de la séance:', error);
+                    setSaveError('Impossible d\'annuler la séance. Veuillez réessayer.');
+                  }
                 }}
-                disabled={saving}
-                className="inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition shadow-sm"
+                disabled={saving || !currentSession?.id}
+                className="inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg border border-red-300 bg-white text-red-700 text-sm font-semibold hover:bg-red-50 disabled:opacity-50 transition shadow-sm"
               >
                 <X className="w-4 h-4" />
-                <span className="hidden sm:inline">Annuler</span>
+                <span className="hidden sm:inline">Annuler la séance</span>
                 <span className="sm:hidden">Annuler</span>
               </button>
             </div>
