@@ -710,10 +710,12 @@ ${historySnippet ? `- Historique récent:\n${historySnippet}` : ''}
 Message reçu: "${messageText}"
 
 Règles de décision:
-- mode "DIRECT": questions factuelles simples (notes exactes, absences du jour, liste devoirs, leçons du jour, programme semaine). Réponse depuis base de données.
+- mode "DIRECT": questions factuelles simples (notes exactes, absences du jour, liste devoirs, leçons du jour, leçons pendant absences, programme semaine). Réponse depuis base de données.
 - mode "AI_FOCUSED": tout le reste (analyse, conseils, comportement, motivation, évolution, questions ouvertes, questions complexes, suivi conversation). Réponse par IA.
 
-intents possibles (tableau): ["presence", "absences", "grades", "homework", "lessons", "schedule", "behavior", "advice", "comparison", "wellbeing", "other"]
+intents possibles (tableau): ["presence", "absences", "grades", "homework", "lessons", "missed_lessons", "schedule", "behavior", "advice", "comparison", "wellbeing", "other"]
+
+Note: Si le parent demande "leçons pendant absences" ou "leçons manquées" → mode DIRECT avec intent "missed_lessons"
 
 Retourne STRICTEMENT ce JSON (rien d'autre):
 {
@@ -1353,6 +1355,71 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
           response += `  ${isArabic ? 'الموعد النهائي' : 'Échéance'}: ${dueDate}\n`;
           if (hw.description) response += `  ${isArabic ? 'الوصف' : 'Description'}: ${hw.description}\n`;
         });
+      }
+    }
+  }
+  
+  // LEÇONS PENDANT LES ABSENCES (nouveau cas spécifique)
+  else if (
+    (searchText.includes('leçon') || searchText.includes('درس') || searchText.includes('الدروس') || searchText.includes('دروس')) &&
+    (searchText.includes('absence') || searchText.includes('غياب') || searchText.includes('absent') || searchText.includes('غائب') || 
+     searchText.includes('pendant') || searchText.includes('durant') || searchText.includes('lors') || searchText.includes('أثناء'))
+  ) {
+    const allAbsences = studentData.absences || [];
+    const allSessions = studentData.allSessions || [];
+    
+    if (allAbsences.length === 0) {
+      response = isArabic
+        ? `✅ لا توجد غيابات مسجلة.`
+        : `✅ Aucune absence enregistrée.`;
+    } else {
+      // Récupérer les dates d'absence
+      const absenceDates = allAbsences.map(abs => abs.sessions?.date).filter(Boolean);
+      
+      // Récupérer les leçons de ces dates
+      const missedLessons = allSessions.filter(s => absenceDates.includes(s.date));
+      
+      if (missedLessons.length === 0) {
+        response = isArabic
+          ? `ℹ️ لا توجد دروس مسجلة في تواريخ الغياب.`
+          : `ℹ️ Pas de leçons enregistrées aux dates d'absence.`;
+      } else {
+        response = isArabic
+          ? `📖 *الدروس التي فاتت بسبب الغياب:*\n\n`
+          : `📖 *Leçons manquées pendant les absences:*\n\n`;
+        
+        // Grouper par date
+        const byDate = {};
+        missedLessons.forEach(s => {
+          if (!byDate[s.date]) byDate[s.date] = [];
+          byDate[s.date].push(s);
+        });
+        
+        // Afficher par date (ordre chronologique inverse)
+        Object.entries(byDate).sort(([a], [b]) => b.localeCompare(a)).slice(0, 10).forEach(([date, sessions]) => {
+          const dateLabel = new Date(date + 'T00:00:00').toLocaleDateString(isArabic ? 'ar-MA' : 'fr-FR', { 
+            weekday: 'long', 
+            day: 'numeric', 
+            month: 'long' 
+          });
+          response += `📅 *${dateLabel}* (${isArabic ? 'غائب' : 'absent'})\n`;
+          sessions.forEach(session => {
+            response += `  📚 *${session.subjects?.name || 'N/A'}*`;
+            if (session.topic) response += `\n     📌 ${session.topic}`;
+            if (session.notes) {
+              const content = session.notes.substring(0, 100);
+              response += `\n     📝 ${content}${session.notes.length > 100 ? '...' : ''}`;
+            }
+            response += `\n`;
+          });
+          response += `\n`;
+        });
+        
+        if (Object.keys(byDate).length > 10) {
+          response += isArabic
+            ? `\n_عرض آخر 10 تواريخ فقط_`
+            : `\n_Affichage des 10 dernières dates uniquement_`;
+        }
       }
     }
   }
