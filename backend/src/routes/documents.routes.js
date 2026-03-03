@@ -388,28 +388,43 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
               'exercice': 'Exercice',
               'correction': 'Correction',
               'support': 'Support pédagogique',
+              'devoir': 'Devoir maison',
+              'rattrapage': 'Rattrapage',
+              'approfondissement': 'Approfondissement',
               'autre': 'Document'
             }[documentType] || 'Document';
 
-            const messageText = `📄 *Nouveau document pédagogique*\n\n` +
+            const messageCaption = `📄 *Nouveau document pédagogique*\n\n` +
               `Classe: *${classInfoWa?.name || 'N/A'}*\n` +
               `Professeur: ${teacherName}\n` +
               (subjectName ? `Matière: ${subjectName}\n` : '') +
               `Type: ${documentTypeLabel}\n\n` +
               `📝 *${title}*\n` +
               (description ? `${description}\n\n` : '\n') +
-              `📎 Fichier: ${req.file.originalname}\n` +
-              `ℹ️ Le document est disponible dans l'espace élève.\n\n` +
-              `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+              `━━━━━━━━━━━━━━━\n� L'équipe pédagogique`;
 
             const sentPhones = new Set();
+            
+            // Importer la fonction d'envoi de fichier
+            const { sendWhatsAppFile } = await import('../services/whatsappChatbot.js');
+            
             for (const link of parentLinks) {
               const phone = link.profiles?.phone;
               if (!phone || sentPhones.has(phone)) continue;
               sentPhones.add(phone);
               const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-              const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId);
-              console.log(`[Documents][${requestId}] Notification document parent`, { phone: e164Phone, sent });
+              
+              // Envoyer le fichier avec la légende
+              const fileSent = await sendWhatsAppFile(e164Phone, req.file.path, messageCaption, schoolId);
+              
+              console.log(`[Documents][${requestId}] Notification document parent`, { 
+                phone: e164Phone, 
+                fileSent,
+                fileName: req.file.originalname 
+              });
+              
+              // Attendre un peu entre chaque envoi pour éviter le rate limiting
+              await new Promise(resolve => setTimeout(resolve, 2000));
             }
           } else {
             console.log(`[Documents][${requestId}] Aucun parent trouvé pour les élèves de la classe`);

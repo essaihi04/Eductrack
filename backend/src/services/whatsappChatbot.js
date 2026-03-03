@@ -2407,6 +2407,76 @@ export async function sendWhatsAppResponse(phoneNumber, message, schoolId) {
   }
 }
 
+/**
+ * Envoyer un fichier via WhatsApp
+ * @param {string} phoneNumber - Numéro de téléphone au format E.164
+ * @param {string} filePath - Chemin du fichier à envoyer
+ * @param {string} caption - Légende du fichier (optionnel)
+ * @param {string} schoolId - ID de l'école
+ * @returns {Promise<boolean>} - true si envoyé avec succès
+ */
+export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId) {
+  try {
+    const sessionApiKey = await getSchoolSessionApiKey(schoolId);
+    
+    if (!sessionApiKey) {
+      console.error('[WhatsApp] Pas de session WhatsApp active pour cette école');
+      return false;
+    }
+    
+    // Formater le numéro (supprimer le +)
+    const cleanPhone = phoneNumber.replace('+', '');
+    
+    // Déterminer le type de média basé sur l'extension
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    let mediaType = 'document';
+    
+    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
+      mediaType = 'image';
+    } else if (ext === 'pdf') {
+      mediaType = 'document';
+    } else if (['mp4', 'avi', 'mov'].includes(ext)) {
+      mediaType = 'video';
+    }
+    
+    const FormData = (await import('form-data')).default;
+    const fs = (await import('fs')).default;
+    
+    const formData = new FormData();
+    formData.append('to', cleanPhone);
+    formData.append('file', fs.createReadStream(filePath));
+    if (caption) formData.append('caption', caption);
+    
+    const response = await fetch(`${WASENDER_BASE}/api/send-${mediaType}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${sessionApiKey}`,
+        ...formData.getHeaders()
+      },
+      body: formData
+    });
+
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = { success: false, message: 'Réponse API non JSON' };
+    }
+
+    if (data?.success) {
+      console.log('[WhatsApp] Fichier envoyé avec succès à', phoneNumber);
+      return true;
+    }
+
+    console.error('[WhatsApp] Erreur envoi fichier:', data);
+    return false;
+    
+  } catch (error) {
+    console.error('[WhatsApp] Erreur envoi fichier WhatsApp:', error);
+    return false;
+  }
+}
+
 // Récupérer la clé API de session pour une école
 export async function getSchoolSessionApiKey(schoolId) {
   const globalKey = process.env.WASENDER_API_KEY;
