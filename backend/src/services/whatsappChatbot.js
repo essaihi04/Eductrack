@@ -9,6 +9,112 @@ const deepseek = new OpenAI({
 
 const WASENDER_BASE = 'https://www.wasenderapi.com';
 
+// ═══════════════════════════════════════════════════════════
+// 🎨 FONCTIONS DE FORMATAGE VISUEL
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Génère une barre de progression visuelle
+ * @param {number} percentage - Pourcentage (0-100)
+ * @param {number} length - Longueur de la barre (défaut: 10)
+ * @returns {string} Barre de progression
+ */
+function createProgressBar(percentage, length = 10) {
+  const filled = Math.round((percentage / 100) * length);
+  const empty = length - filled;
+  return '▓'.repeat(filled) + '░'.repeat(empty);
+}
+
+/**
+ * Formate un score avec emoji et couleur visuelle
+ * @param {number} score - Note sur 20
+ * @returns {object} {emoji, bar, color}
+ */
+function formatScore(score) {
+  const percentage = (score / 20) * 100;
+  let emoji = '🔴';
+  let color = 'rouge';
+  
+  if (percentage >= 90) { emoji = '🟢'; color = 'excellent'; }
+  else if (percentage >= 75) { emoji = '🟡'; color = 'bien'; }
+  else if (percentage >= 60) { emoji = '🟠'; color = 'moyen'; }
+  
+  return {
+    emoji,
+    bar: createProgressBar(percentage, 8),
+    percentage: percentage.toFixed(0),
+    color
+  };
+}
+
+/**
+ * Crée un en-tête visuel pour une section
+ * @param {string} title - Titre de la section
+ * @param {string} emoji - Emoji principal
+ * @returns {string} En-tête formaté
+ */
+function createSectionHeader(title, emoji = '📊') {
+  return `\n╔═══════════════════════╗\n${emoji} *${title}*\n╚═══════════════════════╝\n`;
+}
+
+/**
+ * Crée une ligne de statistique avec icône
+ * @param {string} label - Label
+ * @param {string} value - Valeur
+ * @param {string} icon - Icône
+ * @returns {string} Ligne formatée
+ */
+function createStatLine(label, value, icon = '▸') {
+  return `${icon} *${label}:* ${value}`;
+}
+
+/**
+ * Formate une liste de notes avec barres de progression
+ * @param {Array} grades - Tableau de notes
+ * @param {boolean} isArabic - Langue arabe
+ * @returns {string} Liste formatée
+ */
+function formatGradesList(grades, isArabic = false) {
+  if (!grades || grades.length === 0) {
+    return isArabic ? '📭 لا توجد نقاط متاحة' : '📭 Aucune note disponible';
+  }
+  
+  let result = '';
+  grades.forEach((grade, index) => {
+    const score = formatScore(Number(grade.note) || 0);
+    const subjectName = grade.controls_plan?.subjects?.name || (isArabic ? 'مادة' : 'Matière');
+    const controlName = grade.controls_plan?.name || '';
+    
+    result += `\n┌─────────────────────\n`;
+    result += `│ ${score.emoji} *${subjectName}*\n`;
+    if (controlName) result += `│ 📝 ${controlName}\n`;
+    result += `│ ${score.bar} ${grade.note}/20 (${score.percentage}%)\n`;
+    result += `└─────────────────────\n`;
+  });
+  
+  return result;
+}
+
+/**
+ * Crée un résumé de présence avec graphique
+ * @param {number} present - Nombre de présences
+ * @param {number} total - Total de séances
+ * @param {boolean} isArabic - Langue arabe
+ * @returns {string} Résumé formaté
+ */
+function formatPresenceSummary(present, total, isArabic = false) {
+  const percentage = total > 0 ? ((present / total) * 100).toFixed(0) : 0;
+  const bar = createProgressBar(percentage, 12);
+  
+  let emoji = '✅';
+  if (percentage < 70) emoji = '⚠️';
+  if (percentage < 50) emoji = '❌';
+  
+  return isArabic
+    ? `${emoji} *الحضور:* ${present}/${total} حصص\n${bar} ${percentage}%`
+    : `${emoji} *Présence:* ${present}/${total} séances\n${bar} ${percentage}%`;
+}
+
 // Fonction principale appelée par le webhook
 export async function handleIncomingWhatsAppMessage(messageInfo) {
   const { from: phoneNumber, text: messageText, id: messageId, sessionId } = messageInfo;
@@ -188,8 +294,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     const showMenu = messageCount <= 1 || messageCount % 5 === 0;
     const quickMenu = showMenu
       ? (isArabic
-          ? `\n\n━━━━━━━━━━━━━━━\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
-          : `\n\n━━━━━━━━━━━━━━━\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`)
+          ? `\n\n╔═══════════════════════╗\n📋 *أسئلة سريعة*\n╚═══════════════════════╝\n\n📅 أ. كيف حاله اليوم؟\n📚 ب. ما الدروس المدروسة؟\n✍️ ج. هل هناك واجبات؟\n📝 د. ما آخر النقط؟\n🎯 ه. كيف سلوكه؟\n📆 و. برنامج الأسبوع؟\n\n━━━━━━━━━━━━━━━\n💬 أو اكتب سؤالك مباشرة`
+          : `\n\n╔═══════════════════════╗\n📋 *Menu Rapide*\n╚═══════════════════════╝\n\n📅 A. Comment va-t-il aujourd'hui ?\n📚 B. Quelles leçons étudiées ?\n✍️ C. Y a-t-il des devoirs ?\n📝 D. Dernières notes ?\n🎯 E. Son comportement ?\n📆 F. Programme de la semaine ?\n\n━━━━━━━━━━━━━━━\n💬 Ou écrivez votre question`)
       : '';
     
     const aiResponse = response + quickMenu;
@@ -568,36 +674,36 @@ async function buildWelcomeMenu(parentInfo, phone) {
   const isArabic = parentInfo.parent_name && /[\u0600-\u06FF]/.test(parentInfo.parent_name);
   
   let message = isArabic 
-    ? `السلام عليكم ${parentInfo.parent_name.split(' ')[0]} 👋\n\n` 
-    : `Bonjour ${parentInfo.parent_name.split(' ')[0]} 👋\n\n`;
+    ? `╔═══════════════════════╗\n👋 *مرحبا ${parentInfo.parent_name.split(' ')[0]}*\n╚═══════════════════════╝\n\n` 
+    : `╔═══════════════════════╗\n👋 *Bienvenue ${parentInfo.parent_name.split(' ')[0]}*\n╚═══════════════════════╝\n\n`;
   
   if (children && children.length > 0) {
-    message += isArabic ? '📚 *أبناؤك:*\n' : '📚 *Vos enfants:*\n';
+    message += isArabic ? '📚 *أبناؤك:*\n\n' : '📚 *Vos enfants:*\n\n';
     children.forEach((child, idx) => {
       const student = child.students;
-      message += `${idx + 1}. ${student.first_name} ${student.last_name} - ${student.classes?.name || 'N/A'}\n`;
+      message += `${idx + 1}. 👤 *${student.first_name} ${student.last_name}*\n   📖 ${student.classes?.name || 'N/A'}\n`;
     });
     message += '\n';
   }
   
   message += isArabic 
-    ? '*📋 أسئلة سريعة:*\n\n'
-    : '*📋 Questions rapides:*\n\n';
+    ? '╔═══════════════════════╗\n📋 *أسئلة سريعة*\n╚═══════════════════════╝\n\n'
+    : '╔═══════════════════════╗\n📋 *Menu Rapide*\n╚═══════════════════════╝\n\n';
   
   if (isArabic) {
-    message += 'أ. كيف حال ولدي اليوم؟\n';
-    message += 'ب. ما هي الدروس المدروسة؟\n';
-    message += 'ج. هل هناك واجبات منزلية؟\n';
-    message += 'د. ما هي آخر النقط؟\n';
-    message += 'ه. كيف سلوكه في القسم؟\n';
-    message += 'و. برنامج الأسبوع؟\n';
+    message += '📅 أ. كيف حال ولدي اليوم؟\n';
+    message += '📚 ب. ما هي الدروس المدروسة؟\n';
+    message += '✍️ ج. هل هناك واجبات منزلية؟\n';
+    message += '📝 د. ما هي آخر النقط؟\n';
+    message += '🎯 ه. كيف سلوكه في القسم؟\n';
+    message += '📆 و. برنامج الأسبوع؟\n';
   } else {
-    message += 'A. Comment va mon enfant aujourd\'hui ?\n';
-    message += 'B. Quelles leçons ont été étudiées ?\n';
-    message += 'C. Y a-t-il des devoirs ?\n';
-    message += 'D. Quelles sont les dernières notes ?\n';
-    message += 'E. Comment est son comportement ?\n';
-    message += 'F. Programme de la semaine ?\n';
+    message += '📅 A. Comment va mon enfant aujourd\'hui ?\n';
+    message += '📚 B. Quelles leçons ont été étudiées ?\n';
+    message += '✍️ C. Y a-t-il des devoirs ?\n';
+    message += '📝 D. Quelles sont les dernières notes ?\n';
+    message += '🎯 E. Comment est son comportement ?\n';
+    message += '📆 F. Programme de la semaine ?\n';
   }
   
   message += '\n' + (isArabic 
@@ -646,8 +752,8 @@ async function handleChildSelection(messageText, phone, parentInfo) {
       
       const isArabic = /[\u0600-\u06FF]/.test(student.first_name);
       const quickMenu = isArabic
-        ? `✅ تم اختيار: *${student.first_name} ${student.last_name}*\n\n📋 *أسئلة سريعة:*\n\nأ. كيف حاله اليوم؟\nب. ما الدروس المدروسة؟\nج. هل هناك واجبات؟\nد. ما آخر النقط؟\nه. كيف سلوكه؟\nو. برنامج الأسبوع؟\n\n💬 أو اكتب سؤالك مباشرة`
-        : `✅ Sélectionné: *${student.first_name} ${student.last_name}*\n\n📋 *Questions rapides:*\n\nA. Comment va-t-il aujourd'hui ?\nB. Quelles leçons étudiées ?\nC. Y a-t-il des devoirs ?\nD. Dernières notes ?\nE. Son comportement ?\nF. Programme de la semaine ?\n\n💬 Ou écrivez votre question`;
+        ? `✅ *تم الاختيار:* ${student.first_name} ${student.last_name}\n\n╔═══════════════════════╗\n📋 *أسئلة سريعة*\n╚═══════════════════════╝\n\n📅 أ. كيف حاله اليوم؟\n📚 ب. ما الدروس المدروسة؟\n✍️ ج. هل هناك واجبات؟\n📝 د. ما آخر النقط؟\n🎯 ه. كيف سلوكه؟\n📆 و. برنامج الأسبوع؟\n\n━━━━━━━━━━━━━━━\n💬 أو اكتب سؤالك مباشرة`
+        : `✅ *Sélectionné:* ${student.first_name} ${student.last_name}\n\n╔═══════════════════════╗\n📋 *Menu Rapide*\n╚═══════════════════════╝\n\n📅 A. Comment va-t-il aujourd'hui ?\n📚 B. Quelles leçons étudiées ?\n✍️ C. Y a-t-il des devoirs ?\n📝 D. Dernières notes ?\n🎯 E. Son comportement ?\n📆 F. Programme de la semaine ?\n\n━━━━━━━━━━━━━━━\n💬 Ou écrivez votre question`;
       
       await sendWhatsAppResponse(phone, quickMenu, parentInfo.school_id);
       return { handled: true };
@@ -1137,9 +1243,23 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
       const totalSessions = dayTracking.length;
       const presencePct = pct(presentCount, totalSessions);
       
+      // En-tête visuel
       response = isArabic
-        ? `✅ *الحضور (${dateLabel}):*\n\n${studentInfo.first_name} حاضر في *${presentCount}/${totalSessions}* حصص (${presencePct}%) ${generateProgressBar(presencePct)} 📈`
-        : `✅ *Présence (${dateLabel}):*\n\n${studentInfo.first_name} est présent dans *${presentCount}/${totalSessions}* séances (${presencePct}%) ${generateProgressBar(presencePct)} 📈`;
+        ? createSectionHeader(`الحضور - ${dateLabel}`, '📅')
+        : createSectionHeader(`Présence - ${dateLabel}`, '📅');
+      
+      // Résumé de présence avec graphique
+      response += '\n' + formatPresenceSummary(presentCount, totalSessions, isArabic);
+      
+      // Détails des séances
+      if (dayTracking.length > 0 && dayTracking.length <= 6) {
+        response += '\n\n' + (isArabic ? '📚 *تفاصيل الحصص:*' : '📚 *Détails des séances:*');
+        dayTracking.forEach(t => {
+          const icon = t.presence === 'present' ? '✅' : '❌';
+          const subjectName = t.sessions?.subjects?.name || (isArabic ? 'مادة' : 'Matière');
+          response += `\n${icon} ${subjectName}`;
+        });
+      }
     }
   }
   
@@ -1216,32 +1336,41 @@ async function generateDirectResponse(question, studentInfo, studentData, parent
         : `ℹ️ Pas de notes${requestedSubject ? ` en ${requestedSubject}` : ' récentes'} disponibles.`;
     } else {
       const recentGrades = relevantGrades.slice(0, 5);
-      const subjectLabel = requestedSubject ? ` (${requestedSubject})` : '';
-      response = isArabic
-        ? `📝 *آخر النقط${subjectLabel}:*\n\n`
-        : `📝 *Dernières notes${subjectLabel}:*\n\n`;
+      const subjectLabel = requestedSubject ? ` ${requestedSubject}` : '';
       
-      recentGrades.forEach(grade => {
+      // En-tête visuel
+      response = isArabic
+        ? createSectionHeader(`آخر النقط${subjectLabel}`, '📝')
+        : createSectionHeader(`Dernières Notes${subjectLabel}`, '📝');
+      
+      // Afficher chaque note avec barre de progression
+      recentGrades.forEach((grade, index) => {
+        const score = formatScore(Number(grade.note) || 0);
         const inferredSubject = inferControlSubject(grade);
-        const controlTitle = grade.controls_plan?.name || 'Contrôle';
-        response += `• ${controlTitle}${inferredSubject && !requestedSubject ? ` (${inferredSubject})` : ''}: *${grade.note}/20*\n`;
+        const controlTitle = grade.controls_plan?.name || (isArabic ? 'اختبار' : 'Contrôle');
+        const subjectInfo = inferredSubject && !requestedSubject ? ` (${inferredSubject})` : '';
+        
+        response += `\n${score.emoji} *${controlTitle}${subjectInfo}*\n`;
+        response += `   ${score.bar} *${grade.note}/20* (${score.percentage}%)\n`;
       });
 
+      // Tendance visuelle
       const trendSeries = recentGrades
         .map((g) => Math.round(((Number(g.note) || 0) / 20) * 100))
         .reverse();
       if (trendSeries.length >= 2) {
         response += '\n' + (isArabic
-          ? `📈 تطور آخر الفروض: ${toSparkline(trendSeries)} (${trendSeries.join('% - ')}%)\n`
-          : `📈 Progression derniers contrôles: ${toSparkline(trendSeries)} (${trendSeries.join('% - ')}%)\n`);
+          ? `📈 *التطور:* ${toSparkline(trendSeries)}\n   ${trendSeries.join('% → ')}%`
+          : `📈 *Évolution:* ${toSparkline(trendSeries)}\n   ${trendSeries.join('% → ')}%`);
       }
       
-      // Calculer moyenne si possible
+      // Calculer et afficher moyenne avec barre
       if (relevantGrades.length > 0) {
         const avg = (relevantGrades.reduce((sum, g) => sum + (g.note || 0), 0) / relevantGrades.length).toFixed(2);
-        response += '\n' + (isArabic
-          ? `📊 المعدل${requestedSubject ? ` في ${requestedSubject}` : ' العام'}: *${avg}/20*`
-          : `📊 Moyenne${requestedSubject ? ` en ${requestedSubject}` : ' générale'}: *${avg}/20*`);
+        const avgScore = formatScore(Number(avg));
+        response += '\n\n' + (isArabic
+          ? `╔═══════════════════════╗\n📊 *المعدل${requestedSubject ? ` في ${requestedSubject}` : ' العام'}*\n${avgScore.bar} *${avg}/20* (${avgScore.percentage}%)\n╚═══════════════════════╝`
+          : `╔═══════════════════════╗\n📊 *Moyenne${requestedSubject ? ` en ${requestedSubject}` : ' Générale'}*\n${avgScore.bar} *${avg}/20* (${avgScore.percentage}%)\n╚═══════════════════════╝`);
       }
     }
   }
