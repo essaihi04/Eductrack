@@ -761,6 +761,7 @@ router.delete('/students/:id', async (req, res) => {
 router.delete('/teachers/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    console.log('[DELETE Teacher] Tentative de suppression du professeur:', id);
 
     // Vérifier que c'est bien un professeur
     const { data: teacher, error: teacherError } = await supabaseAdmin
@@ -770,37 +771,91 @@ router.delete('/teachers/:id', async (req, res) => {
       .eq('role', 'teacher')
       .single();
 
-    if (teacherError || !teacher) {
+    if (teacherError) {
+      console.error('[DELETE Teacher] Erreur lors de la recherche du professeur:', teacherError);
+      return res.status(404).json({ error: 'Professeur non trouvé', details: teacherError.message });
+    }
+
+    if (!teacher) {
+      console.error('[DELETE Teacher] Professeur non trouvé avec cet ID');
       return res.status(404).json({ error: 'Professeur non trouvé' });
     }
 
+    console.log('[DELETE Teacher] Professeur trouvé:', teacher);
+
+    // Supprimer les sessions du professeur
+    console.log('[DELETE Teacher] Suppression des sessions...');
+    const { error: sessionsError } = await supabaseAdmin
+      .from('sessions')
+      .delete()
+      .eq('teacher_id', id);
+
+    if (sessionsError) {
+      console.error('[DELETE Teacher] Erreur suppression sessions:', sessionsError);
+    }
+
     // Supprimer les associations teacher_subjects
-    await supabaseAdmin
+    console.log('[DELETE Teacher] Suppression des associations teacher_subjects...');
+    const { error: subjectsError } = await supabaseAdmin
       .from('teacher_subjects')
       .delete()
       .eq('teacher_id', id);
 
+    if (subjectsError) {
+      console.error('[DELETE Teacher] Erreur suppression teacher_subjects:', subjectsError);
+    }
+
     // Supprimer les associations class_teachers
-    await supabaseAdmin
+    console.log('[DELETE Teacher] Suppression des associations class_teachers...');
+    const { error: classesError } = await supabaseAdmin
       .from('class_teachers')
       .delete()
       .eq('teacher_id', id);
 
-    // Supprimer le profil (cascade supprimera les données liées comme les sessions)
+    if (classesError) {
+      console.error('[DELETE Teacher] Erreur suppression class_teachers:', classesError);
+    }
+
+    // Supprimer les documents du professeur
+    console.log('[DELETE Teacher] Suppression des documents...');
+    const { error: documentsError } = await supabaseAdmin
+      .from('documents')
+      .delete()
+      .eq('teacher_id', id);
+
+    if (documentsError) {
+      console.error('[DELETE Teacher] Erreur suppression documents:', documentsError);
+    }
+
+    // Supprimer le profil
+    console.log('[DELETE Teacher] Suppression du profil...');
     const { error: profileError } = await supabaseAdmin
       .from('profiles')
       .delete()
       .eq('id', id);
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      console.error('[DELETE Teacher] Erreur suppression profil:', profileError);
+      throw profileError;
+    }
 
     // Supprimer l'utilisateur Auth
-    await supabaseAdmin.auth.admin.deleteUser(id);
+    console.log('[DELETE Teacher] Suppression de l\'utilisateur Auth...');
+    const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(id);
+    
+    if (authError) {
+      console.error('[DELETE Teacher] Erreur suppression Auth:', authError);
+      // Ne pas bloquer si l'utilisateur Auth n'existe plus
+    }
 
+    console.log('[DELETE Teacher] Professeur supprimé avec succès');
     res.json({ message: 'Professeur supprimé avec succès' });
   } catch (error) {
-    console.error('Erreur suppression professeur:', error);
-    res.status(500).json({ error: 'Erreur lors de la suppression du professeur' });
+    console.error('[DELETE Teacher] Erreur suppression professeur:', error);
+    res.status(500).json({ 
+      error: 'Erreur lors de la suppression du professeur',
+      details: error.message 
+    });
   }
 });
 

@@ -1046,11 +1046,11 @@ const TeachersPage = () => {
                           </button>
                         </div>
                         <div className="space-y-2">
-                          <div>
+                          <div key={`name-${teacher.id}`}>
                             <label className="text-sm font-medium text-gray-700">Nom complet:</label>
                             <p className="text-sm text-gray-900">{teacher.first_name} {teacher.last_name}</p>
                           </div>
-                          <div>
+                          <div key={`phone-${teacher.id}`}>
                             <label className="text-sm font-medium text-gray-700">Téléphone:</label>
                             <p className="text-sm text-gray-900">{teacher.phone || 'Non renseigné'}</p>
                           </div>
