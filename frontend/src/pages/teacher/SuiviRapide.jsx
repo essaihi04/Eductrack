@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, Trash2, BookOpen, CheckSquare, Clock, RefreshCw, Plus, ChevronDown, Users, CalendarDays, Zap, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { Save, Trash2, BookOpen, CheckSquare, Clock, RefreshCw, Plus, ChevronDown, Users, CalendarDays, Zap, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -1896,24 +1896,53 @@ const SuiviRapide = () => {
               )}
             </div>
 
-            {/* Bouton sauvegarder */}
-            <button
-              onClick={saveTracking}
-              disabled={saving || students.filter(s => tracking[s.id]?.presence).length < students.length}
-              className={`inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg text-sm font-semibold transition shadow-sm ${
-                students.filter(s => tracking[s.id]?.presence).length === students.length
-                  ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-200'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              <span className="hidden sm:inline">{saving ? 'Enregistrement...' : 'Enregistrer la séance'}</span>
-              <span className="sm:hidden">{saving ? '...' : 'Enregistrer'}</span>
-            </button>
+            {/* Boutons sauvegarder */}
+            <div className="flex gap-3">
+              <button
+                onClick={saveTracking}
+                disabled={saving || students.filter(s => tracking[s.id]?.presence).length < students.length}
+                className={`inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg text-sm font-semibold transition shadow-sm ${
+                  students.filter(s => tracking[s.id]?.presence).length === students.length
+                    ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-200'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline">{saving ? 'Enregistrement...' : 'Enregistrer la séance'}</span>
+                <span className="sm:hidden">{saving ? '...' : 'Enregistrer'}</span>
+              </button>
+              
+              <button
+                onClick={() => {
+                  // Réinitialiser le suivi pour tous les étudiants
+                  const resetTracking = {};
+                  students.forEach(student => {
+                    resetTracking[student.id] = {
+                      presence: false,
+                      participation: null,
+                      comprehension: null,
+                      behavior: null,
+                      homework_status: null,
+                      notes: ''
+                    };
+                  });
+                  setTracking(resetTracking);
+                  setSaving(false);
+                  setSaveError('');
+                  setSaveInfo('');
+                }}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition shadow-sm"
+              >
+                <X className="w-4 h-4" />
+                <span className="hidden sm:inline">Annuler</span>
+                <span className="sm:hidden">Annuler</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
