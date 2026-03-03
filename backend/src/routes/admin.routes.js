@@ -2443,10 +2443,28 @@ router.post('/students/import', async (req, res) => {
     }
 
     const createdStudents = [];
+    const existingStudents = [];
     const errors = [];
 
     for (const student of students) {
       const { email, password, firstName, lastName } = student;
+
+      // Vérifier si l'élève existe déjà
+      const { data: existingProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, first_name, last_name')
+        .eq('email', email)
+        .eq('role', 'student')
+        .single();
+
+      if (existingProfile) {
+        console.log(`[Import] Élève existant: ${email}`);
+        existingStudents.push({
+          ...existingProfile,
+          password: '********' // Masquer le mot de passe pour les élèves existants
+        });
+        continue;
+      }
 
       // Créer l'utilisateur dans Auth
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -2490,11 +2508,18 @@ router.post('/students/import', async (req, res) => {
       });
     }
 
-    console.log(`[Import] ${createdStudents.length} élèves créés, ${errors.length} erreurs`);
+    console.log(`[Import] ${createdStudents.length} élèves créés, ${existingStudents.length} élèves existants, ${errors.length} erreurs`);
     res.status(201).json({
-      message: `${createdStudents.length} élèves importés avec succès`,
+      message: `${createdStudents.length} nouveaux élèves importés, ${existingStudents.length} élèves existaient déjà`,
       students: createdStudents,
-      errors: errors.length > 0 ? errors : undefined
+      existingStudents: existingStudents.length > 0 ? existingStudents : undefined,
+      errors: errors.length > 0 ? errors : undefined,
+      summary: {
+        new: createdStudents.length,
+        existing: existingStudents.length,
+        errors: errors.length,
+        total: students.length
+      }
     });
   } catch (error) {
     console.error('Erreur:', error);

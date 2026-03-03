@@ -476,7 +476,9 @@ const ClassesPage = () => {
         const importedStudents = result.students || [];
         const passwordMap = {};
         importedStudents.forEach(student => {
-          passwordMap[student.id] = student.password;
+          if (student.password !== '********') {
+            passwordMap[student.id] = student.password;
+          }
         });
         
         // Récupérer les mots de passe existants et les fusionner
@@ -484,13 +486,26 @@ const ClassesPage = () => {
         const updatedPasswords = { ...existingPasswords, ...passwordMap };
         localStorage.setItem('studentPasswords', JSON.stringify(updatedPasswords));
         
-        console.log(`✓ ${students.length} élève(s) importé(s) avec succès`);
+        const summary = result.summary || { new: importedStudents.length, existing: 0, errors: 0, total: students.length };
+        
+        console.log(`✓ ${summary.new} nouvel(s) élève(s) créé(s)`);
+        console.log(`✓ ${summary.existing} élève(s) existaient déjà`);
         console.log(`✓ Mots de passe stockés pour ${Object.keys(passwordMap).length} élève(s)`);
         
         setImportProgress({ current: 100, total: 100, message: 'Importation terminée !' });
         
         setTimeout(() => {
-          alert(`${students.length} élève(s) importé(s) avec succès`);
+          let message = `📊 **Rapport d'importation**\n\n`;
+          message += `✅ **${summary.new}** nouvel(s) élève(s) créé(s)\n`;
+          if (summary.existing > 0) {
+            message += `ℹ️ **${summary.existing}** élève(s) existaient déjà\n`;
+          }
+          if (summary.errors > 0) {
+            message += `❌ **${summary.errors}** erreur(s)\n`;
+          }
+          message += `\n📋 **Total traité**: ${summary.total} élève(s)`;
+          
+          alert(message);
           setIsImporting(false);
           setImportProgress({ current: 0, total: 0, message: '' });
           e.target.value = '';
