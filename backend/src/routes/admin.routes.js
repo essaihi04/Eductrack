@@ -757,6 +757,53 @@ router.delete('/students/:id', async (req, res) => {
   }
 });
 
+// Supprimer un professeur
+router.delete('/teachers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Vérifier que c'est bien un professeur
+    const { data: teacher, error: teacherError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role')
+      .eq('id', id)
+      .eq('role', 'teacher')
+      .single();
+
+    if (teacherError || !teacher) {
+      return res.status(404).json({ error: 'Professeur non trouvé' });
+    }
+
+    // Supprimer les associations teacher_subjects
+    await supabaseAdmin
+      .from('teacher_subjects')
+      .delete()
+      .eq('teacher_id', id);
+
+    // Supprimer les associations class_teachers
+    await supabaseAdmin
+      .from('class_teachers')
+      .delete()
+      .eq('teacher_id', id);
+
+    // Supprimer le profil (cascade supprimera les données liées comme les sessions)
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .delete()
+      .eq('id', id);
+
+    if (profileError) throw profileError;
+
+    // Supprimer l'utilisateur Auth
+    await supabaseAdmin.auth.admin.deleteUser(id);
+
+    res.json({ message: 'Professeur supprimé avec succès' });
+  } catch (error) {
+    console.error('Erreur suppression professeur:', error);
+    res.status(500).json({ error: 'Erreur lors de la suppression du professeur' });
+  }
+});
+
 // Envoyer les identifiants des élèves via WhatsApp en masse
 router.post('/students/send-credentials-whatsapp', async (req, res) => {
   try {

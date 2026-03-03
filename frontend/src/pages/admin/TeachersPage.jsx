@@ -191,20 +191,29 @@ const TeachersPage = () => {
   };
 
   const deleteTeacher = async (id) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce professeur ? Cette action est irréversible.')) {
+      return;
+    }
+
     try {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
 
-      const res = await fetch(`${apiUrl}/api/admin/students/${id}`, {
+      const res = await fetch(`${apiUrl}/api/admin/teachers/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (res.ok) {
         setTeachers(teachers.filter(t => t.id !== id));
+        alert('✅ Professeur supprimé avec succès');
+      } else {
+        const error = await res.json();
+        alert(`❌ Erreur: ${error.error || 'Impossible de supprimer le professeur'}`);
       }
     } catch (error) {
       console.error('Error deleting teacher:', error);
+      alert('❌ Erreur lors de la suppression du professeur');
     }
   };
 
