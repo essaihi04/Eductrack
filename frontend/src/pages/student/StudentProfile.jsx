@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Lock, Moon, Sun, Save, AlertCircle, CheckCircle, Eye, EyeOff, User } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -61,6 +62,7 @@ const AVATARS = [
 ];
 
 const StudentProfile = () => {
+  const navigate = useNavigate();
   const { profile, signOut } = useAuth();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
@@ -219,8 +221,13 @@ const StudentProfile = () => {
       if (res.ok) {
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
         setShowPasswordForm(false);
-        setMessage({ type: 'success', text: 'Mot de passe modifié avec succès !' });
-        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+        setMessage({ type: 'success', text: 'Mot de passe modifié avec succès ! Redirection vers la page de connexion...' });
+        
+        // Déconnexion et redirection vers la page de login après 2 secondes
+        setTimeout(async () => {
+          await signOut();
+          navigate('/login');
+        }, 2000);
       } else {
         const error = await res.json();
         setMessage({ type: 'error', text: error.error || 'Erreur lors du changement de mot de passe' });
