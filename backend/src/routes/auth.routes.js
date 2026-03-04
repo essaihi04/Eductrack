@@ -111,13 +111,46 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'Token invalide' });
     }
 
-    const { data: profile, error: profileError } = await supabaseAdmin
+    let { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .eq('id', user.id)
       .single();
 
-    if (profileError) {
+    // Si le profil n'existe pas mais l'utilisateur Auth existe, créer le profil automatiquement
+    if (profileError && profileError.code === 'PGRST116') {
+      console.log(`[Auth /me] Profil manquant pour ${user.email}, création automatique...`);
+      
+      // Extraire les informations depuis les métadonnées Auth
+      const metadata = user.user_metadata || {};
+      const firstName = metadata.first_name || user.email?.split('@')[0] || 'Utilisateur';
+      const lastName = metadata.last_name || '';
+      const role = metadata.role || 'student';
+      
+      // Créer le profil
+      const { data: newProfile, error: createError } = await supabaseAdmin
+        .from('profiles')
+        .insert({
+          id: user.id,
+          email: user.email,
+          first_name: firstName,
+          last_name: lastName,
+          role: role,
+          school_id: null, // Sera mis à jour plus tard par l'admin
+          class_id: null
+        })
+        .select()
+        .single();
+      
+      if (createError) {
+        console.error(`[Auth /me] Erreur création profil pour ${user.email}:`, createError);
+        return res.status(500).json({ error: 'Impossible de créer le profil' });
+      }
+      
+      console.log(`[Auth /me] Profil créé avec succès pour ${user.email}`);
+      profile = newProfile;
+    } else if (profileError) {
+      console.error(`[Auth /me] Erreur récupération profil pour ${user.email}:`, profileError);
       return res.status(404).json({ error: 'Profil introuvable' });
     }
 
