@@ -411,13 +411,78 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
               return;
             }
 
-            // Récupérer les parents avec leur numéro
-            const { data: parentLinks } = await supabaseAdmin
+            // Récupérer les parents liés aux élèves
+            const { data: parentLinks, error: parentLinksError } = await supabaseAdmin
               .from('parent_students')
-              .select('profiles!parent_id(first_name, phone)')
+              .select('parent_id')
               .in('student_id', studentIds);
 
-            if (parentLinks && parentLinks.length > 0) {
+            if (parentLinksError) {
+              console.error(`[Documents][${requestId}] Erreur récupération parent_students`, {
+                classId: targetClassId,
+                message: parentLinksError.message
+              });
+              return;
+            }
+
+            const parentIds = [...new Set((parentLinks || []).map((link) => link.parent_id).filter(Boolean))];
+
+            if (parentIds.length > 0) {
+              // Priorité aux numéros WhatsApp normalisés dans parent_contacts
+              const { data: contacts, error: contactsError } = await supabaseAdmin
+                .from('parent_contacts')
+                .select('parent_id, phone_e164, is_primary')
+                .in('parent_id', parentIds)
+                .eq('channel', 'whatsapp')
+                .order('is_primary', { ascending: false });
+
+              if (contactsError) {
+                console.error(`[Documents][${requestId}] Erreur récupération parent_contacts`, {
+                  classId: targetClassId,
+                  message: contactsError.message
+                });
+              }
+
+              const parentPhoneMap = {};
+              (contacts || []).forEach((contact) => {
+                if (!contact?.parent_id || !contact?.phone_e164) return;
+                if (!parentPhoneMap[contact.parent_id]) {
+                  parentPhoneMap[contact.parent_id] = contact.phone_e164;
+                }
+              });
+
+              // Fallback compatibilité: profiles.phone pour les parents sans parent_contacts
+              const missingParentIds = parentIds.filter((parentId) => !parentPhoneMap[parentId]);
+              if (missingParentIds.length > 0) {
+                const { data: fallbackParents, error: fallbackParentsError } = await supabaseAdmin
+                  .from('profiles')
+                  .select('id, phone')
+                  .in('id', missingParentIds)
+                  .eq('role', 'parent');
+
+                if (fallbackParentsError) {
+                  console.error(`[Documents][${requestId}] Erreur fallback profiles.phone`, {
+                    classId: targetClassId,
+                    message: fallbackParentsError.message
+                  });
+                } else {
+                  (fallbackParents || []).forEach((parent) => {
+                    if (parent?.id && parent?.phone && !parentPhoneMap[parent.id]) {
+                      parentPhoneMap[parent.id] = parent.phone;
+                    }
+                  });
+                }
+              }
+
+              const parentPhones = Object.values(parentPhoneMap);
+
+              console.log(`[Documents][${requestId}] Parents WhatsApp resolved`, {
+                classId: targetClassId,
+                studentCount: studentIds.length,
+                parentCount: parentIds.length,
+                phoneCount: parentPhones.length
+              });
+
               const documentTypeLabel = {
                 'cours': 'Cours',
                 'exercice': 'Exercice',
@@ -443,8 +508,8 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
               // Importer la fonction d'envoi de fichier
               const { sendWhatsAppFile } = await import('../services/whatsappChatbot.js');
 
-              for (const link of parentLinks) {
-                const phone = link.profiles?.phone;
+              for (const phoneValue of parentPhones) {
+                const phone = String(phoneValue || '').replace(/\s+/g, '');
                 if (!phone || sentPhones.has(phone)) continue;
                 sentPhones.add(phone);
                 const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;

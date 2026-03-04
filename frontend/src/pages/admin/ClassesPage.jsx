@@ -71,6 +71,19 @@ const getLevelLabel = (level) => {
   return level || '';
 };
 
+const normalizeSchoolType = (schoolType) => {
+  if (!schoolType) return '';
+  const normalized = String(schoolType)
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalized === 'college') return 'college';
+  if (normalized === 'lycee' || normalized === 'lycee') return 'lycee';
+  return normalized;
+};
+
 const ClassesPage = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -1091,16 +1104,18 @@ const ClassesPage = () => {
   const uncategorized = [];
 
   classes.forEach(cls => {
-    if (!cls.school_type) {
+    const normalizedType = normalizeSchoolType(cls.school_type);
+
+    if (!normalizedType || !SCHOOL_HIERARCHY[normalizedType]) {
       uncategorized.push(cls);
       return;
     }
-    if (!grouped[cls.school_type]) grouped[cls.school_type] = {};
+    if (!grouped[normalizedType]) grouped[normalizedType] = {};
     const lvl = cls.level || '_none';
-    if (!grouped[cls.school_type][lvl]) grouped[cls.school_type][lvl] = {};
+    if (!grouped[normalizedType][lvl]) grouped[normalizedType][lvl] = {};
     const fil = cls.filiere || '_none';
-    if (!grouped[cls.school_type][lvl][fil]) grouped[cls.school_type][lvl][fil] = [];
-    grouped[cls.school_type][lvl][fil].push(cls);
+    if (!grouped[normalizedType][lvl][fil]) grouped[normalizedType][lvl][fil] = [];
+    grouped[normalizedType][lvl][fil].push(cls);
   });
 
   // Render a single class card
@@ -1285,9 +1300,9 @@ const ClassesPage = () => {
           <div className="flex gap-3 mt-2 text-sm text-muted-foreground">
             <span>{classes.length} classe(s)</span>
             <span>·</span>
-            <span>{classes.filter(c => c.school_type === 'college').length} collège</span>
+            <span>{classes.filter(c => normalizeSchoolType(c.school_type) === 'college').length} collège</span>
             <span>·</span>
-            <span>{classes.filter(c => c.school_type === 'lycee').length} lycée</span>
+            <span>{classes.filter(c => normalizeSchoolType(c.school_type) === 'lycee').length} lycée</span>
             {uncategorized.length > 0 && <><span>·</span><span className="text-orange-600">{uncategorized.length} non classifiée(s)</span></>}
           </div>
         </div>
@@ -1658,21 +1673,40 @@ const ClassesPage = () => {
                             <div className="px-6 pb-3">
                               {lvlInfo.filieres.length > 0 ? (
                                 // Has filieres: group by filiere
-                                lvlInfo.filieres.map(filInfo => {
-                                  const filClasses = lvlFilieres[filInfo.value];
-                                  if (!filClasses || filClasses.length === 0) return null;
+                                <>
+                                  {lvlInfo.filieres.map(filInfo => {
+                                    const filClasses = lvlFilieres[filInfo.value];
+                                    if (!filClasses || filClasses.length === 0) return null;
 
-                                  return (
-                                    <div key={filInfo.value} className="mb-3">
-                                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5 pl-2 border-l-2 border-purple-300">
-                                        {filInfo.label} ({filClasses.length})
-                                      </p>
-                                      <div className="space-y-1.5 ml-2">
-                                        {filClasses.map(cls => renderClassCard(cls))}
+                                    return (
+                                      <div key={filInfo.value} className="mb-3">
+                                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5 pl-2 border-l-2 border-purple-300">
+                                          {filInfo.label} ({filClasses.length})
+                                        </p>
+                                        <div className="space-y-1.5 ml-2">
+                                          {filClasses.map(cls => renderClassCard(cls))}
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })
+                                    );
+                                  })}
+
+                                  {Object.entries(lvlFilieres)
+                                    .filter(([filKey, filClasses]) => {
+                                      if (!filClasses || filClasses.length === 0) return false;
+                                      if (filKey === '_none') return false;
+                                      return !lvlInfo.filieres.some((f) => f.value === filKey);
+                                    })
+                                    .map(([filKey, filClasses]) => (
+                                      <div key={filKey} className="mb-3">
+                                        <p className="text-xs font-medium text-orange-500 uppercase tracking-wide mb-1.5 pl-2 border-l-2 border-orange-300">
+                                          Filière non reconnue ({filClasses.length}) — {getFiliereLabel(filKey) || filKey}
+                                        </p>
+                                        <div className="space-y-1.5 ml-2">
+                                          {filClasses.map(cls => renderClassCard(cls))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                </>
                               ) : (
                                 // No filieres: directly list classes
                                 <div className="space-y-1.5">
