@@ -1261,7 +1261,34 @@ router.get('/classes', async (req, res) => {
     const { data, error } = await query;
 
     if (error) throw error;
-    res.json(data);
+
+    const classIds = (data || []).map(c => c.id);
+    if (classIds.length === 0) {
+      return res.json([]);
+    }
+
+    let studentsQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, class_id')
+      .eq('role', 'student')
+      .in('class_id', classIds);
+    studentsQuery = applySchoolFilter(studentsQuery, req);
+
+    const { data: studentsData, error: studentsError } = await studentsQuery;
+    if (studentsError) throw studentsError;
+
+    const studentCountByClass = (studentsData || []).reduce((acc, student) => {
+      if (!student.class_id) return acc;
+      acc[student.class_id] = (acc[student.class_id] || 0) + 1;
+      return acc;
+    }, {});
+
+    const classesWithCount = data.map(cls => ({
+      ...cls,
+      student_count: studentCountByClass[cls.id] || 0
+    }));
+
+    res.json(classesWithCount);
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });

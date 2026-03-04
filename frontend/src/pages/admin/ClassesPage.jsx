@@ -1107,6 +1107,7 @@ const ClassesPage = () => {
   const renderClassCard = (cls) => {
     const isExpanded = expandedClass === cls.id;
     const isEditing = editingClassId === cls.id;
+    const studentCount = cls.student_count ?? cls.studentCount ?? 0;
 
     return (
       <div key={cls.id} className="border rounded-lg overflow-hidden bg-background">
@@ -1121,6 +1122,9 @@ const ClassesPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+            <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+              {studentCount} élève(s)
+            </span>
             <span className="text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded">
               {classTeachers[cls.id]?.length || 0} prof(s)
             </span>
