@@ -1412,6 +1412,7 @@ router.post('/classes/import', async (req, res) => {
     const createdClasses = [];
     const errors = [];
     const allCreatedStudents = [];
+    const otherSchoolStudents = []; // Élèves qui existent dans une autre école
 
     for (const classData of classesData) {
       const { name, level, school_type, filiere, academic_year, students: studentsList } = classData;
@@ -1521,8 +1522,16 @@ router.post('/classes/import', async (req, res) => {
                           massarCode: massarCode || null
                         });
                       } else {
-                        // École différente
-                        console.log(`[Import Class] Élève ${email} existe dans une autre école`);
+                        // École différente - ajouter à la liste des élèves d'autres écoles
+                        console.log(`[Import Class] Élève ${email} existe dans une autre école (school_id: ${existingProfile.school_id})`);
+                        otherSchoolStudents.push({
+                          email,
+                          firstName,
+                          lastName,
+                          massarCode: massarCode || null,
+                          existingSchoolId: existingProfile.school_id,
+                          className: name
+                        });
                       }
                       continue;
                     }
@@ -1586,11 +1595,13 @@ router.post('/classes/import', async (req, res) => {
       }
     }
 
-    console.log(`[Import Classes] ${createdClasses.length} classes créées, ${allCreatedStudents.length} élèves, ${errors.length} erreurs`);
+    console.log(`[Import Classes] ${createdClasses.length} classes créées, ${allCreatedStudents.length} élèves, ${otherSchoolStudents.length} dans autres écoles, ${errors.length} erreurs`);
     res.status(201).json({
       message: `${createdClasses.length} classe(s) importée(s) avec ${allCreatedStudents.length} élève(s)`,
       classes: createdClasses,
       totalStudents: allCreatedStudents.length,
+      otherSchoolStudents: otherSchoolStudents.length > 0 ? otherSchoolStudents : undefined,
+      otherSchoolCount: otherSchoolStudents.length,
       errors: errors.length > 0 ? errors : undefined
     });
   } catch (error) {

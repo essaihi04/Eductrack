@@ -486,10 +486,18 @@ const ClassesPage = () => {
         const updatedPasswords = { ...existingPasswords, ...passwordMap };
         localStorage.setItem('studentPasswords', JSON.stringify(updatedPasswords));
         
-        const summary = result.summary || { new: importedStudents.length, existing: 0, errors: 0, total: students.length };
+        const otherSchoolCount = result.otherSchoolCount || 0;
+        const summary = result.summary || { 
+          new: importedStudents.length, 
+          existing: 0, 
+          errors: 0, 
+          otherSchool: otherSchoolCount,
+          total: students.length 
+        };
         
         console.log(`✓ ${summary.new} nouvel(s) élève(s) créé(s)`);
         console.log(`✓ ${summary.existing} élève(s) existaient déjà`);
+        console.log(`⚠️ ${otherSchoolCount} élève(s) dans d'autres écoles (ignorés)`);
         console.log(`✓ Mots de passe stockés pour ${Object.keys(passwordMap).length} élève(s)`);
         
         setImportProgress({ current: 100, total: 100, message: 'Importation terminée !' });
@@ -499,6 +507,9 @@ const ClassesPage = () => {
           message += `✅ **${summary.new}** nouvel(s) élève(s) créé(s)\n`;
           if (summary.existing > 0) {
             message += `ℹ️ **${summary.existing}** élève(s) existaient déjà\n`;
+          }
+          if (otherSchoolCount > 0) {
+            message += `⚠️ **${otherSchoolCount}** élève(s) appartiennent à une autre école (non importés)\n`;
           }
           if (summary.errors > 0) {
             message += `❌ **${summary.errors}** erreur(s)\n`;
