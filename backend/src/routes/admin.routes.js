@@ -1457,109 +1457,77 @@ router.post('/classes/import', async (req, res) => {
               ? massarCode.toLowerCase().replace(/[^a-z0-9]/g, '')
               : `${firstName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}${lastName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}`;
             
-            const email = `${emailId}@${schoolDomain}`;
+            let email = `${emailId}@${schoolDomain}`;
             // Mot de passe simplifié: Prénom + Année (ex: Ahmed2025)
             const cleanFirstName = firstName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z]/g, '');
             const password = cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + new Date().getFullYear();
 
             try {
-              // Créer l'utilisateur Auth
-              const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-                email,
-                password,
-                email_confirm: true,
-                user_metadata: { 
-                  first_name: firstName, 
-                  last_name: lastName, 
-                  role: 'student',
-                  massar_code: massarCode || null
+              // Fonction pour créer l'utilisateur avec retry et email unique
+              let authData = null;
+              let authError = null;
+              let attempts = 0;
+              const maxAttempts = 5;
+              
+              while (attempts < maxAttempts) {
+                const result = await supabaseAdmin.auth.admin.createUser({
+                  email,
+                  password,
+                  email_confirm: true,
+                  user_metadata: { 
+                    first_name: firstName, 
+                    last_name: lastName, 
+                    role: 'student',
+                    massar_code: massarCode || null
+                  }
+                });
+                
+                authData = result.data;
+                authError = result.error;
+                
+                if (!authError) {
+                  // Succès - sortir de la boucle
+                  break;
                 }
-              });
-
-              let userId = authData?.user?.id;
-              let isExistingUser = false;
-
-              if (authError) {
-                // Debug: afficher la structure de l'erreur
+                
+                // Vérifier si l'erreur est "email déjà utilisé"
                 const errorMsg = String(authError.message || authError.msg || authError);
                 const errorCode = authError.code || authError.status || '';
-                console.log(`[Import Class] Debug Auth Error - email: ${email}, code: ${errorCode}, message: ${errorMsg.substring(0, 100)}`);
+                const isEmailExists = errorMsg.includes('already') || 
+                                      errorMsg.includes('exists') || 
+                                      errorMsg.includes('duplicate') || 
+                                      errorMsg.includes('registered') ||
+                                      errorCode === 'email_exists' ||
+                                      errorCode === 'user_already_exists' ||
+                                      errorCode === 422;
                 
-                // Vérifier si l'utilisateur existe déjà (plusieurs façons de détecter)
-                const isUserExists = errorMsg.includes('already') || 
-                                     errorMsg.includes('exists') || 
-                                     errorMsg.includes('duplicate') || 
-                                     errorMsg.includes('registered') ||
-                                     errorCode === 'email_exists' ||
-                                     errorCode === 'user_already_exists' ||
-                                     errorCode === 422;
-                
-                if (isUserExists) {
-                  console.log(`[Import Class] Utilisateur Auth existe déjà: ${email}`);
-                  
-                  // Récupérer l'utilisateur depuis Auth par email
-                  const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
-                  const existingAuthUser = authUsers?.users?.find(u => u.email === email);
-                  
-                  if (existingAuthUser) {
-                    userId = existingAuthUser.id;
-                    isExistingUser = true;
-                    
-                    // Vérifier si un profil existe déjà
-                    const { data: existingProfile } = await supabaseAdmin
-                      .from('profiles')
-                      .select('id, email, first_name, last_name, school_id, class_id')
-                      .eq('id', existingAuthUser.id)
-                      .single();
-                    
-                    if (existingProfile) {
-                      // Le profil existe - vérifier s'il appartient à la même école
-                      if (existingProfile.school_id === schoolId) {
-                        // Même école - mettre à jour la classe
-                        if (existingProfile.class_id !== newClass.id) {
-                          await supabaseAdmin
-                            .from('profiles')
-                            .update({ class_id: newClass.id })
-                            .eq('id', existingAuthUser.id);
-                          console.log(`[Import Class] Élève ${email} mis à jour vers la classe ${name}`);
-                        }
-                        classStudents.push({
-                          ...existingProfile,
-                          password: '********',
-                          massarCode: massarCode || null
-                        });
-                        allCreatedStudents.push({
-                          ...existingProfile,
-                          password: '********',
-                          className: name,
-                          massarCode: massarCode || null
-                        });
-                      } else {
-                        // École différente - ajouter à la liste des élèves d'autres écoles
-                        console.log(`[Import Class] Élève ${email} existe dans une autre école (school_id: ${existingProfile.school_id})`);
-                        otherSchoolStudents.push({
-                          email,
-                          firstName,
-                          lastName,
-                          massarCode: massarCode || null,
-                          existingSchoolId: existingProfile.school_id,
-                          className: name
-                        });
-                      }
-                      continue;
-                    }
-                    // Si pas de profil, on continue pour le créer
-                  } else {
-                    console.error(`[Import Class] Utilisateur Auth non trouvé: ${email}`);
-                    continue;
-                  }
+                if (isEmailExists) {
+                  // Email existe - générer un nouvel email unique avec suffixe
+                  attempts++;
+                  const suffix = `_${attempts}`;
+                  email = `${emailId}${suffix}@${schoolDomain}`;
+                  console.log(`[Import Class] Email existe, tentative ${attempts} avec: ${email}`);
                 } else {
-                  console.error(`[Import Class] Erreur auth ${email}:`, authError);
-                  continue;
+                  // Autre erreur - ne pas réessayer
+                  console.error(`[Import Class] Erreur auth non-récupérable pour ${email}:`, authError);
+                  break;
                 }
               }
 
-              // Créer le profil élève (pour nouveau user ou user Auth existant sans profil)
+              if (authError) {
+                console.error(`[Import Class] Échec création après ${attempts} tentatives pour ${emailId}:`, authError);
+                continue;
+              }
+
+              const userId = authData?.user?.id;
+              if (!userId) {
+                console.error(`[Import Class] Pas d'ID utilisateur pour ${email}`);
+                continue;
+              }
+              
+              console.log(`[Import Class] Utilisateur créé: ${email} (ID: ${userId})`);
+
+              // Créer le profil élève
               const { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
                 .insert({
@@ -1582,12 +1550,12 @@ router.post('/classes/import', async (req, res) => {
 
               classStudents.push({
                 ...profile,
-                password: isExistingUser ? '********' : password,
+                password,
                 massarCode: massarCode || null
               });
               allCreatedStudents.push({
                 ...profile,
-                password: isExistingUser ? '********' : password,
+                password,
                 className: name,
                 massarCode: massarCode || null
               });
