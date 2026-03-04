@@ -1439,7 +1439,10 @@ router.post('/classes/import', async (req, res) => {
     const createdClasses = [];
     const errors = [];
     const allCreatedStudents = [];
+    const allExistingStudents = [];
+    const reassignedStudents = [];
     const otherSchoolStudents = []; // Élèves qui existent dans une autre école
+    let totalStudentsProcessed = 0;
 
     for (const classData of classesData) {
       const { name, level, school_type, filiere, academic_year, students: studentsList } = classData;
@@ -1479,6 +1482,8 @@ router.post('/classes/import', async (req, res) => {
               continue; // Skip invalid students
             }
 
+            totalStudentsProcessed += 1;
+
             // Générer email basé sur le code Massar ou le nom
             const emailId = massarCode 
               ? massarCode.toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -1490,6 +1495,65 @@ router.post('/classes/import', async (req, res) => {
             const password = cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + new Date().getFullYear();
 
             try {
+              // 2.a Vérifier profil existant avant création Auth
+              const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
+                .from('profiles')
+                .select('id, email, first_name, last_name, school_id, class_id')
+                .eq('email', email)
+                .eq('role', 'student')
+                .maybeSingle();
+
+              if (existingProfileError) {
+                errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur recherche profil: ${existingProfileError.message}` });
+                continue;
+              }
+
+              if (existingProfile) {
+                if (schoolId && existingProfile.school_id && existingProfile.school_id !== schoolId) {
+                  otherSchoolStudents.push({
+                    className: name,
+                    email,
+                    first_name: existingProfile.first_name,
+                    last_name: existingProfile.last_name,
+                    school_id: existingProfile.school_id
+                  });
+                  continue;
+                }
+
+                let finalExistingProfile = existingProfile;
+                let wasReassigned = false;
+
+                if (existingProfile.class_id !== newClass.id) {
+                  const { data: updatedProfile, error: updateProfileError } = await supabaseAdmin
+                    .from('profiles')
+                    .update({ class_id: newClass.id })
+                    .eq('id', existingProfile.id)
+                    .select('id, email, first_name, last_name, school_id, class_id')
+                    .single();
+
+                  if (updateProfileError) {
+                    errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur mise à jour classe: ${updateProfileError.message}` });
+                    continue;
+                  }
+
+                  finalExistingProfile = updatedProfile;
+                  wasReassigned = true;
+                  reassignedStudents.push({ id: updatedProfile.id, email: updatedProfile.email, className: name });
+                }
+
+                const existingPayload = {
+                  ...finalExistingProfile,
+                  password: '********',
+                  massarCode: massarCode || null,
+                  className: name,
+                  status: wasReassigned ? 'reassigned' : 'existing'
+                };
+
+                classStudents.push(existingPayload);
+                allExistingStudents.push(existingPayload);
+                continue;
+              }
+
               // Fonction pour créer l'utilisateur avec retry et email unique
               let authData = null;
               let authError = null;
@@ -1608,9 +1672,19 @@ router.post('/classes/import', async (req, res) => {
       message: `${createdClasses.length} classe(s) importée(s) avec ${allCreatedStudents.length} élève(s)`,
       classes: createdClasses,
       totalStudents: allCreatedStudents.length,
+      existingStudents: allExistingStudents.length > 0 ? allExistingStudents : undefined,
+      reassignedStudents: reassignedStudents.length > 0 ? reassignedStudents : undefined,
       otherSchoolStudents: otherSchoolStudents.length > 0 ? otherSchoolStudents : undefined,
       otherSchoolCount: otherSchoolStudents.length,
-      errors: errors.length > 0 ? errors : undefined
+      errors: errors.length > 0 ? errors : undefined,
+      summary: {
+        new: allCreatedStudents.length,
+        existing: allExistingStudents.length,
+        reassigned: reassignedStudents.length,
+        otherSchool: otherSchoolStudents.length,
+        errors: errors.length,
+        total: totalStudentsProcessed
+      }
     });
   } catch (error) {
     console.error('Erreur import classes:', error);
