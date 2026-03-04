@@ -1475,16 +1475,73 @@ router.post('/classes/import', async (req, res) => {
                 }
               });
 
+              let userId = authData?.user?.id;
+              let isExistingUser = false;
+
               if (authError) {
-                console.error(`[Import Class] Erreur auth ${email}:`, authError);
-                continue;
+                // Vérifier si l'utilisateur existe déjà
+                if (authError.message && (authError.message.includes('already') || authError.message.includes('exists') || authError.message.includes('duplicate') || authError.message.includes('registered'))) {
+                  console.log(`[Import Class] Utilisateur Auth existe déjà: ${email}`);
+                  
+                  // Récupérer l'utilisateur depuis Auth par email
+                  const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
+                  const existingAuthUser = authUsers?.users?.find(u => u.email === email);
+                  
+                  if (existingAuthUser) {
+                    userId = existingAuthUser.id;
+                    isExistingUser = true;
+                    
+                    // Vérifier si un profil existe déjà
+                    const { data: existingProfile } = await supabaseAdmin
+                      .from('profiles')
+                      .select('id, email, first_name, last_name, school_id, class_id')
+                      .eq('id', existingAuthUser.id)
+                      .single();
+                    
+                    if (existingProfile) {
+                      // Le profil existe - vérifier s'il appartient à la même école
+                      if (existingProfile.school_id === schoolId) {
+                        // Même école - mettre à jour la classe
+                        if (existingProfile.class_id !== newClass.id) {
+                          await supabaseAdmin
+                            .from('profiles')
+                            .update({ class_id: newClass.id })
+                            .eq('id', existingAuthUser.id);
+                          console.log(`[Import Class] Élève ${email} mis à jour vers la classe ${name}`);
+                        }
+                        classStudents.push({
+                          ...existingProfile,
+                          password: '********',
+                          massarCode: massarCode || null
+                        });
+                        allCreatedStudents.push({
+                          ...existingProfile,
+                          password: '********',
+                          className: name,
+                          massarCode: massarCode || null
+                        });
+                      } else {
+                        // École différente
+                        console.log(`[Import Class] Élève ${email} existe dans une autre école`);
+                      }
+                      continue;
+                    }
+                    // Si pas de profil, on continue pour le créer
+                  } else {
+                    console.error(`[Import Class] Utilisateur Auth non trouvé: ${email}`);
+                    continue;
+                  }
+                } else {
+                  console.error(`[Import Class] Erreur auth ${email}:`, authError);
+                  continue;
+                }
               }
 
-              // Créer le profil élève
+              // Créer le profil élève (pour nouveau user ou user Auth existant sans profil)
               const { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
                 .insert({
-                  id: authData.user.id,
+                  id: userId,
                   email,
                   first_name: firstName,
                   last_name: lastName,
@@ -1503,12 +1560,12 @@ router.post('/classes/import', async (req, res) => {
 
               classStudents.push({
                 ...profile,
-                password,
+                password: isExistingUser ? '********' : password,
                 massarCode: massarCode || null
               });
               allCreatedStudents.push({
                 ...profile,
-                password,
+                password: isExistingUser ? '********' : password,
                 className: name,
                 massarCode: massarCode || null
               });
