@@ -186,6 +186,23 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
           ? `العفو 🙏 نحن هنا لمساعدتك دائماً`
           : `De rien 🙏 Nous sommes toujours là pour vous aider`;
         await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
+      } else if (needsAIResponse.reason === 'simple_response') {
+        simpleResponse = isArabicMsg
+          ? `✅ تم. أرسل سؤالك الدراسي مباشرة (نقط، حضور، واجبات، سلوك).`
+          : `✅ D'accord. Envoyez directement votre question scolaire (notes, présence, devoirs, comportement).`;
+        await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
+      } else if (needsAIResponse.reason === 'off_topic') {
+        await sendWhatsAppResponse(
+          normalizedPhone,
+          buildEducationalRedirectMessage(parentInfo, isArabicMsg, 'off_topic'),
+          parentInfo.school_id
+        );
+      } else if (needsAIResponse.reason === 'sensitive_offdomain') {
+        await sendWhatsAppResponse(
+          normalizedPhone,
+          buildEducationalRedirectMessage(parentInfo, isArabicMsg, 'sensitive'),
+          parentInfo.school_id
+        );
       } else if (needsAIResponse.reason === 'short_accidental') {
         // Message trop court/accidentel - ignorer silencieusement
         console.log('[Chatbot] Message accidentel ignoré:', messageText);
@@ -254,8 +271,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
       agentDecision = { mode: 'DIRECT', intents: ['predefined'], summary: 'Menu rapide' };
       response = await generateDirectResponse(enrichedMessage, studentInfo, studentData, parentInfo);
       if (!response) {
-        console.log('[Chatbot] Fallback IA depuis lettre prédéfinie');
-        response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+        console.log('[Chatbot] Fallback sécurisé depuis lettre prédéfinie');
+        response = buildEducationalRedirectMessage(parentInfo, /[\u0600-\u06FF]/.test(messageText), 'off_topic');
       }
     } else {
       // 10. AGENT DÉCIDEUR IA - Analyse le message enrichi et décide comment répondre
@@ -267,8 +284,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
         console.log('[Chatbot] Mode DIRECT - Réponse scriptée depuis DB');
         response = await generateDirectResponse(enrichedMessage, studentInfo, studentData, parentInfo);
         if (!response) {
-          console.log('[Chatbot] Fallback IA depuis DIRECT');
-          response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, agentDecision);
+          console.log('[Chatbot] DIRECT sans correspondance → redirection pédagogique stricte');
+          response = buildEducationalRedirectMessage(parentInfo, /[\u0600-\u06FF]/.test(messageText), 'off_topic');
         }
       } else {
         // Mode IA - DeepSeek répond avec contexte ciblé
@@ -284,6 +301,10 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
           // Régénérer avec un prompt plus strict
           const strictDecision = { ...agentDecision, intents: [...agentDecision.intents], summary: agentDecision.summary + ' [STRICT: données vérifiées uniquement]' };
           response = await generateAIResponse(enrichedMessage, studentInfo, studentData, parentInfo, conversationHistory, strictDecision);
+        }
+
+        if (response && response.trim() === '__OFF_TOPIC__') {
+          response = buildEducationalRedirectMessage(parentInfo, /[\u0600-\u06FF]/.test(messageText), 'off_topic');
         }
       }
     }
@@ -357,19 +378,65 @@ function normalizePhoneNumber(phone) {
   return cleaned;
 }
 
+function buildEducationalRedirectMessage(parentInfo, isArabic = false, reason = 'off_topic') {
+  const intro = isArabic
+    ? (reason === 'sensitive'
+      ? `🔒 *لا يمكنني معالجة معلومات شخصية أو بنكية هنا.*\nهذا البوت مخصص حصراً للمتابعة الدراسية.`
+      : `🎓 *هذا البوت مخصص فقط للمتابعة التربوية والدراسية.*`)
+    : (reason === 'sensitive'
+      ? `🔒 *Je ne peux pas traiter des informations personnelles/bancaires ici.*\nCe bot est réservé au suivi scolaire.`
+      : `🎓 *Ce bot est strictement réservé au suivi pédagogique et scolaire.*`);
+
+  const menu = isArabic
+    ? `\n\n📋 *أسئلة سريعة:*\n📅 أ. كيف حاله اليوم؟\n📚 ب. ما الدروس المدروسة؟\n✍️ ج. هل هناك واجبات؟\n📝 د. ما آخر النقط؟\n🎯 ه. كيف سلوكه؟\n📆 و. برنامج الأسبوع؟`
+    : `\n\n📋 *Questions rapides:*\n📅 A. Comment va-t-il aujourd'hui ?\n📚 B. Quelles leçons étudiées ?\n✍️ C. Y a-t-il des devoirs ?\n📝 D. Dernières notes ?\n🎯 E. Son comportement ?\n📆 F. Programme de la semaine ?`;
+
+  return `${intro}${menu}\n\n━━━━━━━━━━━━━━━\n👥 *${parentInfo.school_name}*`;
+}
+
 // Vérifier si le message nécessite une réponse IA
 async function shouldRespondWithAI(messageText, phone, parentId) {
   const lowerText = messageText.toLowerCase().trim();
-  
-  // Messages qui ne nécessitent pas de réponse IA
+
+  // Messages sociaux simples (traités sans IA)
   const greetings = [
     'سلام', 'مرحبا', 'صباح', 'مساء',
     'bonjour', 'bonsoir', 'salut', 'hello', 'hi',
-    'salam', 'slm', 'slt', 'wslm', 'assalam', // variantes darija/latin
+    'salam', 'slm', 'slt', 'wslm', 'assalam',
     'ahlan', 'mrhba', 'sbah'
   ];
   const thanks = ['شكرا', 'merci', 'thanks', 'thank you', 'بارك الله فيك', 'shukran', 'chokran', 'barak'];
   const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes', 'waw', 'mzyn', 'mlih'];
+
+  // Autoriser les lettres/menu rapides
+  if (/^([a-fأبجدهو]|\d)$/.test(lowerText)) {
+    return { respond: true, reason: 'menu_letter' };
+  }
+
+  // Bloquer demandes sensibles hors périmètre scolaire
+  const sensitivePatterns = [
+    /code\s*(carte|guichet|pin|otp)/i,
+    /\b(pin|otp|cvv|iban|rib|virement|bank|banque|carte)\b/i,
+    /\bcommande|livraison|paiement|transaction\b/i,
+    /\bmot\s*de\s*passe\b/i
+  ];
+  if (sensitivePatterns.some((p) => p.test(messageText))) {
+    return { respond: false, reason: 'sensitive_offdomain' };
+  }
+
+  // Scope strictement pédagogique/éducatif
+  const educationalKeywords = [
+    'élève', 'enfant', 'fils', 'fille', 'student', 'parent',
+    'note', 'notes', 'نقطة', 'نقط', 'moyenne', 'معدل',
+    'absence', 'absent', 'présence', 'presence', 'حضور', 'غياب', 'retard',
+    'devoir', 'devoirs', 'واجب', 'واجبات', 'rendu',
+    'cours', 'leçon', 'leçons', 'lesson', 'درس', 'دروس', 'programme', 'semaine',
+    'comportement', 'discipline', 'participation', 'سلوك',
+    'classe', 'matière', 'matiere', 'svt', 'math', 'physique',
+    'comment va', 'kif', 'كيف', 'chno', 'شنو'
+  ];
+
+  const hasEducationalSignal = educationalKeywords.some((kw) => lowerText.includes(kw));
   
   // Messages accidentels très courts (1-2 chars, probablement envoi accidentel)
   if (lowerText.length <= 2 && !/^[a-fأبجدهو]$/.test(lowerText)) {
@@ -389,6 +456,14 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
   // Vérifier les réponses simples
   if (simple.some(s => lowerText === s)) {
     return { respond: false, reason: 'simple_response' };
+  }
+
+  const looksLikeChitChat = /\b(cv|salam|mzyan|bikhir|nta|nti|jou3|tajine|jama3|pipo)\b/i.test(lowerText);
+  if (!hasEducationalSignal && lowerText.length >= 3 && looksLikeChitChat) {
+    return { respond: false, reason: 'off_topic' };
+  }
+  if (!hasEducationalSignal && lowerText.length >= 4) {
+    return { respond: false, reason: 'off_topic' };
   }
   
   return { respond: true, reason: 'needs_ai' };
@@ -2118,18 +2193,21 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
     const summary = agentDecision?.summary || '';
 
     // Construire le prompt système humain et naturel
-    const systemPrompt = `Tu es Nour, conseiller pédagogique de ${parentInfo.school_name}.
-Tu parles directement au parent comme un ami professionnel — chaleureux, précis, jamais robotique.
+    const systemPrompt = `Tu es Nour, assistant pédagogique strict de ${parentInfo.school_name}.
+Tu réponds UNIQUEMENT dans le périmètre scolaire/éducatif de l'élève.
 
 🎯 Ce que le parent veut: ${summary || question}
 📌 Domaines concernés: ${intents.join(', ') || 'général'}
 
-RÈGLES DE RÉPONSE:
+RÈGLES DE RÉPONSE (OBLIGATOIRES):
 1. Langue: réponds OBLIGATOIREMENT en ${preferredLanguage}. Ne change PAS de langue même si le dossier est en français.
 2. NOM DE L'ÉLÈVE: utilise EXACTEMENT le prénom "${studentInfo.first_name}" tel quel. Ne traduis PAS, ne convertis PAS en majuscules, ne latinise PAS les noms arabes.
-3. Longueur: 4 à 10 lignes maximum. Pas de liste à puces inutile si une phrase suffit.
-4. Style: parle comme un humain, pas comme un rapport. Ex: "${studentInfo.first_name} a bien été présent aujourd'hui, mais j'ai vu qu'il a eu du mal en maths" plutôt que "Présence: 100% - Mathématiques: 8/20".
-5. Données: utilise les chiffres réels pour appuyer, mais intègre-les naturellement dans la phrase.
+3. Format STRICT (court et structuré, 3 blocs max):
+   📌 *Réponse* (1-2 lignes max)
+   📊 *Données* (2-4 puces max avec chiffres réels)
+   ➡️ *Action* (1 recommandation concrète ou une question de précision)
+4. Longueur: 5 à 8 lignes max. Pas de paragraphe long.
+5. Données: utilise uniquement les données du dossier fourni.
 6. Jamais de formule vide en début: pas de "Bien sûr!", "Voici les informations", "بالطبع".
 7. Si tu donnes des conseils: max 2-3 conseils concrets, adaptés aux vraies données de l'élève.
 8. Si une info manque dans le dossier: dis-le simplement sans t'excuser.
@@ -2137,7 +2215,8 @@ RÈGLES DE RÉPONSE:
 10. N'invente JAMAIS de données absentes du dossier. Un booléen 'téléphone en classe' = signalement, pas 'il a quitté la séance'.
 11. RÈGLE ABSOLUE: Ne partage JAMAIS de données (notes, absences, comportement) que le parent n'a PAS demandées explicitement. Si la question est vague ou générale, demande ce qu'il veut savoir. Ne commence pas un résumé spontané.
 12. Si le parent mentionne une MATIÈRE (ex: 'SVT', 'maths') mais que le dossier ne contient AUCUNE donnée pour cette matière, dis simplement 'Pas de données disponibles pour [matière]'. N'invente PAS de leçons, notes ou comportements.
-13. Termine par une question ouverte courte si pertinent.
+13. Si la question est HORS domaine pédagogique (banque, achats, code carte, vie personnelle, etc.), réponds EXACTEMENT: __OFF_TOPIC__
+14. Termine par une question courte de suivi si pertinent.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOSSIER ${studentInfo.first_name} ${studentInfo.last_name || ''}:
@@ -2161,8 +2240,8 @@ ${context}
     const result = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages,
-      temperature: intents.includes('advice') || intents.includes('behavior') ? 0.8 : 0.4,
-      max_tokens: 600
+      temperature: 0.2,
+      max_tokens: 320
     });
     console.log('[Chatbot] Réponse DeepSeek reçue');
 
