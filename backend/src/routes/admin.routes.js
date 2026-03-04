@@ -1480,8 +1480,21 @@ router.post('/classes/import', async (req, res) => {
               let isExistingUser = false;
 
               if (authError) {
-                // Vérifier si l'utilisateur existe déjà
-                if (authError.message && (authError.message.includes('already') || authError.message.includes('exists') || authError.message.includes('duplicate') || authError.message.includes('registered'))) {
+                // Debug: afficher la structure de l'erreur
+                const errorMsg = String(authError.message || authError.msg || authError);
+                const errorCode = authError.code || authError.status || '';
+                console.log(`[Import Class] Debug Auth Error - email: ${email}, code: ${errorCode}, message: ${errorMsg.substring(0, 100)}`);
+                
+                // Vérifier si l'utilisateur existe déjà (plusieurs façons de détecter)
+                const isUserExists = errorMsg.includes('already') || 
+                                     errorMsg.includes('exists') || 
+                                     errorMsg.includes('duplicate') || 
+                                     errorMsg.includes('registered') ||
+                                     errorCode === 'email_exists' ||
+                                     errorCode === 'user_already_exists' ||
+                                     errorCode === 422;
+                
+                if (isUserExists) {
                   console.log(`[Import Class] Utilisateur Auth existe déjà: ${email}`);
                   
                   // Récupérer l'utilisateur depuis Auth par email
