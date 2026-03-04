@@ -2497,6 +2497,7 @@ router.post('/students/import', async (req, res) => {
 
     for (const student of students) {
       const { email, password, firstName, lastName } = student;
+      const [emailLocalPart, emailDomainPart] = String(email || '').split('@');
 
       // Vérifier si l'élève existe déjà
       const { data: existingProfile } = await supabaseAdmin
@@ -2515,91 +2516,46 @@ router.post('/students/import', async (req, res) => {
         continue;
       }
 
-      // Créer l'utilisateur dans Auth
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: { first_name: firstName, last_name: lastName, role: 'student' }
-      });
+      // Créer l'utilisateur dans Auth (avec retry email suffixé si déjà utilisé)
+      let finalEmail = email;
+      let authData = null;
+      let authError = null;
+      let attempts = 0;
+      const maxAttempts = 5;
 
-      if (authError) {
-        // Si l'erreur indique que l'utilisateur existe déjà
-        if (authError.message && (authError.message.includes('already') || authError.message.includes('exists') || authError.message.includes('duplicate') || authError.message.includes('registered'))) {
-          console.log(`[Import] Utilisateur Auth existe déjà: ${email}`);
-          
-          // Récupérer l'utilisateur depuis Auth par email
-          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
-          const existingAuthUser = authUsers?.users?.find(u => u.email === email);
-          
-          if (existingAuthUser) {
-            // Vérifier si un profil existe déjà
-            const { data: existingProfile } = await supabaseAdmin
-              .from('profiles')
-              .select('id, email, first_name, last_name, school_id, class_id')
-              .eq('id', existingAuthUser.id)
-              .single();
-            
-            if (existingProfile) {
-              // Le profil existe - vérifier s'il appartient à la même école
-              const currentSchoolId = getSchoolId(req);
-              if (existingProfile.school_id === currentSchoolId) {
-                // Même école - mettre à jour la classe si différente
-                if (existingProfile.class_id !== classId) {
-                  await supabaseAdmin
-                    .from('profiles')
-                    .update({ class_id: classId })
-                    .eq('id', existingAuthUser.id);
-                  console.log(`[Import] Élève ${email} mis à jour vers la nouvelle classe`);
-                }
-                existingStudents.push({
-                  ...existingProfile,
-                  password: '********'
-                });
-              } else {
-                // École différente - l'élève existe dans une autre école
-                console.log(`[Import] Élève ${email} existe dans une autre école (school_id: ${existingProfile.school_id})`);
-                errors.push({ 
-                  email, 
-                  reason: `Cet élève existe déjà dans une autre école. Contactez l'administrateur pour le transférer.`
-                });
-              }
-            } else {
-              // Pas de profil - créer le profil pour cet utilisateur Auth existant
-              console.log(`[Import] Création du profil pour l'utilisateur Auth existant: ${email}`);
-              const { data: newProfile, error: profileError } = await supabaseAdmin
-                .from('profiles')
-                .insert({
-                  id: existingAuthUser.id,
-                  email,
-                  first_name: firstName,
-                  last_name: lastName,
-                  role: 'student',
-                  class_id: classId || null,
-                  school_id: getSchoolId(req)
-                })
-                .select()
-                .single();
-              
-              if (profileError) {
-                console.error(`[Import] Erreur création profil pour Auth existant ${email}:`, profileError);
-                errors.push({ email, reason: profileError.message });
-              } else {
-                createdStudents.push({
-                  ...newProfile,
-                  password: '********MotDePasseExistant'
-                });
-              }
-            }
-          } else {
-            console.log(`[Import] Utilisateur Auth non trouvé pour: ${email}`);
-            errors.push({ email, reason: 'Utilisateur Auth introuvable' });
-          }
-          continue;
-        }
-        
+      while (attempts < maxAttempts) {
+        const result = await supabaseAdmin.auth.admin.createUser({
+          email: finalEmail,
+          password,
+          email_confirm: true,
+          user_metadata: { first_name: firstName, last_name: lastName, role: 'student' }
+        });
+
+        authData = result.data;
+        authError = result.error;
+
+        if (!authError) break;
+
+        const errorMsg = String(authError.message || authError.msg || '').toLowerCase();
+        const errorCode = String(authError.code || authError.status || '').toLowerCase();
+        const isEmailExists = errorMsg.includes('already') ||
+          errorMsg.includes('exists') ||
+          errorMsg.includes('duplicate') ||
+          errorMsg.includes('registered') ||
+          errorCode === 'email_exists' ||
+          errorCode === 'user_already_exists' ||
+          errorCode === '422';
+
+        if (!isEmailExists) break;
+
+        attempts += 1;
+        finalEmail = `${emailLocalPart}_${attempts}@${emailDomainPart}`;
+        console.log(`[Import] Email déjà utilisé (${email}), tentative ${attempts} avec ${finalEmail}`);
+      }
+
+      if (authError || !authData?.user?.id) {
         console.error(`[Import] Erreur création utilisateur ${email}:`, authError);
-        errors.push({ email, reason: authError.message });
+        errors.push({ email, reason: authError?.message || 'Erreur création utilisateur Auth' });
         continue;
       }
 
@@ -2608,7 +2564,7 @@ router.post('/students/import', async (req, res) => {
         .from('profiles')
         .insert({
           id: authData.user.id,
-          email,
+          email: finalEmail,
           first_name: firstName,
           last_name: lastName,
           role: 'student',
@@ -2627,7 +2583,8 @@ router.post('/students/import', async (req, res) => {
       // Ajouter le mot de passe au profil pour l'affichage
       createdStudents.push({
         ...profile,
-        password
+        password,
+        originalEmail: email
       });
     }
 
