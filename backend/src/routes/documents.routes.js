@@ -202,11 +202,32 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
   try {
     const requestId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const teacherId = req.user.id;
-    const { classId, subjectId, controlId, title, documentType, description } = req.body;
+    const { classId, classIds, subjectId, controlId, title, documentType, description } = req.body;
+
+    let targetClassIds = [];
+    if (Array.isArray(classIds)) {
+      targetClassIds = classIds;
+    } else if (typeof classIds === 'string' && classIds.trim()) {
+      try {
+        const parsedClassIds = JSON.parse(classIds);
+        if (Array.isArray(parsedClassIds)) {
+          targetClassIds = parsedClassIds;
+        }
+      } catch {
+        targetClassIds = classIds.split(',').map((id) => id.trim()).filter(Boolean);
+      }
+    }
+
+    if (targetClassIds.length === 0 && classId) {
+      targetClassIds = [classId];
+    }
+
+    targetClassIds = [...new Set(targetClassIds.filter(Boolean))];
 
     console.log(`[Documents][${requestId}] Upload start`, {
       teacherId,
       classId,
+      classIds: targetClassIds,
       subjectId,
       controlId,
       titleLength: title?.length || 0,
@@ -223,9 +244,9 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
     }
 
     // Validation des champs obligatoires
-    if (!classId || !title || !documentType) {
+    if (!targetClassIds.length || !title || !documentType) {
       return res.status(400).json({ 
-        error: 'Champs obligatoires manquants: classe, titre, type de document' 
+        error: 'Champs obligatoires manquants: classe(s), titre, type de document' 
       });
     }
 
@@ -234,31 +255,25 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
       return res.status(400).json({ error: 'Aucun fichier fourni' });
     }
 
-    // Vérifier que le professeur a accès à cette classe
-    const { data: classTeacher, error: classError } = await supabaseAdmin
+    // Vérifier que le professeur a accès à toutes les classes demandées
+    const { data: classTeachers, error: classError } = await supabaseAdmin
       .from('class_teachers')
-      .select('*')
+      .select('class_id')
       .eq('teacher_id', teacherId)
-      .eq('class_id', classId)
-      .single();
+      .in('class_id', targetClassIds);
 
-    if (classError || !classTeacher) {
-      console.warn(`[Documents][${requestId}] Accès classe refusé`, { classId, teacherId, classError: classError?.message });
-      return res.status(403).json({ error: 'Vous n\'avez pas accès à cette classe' });
+    if (classError) {
+      console.warn(`[Documents][${requestId}] Vérification accès classes échouée`, { classIds: targetClassIds, teacherId, classError: classError?.message });
+      return res.status(403).json({ error: 'Impossible de vérifier l\'accès aux classes' });
     }
 
-    // Récupérer le nombre total d'élèves dans la classe
-    const { data: students, error: studentsError } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('class_id', classId)
-      .eq('role', 'student');
+    const allowedClassIds = new Set((classTeachers || []).map((row) => row.class_id));
+    const forbiddenClassIds = targetClassIds.filter((id) => !allowedClassIds.has(id));
 
-    console.log('[DEBUG] Students fetched:', {
-      classId,
-      studentsCount: students?.length || 0,
-      studentsError: studentsError?.message
-    });
+    if (forbiddenClassIds.length > 0) {
+      console.warn(`[Documents][${requestId}] Accès classe refusé`, { targetClassIds, forbiddenClassIds, teacherId });
+      return res.status(403).json({ error: 'Vous n\'avez pas accès à une ou plusieurs classes sélectionnées' });
+    }
 
     if (!resolvedSubjectId) {
       const { data: teacherSubjects, error: teacherSubjectsError } = await supabaseAdmin
@@ -271,49 +286,11 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
       }
     }
 
-    // Créer le document dans la base de données
-    const documentData = {
-      teacher_id: teacherId,
-      class_id: classId,
-      subject_id: resolvedSubjectId,
-      control_id: controlId || null,
-      title: title,
-      document_type: documentType,
-      description: description || null,
-      file_name: req.file.originalname,
-      file_path: req.file.path,
-      file_size: req.file.size,
-      file_type: req.file.mimetype,
-      total_students: students ? students.length : 0
-    };
-
-    const { data, error } = await supabaseAdmin
-      .from('teaching_documents')
-      .insert(documentData)
-      .select(`
-        *,
-        classes(name, level),
-        subjects(name),
-        controls_plan(name)
-      `)
-      .single();
-
-    if (error) {
-      console.error(`[Documents][${requestId}] Failed to insert document:`, error);
-      throw error;
-    }
-
-    console.log(`[Documents][${requestId}] Document created:`, {
-      documentId: data.id,
-      title: data.title,
-      classId: data.class_id
-    });
-
     const teacherFirstName = req.user?.first_name || null;
     const teacherLastName = req.user?.last_name || null;
     const teacherName = [teacherFirstName, teacherLastName].filter(Boolean).join(' ') || 'Votre professeur';
 
-    let subjectName = data?.subjects?.name || null;
+    let subjectName = null;
     if (!subjectName && resolvedSubjectId) {
       const { data: subjectRow, error: subjectError } = await supabaseAdmin
         .from('subjects')
@@ -326,119 +303,188 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
       }
     }
 
-    // Créer des notifications pour tous les élèves de la classe
-    if (students && students.length > 0) {
-      const notifications = students.map(student => ({
-        user_id: student.id,
-        type: 'document',
-        title: `Nouveau document${subjectName ? ` (${subjectName})` : ''}: ${title}`,
-        message: `${teacherName} a ajouté un nouveau document${subjectName ? ` en ${subjectName}` : ''} (type: ${documentType})`,
-        related_id: data.id,
-        read: false
-      }));
+    const createdDocuments = [];
 
-      console.log(`[Documents][${requestId}] Creating notifications:`, {
-        count: notifications.length,
-        firstStudentId: notifications[0]?.user_id
+    for (const targetClassId of targetClassIds) {
+      // Récupérer le nombre total d'élèves dans la classe
+      const { data: students, error: studentsError } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('class_id', targetClassId)
+        .eq('role', 'student');
+
+      console.log('[DEBUG] Students fetched:', {
+        classId: targetClassId,
+        studentsCount: students?.length || 0,
+        studentsError: studentsError?.message
       });
 
-      const { error: notifError } = await supabaseAdmin
-        .from('notifications')
-        .insert(notifications);
+      // Créer le document dans la base de données
+      const documentData = {
+        teacher_id: teacherId,
+        class_id: targetClassId,
+        subject_id: resolvedSubjectId,
+        control_id: targetClassIds.length === 1 ? (controlId || null) : null,
+        title: title,
+        document_type: documentType,
+        description: description || null,
+        file_name: req.file.originalname,
+        file_path: req.file.path,
+        file_size: req.file.size,
+        file_type: req.file.mimetype,
+        total_students: students ? students.length : 0
+      };
 
-      if (notifError) {
-        console.error(`[Documents][${requestId}] Failed to insert notifications:`, notifError);
-      } else {
-        console.log(`[Documents][${requestId}] Notifications created successfully:`, notifications.length);
+      const { data: createdDoc, error } = await supabaseAdmin
+        .from('teaching_documents')
+        .insert(documentData)
+        .select(`
+          *,
+          classes(name, level),
+          subjects(name),
+          controls_plan(name)
+        `)
+        .single();
+
+      if (error) {
+        console.error(`[Documents][${requestId}] Failed to insert document:`, error);
+        throw error;
       }
 
-      // Envoyer notification WhatsApp aux parents (asynchrone, sans bloquer la requête HTTP)
-      void (async () => {
-        try {
-          const studentIds = students.map(s => s.id);
+      createdDocuments.push(createdDoc);
 
-          const { data: classInfoWa } = await supabaseAdmin
-            .from('classes')
-            .select('name, school_id')
-            .eq('id', classId)
-            .single();
+      console.log(`[Documents][${requestId}] Document created:`, {
+        documentId: createdDoc.id,
+        title: createdDoc.title,
+        classId: createdDoc.class_id
+      });
 
-          const schoolId = classInfoWa?.school_id || req.user.school_id;
-          const sessionApiKey = await getSchoolSessionApiKey(schoolId);
+      // Créer des notifications pour tous les élèves de la classe
+      if (students && students.length > 0) {
+        const notifications = students.map(student => ({
+          user_id: student.id,
+          type: 'document',
+          title: `Nouveau document${subjectName ? ` (${subjectName})` : ''}: ${title}`,
+          message: `${teacherName} a ajouté un nouveau document${subjectName ? ` en ${subjectName}` : ''} (type: ${documentType})`,
+          related_id: createdDoc.id,
+          read: false
+        }));
 
-          console.log(`[Documents][${requestId}] WhatsApp session check`, {
-            schoolId,
-            hasSessionApiKey: Boolean(sessionApiKey)
-          });
+        console.log(`[Documents][${requestId}] Creating notifications:`, {
+          classId: targetClassId,
+          count: notifications.length,
+          firstStudentId: notifications[0]?.user_id
+        });
 
-          if (!sessionApiKey) {
-            console.warn(`[Documents][${requestId}] WhatsApp session non connectée, notifications WhatsApp ignorées`);
-            return;
-          }
+        const { error: notifError } = await supabaseAdmin
+          .from('notifications')
+          .insert(notifications);
 
-          // Récupérer les parents avec leur numéro
-          const { data: parentLinks } = await supabaseAdmin
-            .from('parent_students')
-            .select('profiles!parent_id(first_name, phone)')
-            .in('student_id', studentIds);
-
-          if (parentLinks && parentLinks.length > 0) {
-            const documentTypeLabel = {
-              'cours': 'Cours',
-              'exercice': 'Exercice',
-              'correction': 'Correction',
-              'support': 'Support pédagogique',
-              'devoir': 'Devoir maison',
-              'rattrapage': 'Rattrapage',
-              'approfondissement': 'Approfondissement',
-              'autre': 'Document'
-            }[documentType] || 'Document';
-
-            const messageCaption = `📄 *Nouveau document pédagogique*\n\n` +
-              `Classe: *${classInfoWa?.name || 'N/A'}*\n` +
-              `Professeur: ${teacherName}\n` +
-              (subjectName ? `Matière: ${subjectName}\n` : '') +
-              `Type: ${documentTypeLabel}\n\n` +
-              `📝 *${title}*\n` +
-              (description ? `${description}\n\n` : '\n') +
-              `━━━━━━━━━━━━━━━\n� L'équipe pédagogique`;
-
-            const sentPhones = new Set();
-            
-            // Importer la fonction d'envoi de fichier
-            const { sendWhatsAppFile } = await import('../services/whatsappChatbot.js');
-            
-            for (const link of parentLinks) {
-              const phone = link.profiles?.phone;
-              if (!phone || sentPhones.has(phone)) continue;
-              sentPhones.add(phone);
-              const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-              
-              // Envoyer le fichier avec la légende
-              const fileSent = await sendWhatsAppFile(e164Phone, req.file.path, messageCaption, schoolId);
-              
-              console.log(`[Documents][${requestId}] Notification document parent`, { 
-                phone: e164Phone, 
-                fileSent,
-                fileName: req.file.originalname 
-              });
-              
-              // Attendre un peu entre chaque envoi pour éviter le rate limiting
-              await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-          } else {
-            console.log(`[Documents][${requestId}] Aucun parent trouvé pour les élèves de la classe`);
-          }
-        } catch (whatsappError) {
-          console.error(`[Documents][${requestId}] Erreur notification WhatsApp:`, whatsappError);
+        if (notifError) {
+          console.error(`[Documents][${requestId}] Failed to insert notifications:`, notifError);
+        } else {
+          console.log(`[Documents][${requestId}] Notifications created successfully:`, notifications.length);
         }
-      })();
-    } else {
-      console.log(`[Documents][${requestId}] No students found to notify`);
+
+        // Envoyer notification WhatsApp aux parents (asynchrone, sans bloquer la requête HTTP)
+        void (async () => {
+          try {
+            const studentIds = students.map(s => s.id);
+
+            const { data: classInfoWa } = await supabaseAdmin
+              .from('classes')
+              .select('name, school_id')
+              .eq('id', targetClassId)
+              .single();
+
+            const schoolId = classInfoWa?.school_id || req.user.school_id;
+            const sessionApiKey = await getSchoolSessionApiKey(schoolId);
+
+            console.log(`[Documents][${requestId}] WhatsApp session check`, {
+              classId: targetClassId,
+              schoolId,
+              hasSessionApiKey: Boolean(sessionApiKey)
+            });
+
+            if (!sessionApiKey) {
+              console.warn(`[Documents][${requestId}] WhatsApp session non connectée, notifications WhatsApp ignorées`);
+              return;
+            }
+
+            // Récupérer les parents avec leur numéro
+            const { data: parentLinks } = await supabaseAdmin
+              .from('parent_students')
+              .select('profiles!parent_id(first_name, phone)')
+              .in('student_id', studentIds);
+
+            if (parentLinks && parentLinks.length > 0) {
+              const documentTypeLabel = {
+                'cours': 'Cours',
+                'exercice': 'Exercice',
+                'correction': 'Correction',
+                'support': 'Support pédagogique',
+                'devoir': 'Devoir maison',
+                'rattrapage': 'Rattrapage',
+                'approfondissement': 'Approfondissement',
+                'autre': 'Document'
+              }[documentType] || 'Document';
+
+              const messageCaption = `📄 *Nouveau document pédagogique*\n\n` +
+                `Classe: *${classInfoWa?.name || 'N/A'}*\n` +
+                `Professeur: ${teacherName}\n` +
+                (subjectName ? `Matière: ${subjectName}\n` : '') +
+                `Type: ${documentTypeLabel}\n\n` +
+                `📝 *${title}*\n` +
+                (description ? `${description}\n\n` : '\n') +
+                `━━━━━━━━━━━━━━━\n� L'équipe pédagogique`;
+
+              const sentPhones = new Set();
+
+              // Importer la fonction d'envoi de fichier
+              const { sendWhatsAppFile } = await import('../services/whatsappChatbot.js');
+
+              for (const link of parentLinks) {
+                const phone = link.profiles?.phone;
+                if (!phone || sentPhones.has(phone)) continue;
+                sentPhones.add(phone);
+                const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
+
+                // Envoyer le fichier avec la légende
+                const fileSent = await sendWhatsAppFile(e164Phone, req.file.path, messageCaption, schoolId);
+
+                console.log(`[Documents][${requestId}] Notification document parent`, {
+                  classId: targetClassId,
+                  phone: e164Phone,
+                  fileSent,
+                  fileName: req.file.originalname
+                });
+
+                // Attendre un peu entre chaque envoi pour éviter le rate limiting
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+            } else {
+              console.log(`[Documents][${requestId}] Aucun parent trouvé pour les élèves de la classe`);
+            }
+          } catch (whatsappError) {
+            console.error(`[Documents][${requestId}] Erreur notification WhatsApp:`, whatsappError);
+          }
+        })();
+      } else {
+        console.log(`[Documents][${requestId}] No students found to notify`, { classId: targetClassId });
+      }
     }
 
-    console.log(`[Documents][${requestId}] Upload success, response 201`);
-    res.status(201).json(data);
+    console.log(`[Documents][${requestId}] Upload success, response 201`, {
+      documentsCreated: createdDocuments.length,
+      classCount: targetClassIds.length
+    });
+    res.status(201).json({
+      documents: createdDocuments,
+      summary: {
+        classes: targetClassIds.length,
+        created: createdDocuments.length
+      }
+    });
   } catch (error) {
     console.error('[Documents] Erreur upload route:', {
       message: error?.message,

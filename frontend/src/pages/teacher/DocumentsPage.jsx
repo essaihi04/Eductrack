@@ -37,7 +37,7 @@ const DocumentsPage = () => {
   
   // Formulaire
   const [formData, setFormData] = useState({
-    classId: '',
+    classIds: [],
     subjectId: '',
     controlId: '',
     title: '',
@@ -45,6 +45,27 @@ const DocumentsPage = () => {
     description: '',
     file: null
   });
+
+  const toggleClassSelection = (classId) => {
+    setFormData((prev) => {
+      const alreadySelected = prev.classIds.includes(classId);
+      const nextClassIds = alreadySelected
+        ? prev.classIds.filter((id) => id !== classId)
+        : [...prev.classIds, classId];
+
+      if (nextClassIds.length === 1) {
+        loadControls(nextClassIds[0]);
+      } else {
+        setControls([]);
+      }
+
+      return {
+        ...prev,
+        classIds: nextClassIds,
+        controlId: nextClassIds.length === 1 ? prev.controlId : ''
+      };
+    });
+  };
 
   // Charger les classes du professeur
   useEffect(() => {
@@ -180,7 +201,7 @@ const DocumentsPage = () => {
     e.preventDefault();
     
     // Validation des champs obligatoires
-    if (!formData.classId || !formData.title || !formData.documentType || !formData.file) {
+    if (!formData.classIds?.length || !formData.title || !formData.documentType || !formData.file) {
       alert('❌ Veuillez remplir tous les champs obligatoires');
       return;
     }
@@ -204,7 +225,10 @@ const DocumentsPage = () => {
       }
       
       const formDataToSend = new FormData();
-      formDataToSend.append('classId', formData.classId);
+      formDataToSend.append('classIds', JSON.stringify(formData.classIds));
+      if (formData.classIds.length === 1) {
+        formDataToSend.append('classId', formData.classIds[0]);
+      }
       formDataToSend.append('subjectId', formData.subjectId || '');
       formDataToSend.append('controlId', formData.controlId || '');
       formDataToSend.append('title', formData.title);
@@ -216,7 +240,7 @@ const DocumentsPage = () => {
         requestId,
         uploadUrl,
         hasToken: Boolean(token),
-        classId: formData.classId,
+        classIds: formData.classIds,
         subjectId: formData.subjectId,
         controlId: formData.controlId,
         titleLength: formData.title?.length || 0,
@@ -243,7 +267,7 @@ const DocumentsPage = () => {
         alert('✅ Document envoyé avec succès !');
         setShowForm(false);
         setFormData({
-          classId: '',
+          classIds: [],
           subjectId: '',
           controlId: '',
           title: '',
@@ -458,22 +482,24 @@ const DocumentsPage = () => {
             {/* Classe (obligatoire) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Classe <span className="text-red-500">*</span>
+                Classes destinataires <span className="text-red-500">*</span>
               </label>
-              <select
-                value={formData.classId}
-                onChange={(e) => {
-                  setFormData({ ...formData, classId: e.target.value });
-                  loadControls(e.target.value);
-                }}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">Sélectionner une classe</option>
+              <div className="border border-gray-300 rounded-lg p-3 max-h-52 overflow-y-auto space-y-2">
                 {classes.map((cls) => (
-                  <option key={cls.id} value={cls.id}>{cls.name}</option>
+                  <label key={cls.id} className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={formData.classIds.includes(cls.id)}
+                      onChange={() => toggleClassSelection(cls.id)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>{cls.name}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {formData.classIds.length} classe(s) sélectionnée(s)
+              </p>
             </div>
 
             {/* Type de contenu (obligatoire) */}
@@ -554,7 +580,7 @@ const DocumentsPage = () => {
             </div>
 
             {/* Lier à un contrôle (optionnel) */}
-            {formData.classId && controls.length > 0 && (
+            {formData.classIds.length === 1 && controls.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Lier à un contrôle (optionnel)
