@@ -176,36 +176,30 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     if (!needsAIResponse.respond) {
       console.log('[Chatbot] Message ne nécessite pas de réponse IA:', needsAIResponse.reason);
       const isArabicMsg = /[\u0600-\u06FF]/.test(messageText);
-      let simpleResponse = '';
       
       if (needsAIResponse.reason === 'greeting') {
-        const menuMessage = await buildWelcomeMenu(parentInfo, normalizedPhone);
-        await sendWhatsAppResponse(normalizedPhone, menuMessage, parentInfo.school_id);
+        // Salutations → menu seulement avec cooldown (pas de spam)
+        if (canSendGreetingReply(normalizedPhone)) {
+          markGreetingReply(normalizedPhone);
+          const menuMessage = await buildWelcomeMenu(parentInfo, normalizedPhone);
+          await sendWhatsAppResponse(normalizedPhone, menuMessage, parentInfo.school_id);
+        } else {
+          console.log('[Chatbot] Greeting cooldown actif, silence pour:', normalizedPhone);
+        }
       } else if (needsAIResponse.reason === 'thanks') {
-        simpleResponse = isArabicMsg
+        const simpleResponse = isArabicMsg
           ? `العفو 🙏 نحن هنا لمساعدتك دائماً`
           : `De rien 🙏 Nous sommes toujours là pour vous aider`;
         await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
-      } else if (needsAIResponse.reason === 'simple_response') {
-        simpleResponse = isArabicMsg
-          ? `✅ تم. أرسل سؤالك الدراسي مباشرة (نقط، حضور، واجبات، سلوك).`
-          : `✅ D'accord. Envoyez directement votre question scolaire (notes, présence, devoirs, comportement).`;
-        await sendWhatsAppResponse(normalizedPhone, simpleResponse, parentInfo.school_id);
-      } else if (needsAIResponse.reason === 'off_topic') {
-        await sendWhatsAppResponse(
-          normalizedPhone,
-          buildEducationalRedirectMessage(parentInfo, isArabicMsg, 'off_topic'),
-          parentInfo.school_id
-        );
+      } else if (needsAIResponse.reason === 'off_topic_silent' || needsAIResponse.reason === 'off_topic') {
+        // Hors-sujet → SILENCE TOTAL (pas de menu, pas de réponse)
+        console.log('[Chatbot] Message hors-sujet ignoré silencieusement:', messageText.substring(0, 50));
       } else if (needsAIResponse.reason === 'sensitive_offdomain') {
-        await sendWhatsAppResponse(
-          normalizedPhone,
-          buildEducationalRedirectMessage(parentInfo, isArabicMsg, 'sensitive'),
-          parentInfo.school_id
-        );
-      } else if (needsAIResponse.reason === 'short_accidental') {
-        // Message trop court/accidentel - ignorer silencieusement
-        console.log('[Chatbot] Message accidentel ignoré:', messageText);
+        // Sensible → SILENCE (pas de menu spam)
+        console.log('[Chatbot] Message sensible/hors domaine ignoré:', messageText.substring(0, 50));
+      } else if (needsAIResponse.reason === 'simple_response' || needsAIResponse.reason === 'short_accidental') {
+        // Messages simples/accidentels → SILENCE
+        console.log('[Chatbot] Message simple/accidentel ignoré:', messageText.substring(0, 30));
       }
       
       await supabaseAdmin
@@ -304,15 +298,19 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
         }
 
         if (response && response.trim() === '__OFF_TOPIC__') {
-          response = buildEducationalRedirectMessage(parentInfo, /[\u0600-\u06FF]/.test(messageText), 'off_topic');
+          // IA détecte hors-sujet → réponse courte sans menu spam
+          const isAr = /[\u0600-\u06FF]/.test(messageText);
+          response = isAr
+            ? `🎓 هذا البوت مخصص للمتابعة الدراسية فقط.\n💬 أرسل سؤالك حول: النقط، الحضور، الواجبات، السلوك.`
+            : `🎓 Ce bot est réservé au suivi scolaire.\n💬 Posez votre question sur: notes, présence, devoirs, comportement.`;
         }
       }
     }
     
-    // Ajouter le menu de questions rapides seulement toutes les 5 interactions
+    // Ajouter le menu de questions rapides seulement à la 1ère interaction ou toutes les 10
     const isArabic = /[\u0600-\u06FF]/.test(messageText);
     const messageCount = conversationHistory.length + 1;
-    const showMenu = messageCount <= 1 || messageCount % 5 === 0;
+    const showMenu = messageCount <= 1 || messageCount % 10 === 0;
     const quickMenu = showMenu
       ? (isArabic
           ? `\n\n╔═══════════════════════╗\n📋 *أسئلة سريعة*\n╚═══════════════════════╝\n\n📅 أ. كيف حاله اليوم؟\n📚 ب. ما الدروس المدروسة؟\n✍️ ج. هل هناك واجبات؟\n📝 د. ما آخر النقط؟\n🎯 ه. كيف سلوكه؟\n📆 و. برنامج الأسبوع؟\n\n━━━━━━━━━━━━━━━\n💬 أو اكتب سؤالك مباشرة`
@@ -394,6 +392,27 @@ function buildEducationalRedirectMessage(parentInfo, isArabic = false, reason = 
   return `${intro}${menu}\n\n━━━━━━━━━━━━━━━\n👥 *${parentInfo.school_name}*`;
 }
 
+// ═══════════════════════════════════════════════════════
+// COOLDOWN / ANTI-SPAM : éviter de spammer le même menu
+// ═══════════════════════════════════════════════════════
+const _lastOffTopicReply = new Map(); // phone → timestamp
+const _lastGreetingReply = new Map(); // phone → timestamp
+
+function canSendOffTopicReply(phone) {
+  const last = _lastOffTopicReply.get(phone) || 0;
+  return Date.now() - last > 30 * 60 * 1000; // 30 min cooldown
+}
+function markOffTopicReply(phone) {
+  _lastOffTopicReply.set(phone, Date.now());
+}
+function canSendGreetingReply(phone) {
+  const last = _lastGreetingReply.get(phone) || 0;
+  return Date.now() - last > 10 * 60 * 1000; // 10 min cooldown
+}
+function markGreetingReply(phone) {
+  _lastGreetingReply.set(phone, Date.now());
+}
+
 // Vérifier si le message nécessite une réponse IA
 async function shouldRespondWithAI(messageText, phone, parentId) {
   const lowerText = messageText.toLowerCase().trim();
@@ -406,11 +425,17 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
     'ahlan', 'mrhba', 'sbah'
   ];
   const thanks = ['شكرا', 'merci', 'thanks', 'thank you', 'بارك الله فيك', 'shukran', 'chokran', 'barak'];
-  const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes', 'waw', 'mzyn', 'mlih'];
+  const simple = ['ok', 'okay', 'd\'accord', 'حسنا', 'نعم', 'oui', 'yes', 'waw', 'mzyn', 'mlih', 'hmd',
+    'llh', 'inchallah', 'hamdoullah', 'hamdulah', 'tbarkllah', 'alhamdoulillah', 'الحمد لله'];
 
   // Autoriser les lettres/menu rapides
   if (/^([a-fأبجدهو]|\d)$/.test(lowerText)) {
     return { respond: true, reason: 'menu_letter' };
+  }
+
+  // Messages accidentels très courts (1-3 chars, probablement envoi accidentel)
+  if (lowerText.length <= 3 && !/^[a-fأبجدهو]$/.test(lowerText)) {
+    return { respond: false, reason: 'short_accidental' };
   }
 
   // Bloquer demandes sensibles hors périmètre scolaire
@@ -424,27 +449,50 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
     return { respond: false, reason: 'sensitive_offdomain' };
   }
 
+  // ═══ DÉTECTION HORS-SUJET AVANCÉE ═══
+  // Listes de courses / commissions / nourriture
+  const groceryPatterns = [
+    /\b(hlib|lma|tomate|khyar|zitoun|thon|fromage|byd|danoune|mayonaise|frmage|papier|limoune|khossa|maticha|farina|sucre|lait|pain|poulet|viande|poisson|riz|huile|beurre|sel|flfla|batata|basla|dinde|kiche|mais)\b/i,
+    /\b(acheter|achat|lista|magasin|marché|souk|hanout|supermarché|epicerie)\b/i,
+    /\b(hak|sir|jib|jibli|3tini|atini|bghit|khssni|dir|diri)\b.*\b(flous|drhm|euro|sous|cash)\b/i
+  ];
+  if (groceryPatterns.some(p => p.test(lowerText))) {
+    return { respond: false, reason: 'off_topic_silent' };
+  }
+
+  // Conversations privées / personnelles / darija courante non scolaire
+  const personalPatterns = [
+    /\b(dodat|mkhrjinha|mni|wsslna|bikhir|rah|ghadi|jibt|jbti|jat|ja|mchit|mchiti|rj3t|khrjt)\b/i,
+    /\b(pipo|habibi|7bibi|azizi|mon amour|my love|chéri|cherie|mama|baba|yemma|immi)\b/i,
+    /\b(tajine|couscous|pastilla|harira|msemen|rghaif|atay|9hwa|cafe|pizza|sandwich|burger)\b/i,
+    /\b(cv|nta|nti|wach\s+nti|kifach|labas|bikhir|jou3|3ya|n3as|fay9|fiq)\b/i,
+    /\b(sbar|ghsbar|yt9bl|ndiru|ndirou|wakha|yallah|hia|hiya|daba|daba daba)\b/i,
+    /\b(madra|fatro|amine|produit|smito|winx)\b/i
+  ];
+  if (personalPatterns.some(p => p.test(lowerText)) && lowerText.length < 80) {
+    return { respond: false, reason: 'off_topic_silent' };
+  }
+
   // Scope strictement pédagogique/éducatif
   const educationalKeywords = [
-    'élève', 'enfant', 'fils', 'fille', 'student', 'parent',
-    'note', 'notes', 'نقطة', 'نقط', 'moyenne', 'معدل',
-    'absence', 'absent', 'présence', 'presence', 'حضور', 'غياب', 'retard',
-    'devoir', 'devoirs', 'واجب', 'واجبات', 'rendu',
-    'cours', 'leçon', 'leçons', 'lesson', 'درس', 'دروس', 'programme', 'semaine',
-    'comportement', 'discipline', 'participation', 'سلوك',
-    'classe', 'matière', 'matiere', 'svt', 'math', 'physique',
-    'comment va', 'kif', 'كيف', 'chno', 'شنو'
+    'élève', 'enfant', 'fils', 'fille', 'student', 'parent', 'wldi', 'ولدي', 'بنتي',
+    'note', 'notes', 'نقطة', 'نقط', 'moyenne', 'معدل', 'nqt', 'no9ta',
+    'absence', 'absent', 'présence', 'presence', 'حضور', 'غياب', 'retard', 'ghyab',
+    'devoir', 'devoirs', 'واجب', 'واجبات', 'rendu', 'wajib',
+    'cours', 'leçon', 'leçons', 'lesson', 'درس', 'دروس', 'programme', 'semaine', 'drs', 'doross',
+    'comportement', 'discipline', 'participation', 'سلوك', 'solouk',
+    'classe', 'matière', 'matiere', 'svt', 'math', 'physique', '9ism', 'qism', 'القسم',
+    'comment va', 'kif dayir', 'كيف', 'chno', 'شنو', 'kidayr', 'kidayra',
+    'examen', 'contrôle', 'controle', 'imti7an', 'امتحان', 'فرض',
+    'école', 'ecole', 'madrasa', 'مدرسة', 'lycée', 'lycee', 'collège', 'college',
+    'professeur', 'prof', 'أستاذ', 'ostad', 'enseignant',
+    'bulletin', 'résultat', 'نتيجة', 'natija', 'bilan', 'ملخص'
   ];
 
   const hasEducationalSignal = educationalKeywords.some((kw) => lowerText.includes(kw));
-  
-  // Messages accidentels très courts (1-2 chars, probablement envoi accidentel)
-  if (lowerText.length <= 2 && !/^[a-fأبجدهو]$/.test(lowerText)) {
-    return { respond: false, reason: 'short_accidental' };
-  }
 
   // Vérifier les salutations simples (mais pas "hier" qui contient "hi")
-  if (greetings.some(g => lowerText.includes(g)) && lowerText.length < 20 && !lowerText.includes('hier') && !lowerText.includes('leçon') && !lowerText.includes('cours')) {
+  if (greetings.some(g => lowerText.includes(g)) && lowerText.length < 25 && !lowerText.includes('hier') && !lowerText.includes('leçon') && !lowerText.includes('cours') && !hasEducationalSignal) {
     return { respond: false, reason: 'greeting' };
   }
   
@@ -453,17 +501,14 @@ async function shouldRespondWithAI(messageText, phone, parentId) {
     return { respond: false, reason: 'thanks' };
   }
   
-  // Vérifier les réponses simples
-  if (simple.some(s => lowerText === s)) {
+  // Vérifier les réponses simples (ok, oui, hamdoullah, etc.)
+  if (simple.some(s => lowerText === s || lowerText.startsWith(s + ' ') || lowerText.endsWith(' ' + s))) {
     return { respond: false, reason: 'simple_response' };
   }
 
-  const looksLikeChitChat = /\b(cv|salam|mzyan|bikhir|nta|nti|jou3|tajine|jama3|pipo)\b/i.test(lowerText);
-  if (!hasEducationalSignal && lowerText.length >= 3 && looksLikeChitChat) {
-    return { respond: false, reason: 'off_topic' };
-  }
+  // Si pas de signal éducatif et message >= 4 chars → hors-sujet silencieux
   if (!hasEducationalSignal && lowerText.length >= 4) {
-    return { respond: false, reason: 'off_topic' };
+    return { respond: false, reason: 'off_topic_silent' };
   }
   
   return { respond: true, reason: 'needs_ai' };
@@ -2193,30 +2238,36 @@ async function generateAIResponse(question, studentInfo, studentData, parentInfo
     const summary = agentDecision?.summary || '';
 
     // Construire le prompt système humain et naturel
-    const systemPrompt = `Tu es Nour, assistant pédagogique strict de ${parentInfo.school_name}.
-Tu réponds UNIQUEMENT dans le périmètre scolaire/éducatif de l'élève.
+    const systemPrompt = `Tu es Nour, assistant pédagogique intelligent de ${parentInfo.school_name}.
+Tu aides les parents à suivre la scolarité de leurs enfants avec des réponses riches et personnalisées.
 
 🎯 Ce que le parent veut: ${summary || question}
 📌 Domaines concernés: ${intents.join(', ') || 'général'}
 
 RÈGLES DE RÉPONSE (OBLIGATOIRES):
-1. Langue: réponds OBLIGATOIREMENT en ${preferredLanguage}. Ne change PAS de langue même si le dossier est en français.
-2. NOM DE L'ÉLÈVE: utilise EXACTEMENT le prénom "${studentInfo.first_name}" tel quel. Ne traduis PAS, ne convertis PAS en majuscules, ne latinise PAS les noms arabes.
-3. Format STRICT (court et structuré, 3 blocs max):
-   📌 *Réponse* (1-2 lignes max)
-   📊 *Données* (2-4 puces max avec chiffres réels)
-   ➡️ *Action* (1 recommandation concrète ou une question de précision)
-4. Longueur: 5 à 8 lignes max. Pas de paragraphe long.
-5. Données: utilise uniquement les données du dossier fourni.
-6. Jamais de formule vide en début: pas de "Bien sûr!", "Voici les informations", "بالطبع".
-7. Si tu donnes des conseils: max 2-3 conseils concrets, adaptés aux vraies données de l'élève.
-8. Si une info manque dans le dossier: dis-le simplement sans t'excuser.
-9. 1-3 emojis seulement, placés intelligemment.
-10. N'invente JAMAIS de données absentes du dossier. Un booléen 'téléphone en classe' = signalement, pas 'il a quitté la séance'.
-11. RÈGLE ABSOLUE: Ne partage JAMAIS de données (notes, absences, comportement) que le parent n'a PAS demandées explicitement. Si la question est vague ou générale, demande ce qu'il veut savoir. Ne commence pas un résumé spontané.
-12. Si le parent mentionne une MATIÈRE (ex: 'SVT', 'maths') mais que le dossier ne contient AUCUNE donnée pour cette matière, dis simplement 'Pas de données disponibles pour [matière]'. N'invente PAS de leçons, notes ou comportements.
-13. Si la question est HORS domaine pédagogique (banque, achats, code carte, vie personnelle, etc.), réponds EXACTEMENT: __OFF_TOPIC__
-14. Termine par une question courte de suivi si pertinent.
+1. LANGUE: réponds en ${preferredLanguage}. Ne change PAS de langue même si le dossier est en français.
+2. NOM: utilise EXACTEMENT "${studentInfo.first_name}" tel quel. Ne traduis/modifie PAS.
+3. FORMAT RICHE (adapté WhatsApp):
+   - Utilise *gras* pour les données importantes
+   - Utilise des emojis pertinents (📊📈✅❌⚠️📚🎯💡)
+   - Structure avec des puces et sections claires
+   - Si tu cites des notes: ajoute une appréciation (🟢 Excellent / 🟡 Bien / 🟠 Moyen / 🔴 Faible)
+   - Si tu parles de présence: donne le % et une appréciation
+4. LONGUEUR: 5 à 12 lignes. Assez pour être utile, pas trop long.
+5. DONNÉES: utilise UNIQUEMENT les données du dossier fourni. N'invente JAMAIS.
+6. PAS de formule vide en début ("Bien sûr!", "Voici", "بالطبع").
+7. CONSEILS: si demandés, 2-3 conseils CONCRETS basés sur les vrais problèmes de l'élève.
+8. DONNÉES MANQUANTES: dis-le simplement sans t'excuser.
+9. Un booléen 'téléphone en classe' = signalement d'utilisation, pas 'il a quitté la séance'.
+10. Ne partage PAS de données non demandées. Question vague → demande ce qu'il veut savoir.
+11. Matière mentionnée sans données → "Pas de données pour [matière]". N'invente PAS.
+12. Question HORS domaine scolaire → réponds EXACTEMENT: __OFF_TOPIC__
+13. Termine par une question de suivi courte et naturelle quand c'est pertinent.
+14. Si le parent demande un résumé/bilan global → fournis une vue d'ensemble structurée avec:
+    📊 Résumé académique (moyenne, tendance)
+    ✅ Points forts
+    ⚠️ Points à améliorer
+    💡 Recommandation prioritaire
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DOSSIER ${studentInfo.first_name} ${studentInfo.last_name || ''}:
@@ -2240,8 +2291,8 @@ ${context}
     const result = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages,
-      temperature: 0.2,
-      max_tokens: 320
+      temperature: 0.25,
+      max_tokens: 500
     });
     console.log('[Chatbot] Réponse DeepSeek reçue');
 
@@ -2280,7 +2331,7 @@ function buildTargetedContext(studentInfo, studentData, agentDecision) {
       const lessons = todayTracking.map(t => t.sessions?.topic).filter(Boolean);
 
       context += `AUJOURD'HUI (${today}):\n`;
-      context += `- Présence: ${present}/${total} séances\n`;
+      context += `- Présence: ${present}/${total} séances (${Math.round(present/total*100)}%)\n`;
       if (subjects.length) context += `- Matières: ${subjects.join(', ')}\n`;
       if (lessons.length) context += `- Leçons: ${lessons.join(', ')}\n`;
       if (incidents.length) context += `- ⚠️ Incidents: ${incidents.join(', ')}\n`;
@@ -2289,19 +2340,34 @@ function buildTargetedContext(studentInfo, studentData, agentDecision) {
         const avg = Math.round(partScores.reduce((a, b) => a + b, 0) / partScores.length / 5 * 100);
         context += `- Participation: ${avg}%\n`;
       }
+      // Discipline du jour
+      const discScores = todayTracking.map(t => ({ excellent: 5, good: 4, average: 3, weak: 2 })[t.discipline] || 0).filter(s => s > 0);
+      if (discScores.length) {
+        const davg = Math.round(discScores.reduce((a, b) => a + b, 0) / discScores.length / 5 * 100);
+        context += `- Discipline: ${davg}%\n`;
+      }
       context += `\n`;
     } else {
       context += `AUJOURD'HUI: Pas encore de données enregistrées.\n\n`;
     }
 
-    // Présence 7 jours
+    // Présence globale (3 mois)
+    const allTracking = studentData.allTracking || [];
     const tracking7 = studentData.tracking || [];
+    if (allTracking.length > 0) {
+      const pAll = allTracking.filter(t => t.presence === 'present').length;
+      const aAll = allTracking.filter(t => t.presence === 'absent').length;
+      const lAll = allTracking.filter(t => t.presence === 'late').length;
+      const pctAll = Math.round(pAll / allTracking.length * 100);
+      context += `PRÉSENCE GLOBALE (3 mois): ${pAll}/${allTracking.length} (${pctAll}%) | Absences: ${aAll} | Retards: ${lAll}\n`;
+    }
     if (tracking7.length > 0) {
       const p7 = tracking7.filter(t => t.presence === 'present').length;
       const a7 = tracking7.filter(t => t.presence === 'absent').length;
       const l7 = tracking7.filter(t => t.presence === 'late').length;
-      context += `PRÉSENCE (7 jours): ${p7}/${tracking7.length} présent${a7 > 0 ? `, ${a7} absent(s)` : ''}${l7 > 0 ? `, ${l7} retard(s)` : ''}\n\n`;
+      context += `PRÉSENCE (7 jours): ${p7}/${tracking7.length} présent${a7 > 0 ? `, ${a7} absent(s)` : ''}${l7 > 0 ? `, ${l7} retard(s)` : ''}\n`;
     }
+    context += `\n`;
   }
 
   // Notes
@@ -2311,7 +2377,7 @@ function buildTargetedContext(studentInfo, studentData, agentDecision) {
       const allSessions = studentData.allSessions || [];
       const subjectPool = [...new Set(allSessions.map(s => s?.subjects?.name).filter(Boolean))];
       const subjectMap = {};
-      grades.slice(0, 10).forEach(g => {
+      grades.slice(0, 15).forEach(g => {
         const cn = String(g?.controls_plan?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
         let sub = subjectPool.find(s => { const ns = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); return ns && (cn.includes(ns) || ns.includes(cn)); });
         if (!sub && g?.controls_plan?.date) {
@@ -2323,26 +2389,60 @@ function buildTargetedContext(studentInfo, studentData, agentDecision) {
         if (!subjectMap[key]) subjectMap[key] = [];
         subjectMap[key].push(Number(g.note) || 0);
       });
-      context += `NOTES PAR MATIÈRE:\n`;
-      Object.entries(subjectMap).forEach(([sub, notes]) => {
+      
+      // Moyenne générale de l'élève
+      const allNotes = grades.map(g => Number(g.note) || 0);
+      const overallAvg = (allNotes.reduce((a, b) => a + b, 0) / allNotes.length).toFixed(1);
+      context += `MOYENNE GÉNÉRALE: ${overallAvg}/20 (${grades.length} contrôles)\n`;
+      
+      // Comparaison avec la classe si disponible
+      const classGrades = studentData.classGrades || [];
+      if (classGrades.length > 0) {
+        const classAvg = (classGrades.reduce((s, g) => s + (Number(g.note) || 0), 0) / classGrades.length).toFixed(1);
+        const diff = (Number(overallAvg) - Number(classAvg)).toFixed(1);
+        const arrow = diff > 0 ? '📈 au-dessus' : diff < 0 ? '📉 en-dessous' : '➡️ égal';
+        context += `MOYENNE CLASSE: ${classAvg}/20 → Élève est ${arrow} de la moyenne classe (${diff > 0 ? '+' : ''}${diff})\n`;
+      }
+      
+      context += `\nNOTES PAR MATIÈRE:\n`;
+      Object.entries(subjectMap).sort((a, b) => {
+        const avgA = a[1].reduce((s, n) => s + n, 0) / a[1].length;
+        const avgB = b[1].reduce((s, n) => s + n, 0) / b[1].length;
+        return avgA - avgB; // Plus faible d'abord
+      }).forEach(([sub, notes]) => {
         const avg = (notes.reduce((a, b) => a + b, 0) / notes.length).toFixed(1);
-        const icon = Number(avg) >= 14 ? '✅' : Number(avg) >= 10 ? '🔶' : '❌';
+        const icon = Number(avg) >= 14 ? '🟢' : Number(avg) >= 10 ? '🟡' : '🔴';
         context += `- ${icon} ${sub}: ${avg}/20 (${notes.length} contrôle${notes.length > 1 ? 's' : ''})\n`;
       });
       context += `\n`;
     }
   }
 
+  // Absences détaillées
+  const absences = studentData.absences || [];
+  if (absences.length > 0 && (d.needsToday || d.intents?.includes('absences'))) {
+    context += `ABSENCES (${absences.length} total):\n`;
+    absences.slice(0, 5).forEach(abs => {
+      context += `- ${abs.sessions?.date || 'N/A'}: ${abs.sessions?.subjects?.name || 'N/A'}\n`;
+    });
+    if (absences.length > 5) context += `- ... et ${absences.length - 5} autres\n`;
+    context += `\n`;
+  }
+
   // Devoirs
   if (d.needsHomework) {
     const hw = studentData.homework || [];
     if (hw.length > 0) {
-      const done = hw.filter(h => h.status === 'submitted').length;
-      const pending = hw.filter(h => h.status !== 'submitted').slice(0, 3);
+      const hwWithStatus = hw.map(h => {
+        const submission = h.homework_submissions?.find(sub => sub.student_id === studentInfo.id);
+        return { ...h, studentStatus: submission?.status || 'pending' };
+      });
+      const done = hwWithStatus.filter(h => h.studentStatus === 'submitted').length;
+      const pending = hwWithStatus.filter(h => h.studentStatus !== 'submitted').slice(0, 3);
       context += `DEVOIRS: ${done}/${hw.length} rendus\n`;
       if (pending.length) {
         pending.forEach(h => {
-          context += `  - Non rendu: ${h.homework?.subjects?.name || 'N/A'} - "${h.homework?.title || 'N/A'}" (échéance: ${h.homework?.due_date || 'N/A'})\n`;
+          context += `  - Non rendu: ${h.title || 'N/A'} (échéance: ${h.due_date || 'N/A'})\n`;
         });
       }
       context += `\n`;
@@ -2355,16 +2455,21 @@ function buildTargetedContext(studentInfo, studentData, agentDecision) {
     if (allTracking.length > 0) {
       const phoneUse = allTracking.filter(t => t.phone_use).length;
       const sleeping = allTracking.filter(t => t.sleeping).length;
+      const lateCount = allTracking.filter(t => t.presence === 'late').length;
       const cahier = Math.round(allTracking.filter(t => t.cahier_present).length / allTracking.length * 100);
       const partValues = allTracking.map(t => ({ excellent: 5, good: 4, average: 3, weak: 2 })[t.participation] || 0).filter(s => s > 0);
       const partAvg = partValues.length ? Math.round(partValues.reduce((a, b) => a + b, 0) / partValues.length / 5 * 100) : null;
+      const discValues = allTracking.map(t => ({ excellent: 5, good: 4, average: 3, weak: 2 })[t.discipline] || 0).filter(s => s > 0);
+      const discAvg = discValues.length ? Math.round(discValues.reduce((a, b) => a + b, 0) / discValues.length / 5 * 100) : null;
 
       context += `COMPORTEMENT (${allTracking.length} séances observées):\n`;
-      if (partAvg !== null) context += `- Participation moyenne: ${partAvg}%\n`;
+      if (partAvg !== null) context += `- Participation: ${partAvg}%\n`;
+      if (discAvg !== null) context += `- Discipline: ${discAvg}%\n`;
       context += `- Cahier présent: ${cahier}%\n`;
       if (phoneUse > 0) context += `- ⚠️ Téléphone en classe: ${phoneUse} fois\n`;
       if (sleeping > 0) context += `- ⚠️ Somnolence: ${sleeping} fois\n`;
-      if (phoneUse === 0 && sleeping === 0) context += `- Aucun incident signalé ✅\n`;
+      if (lateCount > 0) context += `- ⏰ Retards: ${lateCount} fois\n`;
+      if (phoneUse === 0 && sleeping === 0 && lateCount === 0) context += `- ✅ Aucun incident signalé\n`;
       context += `\n`;
     }
   }
