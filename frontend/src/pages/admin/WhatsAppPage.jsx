@@ -48,6 +48,15 @@ const WhatsAppPage = () => {
   const [detailMessage, setDetailMessage] = useState(null);
   const [availableLevels, setAvailableLevels] = useState([]);
 
+  // Parent selection
+  const [parentSelectionMode, setParentSelectionMode] = useState('all'); // 'all' | 'select'
+  const [parentsList, setParentsList] = useState([]);
+  const [selectedParents, setSelectedParents] = useState([]);
+  const [loadingParents, setLoadingParents] = useState(false);
+  const [parentSearch, setParentSearch] = useState('');
+  const [parentDropdownOpen, setParentDropdownOpen] = useState(false);
+  const parentDropdownRef = useRef(null);
+
   // ===================== TAB: TEACHERS =====================
   const [teachers, setTeachers] = useState([]);
   const [selectedTeachers, setSelectedTeachers] = useState([]);
@@ -141,10 +150,42 @@ const WhatsAppPage = () => {
       if (classDropdownRef.current && !classDropdownRef.current.contains(e.target)) {
         setClassDropdownOpen(false);
       }
+      if (parentDropdownRef.current && !parentDropdownRef.current.contains(e.target)) {
+        setParentDropdownOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  // Fetch parents list when classes change and mode is 'select'
+  const fetchParentsList = useCallback(async () => {
+    if (parentSelectionMode !== 'select' || selectedClasses.length === 0) {
+      setParentsList([]);
+      return;
+    }
+    setLoadingParents(true);
+    try {
+      const token = await getAuthToken();
+      const params = new URLSearchParams();
+      params.append('class_ids', selectedClasses.join(','));
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients-list?${params}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setParentsList(data.parents || []);
+      // By default select all parents
+      setSelectedParents((data.parents || []).map(p => p.phone_whatsapp));
+    } catch (error) {
+      console.error('Erreur chargement parents:', error);
+    } finally {
+      setLoadingParents(false);
+    }
+  }, [apiUrl, selectedClasses, parentSelectionMode]);
+
+  useEffect(() => {
+    fetchParentsList();
+  }, [fetchParentsList]);
 
   // Load classes and teachers on mount
   useEffect(() => {
@@ -322,11 +363,13 @@ const WhatsAppPage = () => {
     } catch (error) { setUploading(false); throw error; }
   };
 
+  const effectiveRecipientCount = parentSelectionMode === 'select' ? selectedParents.length : recipientCount;
+
   const handleSend = async () => {
     if (!messageText && !mediaFile) return;
-    if (recipientCount === 0) return;
+    if (effectiveRecipientCount === 0) return;
     setSending(true);
-    setSendProgress({ total: recipientCount, sent: 0, failed: 0, status: 'sending' });
+    setSendProgress({ total: effectiveRecipientCount, sent: 0, failed: 0, status: 'sending' });
     try {
       let uploadedUrl = mediaUrl;
       if (mediaFile && !mediaUrl) uploadedUrl = await uploadMedia();
@@ -335,6 +378,10 @@ const WhatsAppPage = () => {
       if (selectedClasses.length > 0 && selectedClasses.length < classes.length) filter.class_ids = selectedClasses;
       if (schoolTypeFilter) filter.school_type = schoolTypeFilter;
       if (levelFilter) filter.level = levelFilter;
+      // If specific parents selected, pass their phones
+      if (parentSelectionMode === 'select' && selectedParents.length > 0) {
+        filter.parent_phones = selectedParents;
+      }
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -1148,11 +1195,102 @@ const WhatsAppPage = () => {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                  <CheckSquare className="w-4 h-4 text-green-600" />
-                  <span className="text-sm font-medium text-gray-700">
-                    {loadingRecipients ? 'Calcul...' : `${recipientCount} parent(s) avec numéro WhatsApp`}
-                  </span>
+                {/* Mode de sélection parents */}
+                <div className="pt-3 border-t border-gray-100 space-y-3">
+                  <div className="flex items-center gap-4">
+                    <span className="text-xs font-semibold text-gray-600">Envoyer à :</span>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name="parentMode" value="all" checked={parentSelectionMode === 'all'}
+                        onChange={() => { setParentSelectionMode('all'); setSelectedParents([]); setParentsList([]); }}
+                        className="w-3.5 h-3.5 text-green-600" />
+                      <span className="text-sm text-gray-700">Tous les parents</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name="parentMode" value="select" checked={parentSelectionMode === 'select'}
+                        onChange={() => setParentSelectionMode('select')}
+                        className="w-3.5 h-3.5 text-green-600" />
+                      <span className="text-sm text-gray-700">Sélectionner des parents</span>
+                    </label>
+                  </div>
+
+                  {parentSelectionMode === 'all' ? (
+                    <div className="flex items-center gap-2">
+                      <CheckSquare className="w-4 h-4 text-green-600" />
+                      <span className="text-sm font-medium text-gray-700">
+                        {loadingRecipients ? 'Calcul...' : `${recipientCount} parent(s) avec numéro WhatsApp`}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {loadingParents ? (
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          <RefreshCw className="w-4 h-4 animate-spin" /> Chargement des parents...
+                        </div>
+                      ) : parentsList.length === 0 ? (
+                        <p className="text-sm text-gray-500">Aucun parent trouvé pour les classes sélectionnées.</p>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <input type="text" placeholder="Rechercher un parent..."
+                              value={parentSearch} onChange={(e) => setParentSearch(e.target.value)}
+                              className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                            <button onClick={() => setSelectedParents(parentsList.map(p => p.phone_whatsapp))}
+                              className="px-3 py-1.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
+                              Tout
+                            </button>
+                            <button onClick={() => setSelectedParents([])}
+                              className="px-3 py-1.5 text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100">
+                              Aucun
+                            </button>
+                          </div>
+                          <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                            {parentsList
+                              .filter(p => {
+                                if (!parentSearch) return true;
+                                const q = parentSearch.toLowerCase();
+                                return p.name.toLowerCase().includes(q)
+                                  || p.phone_whatsapp?.includes(q)
+                                  || p.children?.some(c => c.name.toLowerCase().includes(q) || c.class_name?.toLowerCase().includes(q));
+                              })
+                              .map(parent => (
+                                <label key={parent.phone_whatsapp}
+                                  className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-green-50/50 transition-colors ${
+                                    selectedParents.includes(parent.phone_whatsapp) ? 'bg-green-50/30' : ''
+                                  }`}>
+                                  <input type="checkbox"
+                                    checked={selectedParents.includes(parent.phone_whatsapp)}
+                                    onChange={() => {
+                                      setSelectedParents(prev =>
+                                        prev.includes(parent.phone_whatsapp)
+                                          ? prev.filter(p => p !== parent.phone_whatsapp)
+                                          : [...prev, parent.phone_whatsapp]
+                                      );
+                                    }}
+                                    className="w-4 h-4 rounded text-green-600 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-800 truncate">{parent.name}</p>
+                                    <p className="text-xs text-gray-500">
+                                      {parent.phone_whatsapp}
+                                      {parent.children?.length > 0 && (
+                                        <span className="ml-2 text-gray-400">
+                                          — {parent.children.map(c => `${c.name} (${c.class_name})`).join(', ')}
+                                        </span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </label>
+                              ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <CheckSquare className="w-4 h-4 text-green-600" />
+                            <span className="text-sm font-medium text-gray-700">
+                              {selectedParents.length} / {parentsList.length} parent(s) sélectionné(s)
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1195,10 +1333,10 @@ const WhatsAppPage = () => {
                       <Image className="w-4 h-4" /> Image
                     </button>
                   </div>
-                  <button onClick={handleSend} disabled={sending || uploading || (!messageText && !mediaFile) || recipientCount === 0}
+                  <button onClick={handleSend} disabled={sending || uploading || (!messageText && !mediaFile) || effectiveRecipientCount === 0}
                     className="flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">
                     <Send className="w-4 h-4" />
-                    {uploading ? 'Upload...' : sending ? 'Envoi...' : `Envoyer à ${recipientCount}`}
+                    {uploading ? 'Upload...' : sending ? 'Envoi...' : `Envoyer à ${effectiveRecipientCount} parent(s)`}
                   </button>
                 </div>
 

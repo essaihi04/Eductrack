@@ -169,6 +169,103 @@ router.get('/recipients', async (req, res) => {
   }
 });
 
+// ==================== RECIPIENTS LIST (detailed) ====================
+
+// GET /recipients-list — get detailed parent list with names and children for a given class
+router.get('/recipients-list', async (req, res) => {
+  try {
+    const { class_ids } = req.query;
+    const schoolId = getSchoolId(req);
+
+    if (!class_ids) {
+      return res.json({ parents: [] });
+    }
+
+    const ids = class_ids.split(',').map(id => id.trim()).filter(Boolean);
+    if (ids.length === 0) return res.json({ parents: [] });
+
+    // Get students in selected classes
+    let studentQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)')
+      .eq('role', 'student')
+      .in('class_id', ids);
+
+    if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId);
+
+    const { data: students, error: studentsError } = await studentQuery;
+    if (studentsError) throw studentsError;
+    if (!students || students.length === 0) return res.json({ parents: [] });
+
+    const studentIds = students.map(s => s.id);
+
+    // Get parent-student links
+    const { data: parentLinks } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id, student_id')
+      .in('student_id', studentIds);
+
+    if (!parentLinks || parentLinks.length === 0) return res.json({ parents: [] });
+
+    const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
+
+    // Get parent profiles
+    const { data: parentProfiles } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, phone')
+      .in('id', parentIds);
+
+    // Get parent WhatsApp contacts
+    const { data: contacts } = await supabaseAdmin
+      .from('parent_contacts')
+      .select('parent_id, phone_e164, is_primary')
+      .in('parent_id', parentIds)
+      .eq('channel', 'whatsapp')
+      .order('is_primary', { ascending: false });
+
+    // Build parent map with children and phone
+    const parentMap = {};
+    (parentProfiles || []).forEach(p => {
+      parentMap[p.id] = {
+        parent_id: p.id,
+        name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Parent',
+        phone_profile: p.phone,
+        phone_whatsapp: null,
+        children: []
+      };
+    });
+
+    // Assign WhatsApp phone (prefer primary)
+    (contacts || []).forEach(c => {
+      if (parentMap[c.parent_id] && !parentMap[c.parent_id].phone_whatsapp) {
+        parentMap[c.parent_id].phone_whatsapp = c.phone_e164;
+      }
+    });
+
+    // Assign children
+    (parentLinks || []).forEach(link => {
+      const student = students.find(s => s.id === link.student_id);
+      if (student && parentMap[link.parent_id]) {
+        parentMap[link.parent_id].children.push({
+          id: student.id,
+          name: `${student.first_name || ''} ${student.last_name || ''}`.trim(),
+          class_name: student.classes?.name || ''
+        });
+      }
+    });
+
+    // Filter only parents that have a WhatsApp phone
+    const parents = Object.values(parentMap)
+      .filter(p => p.phone_whatsapp)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ parents, total: parents.length });
+  } catch (error) {
+    console.error('Erreur récupération liste parents:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ==================== SEND MESSAGE ====================
 
 // POST /send — send WhatsApp message to filtered parents
@@ -243,7 +340,13 @@ router.post('/send', async (req, res) => {
         uniquePhones[c.phone_e164] = c;
       }
     });
-    const recipients = Object.values(uniquePhones);
+    let recipients = Object.values(uniquePhones);
+
+    // If specific parent phones are provided, filter to only those
+    if (filter?.parent_phones?.length > 0) {
+      const targetPhones = new Set(filter.parent_phones);
+      recipients = recipients.filter(r => targetPhones.has(r.phone_e164));
+    }
 
     if (recipients.length === 0) {
       return res.status(400).json({ error: 'Aucun numéro WhatsApp trouvé' });

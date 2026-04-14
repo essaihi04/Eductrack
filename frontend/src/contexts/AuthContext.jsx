@@ -1,7 +1,46 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 
 const AuthContext = createContext({});
+
+const classifyAuthError = async (error) => {
+  const message = error?.message || '';
+  const name = error?.name || '';
+
+  if (
+    name === 'AuthRetryableFetchError'
+    || /failed to fetch/i.test(message)
+    || /networkerror/i.test(message)
+    || /load failed/i.test(message)
+  ) {
+    try {
+      const healthUrl = `${supabaseUrl}/auth/v1/health`;
+      const response = await fetch(healthUrl, { method: 'GET' });
+
+      if (!response.ok) {
+        return {
+          ...error,
+          friendlyMessage: 'Connexion impossible au service d’authentification. Vérifiez la connexion internet ou le certificat du téléphone.',
+          errorCategory: 'network_auth_service',
+        };
+      }
+    } catch (_networkCheckError) {
+      return {
+        ...error,
+        friendlyMessage: 'Impossible de joindre le service de connexion depuis cet appareil. Vérifiez internet, la date/heure du téléphone, ou essayez un autre réseau.',
+        errorCategory: 'network_unreachable',
+      };
+    }
+
+    return {
+      ...error,
+      friendlyMessage: 'Le service de connexion est joignable, mais cet appareil bloque la requête. Vérifiez le navigateur, le VPN, le proxy ou les restrictions réseau.',
+      errorCategory: 'device_network_block',
+    };
+  }
+
+  return error;
+};
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -74,7 +113,9 @@ export const AuthProvider = ({ children }) => {
       password,
     });
 
-    if (error) throw error;
+    if (error) {
+      throw await classifyAuthError(error);
+    }
     return data;
   };
 
