@@ -235,10 +235,21 @@ router.get('/recipients-list', async (req, res) => {
       };
     });
 
-    // Assign WhatsApp phone (prefer primary)
+    // Assign WhatsApp phone (prefer primary from parent_contacts)
     (contacts || []).forEach(c => {
       if (parentMap[c.parent_id] && !parentMap[c.parent_id].phone_whatsapp) {
         parentMap[c.parent_id].phone_whatsapp = c.phone_e164;
+      }
+    });
+
+    // Fallback: use profiles.phone for parents without parent_contacts entry
+    Object.values(parentMap).forEach(p => {
+      if (!p.phone_whatsapp && p.phone_profile) {
+        // Normalize phone: ensure it starts with country code
+        let phone = p.phone_profile.replace(/[\s\-\(\)]/g, '');
+        if (phone.startsWith('0')) phone = '+212' + phone.substring(1);
+        if (!phone.startsWith('+')) phone = '+' + phone;
+        p.phone_whatsapp = phone;
       }
     });
 
