@@ -4,7 +4,7 @@ import { FileText, Download, Calendar, BookOpen, Pencil, Check, ChevronDown } fr
 
 const CahierDeTexte = () => {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   const [classes, setClasses] = useState([]);
