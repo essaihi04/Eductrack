@@ -42,6 +42,7 @@ import SchoolComparisonPage from './pages/superadmin/SchoolComparisonPage';
 import AuditLogPage from './pages/superadmin/AuditLogPage';
 import WhatsAppPage from './pages/admin/WhatsAppPage';
 import FinanceManagersPage from './pages/admin/FinanceManagersPage';
+import PedagogicalDirectorsPage from './pages/admin/PedagogicalDirectorsPage';
 import FinanceDashboard from './pages/finance/FinanceDashboard';
 import FeeTemplatesPage from './pages/finance/FeeTemplatesPage';
 import InvoicesPage from './pages/finance/InvoicesPage';

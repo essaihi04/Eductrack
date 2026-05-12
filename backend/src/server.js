@@ -21,6 +21,7 @@ import whatsappRoutes from './routes/whatsapp.routes.js';
 import webhooksRoutes from './routes/webhooks.routes.js';
 import financeRoutes from './routes/finance.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
+import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 
 dotenv.config();
