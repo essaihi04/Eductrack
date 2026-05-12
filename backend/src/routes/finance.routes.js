@@ -46,6 +46,25 @@ async function getNextCounter(schoolId, counterType) {
 }
 
 // ============================================================
+// CLASSES (lecture seule pour le module finance)
+// ============================================================
+router.get('/classes', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    let query = supabaseAdmin
+      .from('classes')
+      .select('id, name, level, school_type, filiere, academic_year');
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data, error } = await query.order('name');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('Erreur GET /finance/classes:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ============================================================
 // MODÈLES DE FRAIS
 // ============================================================
 router.get('/fee-templates', async (req, res) => {

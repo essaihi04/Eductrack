@@ -34,6 +34,9 @@ async function request(path, { method = 'GET', body, query } = {}) {
 }
 
 export const financeApi = {
+  // Classes (lecture pour module finance)
+  listClasses: () => request('/api/finance/classes'),
+
   // Templates
   listTemplates: () => request('/api/finance/fee-templates'),
   createTemplate: (data) => request('/api/finance/fee-templates', { method: 'POST', body: data }),
