@@ -104,6 +104,7 @@ function App() {
             <Route path="finance/students" element={<FinanceStudentsPage />} />
             <Route path="finance/expenses" element={<ExpensesPage />} />
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
+            <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />

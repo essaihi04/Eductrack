@@ -69,6 +69,7 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/admin/whatsapp', whatsappRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/admin/finance-managers', financeManagersRoutes);
+app.use('/api/admin/pedagogical-directors', pedagogicalDirectorsRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {

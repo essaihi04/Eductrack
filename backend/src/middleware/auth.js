@@ -44,7 +44,12 @@ export const authorize = (...roles) => {
       return next();
     }
 
-    if (!roles.includes(req.user.role)) {
+    // pedagogical_director hérite des droits admin/school_admin (sauf finance, gérée séparément)
+    const allowedRoles = (roles.includes('admin') || roles.includes('school_admin'))
+      ? [...roles, 'pedagogical_director']
+      : roles;
+
+    if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -66,8 +71,20 @@ export const requireSchoolAdmin = (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: 'Non authentifié' });
   }
-  if (!['super_admin', 'admin', 'school_admin'].includes(req.user.role)) {
+  if (!['super_admin', 'admin', 'school_admin', 'pedagogical_director'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+  }
+  next();
+};
+
+// Réservé aux admins "complets" — exclut le directeur pédagogique
+// Utilisé pour les actions sensibles (créer un autre admin, gérer les responsables financiers, etc.)
+export const requireFullAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Non authentifié' });
+  }
+  if (!['super_admin', 'admin', 'school_admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé aux administrateurs principaux' });
   }
   next();
 };

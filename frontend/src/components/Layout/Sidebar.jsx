@@ -63,7 +63,8 @@ const Sidebar = () => {
       { icon: LayoutDashboard, label: 'Tableau de bord', path: '/dashboard' },
     ];
 
-    if (profile?.role === 'admin' || profile?.role === 'school_admin') {
+    if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director') {
+      const isPedagogical = profile?.role === 'pedagogical_director';
       return [
         ...commonItems,
         { icon: BarChart3, label: 'Comportement', path: '/behavior' },
@@ -74,15 +75,23 @@ const Sidebar = () => {
         { icon: FileText, label: 'Cahier de texte', path: '/cahier-de-texte' },
         { icon: Users2, label: 'Parents', path: '/parents' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
-        { section: 'Finance', isSection: true },
-        { icon: Wallet, label: 'Tableau finance', path: '/finance' },
-        { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
-        { icon: Users, label: 'Élèves (finance)', path: '/finance/students' },
-        { icon: FileText, label: 'Factures', path: '/finance/invoices' },
-        { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
-        { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
-        { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
-        { icon: UserCog, label: 'Resp. financiers', path: '/admin/finance-managers' },
+        // Section Finance — masquée pour le directeur pédagogique
+        ...(isPedagogical ? [] : [
+          { section: 'Finance', isSection: true },
+          { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+          { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
+          { icon: Users, label: 'Élèves (finance)', path: '/finance/students' },
+          { icon: FileText, label: 'Factures', path: '/finance/invoices' },
+          { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
+          { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
+          { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
+        ]),
+        // Section Équipe — uniquement pour les admins complets (pas le directeur pédagogique)
+        ...(isPedagogical ? [] : [
+          { section: 'Équipe', isSection: true },
+          { icon: UserCog, label: 'Resp. financiers', path: '/admin/finance-managers' },
+          { icon: UserCog, label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors' },
+        ]),
       ];
     }
 

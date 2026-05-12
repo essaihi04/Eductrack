@@ -1,4 +1,4 @@
-// Gestion des Responsables Financiers (finance_manager) par l'admin
+// Gestion des Directeurs Pédagogiques (pedagogical_director) par l'admin
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFullAdmin } from '../middleware/auth.js';
@@ -13,26 +13,26 @@ const getSchoolId = (req) => {
   return req.user.school_id || null;
 };
 
-// GET — liste des responsables financiers
+// GET — liste des directeurs pédagogiques
 router.get('/', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     let q = supabaseAdmin
       .from('profiles')
       .select('id, email, first_name, last_name, phone, role, created_at, school_id')
-      .eq('role', 'finance_manager')
+      .eq('role', 'pedagogical_director')
       .order('created_at', { ascending: false });
     if (schoolId) q = q.eq('school_id', schoolId);
     const { data, error } = await q;
     if (error) throw error;
-    res.json({ managers: data || [] });
+    res.json({ directors: data || [] });
   } catch (error) {
-    console.error('Erreur fetch finance-managers:', error);
+    console.error('Erreur fetch pedagogical-directors:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// POST — créer un responsable financier
+// POST — créer un directeur pédagogique
 router.post('/', async (req, res) => {
   try {
     const { email, firstName, lastName, phone, password } = req.body;
@@ -47,7 +47,7 @@ router.post('/', async (req, res) => {
       email,
       password: finalPassword,
       email_confirm: true,
-      user_metadata: { first_name: firstName, last_name: lastName, role: 'finance_manager' }
+      user_metadata: { first_name: firstName, last_name: lastName, role: 'pedagogical_director' }
     });
     if (authError) throw authError;
 
@@ -59,20 +59,19 @@ router.post('/', async (req, res) => {
         first_name: firstName,
         last_name: lastName,
         phone: phone || null,
-        role: 'finance_manager',
+        role: 'pedagogical_director',
         school_id: schoolId
       })
       .select()
       .single();
     if (profileError) {
-      // rollback auth
       try { await supabaseAdmin.auth.admin.deleteUser(authData.user.id); } catch {}
       throw profileError;
     }
 
     res.status(201).json({ ...profile, password: finalPassword });
   } catch (error) {
-    console.error('Erreur create finance-manager:', error);
+    console.error('Erreur create pedagogical-director:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
@@ -91,13 +90,13 @@ router.put('/:id', async (req, res) => {
       .from('profiles')
       .update(updates)
       .eq('id', id)
-      .eq('role', 'finance_manager')
+      .eq('role', 'pedagogical_director')
       .select()
       .single();
     if (error) throw error;
     res.json(data);
   } catch (error) {
-    console.error('Erreur update finance-manager:', error);
+    console.error('Erreur update pedagogical-director:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -111,12 +110,11 @@ router.post('/:id/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'Mot de passe min 6 caractères' });
     }
 
-    // Vérifier que c'est bien un finance_manager de la même école
     const { data: profile } = await supabaseAdmin
       .from('profiles').select('id, role, school_id')
       .eq('id', id).single();
-    if (!profile || profile.role !== 'finance_manager') {
-      return res.status(404).json({ error: 'Responsable financier non trouvé' });
+    if (!profile || profile.role !== 'pedagogical_director') {
+      return res.status(404).json({ error: 'Directeur pédagogique non trouvé' });
     }
     if (req.user.role !== 'super_admin' && profile.school_id !== req.user.school_id) {
       return res.status(403).json({ error: 'Accès refusé' });
@@ -125,7 +123,7 @@ router.post('/:id/reset-password', async (req, res) => {
     await supabaseAdmin.auth.admin.updateUserById(id, { password: newPassword });
     res.json({ success: true });
   } catch (error) {
-    console.error('Erreur reset password finance-manager:', error);
+    console.error('Erreur reset password pedagogical-director:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
@@ -134,11 +132,11 @@ router.post('/:id/reset-password', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    await supabaseAdmin.from('profiles').delete().eq('id', id).eq('role', 'finance_manager');
+    await supabaseAdmin.from('profiles').delete().eq('id', id).eq('role', 'pedagogical_director');
     try { await supabaseAdmin.auth.admin.deleteUser(id); } catch {}
     res.json({ success: true });
   } catch (error) {
-    console.error('Erreur delete finance-manager:', error);
+    console.error('Erreur delete pedagogical-director:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
