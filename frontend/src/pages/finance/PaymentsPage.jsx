@@ -33,19 +33,43 @@ export default function PaymentsPage() {
 
   const printReceipt = (payment) => {
     const w = window.open('', '_blank');
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const school = payment.school || {};
+    const logoSrc = school.logo_url
+      ? (school.logo_url.startsWith('http') ? school.logo_url : `${apiBase}${school.logo_url.startsWith('/') ? '' : '/'}${school.logo_url}`)
+      : null;
+    const schoolHeader = `
+      <div class="school-header">
+        ${logoSrc ? `<img src="${logoSrc}" alt="Logo" class="logo"/>` : ''}
+        <div class="school-info">
+          <h2>${school.name || 'École'}</h2>
+          ${school.address ? `<p>${school.address}</p>` : ''}
+          ${school.phone ? `<p>Tél : ${school.phone}</p>` : ''}
+        </div>
+      </div>`;
     const html = `
       <html><head><title>Reçu ${payment.receipt_number}</title>
       <style>
-        body{font-family:Arial,sans-serif;padding:40px;max-width:600px;margin:0 auto}
+        body{font-family:Arial,sans-serif;padding:40px;max-width:700px;margin:0 auto;color:#1f2937}
         h1{color:#1e40af;margin:0}
-        .header{border-bottom:2px solid #1e40af;padding-bottom:15px;margin-bottom:25px}
-        .row{display:flex;justify-content:space-between;margin:8px 0}
-        .total{background:#f0f9ff;padding:15px;border-radius:8px;margin-top:20px;font-size:1.3em;font-weight:bold;color:#1e40af;text-align:center}
-        .footer{margin-top:40px;padding-top:20px;border-top:1px solid #ccc;font-size:0.85em;color:#666}
+        h2{margin:0 0 4px;color:#1e40af;font-size:1.2em}
+        .school-header{display:flex;align-items:center;gap:16px;padding-bottom:15px;border-bottom:2px solid #1e40af;margin-bottom:20px}
+        .school-header .logo{width:80px;height:80px;object-fit:contain}
+        .school-info p{margin:2px 0;font-size:0.85em;color:#555}
+        .doc-title{text-align:center;margin:20px 0}
+        .doc-title h1{font-size:1.6em}
+        .doc-title p{color:#666;margin:4px 0}
+        .row{display:flex;justify-content:space-between;margin:8px 0;padding:4px 0;border-bottom:1px dotted #e5e7eb}
+        .total{background:#f0f9ff;padding:18px;border-radius:8px;margin-top:25px;font-size:1.3em;font-weight:bold;color:#1e40af;text-align:center;border:2px solid #1e40af}
+        .footer{margin-top:40px;padding-top:20px;border-top:1px solid #ccc;font-size:0.85em;color:#666;text-align:center}
+        .signature{margin-top:50px;display:flex;justify-content:space-between}
+        .signature div{width:45%;text-align:center;padding-top:50px;border-top:1px solid #999;font-size:0.85em}
+        @media print { body{padding:20px} }
       </style></head><body>
-      <div class="header">
+      ${schoolHeader}
+      <div class="doc-title">
         <h1>REÇU DE PAIEMENT</h1>
-        <p style="color:#666;margin:5px 0">N° ${payment.receipt_number}</p>
+        <p>N° <strong>${payment.receipt_number}</strong></p>
       </div>
       <div class="row"><strong>Date :</strong><span>${formatDate(payment.payment_date)}</span></div>
       <div class="row"><strong>Élève :</strong><span>${payment.student?.first_name} ${payment.student?.last_name}</span></div>
@@ -55,13 +79,17 @@ export default function PaymentsPage() {
       ${payment.reference ? `<div class="row"><strong>Référence :</strong><span>${payment.reference}</span></div>` : ''}
       ${payment.notes ? `<div class="row"><strong>Notes :</strong><span>${payment.notes}</span></div>` : ''}
       <div class="total">Montant payé : ${formatMAD(payment.amount)}</div>
+      <div class="signature">
+        <div>Signature du responsable financier</div>
+        <div>Cachet et signature de l'école</div>
+      </div>
       <div class="footer">
-        <p>Ce reçu atteste le paiement effectué. Veuillez le conserver.</p>
+        <p>Ce reçu atteste le paiement effectué. Veuillez le conserver précieusement.</p>
       </div>
       </body></html>`;
     w.document.write(html);
     w.document.close();
-    setTimeout(() => w.print(), 300);
+    setTimeout(() => w.print(), 500);
   };
 
   const filteredBySearch = filters.search

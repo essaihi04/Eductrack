@@ -53,6 +53,7 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [school, setSchool] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -100,6 +101,7 @@ export const AuthProvider = ({ children }) => {
 
       const data = await response.json();
       setProfile(data.profile);
+      setSchool(data.school || null);
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
@@ -137,11 +139,13 @@ export const AuthProvider = ({ children }) => {
     if (error) throw error;
     setUser(null);
     setProfile(null);
+    setSchool(null);
   };
 
   const value = {
     user,
     profile,
+    school,
     loading,
     signIn,
     signUp,

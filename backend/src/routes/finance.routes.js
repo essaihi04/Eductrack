@@ -457,6 +457,7 @@ router.get('/invoices/:id', async (req, res) => {
       .from('invoices')
       .select(`*,
         student:profiles!invoices_student_id_fkey(id, first_name, last_name, email, class_id, classes!fk_profiles_class(id, name)),
+        school:schools(id, name, logo_url, address, phone),
         lines:invoice_lines(*),
         payments:payments(*)
       `)
@@ -703,6 +704,7 @@ router.get('/payments', async (req, res) => {
       .from('payments')
       .select(`*,
         student:profiles!payments_student_id_fkey(id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)),
+        school:schools(id, name, logo_url, address, phone),
         invoice:invoices(id, invoice_number, total, period_label)
       `)
       .eq('status', 'confirmed')

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Search, RefreshCw, Plus, Download, Ban, Eye, Zap, Filter } from 'lucide-react';
-import { financeApi, formatMAD, formatDate, STATUS_LABELS, STATUS_COLORS } from '../../lib/financeApi';
+import { FileText, Search, RefreshCw, Plus, Download, Ban, Eye, Zap, Filter, Printer } from 'lucide-react';
+import { financeApi, formatMAD, formatDate, STATUS_LABELS, STATUS_COLORS, METHOD_LABELS } from '../../lib/financeApi';
 import { supabase } from '../../lib/supabase';
 
 export default function InvoicesPage() {
@@ -308,6 +308,108 @@ function InvoiceDetailModal({ invoice, onClose, onRefresh }) {
     }
   };
 
+  const printInvoice = () => {
+    const w = window.open('', '_blank');
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const school = invoice.school || {};
+    const logoSrc = school.logo_url
+      ? (school.logo_url.startsWith('http') ? school.logo_url : `${apiBase}${school.logo_url.startsWith('/') ? '' : '/'}${school.logo_url}`)
+      : null;
+    const linesHtml = (invoice.lines || []).map(l => `
+      <tr>
+        <td>${l.description || ''}</td>
+        <td style="text-align:right">${l.quantity || 1}</td>
+        <td style="text-align:right">${formatMAD(l.unit_price)}</td>
+        <td style="text-align:right">${formatMAD(l.amount)}</td>
+      </tr>`).join('');
+    const paymentsHtml = (invoice.payments || []).map(p => `
+      <tr>
+        <td>${p.receipt_number || ''}</td>
+        <td>${formatDate(p.payment_date)}</td>
+        <td>${METHOD_LABELS[p.method] || p.method || ''}</td>
+        <td style="text-align:right">${formatMAD(p.amount)}</td>
+      </tr>`).join('');
+    const html = `
+      <html><head><title>Facture ${invoice.invoice_number}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:40px;max-width:800px;margin:0 auto;color:#1f2937}
+        h1{color:#1e40af;margin:0;font-size:1.8em}
+        h2{margin:0 0 4px;color:#1e40af;font-size:1.2em}
+        h3{margin:18px 0 8px;color:#374151;font-size:1em}
+        .school-header{display:flex;align-items:center;gap:16px;padding-bottom:15px;border-bottom:2px solid #1e40af;margin-bottom:20px}
+        .school-header .logo{width:80px;height:80px;object-fit:contain}
+        .school-info p{margin:2px 0;font-size:0.85em;color:#555}
+        .doc-title{text-align:center;margin:20px 0}
+        .doc-title p{color:#666;margin:4px 0}
+        .meta{display:flex;justify-content:space-between;background:#f9fafb;padding:12px;border-radius:6px;margin:15px 0;font-size:0.9em}
+        .meta div{flex:1}
+        .meta strong{display:block;color:#6b7280;font-size:0.8em;text-transform:uppercase;margin-bottom:2px}
+        table{width:100%;border-collapse:collapse;margin-top:10px}
+        th{background:#1e40af;color:#fff;padding:8px;text-align:left;font-size:0.85em}
+        td{padding:8px;border-bottom:1px solid #e5e7eb;font-size:0.9em}
+        .totals{margin-top:15px;margin-left:auto;width:60%}
+        .totals .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dotted #e5e7eb}
+        .totals .total-line{font-weight:bold;font-size:1.15em;color:#1e40af;border-top:2px solid #1e40af;padding-top:10px;margin-top:5px}
+        .totals .remaining{font-weight:bold;color:#dc2626}
+        .footer{margin-top:40px;padding-top:20px;border-top:1px solid #ccc;font-size:0.8em;color:#666;text-align:center}
+        .badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.75em;font-weight:bold;text-transform:uppercase}
+        .badge-paid{background:#d1fae5;color:#065f46}
+        .badge-issued{background:#dbeafe;color:#1e40af}
+        .badge-overdue{background:#fee2e2;color:#991b1b}
+        .badge-partial{background:#fef3c7;color:#92400e}
+        @media print { body{padding:20px} }
+      </style></head><body>
+      <div class="school-header">
+        ${logoSrc ? `<img src="${logoSrc}" alt="Logo" class="logo"/>` : ''}
+        <div class="school-info">
+          <h2>${school.name || 'École'}</h2>
+          ${school.address ? `<p>${school.address}</p>` : ''}
+          ${school.phone ? `<p>Tél : ${school.phone}</p>` : ''}
+        </div>
+      </div>
+      <div class="doc-title">
+        <h1>FACTURE</h1>
+        <p>N° <strong>${invoice.invoice_number}</strong> &nbsp;·&nbsp; <span class="badge badge-${invoice.status}">${STATUS_LABELS[invoice.status] || invoice.status}</span></p>
+      </div>
+      <div class="meta">
+        <div><strong>Émise le</strong>${formatDate(invoice.issue_date)}</div>
+        <div><strong>Échéance</strong>${formatDate(invoice.due_date)}</div>
+        <div><strong>Période</strong>${invoice.period_label || '—'}</div>
+      </div>
+      <div class="meta">
+        <div><strong>Élève</strong>${invoice.student?.first_name || ''} ${invoice.student?.last_name || ''}</div>
+        <div><strong>Classe</strong>${invoice.student?.classes?.name || '—'}</div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Description</th><th style="text-align:right">Qté</th><th style="text-align:right">Prix unit.</th><th style="text-align:right">Montant</th></tr>
+        </thead>
+        <tbody>${linesHtml}</tbody>
+      </table>
+      <div class="totals">
+        <div class="row"><span>Sous-total</span><span>${formatMAD(invoice.subtotal)}</span></div>
+        ${Number(invoice.discount) > 0 ? `<div class="row"><span>Réduction</span><span style="color:#059669">- ${formatMAD(invoice.discount)}</span></div>` : ''}
+        <div class="row total-line"><span>TOTAL</span><span>${formatMAD(invoice.total)}</span></div>
+        <div class="row" style="color:#059669"><span>Déjà payé</span><span>${formatMAD(invoice.amount_paid)}</span></div>
+        <div class="row remaining"><span>Reste à payer</span><span>${formatMAD(invoice.amount_due)}</span></div>
+      </div>
+      ${paymentsHtml ? `
+        <h3>Historique des paiements</h3>
+        <table>
+          <thead><tr><th>Reçu</th><th>Date</th><th>Mode</th><th style="text-align:right">Montant</th></tr></thead>
+          <tbody>${paymentsHtml}</tbody>
+        </table>` : ''}
+      ${invoice.notes ? `<p style="margin-top:20px;padding:12px;background:#fef3c7;border-radius:6px;font-size:0.9em"><strong>Notes :</strong> ${invoice.notes}</p>` : ''}
+      <div class="footer">
+        <p>Merci de régler cette facture avant la date d'échéance.</p>
+        <p>Pour toute question, contactez l'administration de l'école.</p>
+      </div>
+      </body></html>`;
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -316,7 +418,12 @@ function InvoiceDetailModal({ invoice, onClose, onRefresh }) {
             <h2 className="text-lg font-semibold">Facture {invoice.invoice_number}</h2>
             <p className="text-sm text-gray-500">{invoice.student?.first_name} {invoice.student?.last_name}</p>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">✕</button>
+          <div className="flex items-center gap-2">
+            <button onClick={printInvoice} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" title="Imprimer">
+              <Printer className="w-4 h-4" /> Imprimer
+            </button>
+            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">✕</button>
+          </div>
         </div>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-3 text-sm">
