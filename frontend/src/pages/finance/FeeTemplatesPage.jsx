@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Copy, Save, X, Layers, Calendar, Users } from 'lucide-react';
+import { Plus, Trash2, Edit2, Copy, Save, X, Layers, Calendar, Users, Check, Sparkles } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
 import { supabase } from '../../lib/supabase';
 
