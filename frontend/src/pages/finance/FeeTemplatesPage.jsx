@@ -27,6 +27,8 @@ export default function FeeTemplatesPage() {
   const [showForm, setShowForm] = useState(false);
   const [classes, setClasses] = useState([]);
   const [applyingTemplateId, setApplyingTemplateId] = useState(null);
+  const [selectedClassIds, setSelectedClassIds] = useState([]);
+  const [applying, setApplying] = useState(false);
 
   useEffect(() => {
     load();
@@ -119,17 +121,54 @@ export default function FeeTemplatesPage() {
     setEditing({ ...editing, items });
   };
 
-  const applyToClass = async (templateId, classId) => {
-    if (!classId) return;
+  const normalize = (s) => String(s || '').toLowerCase().trim();
+
+  const classMatchesTemplate = (cls, t) => {
+    if (!t) return false;
+    const lvl = normalize(t.level);
+    const typ = normalize(t.school_type);
+    const clsLvl = normalize(cls.level);
+    const clsTyp = normalize(cls.school_type);
+    if (lvl && clsLvl && (clsLvl === lvl || clsLvl.includes(lvl) || lvl.includes(clsLvl))) return true;
+    if (typ && clsTyp && clsTyp === typ) return true;
+    return false;
+  };
+
+  const sortedClassesFor = (t) => {
+    const matches = classes.filter(c => classMatchesTemplate(c, t));
+    const others = classes.filter(c => !classMatchesTemplate(c, t));
+    const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+    return { matches: matches.sort(byName), others: others.sort(byName) };
+  };
+
+  const openApply = (templateId) => {
+    const t = templates.find(x => x.id === templateId);
+    const { matches } = sortedClassesFor(t);
+    setApplyingTemplateId(templateId);
+    setSelectedClassIds(matches.map(c => c.id)); // pré-cocher les classes correspondantes
+  };
+
+  const toggleClass = (classId) => {
+    setSelectedClassIds(prev => prev.includes(classId) ? prev.filter(x => x !== classId) : [...prev, classId]);
+  };
+
+  const applyToSelected = async (templateId) => {
+    if (selectedClassIds.length === 0) {
+      alert('Sélectionnez au moins une classe');
+      return;
+    }
+    setApplying(true);
     try {
       const t = templates.find(x => x.id === templateId);
-      const res = await financeApi.applyTemplateToClass(templateId, {
-        class_id: classId,
+      const res = await financeApi.applyTemplateToClasses(templateId, {
+        class_ids: selectedClassIds,
         academic_year: t.academic_year
       });
-      alert(`${res.created_count} plan(s) créé(s), ${res.skipped_count} ignoré(s) (déjà existants)`);
+      alert(`${res.created_count} plan(s) créé(s), ${res.skipped_count} ignoré(s) sur ${selectedClassIds.length} classe(s)`);
       setApplyingTemplateId(null);
+      setSelectedClassIds([]);
     } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setApplying(false); }
   };
 
   const computeTotal = (items) => {
@@ -224,23 +263,92 @@ export default function FeeTemplatesPage() {
               </div>
 
               {applyingTemplateId === t.id ? (
-                <div className="mt-3 p-2 bg-blue-50 rounded-lg">
-                  <select
-                    onChange={(e) => applyToClass(t.id, e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
-                    defaultValue=""
-                  >
-                    <option value="">Choisir une classe...</option>
-                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  <button onClick={() => setApplyingTemplateId(null)} className="mt-1 text-xs text-gray-500">Annuler</button>
-                </div>
+                (() => {
+                  const { matches, others } = sortedClassesFor(t);
+                  const allSelected = classes.length > 0 && selectedClassIds.length === classes.length;
+                  return (
+                    <div className="mt-3 p-3 bg-blue-50 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-gray-700">
+                          {selectedClassIds.length} / {classes.length} classe(s) sélectionnée(s)
+                        </span>
+                        <button
+                          onClick={() => setSelectedClassIds(allSelected ? [] : classes.map(c => c.id))}
+                          className="text-blue-700 hover:underline"
+                        >
+                          {allSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
+                        </button>
+                      </div>
+
+                      {classes.length === 0 && (
+                        <p className="text-xs text-gray-500 italic">Aucune classe disponible. Créez-en dans Admin → Classes.</p>
+                      )}
+
+                      <div className="max-h-60 overflow-y-auto border border-blue-100 rounded bg-white">
+                        {matches.length > 0 && (
+                          <>
+                            <div className="px-2 py-1 text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-50 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" /> Correspondance niveau/type
+                            </div>
+                            {matches.map(c => (
+                              <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-emerald-50 cursor-pointer border-b border-gray-50">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedClassIds.includes(c.id)}
+                                  onChange={() => toggleClass(c.id)}
+                                  className="rounded"
+                                />
+                                <span className="flex-1 truncate">{c.name}</span>
+                                <span className="text-[10px] text-gray-500">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
+                              </label>
+                            ))}
+                          </>
+                        )}
+                        {others.length > 0 && (
+                          <>
+                            <div className="px-2 py-1 text-[10px] uppercase font-semibold text-gray-500 bg-gray-50">
+                              Autres classes
+                            </div>
+                            {others.map(c => (
+                              <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-gray-50 cursor-pointer border-b border-gray-50">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedClassIds.includes(c.id)}
+                                  onChange={() => toggleClass(c.id)}
+                                  className="rounded"
+                                />
+                                <span className="flex-1 truncate">{c.name}</span>
+                                <span className="text-[10px] text-gray-500">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
+                              </label>
+                            ))}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => applyToSelected(t.id)}
+                          disabled={applying || selectedClassIds.length === 0}
+                          className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          <Check className="w-4 h-4" /> {applying ? 'Application...' : `Appliquer (${selectedClassIds.length})`}
+                        </button>
+                        <button
+                          onClick={() => { setApplyingTemplateId(null); setSelectedClassIds([]); }}
+                          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-white rounded"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()
               ) : (
                 <button
-                  onClick={() => setApplyingTemplateId(t.id)}
+                  onClick={() => openApply(t.id)}
                   className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
                 >
-                  <Users className="w-4 h-4" /> Appliquer à une classe
+                  <Users className="w-4 h-4" /> Appliquer à des classes
                 </button>
               )}
             </div>

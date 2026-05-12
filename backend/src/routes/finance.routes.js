@@ -225,6 +225,64 @@ router.post('/fee-templates/:id/apply-to-class', async (req, res) => {
   }
 });
 
+// Appliquer un modèle à plusieurs classes en une fois
+router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
+  try {
+    const { id: templateId } = req.params;
+    const { class_ids, academic_year } = req.body;
+    const schoolId = getSchoolId(req);
+    if (!Array.isArray(class_ids) || class_ids.length === 0 || !academic_year) {
+      return res.status(400).json({ error: 'class_ids[] et academic_year requis' });
+    }
+
+    let totalCreated = 0;
+    let totalSkipped = 0;
+    const perClass = [];
+
+    for (const classId of class_ids) {
+      let studentsQuery = supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('role', 'student')
+        .eq('class_id', classId);
+      if (schoolId) studentsQuery = studentsQuery.eq('school_id', schoolId);
+      const { data: students, error: sErr } = await studentsQuery;
+      if (sErr) continue;
+
+      let created = 0;
+      let skipped = 0;
+      for (const st of students || []) {
+        const { data: existing } = await supabaseAdmin
+          .from('student_fee_plans')
+          .select('id')
+          .eq('student_id', st.id)
+          .eq('academic_year', academic_year)
+          .maybeSingle();
+        if (existing) { skipped++; continue; }
+
+        const { error: pErr } = await supabaseAdmin
+          .from('student_fee_plans')
+          .insert({
+            school_id: schoolId,
+            student_id: st.id,
+            template_id: templateId,
+            academic_year,
+            created_by: req.user.id
+          });
+        if (!pErr) created++;
+      }
+      totalCreated += created;
+      totalSkipped += skipped;
+      perClass.push({ class_id: classId, created, skipped });
+    }
+
+    res.json({ success: true, created_count: totalCreated, skipped_count: totalSkipped, per_class: perClass });
+  } catch (error) {
+    console.error('Erreur apply-to-classes:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
 // ============================================================
 // PLANS DE FRAIS PAR ÉLÈVE
 // ============================================================
