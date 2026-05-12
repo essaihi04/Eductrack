@@ -21,7 +21,14 @@ import {
   Shield,
   GitCompare,
   Activity,
-  MessageSquare
+  MessageSquare,
+  DollarSign,
+  CreditCard,
+  AlertCircle,
+  Layers,
+  TrendingDown,
+  UserCog,
+  Wallet
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
@@ -67,6 +74,26 @@ const Sidebar = () => {
         { icon: FileText, label: 'Cahier de texte', path: '/cahier-de-texte' },
         { icon: Users2, label: 'Parents', path: '/parents' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
+        { section: 'Finance', isSection: true },
+        { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+        { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
+        { icon: Users, label: 'Élèves (finance)', path: '/finance/students' },
+        { icon: FileText, label: 'Factures', path: '/finance/invoices' },
+        { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
+        { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
+        { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
+        { icon: UserCog, label: 'Resp. financiers', path: '/admin/finance-managers' },
+      ];
+    }
+
+    if (profile?.role === 'finance_manager') {
+      return [
+        { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+        { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
+        { icon: Users, label: 'Élèves', path: '/finance/students' },
+        { icon: FileText, label: 'Factures', path: '/finance/invoices' },
+        { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
+        { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
       ];
     }
 
@@ -103,6 +130,7 @@ const Sidebar = () => {
             <p className="text-xs text-muted-foreground truncate">
               {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
               {profile?.role === 'teacher' && 'Espace Professeur'}
+              {profile?.role === 'finance_manager' && 'Espace Finance'}
               {profile?.role === 'student' && 'Espace Élève'}
             </p>
           </div>
@@ -115,6 +143,7 @@ const Sidebar = () => {
             <p className="text-sm text-muted-foreground mt-1">
               {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
               {profile?.role === 'teacher' && 'Espace Professeur'}
+              {profile?.role === 'finance_manager' && 'Espace Finance'}
               {profile?.role === 'student' && 'Espace Élève'}
             </p>
           </div>
@@ -128,14 +157,24 @@ const Sidebar = () => {
               {profile?.role === 'super_admin' && 'Super Administration'}
               {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
               {profile?.role === 'teacher' && 'Espace Professeur'}
+              {profile?.role === 'finance_manager' && 'Espace Finance'}
               {profile?.role === 'student' && 'Espace Élève'}
             </p>
           </div>
         )}
       </div>
 
-      <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-        {menuItems.map((item) => {
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        {menuItems.map((item, idx) => {
+          if (item.isSection) {
+            return (
+              <div key={`section-${idx}`} className="pt-4 pb-1 px-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  {item.section}
+                </p>
+              </div>
+            );
+          }
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
 
@@ -144,14 +183,14 @@ const Sidebar = () => {
               key={item.path}
               to={item.path}
               className={cn(
-                'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors',
+                'flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors text-sm',
                 isActive
                   ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               )}
             >
-              <Icon className="w-5 h-5" />
-              <span className="font-medium">{item.label}</span>
+              <Icon className="w-5 h-5 flex-shrink-0" />
+              <span className="font-medium truncate">{item.label}</span>
             </Link>
           );
         })}

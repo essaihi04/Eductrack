@@ -11,6 +11,7 @@ import {
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import FinanceSummaryCard from '../../components/dashboard/FinanceSummaryCard';
 
 const getStatusColor = (value, thresholds) => {
   if (value >= thresholds.good) return 'green';
@@ -838,6 +839,9 @@ const AdminDashboard = () => {
 
       {/* ==================== OVERVIEW TAB ==================== */}
       {dashboardTab === 'overview' && <>
+      {/* FINANCE SUMMARY */}
+      <FinanceSummaryCard />
+
       {/* BLOC 1 - KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <KPICard

@@ -41,6 +41,14 @@ import SchoolDetailPage from './pages/superadmin/SchoolDetailPage';
 import SchoolComparisonPage from './pages/superadmin/SchoolComparisonPage';
 import AuditLogPage from './pages/superadmin/AuditLogPage';
 import WhatsAppPage from './pages/admin/WhatsAppPage';
+import FinanceManagersPage from './pages/admin/FinanceManagersPage';
+import FinanceDashboard from './pages/finance/FinanceDashboard';
+import FeeTemplatesPage from './pages/finance/FeeTemplatesPage';
+import InvoicesPage from './pages/finance/InvoicesPage';
+import PaymentsPage from './pages/finance/PaymentsPage';
+import OverduePage from './pages/finance/OverduePage';
+import FinanceStudentsPage from './pages/finance/FinanceStudentsPage';
+import ExpensesPage from './pages/finance/ExpensesPage';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -88,6 +96,14 @@ function App() {
             <Route path="stats" element={<StatsPage />} />
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
+            <Route path="finance" element={<FinanceDashboard />} />
+            <Route path="finance/fee-templates" element={<FeeTemplatesPage />} />
+            <Route path="finance/invoices" element={<InvoicesPage />} />
+            <Route path="finance/payments" element={<PaymentsPage />} />
+            <Route path="finance/overdue" element={<OverduePage />} />
+            <Route path="finance/students" element={<FinanceStudentsPage />} />
+            <Route path="finance/expenses" element={<ExpensesPage />} />
+            <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />

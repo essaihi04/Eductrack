@@ -71,3 +71,14 @@ export const requireSchoolAdmin = (req, res, next) => {
   }
   next();
 };
+
+// Accès au module finance: admin, school_admin, super_admin, finance_manager
+export const requireFinanceAccess = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Non authentifié' });
+  }
+  if (!['super_admin', 'admin', 'school_admin', 'finance_manager'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé au personnel financier' });
+  }
+  next();
+};
