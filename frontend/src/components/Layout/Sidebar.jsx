@@ -120,6 +120,7 @@ const Sidebar = () => {
         { icon: MapPin, label: 'Suivi en direct', path: '/transport/live' },
         { icon: Bus, label: 'Bus & élèves', path: '/transport/buses' },
         { icon: UserCircle, label: 'Chauffeurs', path: '/transport/drivers' },
+        { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
       ];
     }
 

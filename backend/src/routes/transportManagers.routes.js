@@ -1,11 +1,11 @@
 // Gestion des Responsables Transport (transport_manager) — créés par admin/directeur pédagogique
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate, requirePedagogicalLeadership } from '../middleware/auth.js';
+import { authenticate, requireTransportManagement } from '../middleware/auth.js';
 
 const router = express.Router();
 router.use(authenticate);
-router.use(requirePedagogicalLeadership);
+router.use(requireTransportManagement);
 
 const getSchoolId = (req) => {
   if (req.user.role === 'super_admin') return req.body.school_id || req.query.school_id || null;
