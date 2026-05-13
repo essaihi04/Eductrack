@@ -399,7 +399,7 @@ router.get('/live', requireTransportAccess, async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     let q = supabaseAdmin
       .from('bus_trips')
-      .select('id, bus_id, direction, status, started_at, bus:buses(id, plate_number, model, color)')
+      .select('id, bus_id, driver_id, direction, status, started_at, bus:buses(id, plate_number, model, color)')
       .eq('status', 'in_progress')
       .eq('trip_date', today);
     if (schoolId) q = q.eq('school_id', schoolId);
@@ -408,9 +408,10 @@ router.get('/live', requireTransportAccess, async (req, res) => {
 
     // Dernière position de chaque trip
     const tripIds = (trips || []).map(t => t.id);
+    const driverIds = [...new Set((trips || []).map(t => t.driver_id).filter(Boolean))];
     let lastPositions = {};
+    let driversById = {};
     if (tripIds.length > 0) {
-      // Récupérer les 1 dernière position par trip via une requête
       const { data: positions } = await supabaseAdmin
         .from('bus_positions')
         .select('trip_id, lat, lng, speed_kmh, heading, recorded_at')
@@ -420,8 +421,19 @@ router.get('/live', requireTransportAccess, async (req, res) => {
         if (!lastPositions[p.trip_id]) lastPositions[p.trip_id] = p;
       });
     }
+    if (driverIds.length > 0) {
+      const { data: drivers } = await supabaseAdmin
+        .from('profiles')
+        .select('id, first_name, last_name, phone')
+        .in('id', driverIds);
+      (drivers || []).forEach(d => { driversById[d.id] = d; });
+    }
     res.json({
-      trips: (trips || []).map(t => ({ ...t, last_position: lastPositions[t.id] || null }))
+      trips: (trips || []).map(t => ({
+        ...t,
+        last_position: lastPositions[t.id] || null,
+        driver: driversById[t.driver_id] || null
+      }))
     });
   } catch (e) {
     console.error('Erreur live:', e);
