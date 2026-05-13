@@ -4,19 +4,12 @@ import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import L from 'leaflet';
 import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
 import { useGeolocation } from '../../hooks/useGeolocation';
+import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon, homeTopViewIcon } from '../../lib/mapAssets';
 
-const busIcon = L.divIcon({
-  html: `<div style="background:#f59e0b;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:18px">🚌</div>`,
-  className: '', iconSize: [36, 36], iconAnchor: [18, 18]
-});
-const homeIcon = L.divIcon({
-  html: `<div style="background:#10b981;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;font-size:14px">🏠</div>`,
-  className: '', iconSize: [30, 30], iconAnchor: [15, 15]
-});
+const homeIcon = homeTopViewIcon(34);
 
 function MapAutoCenter({ position }) {
   const map = useMap();
@@ -125,9 +118,9 @@ export default function ActiveTripPage() {
       {/* Carte */}
       <div className="relative" style={{ height: collapsed ? '30vh' : '45vh' }}>
         <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={15} style={{ height: '100%', width: '100%' }}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
           <MapAutoCenter position={position} />
-          {position && <Marker position={[position.lat, position.lng]} icon={busIcon} />}
+          {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, 48, true)} />}
           {nextStudent?.student.home_lat && (
             <>
               <Marker position={[nextStudent.student.home_lat, nextStudent.student.home_lng]} icon={homeIcon} />

@@ -3,20 +3,13 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import L from 'leaflet';
 import { Bus, Home, RefreshCw, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { transportApi, pushApi } from '../../lib/transportApi';
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
+import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon, homeTopViewIcon } from '../../lib/mapAssets';
 
-const busIcon = (color = '#f59e0b') => L.divIcon({
-  html: `<div style="background:${color};width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:18px">🚌</div>`,
-  className: '', iconSize: [36, 36], iconAnchor: [18, 18]
-});
-const homeIcon = L.divIcon({
-  html: `<div style="background:#10b981;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.2);font-size:14px">🏠</div>`,
-  className: '', iconSize: [30, 30], iconAnchor: [15, 15]
-});
+const homeIcon = homeTopViewIcon(34);
 
 const eventLabel = (e) => {
   if (!e) return '—';
@@ -110,8 +103,8 @@ export default function ParentTransportPage() {
                   {b.last_position && c.student.home_lat && (
                     <div className="rounded-lg overflow-hidden border" style={{ height: 280 }}>
                       <MapContainer center={[b.last_position.lat, b.last_position.lng]} zoom={13} style={{ height: '100%', width: '100%' }}>
-                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
-                        <Marker position={[b.last_position.lat, b.last_position.lng]} icon={busIcon(b.color)}>
+                        <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
+                        <Marker position={[b.last_position.lat, b.last_position.lng]} icon={busTopViewIcon(b.color || '#f59e0b', b.last_position.heading || 0, 44)}>
                           <Popup>Bus {b.plate_number}<br />{b.last_position.speed_kmh ? `${Math.round(b.last_position.speed_kmh)} km/h` : ''}</Popup>
                         </Marker>
                         <Marker position={[c.student.home_lat, c.student.home_lng]} icon={homeIcon}>

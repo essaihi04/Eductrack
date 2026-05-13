@@ -3,17 +3,10 @@ import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-l
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import L from 'leaflet';
 import { Bus, RefreshCw, User, Phone, Clock, Navigation } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
 import { supabase } from '../../lib/supabase';
-
-const busIcon = (color = '#f59e0b', highlighted = false) => L.divIcon({
-  html: `<div style="background:${color};width:${highlighted ? 44 : 36}px;height:${highlighted ? 44 : 36}px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);font-size:${highlighted ? 22 : 18}px;${highlighted ? 'animation: pulse 2s infinite;' : ''}">🚌</div>`,
-  className: '',
-  iconSize: [highlighted ? 44 : 36, highlighted ? 44 : 36],
-  iconAnchor: [highlighted ? 22 : 18, highlighted ? 22 : 18]
-});
+import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon } from '../../lib/mapAssets';
 
 function FitBounds({ trips, selectedId }) {
   const map = useMap();
@@ -137,7 +130,7 @@ export default function LiveMapPage() {
       {/* Carte */}
       <div className="flex-1 relative">
         <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap" />
+          <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
           <FitBounds trips={trips} selectedId={selectedId} />
           {trips.filter(t => t.last_position).map(t => {
             const isSel = t.id === selectedId;
@@ -145,7 +138,7 @@ export default function LiveMapPage() {
               <Marker
                 key={t.id}
                 position={[t.last_position.lat, t.last_position.lng]}
-                icon={busIcon(t.bus?.color, isSel)}
+                icon={busTopViewIcon(t.bus?.color || '#f59e0b', t.last_position.heading || 0, isSel ? 56 : 44, isSel)}
                 eventHandlers={{ click: () => setSelectedId(t.id) }}
               >
                 <Tooltip permanent direction="top" offset={[0, -20]} className="bus-label">
