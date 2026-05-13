@@ -843,7 +843,16 @@ const AdminDashboard = () => {
       {/* FINANCE SUMMARY — masqué pour le directeur pédagogique */}
       {!isPedagogical && <FinanceSummaryCard />}
 
-      {/* BLOC 1 - KPI Cards */}
+      {/* PÉDAGOGIE SECTION */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <GraduationCap className="w-5 h-5 text-blue-500" />
+            <CardTitle className="text-lg">Pédagogie</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {/* BLOC 1 - KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <KPICard
           icon={UserCheck}
@@ -1017,6 +1026,8 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
       </div>
+        </CardContent>
+      </Card>
 
       </>}
 
