@@ -1,12 +1,27 @@
 // Assets partagés pour les cartes Leaflet (style inDrive / Google Maps)
 import L from 'leaflet';
 
-// Tuiles style "Google Maps" claires et détaillées (rues + quartiers + commerces)
-// CartoDB Voyager : gratuit, sans clé, attribution requise
-export const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-export const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
-export const TILE_SUBDOMAINS = 'abcd';
+// === Fond de carte sophistiqué (style GPS pro / Apple Maps) ===
+// Stratégie hybride :
+//   1. Si VITE_MAPTILER_KEY défini → MapTiler Streets v2 (qualité max, ~Apple Maps)
+//   2. Sinon → Esri World Navigation (très joli style GPS pro, sans clé)
+//   3. Fallback CartoDB Voyager si problème réseau Esri (au niveau du composant via onerror)
+const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
+
+export const TILE_URL = MAPTILER_KEY
+  ? `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`
+  : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}';
+
+export const TILE_ATTRIBUTION = MAPTILER_KEY
+  ? '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  : 'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, NGA, USGS';
+
+export const TILE_SUBDOMAINS = MAPTILER_KEY ? '' : '';
 export const TILE_MAX_ZOOM = 20;
+
+// Fallback CartoDB (à utiliser comme deuxième TileLayer si besoin)
+export const TILE_URL_FALLBACK = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+export const TILE_ATTRIBUTION_FALLBACK = '&copy; OpenStreetMap &copy; CARTO';
 
 // SVG bus vu de dessus (style inDrive automobile)
 // heading en degrés (0 = nord, sens horaire), color = couleur principale du bus

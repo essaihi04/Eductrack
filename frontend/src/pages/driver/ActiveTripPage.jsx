@@ -26,9 +26,21 @@ const maneuverIcon = (type, modifier) => {
 
 const homeIcon = homeTopViewIcon(34);
 
-function MapAutoCenter({ position }) {
+function MapAutoCenter({ position, navMode }) {
   const map = useMap();
-  useEffect(() => { if (position) map.setView([position.lat, position.lng], map.getZoom() < 14 ? 15 : map.getZoom()); }, [position?.lat, position?.lng]);
+  useEffect(() => {
+    if (!position) return;
+    const targetZoom = navMode ? 17 : (map.getZoom() < 14 ? 15 : map.getZoom());
+    // Décale le centre de la carte vers le bas pour voir plus loin devant le bus (style Waze)
+    if (navMode) {
+      const offset = map.getSize().y * 0.2;
+      const point = map.project([position.lat, position.lng], targetZoom).subtract([0, -offset]);
+      const newCenter = map.unproject(point, targetZoom);
+      map.flyTo(newCenter, targetZoom, { duration: 0.5, animate: true });
+    } else {
+      map.flyTo([position.lat, position.lng], targetZoom, { duration: 0.6, animate: true });
+    }
+  }, [position?.lat, position?.lng, navMode]);
   return null;
 }
 
@@ -42,6 +54,7 @@ export default function ActiveTripPage() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  const [navMode, setNavMode] = useState(true); // mode navigation plein écran style Waze
   const lastPushRef = useRef(0);
   const offlineBufferRef = useRef([]);
   const [pushError, setPushError] = useState(null);
@@ -192,28 +205,38 @@ export default function ActiveTripPage() {
         </div>
       )}
 
-      {/* HUD instruction de navigation */}
+      {/* HUD instruction de navigation style Waze */}
       {nav.currentStep && destination && (
-        <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-4 py-3 flex items-center gap-3 shadow-md">
-          <div className="shrink-0">{maneuverIcon(nav.currentStep.maneuver?.type, nav.currentStep.maneuver?.modifier)}</div>
-          <div className="flex-1 min-w-0">
-            <div className="text-2xl font-bold leading-tight">{formatDistance(nav.distToNextManeuver)}</div>
-            <div className="text-xs opacity-90 truncate">{nav.currentStep.name || 'continuer'}</div>
+        <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-4 py-4 shadow-xl">
+          <div className="flex items-center gap-4">
+            <div className="shrink-0 bg-white/20 rounded-2xl p-3">{maneuverIcon(nav.currentStep.maneuver?.type, nav.currentStep.maneuver?.modifier)}</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-5xl font-black leading-none">{formatDistance(nav.distToNextManeuver)}</div>
+              <div className="text-sm opacity-95 truncate mt-1">{nav.currentStep.name || 'Continuez'}</div>
+              {nav.route?.steps?.[nav.stepIndex + 1] && (
+                <div className="text-xs opacity-75 truncate mt-0.5">puis {nav.route.steps[nav.stepIndex + 1].name || 'continuer'}</div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 shrink-0">
+              <button onClick={() => setVoiceEnabled(v => !v)} className="bg-white/20 p-2.5 rounded-full hover:bg-white/30">
+                {voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              </button>
+              <button onClick={() => setNavMode(v => !v)} className="bg-white/20 p-2.5 rounded-full hover:bg-white/30" title="Basculer mode navigation">
+                <Navigation className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-          <button onClick={() => setVoiceEnabled(v => !v)} className="bg-white/20 p-2 rounded-full">
-            {voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-          </button>
         </div>
       )}
       {nav.recalculating && <div className="bg-blue-100 text-blue-800 text-xs px-3 py-1 text-center">🔄 Recalcul de l'itinéraire...</div>}
 
       {/* Carte */}
-      <div className="relative" style={{ height: collapsed ? '30vh' : '45vh' }}>
-        <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={15} style={{ height: '100%', width: '100%' }}>
+      <div className="relative overflow-hidden" style={{ height: navMode ? (collapsed ? '40vh' : '60vh') : (collapsed ? '30vh' : '45vh') }}>
+        <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={navMode ? 17 : 15} style={{ height: '100%', width: '100%' }} zoomControl={!navMode} attributionControl={!navMode}>
           <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
-          <MapAutoCenter position={position} />
-          {nav.route?.geometry && <Polyline positions={nav.route.geometry} color="#2563eb" weight={6} opacity={0.85} />}
-          {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, 48, true)} />}
+          <MapAutoCenter position={position} navMode={navMode} />
+          {nav.route?.geometry && <Polyline positions={nav.route.geometry} color="#2563eb" weight={8} opacity={0.9} />}
+          {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, navMode ? 60 : 48, true)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={homeIcon} />}
         </MapContainer>
         <button onClick={() => setCollapsed(!collapsed)} className="absolute bottom-2 right-2 bg-white rounded-full p-2 shadow z-[1000]">
