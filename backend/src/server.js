@@ -58,6 +58,14 @@ app.use('/uploads', express.static('uploads'));
 app.use('/api/webhooks', webhooksRoutes);
 
 app.use('/api/auth', authRoutes);
+// IMPORTANT: sous-routes /api/admin/* spécifiques montées AVANT le routeur admin générique
+// (sinon le middleware authorize('admin') du routeur admin bloque les autres rôles)
+app.use('/api/admin/whatsapp', whatsappRoutes);
+app.use('/api/admin/finance-managers', financeManagersRoutes);
+app.use('/api/admin/pedagogical-managers', pedagogicalManagersRoutes);
+app.use('/api/admin/pedagogical-directors', pedagogicalDirectorsRoutes);
+app.use('/api/admin/transport-managers', transportManagersRoutes);
+app.use('/api/admin/drivers', driversRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/students', studentsRoutes);
@@ -72,14 +80,8 @@ app.use('/api', controlsPlanRoutes);
 app.use('/api/teacher/documents', documentsRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/superadmin', superadminRoutes);
-app.use('/api/admin/whatsapp', whatsappRoutes);
 app.use('/api/finance', financeRoutes);
-app.use('/api/admin/finance-managers', financeManagersRoutes);
-app.use('/api/admin/pedagogical-managers', pedagogicalManagersRoutes);
-app.use('/api/admin/pedagogical-directors', pedagogicalDirectorsRoutes);
 app.use('/api/transport', transportRoutes);
-app.use('/api/admin/transport-managers', transportManagersRoutes);
-app.use('/api/admin/drivers', driversRoutes);
 app.use('/api/push', pushRoutes);
 
 // Route de test
