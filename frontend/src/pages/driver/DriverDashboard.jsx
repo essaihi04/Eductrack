@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bus, Sun, Moon, LogOut, Play } from 'lucide-react';
+import { Bus, Sun, Moon, LogOut, Play, MapPin, CheckCircle, XCircle } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -9,6 +9,26 @@ export default function DriverDashboard() {
   const { profile, signOut } = useAuth();
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [gpsTest, setGpsTest] = useState(null); // { ok, lat, lng, accuracy, error }
+  const [testing, setTesting] = useState(false);
+
+  const testGps = async () => {
+    setTesting(true); setGpsTest(null);
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      setGpsTest({ ok: false, error: 'Site doit être en HTTPS (actuellement HTTP)' });
+      setTesting(false); return;
+    }
+    if (!('geolocation' in navigator)) {
+      setGpsTest({ ok: false, error: 'Géolocalisation non supportée par le navigateur' });
+      setTesting(false); return;
+    }
+    try {
+      const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 15000 }));
+      setGpsTest({ ok: true, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+    } catch (e) {
+      setGpsTest({ ok: false, error: e.message + ' (autorisez la localisation pour ce site)' });
+    } finally { setTesting(false); }
+  };
 
   useEffect(() => { load(); }, []);
 
@@ -59,6 +79,27 @@ export default function DriverDashboard() {
 
             {!inProgress && (
               <>
+                {/* Test GPS */}
+                <div className="bg-white rounded-2xl shadow p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-sm text-gray-700 flex items-center gap-2"><MapPin className="w-4 h-4 text-amber-600" /> Diagnostic GPS</h3>
+                    <button onClick={testGps} disabled={testing} className="text-xs bg-amber-500 text-white px-3 py-1.5 rounded-lg disabled:opacity-50">
+                      {testing ? 'Test...' : 'Tester'}
+                    </button>
+                  </div>
+                  {gpsTest?.ok && (
+                    <div className="text-xs bg-green-50 text-green-800 rounded p-2 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4" /> GPS OK — {gpsTest.lat.toFixed(5)}, {gpsTest.lng.toFixed(5)} (±{Math.round(gpsTest.accuracy)}m)
+                    </div>
+                  )}
+                  {gpsTest && !gpsTest.ok && (
+                    <div className="text-xs bg-red-50 text-red-800 rounded p-2 flex items-start gap-2">
+                      <XCircle className="w-4 h-4 shrink-0" /> {gpsTest.error}
+                    </div>
+                  )}
+                  {!gpsTest && <p className="text-xs text-gray-500">Cliquez "Tester" pour vérifier que la géolocalisation fonctionne avant de démarrer une tournée.</p>}
+                </div>
+
                 <div className="bg-white rounded-2xl shadow p-4 space-y-3">
                   <h2 className="font-semibold text-gray-700">Démarrer une tournée</h2>
                   <button onClick={() => startTrip('morning_pickup')} className="w-full bg-amber-500 text-white rounded-xl p-5 flex items-center gap-3 hover:bg-amber-600 transition">

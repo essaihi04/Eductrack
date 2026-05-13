@@ -43,7 +43,10 @@ export default function ActiveTripPage() {
         offlineBufferRef.current.shift();
       }
       await transportApi.pushPosition(id, { lat: p.lat, lng: p.lng, speed_kmh: p.speed, heading: p.heading, accuracy_m: p.accuracy });
-    } catch {
+      setPushCount(c => c + 1);
+      setPushError(null);
+    } catch (e) {
+      setPushError(e.message || 'Échec envoi position');
       offlineBufferRef.current.push({ lat: p.lat, lng: p.lng, speed_kmh: p.speed, heading: p.heading, accuracy_m: p.accuracy });
       if (offlineBufferRef.current.length > 100) offlineBufferRef.current.shift();
     }
@@ -114,6 +117,22 @@ export default function ActiveTripPage() {
           <Square className="w-4 h-4" /> Terminer
         </button>
       </div>
+
+      {/* Bandeau diagnostic GPS */}
+      {(gpsError || (!position && !gpsError)) && (
+        <div className={`px-3 py-2 text-xs font-medium ${gpsError ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
+          {gpsError ? `⚠️ GPS bloqué : ${gpsError}. Activez la localisation pour ce site dans les paramètres du navigateur.` : '⏳ En attente du signal GPS...'}
+        </div>
+      )}
+      {position && pushError && (
+        <div className="px-3 py-2 text-xs bg-orange-100 text-orange-800">⚠️ Position captée mais échec d'envoi : {pushError}</div>
+      )}
+      {position && !pushError && pushCount > 0 && (
+        <div className="px-3 py-1 text-xs bg-green-50 text-green-700 flex items-center justify-between">
+          <span>✅ GPS partagé ({pushCount} positions envoyées)</span>
+          <span>±{Math.round(position.accuracy || 0)}m</span>
+        </div>
+      )}
 
       {/* Carte */}
       <div className="relative" style={{ height: collapsed ? '30vh' : '45vh' }}>
