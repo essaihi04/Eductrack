@@ -4901,11 +4901,3 @@ router.get('/cahier-de-texte', async (req, res) => {
 });
 
 export default router;
-  }
-});
-
-export default router;
-  }
-});
-
-export default router;
