@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Bus, MapPin, Users, AlertCircle, CheckCircle, Activity, History, UserCog, User, School, Save, X, Crosshair } from 'lucide-react';
+import { Bus, MapPin, Users, AlertCircle, CheckCircle, Activity, History, UserCog, User, School, Save, X, Crosshair, TrendingUp } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
 import { directionLabel } from '../../lib/tripDirection';
 import HomeMapPicker from '../../components/transport/HomeMapPicker';
@@ -62,6 +62,15 @@ export default function TransportDashboard() {
           <UserCog className="w-6 h-6 mb-2 text-orange-600" /><h3 className="font-bold">Responsables</h3>
           <p className="text-xs text-gray-500">Resp. transport</p>
         </Link>
+        <Link to="/transport/stats" className="bg-gradient-to-br from-purple-500 to-fuchsia-600 text-white rounded-xl p-4 hover:shadow-lg transition col-span-2 lg:col-span-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <TrendingUp className="w-6 h-6 mb-2" /><h3 className="font-bold">📊 Statistiques détaillées</h3>
+              <p className="text-xs text-purple-100">Performance par chauffeur · Km parcourus · Temps moyen · Détail de chaque trajet</p>
+            </div>
+            <div className="text-3xl opacity-80">→</div>
+          </div>
+        </Link>
       </div>
 
       {/* Localisation de l'école — point de départ/arrivée de chaque tournée */}
@@ -115,7 +124,7 @@ export default function TransportDashboard() {
       <div className="bg-white rounded-xl shadow border">
         <div className="p-4 border-b flex items-center justify-between">
           <h2 className="font-bold">🚌 Trajets en cours</h2>
-          <Link to="/transport/history" className="text-sm text-orange-600 hover:underline flex items-center gap-1"><History className="w-4 h-4" /> Historique</Link>
+          <Link to="/transport/stats" className="text-sm text-orange-600 hover:underline flex items-center gap-1"><History className="w-4 h-4" /> Historique & Stats</Link>
         </div>
         <div className="divide-y">
           {live.length === 0 && <div className="p-6 text-center text-gray-400">Aucun trajet en cours</div>}

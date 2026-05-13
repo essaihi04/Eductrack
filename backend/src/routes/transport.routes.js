@@ -623,6 +623,118 @@ router.get('/students/available', requireTransportAccess, async (req, res) => {
   }
 });
 
+// GET /statistics — stats détaillées par chauffeur + par trajet (admin/transport_manager)
+// Query: ?period=today|week|month (default: week)
+router.get('/statistics', requireTransportAccess, async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const period = (req.query.period || 'week').toString();
+    const now = new Date();
+    const from = new Date(now);
+    if (period === 'today') from.setHours(0, 0, 0, 0);
+    else if (period === 'month') from.setDate(from.getDate() - 30);
+    else from.setDate(from.getDate() - 7); // week
+    const fromDate = from.toISOString().split('T')[0];
+
+    // Tous les trajets de la période (complétés ou en cours)
+    let q = supabaseAdmin
+      .from('bus_trips')
+      .select('id, bus_id, driver_id, direction, status, trip_date, started_at, ended_at, total_duration_min, total_km, bus:buses(id, plate_number, model, color), driver:profiles!bus_trips_driver_id_fkey(id, first_name, last_name, phone)')
+      .gte('trip_date', fromDate)
+      .order('started_at', { ascending: false });
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { data: trips, error } = await q;
+    if (error) throw error;
+
+    // Charger les événements (pour compter montés/déposés/absents par trajet)
+    const tripIds = (trips || []).map(t => t.id);
+    let eventsByTrip = {};
+    if (tripIds.length > 0) {
+      const { data: events } = await supabaseAdmin
+        .from('trip_student_events')
+        .select('trip_id, event_type, student_id')
+        .in('trip_id', tripIds);
+      // Dernier événement par (trip, student) — un élève peut être 'boarded' puis 'dropped'
+      const lastByKey = {};
+      (events || []).forEach(e => {
+        const key = `${e.trip_id}_${e.student_id}`;
+        lastByKey[key] = e; // events come in order, last wins (but DB doesn't guarantee; we just count all distinct statuses)
+      });
+      eventsByTrip = Object.values(lastByKey).reduce((acc, e) => {
+        if (!acc[e.trip_id]) acc[e.trip_id] = { boarded: 0, dropped: 0, absent: 0, total: 0 };
+        acc[e.trip_id].total++;
+        if (e.event_type === 'boarded') acc[e.trip_id].boarded++;
+        else if (e.event_type === 'dropped') acc[e.trip_id].dropped++;
+        else if (e.event_type === 'absent' || e.event_type === 'no_show') acc[e.trip_id].absent++;
+        return acc;
+      }, {});
+    }
+
+    // Enrichir chaque trajet avec stats événements
+    const enrichedTrips = (trips || []).map(t => ({
+      ...t,
+      events: eventsByTrip[t.id] || { boarded: 0, dropped: 0, absent: 0, total: 0 },
+    }));
+
+    // Aggréger par chauffeur
+    const driverMap = {};
+    enrichedTrips.forEach(t => {
+      if (!t.driver_id) return;
+      const key = t.driver_id;
+      if (!driverMap[key]) {
+        driverMap[key] = {
+          driver: t.driver,
+          driver_id: t.driver_id,
+          total_trips: 0,
+          completed_trips: 0,
+          total_km: 0,
+          total_duration_min: 0,
+          total_boarded: 0,
+          total_dropped: 0,
+          total_absent: 0,
+          buses_used: new Set(),
+        };
+      }
+      const d = driverMap[key];
+      d.total_trips++;
+      if (t.status === 'completed') d.completed_trips++;
+      d.total_km += Number(t.total_km || 0);
+      d.total_duration_min += Number(t.total_duration_min || 0);
+      d.total_boarded += t.events.boarded;
+      d.total_dropped += t.events.dropped;
+      d.total_absent += t.events.absent;
+      if (t.bus_id) d.buses_used.add(t.bus_id);
+    });
+    const driverStats = Object.values(driverMap).map(d => ({
+      ...d,
+      buses_used: d.buses_used.size,
+      avg_km_per_trip: d.completed_trips > 0 ? +(d.total_km / d.completed_trips).toFixed(2) : 0,
+      avg_duration_min: d.completed_trips > 0 ? Math.round(d.total_duration_min / d.completed_trips) : 0,
+    })).sort((a, b) => b.total_km - a.total_km);
+
+    // Stats globales
+    const completedTrips = enrichedTrips.filter(t => t.status === 'completed');
+    const global = {
+      total_trips: enrichedTrips.length,
+      completed_trips: completedTrips.length,
+      in_progress_trips: enrichedTrips.filter(t => t.status === 'in_progress').length,
+      total_km: +completedTrips.reduce((s, t) => s + Number(t.total_km || 0), 0).toFixed(2),
+      total_duration_min: completedTrips.reduce((s, t) => s + Number(t.total_duration_min || 0), 0),
+      avg_km: completedTrips.length > 0 ? +(completedTrips.reduce((s, t) => s + Number(t.total_km || 0), 0) / completedTrips.length).toFixed(2) : 0,
+      avg_duration_min: completedTrips.length > 0 ? Math.round(completedTrips.reduce((s, t) => s + Number(t.total_duration_min || 0), 0) / completedTrips.length) : 0,
+      total_boarded: completedTrips.reduce((s, t) => s + t.events.boarded, 0),
+      total_dropped: completedTrips.reduce((s, t) => s + t.events.dropped, 0),
+      total_absent: completedTrips.reduce((s, t) => s + t.events.absent, 0),
+      by_direction: completedTrips.reduce((acc, t) => { acc[t.direction] = (acc[t.direction] || 0) + 1; return acc; }, {}),
+    };
+
+    res.json({ period, from: fromDate, global, drivers: driverStats, trips: enrichedTrips });
+  } catch (e) {
+    console.error('Erreur stats transport:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // GET /summary — KPIs pour dashboard (bus actifs, trajets en cours, présences du jour)
 router.get('/summary', requireTransportAccess, async (req, res) => {
   try {

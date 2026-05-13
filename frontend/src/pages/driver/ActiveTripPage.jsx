@@ -139,7 +139,7 @@ export default function ActiveTripPage() {
 
   const endTrip = async () => {
     if (!confirm('Terminer la tournée ?')) return;
-    try { await transportApi.endTrip(id, {}); navigate('/driver'); }
+    try { await transportApi.endTrip(id, { total_km: Number(totalKm.toFixed(2)) }); navigate('/driver'); }
     catch (e) { alert('Erreur : ' + e.message); }
   };
 

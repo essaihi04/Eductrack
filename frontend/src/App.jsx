@@ -56,6 +56,7 @@ import BusesPage from './pages/transport/BusesPage';
 import BusDetailPage from './pages/transport/BusDetailPage';
 import LiveMapPage from './pages/transport/LiveMapPage';
 import TransportManagersPage from './pages/transport/TransportManagersPage';
+import TransportStatsPage from './pages/transport/TransportStatsPage';
 import DriversPage from './pages/transport/DriversPage';
 import ParentTransportPage from './pages/parent/TransportPage';
 import DriverDashboard from './pages/driver/DriverDashboard';
@@ -126,7 +127,8 @@ function App() {
             <Route path="transport/live" element={<LiveMapPage />} />
             <Route path="transport/managers" element={<TransportManagersPage />} />
             <Route path="transport/drivers" element={<DriversPage />} />
-            <Route path="transport/history" element={<TransportDashboard />} />
+            <Route path="transport/stats" element={<TransportStatsPage />} />
+            <Route path="transport/history" element={<TransportStatsPage />} />
             <Route path="parent/transport" element={<ParentTransportPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
