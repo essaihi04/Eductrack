@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-l
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import { Bus, RefreshCw, User, Phone, Clock, Navigation } from 'lucide-react';
+import { Bus, RefreshCw, User, Phone, Clock, Navigation, Menu, X } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
 import { supabase } from '../../lib/supabase';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon } from '../../lib/mapAssets';
@@ -34,6 +34,7 @@ export default function LiveMapPage() {
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
   const channelRef = useRef(null);
 
   useEffect(() => {
@@ -64,9 +65,27 @@ export default function LiveMapPage() {
   const selected = trips.find(t => t.id === selectedId);
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex">
+    <div className="h-[calc(100vh-4rem)] flex relative">
+      {/* Bouton flottant ouverture sidebar mobile */}
+      <button
+        onClick={() => setSidebarOpen(true)}
+        className="md:hidden fixed top-20 left-3 z-[1100] bg-orange-600 text-white p-2.5 rounded-full shadow-lg flex items-center gap-1.5"
+        aria-label="Voir liste des bus"
+      >
+        <Menu className="w-5 h-5" />
+        <span className="text-xs font-bold">{trips.length}</span>
+      </button>
+
+      {/* Overlay mobile */}
+      {sidebarOpen && (
+        <div onClick={() => setSidebarOpen(false)} className="md:hidden fixed inset-0 bg-black/40 z-[1099]" />
+      )}
+
       {/* Sidebar gauche : liste des bus en circulation */}
-      <div className="w-80 bg-white border-r flex flex-col shadow-lg z-[1000]">
+      <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static inset-y-0 left-0 top-16 md:top-0 w-72 md:w-80 bg-white border-r flex flex-col shadow-lg z-[1100] md:z-[1000] transition-transform duration-300`}>
+        <button onClick={() => setSidebarOpen(false)} className="md:hidden absolute top-3 right-3 text-white p-1 z-10">
+          <X className="w-5 h-5" />
+        </button>
         <div className="p-4 border-b bg-gradient-to-r from-orange-500 to-amber-600 text-white">
           <h1 className="text-lg font-bold flex items-center gap-2"><Bus className="w-5 h-5" /> Suivi en direct</h1>
           <p className="text-xs opacity-90">{trips.length} bus en circulation</p>
@@ -92,7 +111,7 @@ export default function LiveMapPage() {
             return (
               <button
                 key={t.id}
-                onClick={() => setSelectedId(t.id)}
+                onClick={() => { setSelectedId(t.id); setSidebarOpen(false); }}
                 className={`w-full text-left p-3 border-b hover:bg-orange-50 transition flex gap-3 items-start ${isSelected ? 'bg-orange-100 border-l-4 border-l-orange-500' : ''}`}
               >
                 <div

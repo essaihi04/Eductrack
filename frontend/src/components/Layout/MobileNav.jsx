@@ -16,7 +16,11 @@ import {
   School,
   GitCompare,
   Activity,
-  CalendarDays
+  CalendarDays,
+  Bus,
+  MapPin,
+  UserCog,
+  Wallet
 } from 'lucide-react';
 
 const MobileNav = () => {
@@ -42,6 +46,28 @@ const MobileNav = () => {
       ];
     }
 
+    if (profile?.role === 'transport_manager') {
+      return [
+        { icon: LayoutDashboard, label: 'Tableau', path: '/transport' },
+        { icon: MapPin, label: 'Suivi', path: '/transport/live' },
+        { icon: Bus, label: 'Bus', path: '/transport/buses' },
+        { icon: UserCog, label: 'Chauffeurs', path: '/transport/drivers' },
+      ];
+    }
+
+    if (profile?.role === 'driver') {
+      return [
+        { icon: LayoutDashboard, label: 'Tableau', path: '/driver/dashboard' },
+      ];
+    }
+
+    if (profile?.role === 'finance_manager') {
+      return [
+        { icon: LayoutDashboard, label: 'Accueil', path: '/dashboard' },
+        { icon: Wallet, label: 'Finance', path: '/finance' },
+      ];
+    }
+
     if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager') {
       return [
         { icon: LayoutDashboard, label: 'Accueil', path: '/dashboard' },
@@ -53,6 +79,7 @@ const MobileNav = () => {
     }
 
     // Student
+    if (profile?.role !== 'student') return []; // évite menu élève pour rôles inconnus
     return [
       { icon: Calendar, label: 'Mon jour', path: '/dashboard' },
       { icon: GraduationCap, label: 'Niveau', path: '/student/level' },
@@ -63,6 +90,8 @@ const MobileNav = () => {
   };
 
   const navItems = getNavItems();
+
+  if (!navItems || navItems.length === 0) return null;
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-card border-t border-border">
