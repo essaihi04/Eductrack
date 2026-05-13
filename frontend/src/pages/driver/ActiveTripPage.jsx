@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical } from 'lucide-react';
+import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical, School } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -52,6 +52,7 @@ export default function ActiveTripPage() {
   const navigate = useNavigate();
   const [bus, setBus] = useState(null);
   const [tripDirection, setTripDirection] = useState(null);
+  const [school, setSchool] = useState(null); // { lat, lng, name, address }
   const [students, setStudents] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -106,12 +107,14 @@ export default function ActiveTripPage() {
       if (!trip) { alert('Trajet introuvable'); navigate('/driver'); return; }
       setBus(trip.bus);
       setTripDirection(trip.direction);
-      const [s, e] = await Promise.all([
+      const [s, e, sch] = await Promise.all([
         transportApi.listBusStudents(trip.bus_id),
-        transportApi.getEvents(id)
+        transportApi.getEvents(id),
+        transportApi.getSchool().catch(() => null),
       ]);
       setStudents(s.assignments || []);
       setEvents(e.events || []);
+      setSchool(sch);
     } catch (err) { console.error(err); alert('Erreur : ' + err.message); }
     finally { setLoading(false); }
   };
@@ -148,11 +151,17 @@ export default function ActiveTripPage() {
     return (a.pickup_order || 0) - (b.pickup_order || 0);
   }), [students, events]);
   const nextStudent = sortedStudents.find(a => statusOf(a.student.id) === 'pending');
-  // Destination mémorisée : ne change QUE quand le prochain élève change
+  // Tous les élèves ont été traités ? → la destination devient l'école (retour automatique)
+  const allDone = students.length > 0 && !nextStudent;
+  const schoolDest = school?.lat && school?.lng ? { lat: Number(school.lat), lng: Number(school.lng) } : null;
+  // Destination mémorisée : ne change QUE quand le prochain élève change OU à la fin
   const destination = useMemo(() => {
-    if (!nextStudent?.student?.home_lat) return null;
-    return { lat: Number(nextStudent.student.home_lat), lng: Number(nextStudent.student.home_lng) };
-  }, [nextStudent?.student?.id]);
+    if (nextStudent?.student?.home_lat) {
+      return { lat: Number(nextStudent.student.home_lat), lng: Number(nextStudent.student.home_lng) };
+    }
+    if (allDone && schoolDest) return schoolDest;
+    return null;
+  }, [nextStudent?.student?.id, allDone, schoolDest?.lat, schoolDest?.lng]);
   const nav = useNavigation({ position, destination, voiceEnabled });
 
   // Drag-and-drop sensors (souris + tactile)
@@ -245,6 +254,22 @@ export default function ActiveTripPage() {
           {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, navMode ? 60 : 48, true)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={homeIcon} />}
         </MapContainer>
+
+        {/* Bannière "Retour école" (clignotante bleue) quand tous les élèves sont traités */}
+        {allDone && schoolDest && (
+          <div className="absolute top-3 left-3 right-3 z-[1000] pointer-events-none">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3 student-banner-pulse-blue pointer-events-auto">
+              <div className="w-12 h-12 rounded-full bg-white text-blue-700 flex items-center justify-center shrink-0 shadow ring-2 ring-white/60">
+                <School className="w-7 h-7" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-wide opacity-90 leading-none">🏁 Tous traités — Retour</div>
+                <div className="font-black text-base leading-tight truncate">Retour à l'école</div>
+                <div className="text-[11px] opacity-95 truncate">{school?.name || 'École'} · {school?.address || ''}</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Bannière élève en cours (clignotante) en haut de la carte */}
         {nextStudent && (
@@ -346,6 +371,13 @@ export default function ActiveTripPage() {
         }
         .student-banner-pulse {
           animation: studentBannerPulse 1.6s ease-in-out infinite;
+        }
+        @keyframes studentBannerPulseBlue {
+          0%, 100% { box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.7), 0 0 0 0 rgba(37, 99, 235, 0.6); transform: scale(1); }
+          50% { box-shadow: 0 10px 35px -5px rgba(37, 99, 235, 1), 0 0 0 8px rgba(37, 99, 235, 0); transform: scale(1.02); }
+        }
+        .student-banner-pulse-blue {
+          animation: studentBannerPulseBlue 1.6s ease-in-out infinite;
         }
       `}</style>
     </div>

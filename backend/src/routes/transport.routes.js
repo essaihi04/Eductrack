@@ -207,6 +207,52 @@ router.put('/students/:id/home', requireTransportAccess, async (req, res) => {
   }
 });
 
+// ==================== ÉCOLE (localisation) ====================
+
+// GET /school — récupère lat/lng/address de l'école courante
+// Accessible aussi aux drivers car ActiveTripPage en a besoin pour route retour école.
+router.get('/school', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
+    const schoolId = req.user.school_id;
+    if (!schoolId) return res.json({ id: null, name: null, lat: null, lng: null, address: null });
+    const { data, error } = await supabaseAdmin
+      .from('schools')
+      .select('id, name, lat, lng, address')
+      .eq('id', schoolId)
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('Erreur get school:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// PUT /school — admin/transport_manager met à jour la localisation GPS de l'école
+router.put('/school', requireTransportAccess, async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'Aucune école associée' });
+    const { lat, lng, address } = req.body;
+    const update = {};
+    if (lat !== undefined) update.lat = lat;
+    if (lng !== undefined) update.lng = lng;
+    if (address !== undefined) update.address = address;
+    const { data, error } = await supabaseAdmin
+      .from('schools')
+      .update(update)
+      .eq('id', schoolId)
+      .select('id, name, lat, lng, address')
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('Erreur update school:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ==================== TRIPS (chauffeur principalement) ====================
 
 // GET /trips/today — trajets du jour pour le bus du chauffeur (ou pour admin tous bus)

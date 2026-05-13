@@ -50,6 +50,9 @@ export const transportApi = {
   // Historique
   history: (params) => request('/api/transport/history', { query: params }),
   summary: () => request('/api/transport/summary'),
+  // École (localisation GPS — départ et arrivée de chaque tournée)
+  getSchool: () => request('/api/transport/school'),
+  updateSchool: (body) => request('/api/transport/school', { method: 'PUT', body }),
 };
 
 export const transportManagersApi = {
