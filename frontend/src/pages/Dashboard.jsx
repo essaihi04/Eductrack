@@ -23,9 +23,8 @@ const Dashboard = () => {
       return <Navigate to="/superadmin/schools" replace />;
     case 'admin':
     case 'school_admin':
-      return <AdminDashboard />;
     case 'pedagogical_director':
-      return <Navigate to="/classes" replace />;
+      return <AdminDashboard />;
     case 'teacher':
       return <Navigate to="/teacher/dashboard" replace />;
     case 'finance_manager':

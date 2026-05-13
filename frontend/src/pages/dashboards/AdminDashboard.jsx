@@ -839,8 +839,8 @@ const AdminDashboard = () => {
 
       {/* ==================== OVERVIEW TAB ==================== */}
       {dashboardTab === 'overview' && <>
-      {/* FINANCE SUMMARY */}
-      <FinanceSummaryCard />
+      {/* FINANCE SUMMARY — masqué pour le directeur pédagogique */}
+      {!isPedagogical && <FinanceSummaryCard />}
 
       {/* BLOC 1 - KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">

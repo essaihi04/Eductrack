@@ -66,8 +66,7 @@ const Sidebar = () => {
     if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director') {
       const isPedagogical = profile?.role === 'pedagogical_director';
       return [
-        // Tableau de bord uniquement pour admin/school_admin (le directeur pédagogique n'a pas de dashboard dédié)
-        ...(isPedagogical ? [] : commonItems),
+        ...commonItems,
         { icon: BarChart3, label: 'Comportement', path: '/behavior' },
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: UserCircle, label: 'Professeurs', path: '/teachers' },
