@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { processDailyReports, generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 
 const router = express.Router();
@@ -93,6 +93,13 @@ router.get('/recipients', async (req, res) => {
     // Filter students by class criteria
     let filteredStudents = students || [];
 
+    // Filtre de scope pour pedagogical_manager
+    const scopedIds = await getScopedClassIds(req);
+    if (scopedIds !== null) {
+      if (scopedIds.length === 0) return res.json({ recipients: [], stats: { total: 0, withParents: 0 } });
+      filteredStudents = filteredStudents.filter(s => scopedIds.includes(s.class_id));
+    }
+
     if (class_ids) {
       const ids = class_ids.split(',').map(id => id.trim()).filter(Boolean);
       if (ids.length > 0) {
@@ -181,8 +188,15 @@ router.get('/recipients-list', async (req, res) => {
       return res.json({ parents: [] });
     }
 
-    const ids = class_ids.split(',').map(id => id.trim()).filter(Boolean);
+    let ids = class_ids.split(',').map(id => id.trim()).filter(Boolean);
     if (ids.length === 0) return res.json({ parents: [] });
+
+    // Filtre de scope pour pedagogical_manager : restreindre aux classes assignées
+    const scopedIds = await getScopedClassIds(req);
+    if (scopedIds !== null) {
+      ids = ids.filter(id => scopedIds.includes(id));
+      if (ids.length === 0) return res.json({ parents: [] });
+    }
 
     // Get students in selected classes
     let studentQuery = supabaseAdmin

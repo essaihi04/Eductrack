@@ -6,7 +6,7 @@ import { generateEmail, generatePassword } from '../../utils/studentUtils';
 
 const StudentsPage = () => {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -194,8 +194,8 @@ const StudentsPage = () => {
       // Récupérer les mots de passe stockés dans localStorage
       const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
 
-      if (profile.role === 'admin' || profile.role === 'school_admin') {
-        // Admin: récupère tous les élèves et classes
+      if (isAdmin) {
+        // Admin / directeur / responsable pédagogique : routes admin (filtrées par scope côté backend)
         const [studentsRes, classesRes] = await Promise.all([
           fetch(`${apiUrl}/api/admin/students`, { headers: { 'Authorization': `Bearer ${token}` } }),
           fetch(`${apiUrl}/api/admin/classes`, { headers: { 'Authorization': `Bearer ${token}` } })
@@ -407,7 +407,7 @@ L'administration de ${schoolName}`;
       const student = students.find(s => s.id === studentId);
       const newPassword = generatePassword(student?.first_name || '');
 
-      const endpoint = (profile.role === 'admin' || profile.role === 'school_admin') 
+      const endpoint = isAdmin
         ? `${apiUrl}/api/admin/students/${studentId}/reset-password`
         : `${apiUrl}/api/teacher/students/${studentId}/reset-password`;
 

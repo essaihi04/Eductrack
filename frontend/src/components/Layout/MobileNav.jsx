@@ -42,7 +42,7 @@ const MobileNav = () => {
       ];
     }
 
-    if (profile?.role === 'admin' || profile?.role === 'school_admin') {
+    if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager') {
       return [
         { icon: LayoutDashboard, label: 'Accueil', path: '/dashboard' },
         { icon: Users, label: 'Élèves', path: '/students' },

@@ -233,6 +233,25 @@ router.get('/parents', async (req, res) => {
       .eq('role', 'parent')
       .order('created_at', { ascending: false });
     parentsQuery = applySchoolFilter(parentsQuery, req);
+    // Filtre de scope : ne garder que les parents ayant au moins un enfant dans les classes assignées
+    const scopedClassIds = await getScopedClassIds(req);
+    if (scopedClassIds !== null) {
+      if (scopedClassIds.length === 0) return res.json([]);
+      const { data: scopedStudents } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('role', 'student')
+        .in('class_id', scopedClassIds);
+      const studentIds = (scopedStudents || []).map(s => s.id);
+      if (studentIds.length === 0) return res.json([]);
+      const { data: ps } = await supabaseAdmin
+        .from('parent_students')
+        .select('parent_id')
+        .in('student_id', studentIds);
+      const allowedParentIds = [...new Set((ps || []).map(p => p.parent_id))];
+      if (allowedParentIds.length === 0) return res.json([]);
+      parentsQuery = parentsQuery.in('id', allowedParentIds);
+    }
     const { data: parents, error: parentsError } = await parentsQuery;
 
     if (parentsError) throw parentsError;
@@ -4862,9 +4881,18 @@ router.get('/cahier-de-texte', async (req, res) => {
       .order('start_time', { ascending: true });
 
     query = applySchoolFilter(query, req);
+    // Filtre de scope sur class_id pour pedagogical_manager
+    const scopedClassIdsCdt = await getScopedClassIds(req);
+    if (scopedClassIdsCdt !== null) {
+      if (scopedClassIdsCdt.length === 0) return res.json({ classes: [], totalSessions: 0, period: { startDate, endDate } });
+      query = query.in('class_id', scopedClassIdsCdt);
+    }
 
     if (class_id) {
-      query = query.eq('class_id', class_id);
+      // Si plusieurs ids séparés par virgule
+      const ids = String(class_id).split(',').filter(Boolean);
+      if (ids.length === 1) query = query.eq('class_id', ids[0]);
+      else if (ids.length > 1) query = query.in('class_id', ids);
     }
     if (subject_id) {
       query = query.eq('subject_id', subject_id);
