@@ -212,6 +212,12 @@ router.get('/students', async (req, res) => {
       .select('*')
       .eq('role', 'student');
     query = applySchoolFilter(query, req);
+    // Filtre de scope pour pedagogical_manager
+    const scopedStuIds = await getScopedClassIds(req);
+    if (scopedStuIds !== null) {
+      if (scopedStuIds.length === 0) return res.json([]);
+      query = query.in('class_id', scopedStuIds);
+    }
     const { data, error } = await query;
 
     if (error) throw error;
@@ -1286,6 +1292,12 @@ router.get('/classes', async (req, res) => {
       .from('classes')
       .select('*, teacher:profiles!classes_teacher_id_fkey(first_name, last_name)');
     query = applySchoolFilter(query, req);
+    // Filtre de scope pour pedagogical_manager
+    const scopedClsIds = await getScopedClassIds(req);
+    if (scopedClsIds !== null) {
+      if (scopedClsIds.length === 0) return res.json([]);
+      query = query.in('id', scopedClsIds);
+    }
     const { data, error } = await query;
 
     if (error) throw error;
