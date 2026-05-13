@@ -68,6 +68,7 @@ const Sidebar = () => {
       const isManager = profile?.role === 'pedagogical_manager';
       return [
         ...commonItems,
+        { section: 'Pédagogique', isSection: true },
         { icon: BarChart3, label: 'Comportement', path: '/behavior' },
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: UserCircle, label: 'Professeurs', path: '/teachers' },

@@ -843,191 +843,180 @@ const AdminDashboard = () => {
       {/* FINANCE SUMMARY — masqué pour le directeur pédagogique */}
       {!isPedagogical && <FinanceSummaryCard />}
 
-      {/* PÉDAGOGIE SECTION */}
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <GraduationCap className="w-5 h-5 text-blue-500" />
-            <CardTitle className="text-lg">Pédagogie</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="pt-0">
-          {/* BLOC 1 - KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <KPICard
-              icon={UserCheck}
-              title="Présence Élèves"
-              value={kpis.studentAttendance.value !== null ? `${kpis.studentAttendance.value}%` : '—'}
-              subtitle={kpis.studentAttendance.total > 0 ? `${kpis.studentAttendance.total} élèves au total` : 'Aucun élève'}
-              status={kpis.studentAttendance.value !== null ? getStatusColor(kpis.studentAttendance.value, { good: 90, warning: 75 }) : 'gray'}
-              onClick={() => openPanel('student-attendance', kpis.studentAttendance)}
-            />
-            <KPICard
-              icon={GraduationCap}
-              title="Présence Profs"
-              value={kpis.teacherAttendance.value !== null ? `${kpis.teacherAttendance.value}%` : '—'}
-              subtitle={kpis.teacherAttendance.total > 0 ? `${kpis.teacherAttendance.total} professeurs` : 'Aucun professeur'}
-              status={kpis.teacherAttendance.value !== null ? getStatusColor(kpis.teacherAttendance.value, { good: 95, warning: 85 }) : 'gray'}
-              onClick={() => openPanel('teacher-attendance', kpis.teacherAttendance)}
-            />
-            <KPICard
-              icon={ClipboardList}
-              title="Devoirs Non Corrigés"
-              value={kpis.uncorrectedHomework.value}
-              subtitle={`${kpis.uncorrectedHomework.teachers.length} profs concernés`}
-              status={kpis.uncorrectedHomework.value === 0 ? 'green' : kpis.uncorrectedHomework.value < 10 ? 'orange' : 'red'}
-              onClick={() => openPanel('uncorrected-homework', kpis.uncorrectedHomework)}
-            />
-            <KPICard
-              icon={AlertTriangle}
-              title="Alertes Comportement"
-              value={kpis.behaviorAlerts.value}
-              subtitle="Incidents actifs"
-              status={kpis.behaviorAlerts.value === 0 ? 'green' : kpis.behaviorAlerts.value < 5 ? 'orange' : 'red'}
-              onClick={() => openPanel('behavior-alerts', kpis.behaviorAlerts)}
-            />
-            <KPICard
-              icon={Calendar}
-              title="Classes Sans Cours"
-              value={kpis.classesWithoutCourse.value}
-              subtitle="Aujourd'hui"
-              status={kpis.classesWithoutCourse.value === 0 ? 'green' : 'red'}
-              onClick={() => openPanel('classes-without-course', kpis.classesWithoutCourse)}
-            />
-          </div>
+      {/* BLOC 1 - KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <KPICard
+          icon={UserCheck}
+          title="Présence Élèves"
+          value={kpis.studentAttendance.value !== null ? `${kpis.studentAttendance.value}%` : '—'}
+          subtitle={kpis.studentAttendance.total > 0 ? `${kpis.studentAttendance.total} élèves au total` : 'Aucun élève'}
+          status={kpis.studentAttendance.value !== null ? getStatusColor(kpis.studentAttendance.value, { good: 90, warning: 75 }) : 'gray'}
+          onClick={() => openPanel('student-attendance', kpis.studentAttendance)}
+        />
+        <KPICard
+          icon={GraduationCap}
+          title="Présence Profs"
+          value={kpis.teacherAttendance.value !== null ? `${kpis.teacherAttendance.value}%` : '—'}
+          subtitle={kpis.teacherAttendance.total > 0 ? `${kpis.teacherAttendance.total} professeurs` : 'Aucun professeur'}
+          status={kpis.teacherAttendance.value !== null ? getStatusColor(kpis.teacherAttendance.value, { good: 95, warning: 85 }) : 'gray'}
+          onClick={() => openPanel('teacher-attendance', kpis.teacherAttendance)}
+        />
+        <KPICard
+          icon={ClipboardList}
+          title="Devoirs Non Corrigés"
+          value={kpis.uncorrectedHomework.value}
+          subtitle={`${kpis.uncorrectedHomework.teachers.length} profs concernés`}
+          status={kpis.uncorrectedHomework.value === 0 ? 'green' : kpis.uncorrectedHomework.value < 10 ? 'orange' : 'red'}
+          onClick={() => openPanel('uncorrected-homework', kpis.uncorrectedHomework)}
+        />
+        <KPICard
+          icon={AlertTriangle}
+          title="Alertes Comportement"
+          value={kpis.behaviorAlerts.value}
+          subtitle="Incidents actifs"
+          status={kpis.behaviorAlerts.value === 0 ? 'green' : kpis.behaviorAlerts.value < 5 ? 'orange' : 'red'}
+          onClick={() => openPanel('behavior-alerts', kpis.behaviorAlerts)}
+        />
+        <KPICard
+          icon={Calendar}
+          title="Classes Sans Cours"
+          value={kpis.classesWithoutCourse.value}
+          subtitle="Aujourd'hui"
+          status={kpis.classesWithoutCourse.value === 0 ? 'green' : 'red'}
+          onClick={() => openPanel('classes-without-course', kpis.classesWithoutCourse)}
+        />
+      </div>
 
-          {/* BLOC 2 - Priorities */}
-          {priorities.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Zap className="w-5 h-5 text-orange-500" />
-                  <CardTitle className="text-lg">À traiter aujourd'hui</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {priorities.map((alert) => (
-                  <PriorityAlert key={alert.id} alert={alert} onAction={handleAction} />
-                ))}
-              </CardContent>
-            </Card>
-          )}
+      {/* BLOC 2 - Priorities */}
+      {priorities.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-orange-500" />
+              <CardTitle className="text-lg">À traiter aujourd'hui</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {priorities.map((alert) => (
+              <PriorityAlert key={alert.id} alert={alert} onAction={handleAction} />
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
-          {/* BLOC 3 & 4 - Classes and Teachers Tables */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {/* Classes Table */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-5 h-5 text-purple-500" />
-                    <CardTitle className="text-lg">Surveillance des Classes</CardTitle>
-                  </div>
-                  <span className="text-sm text-muted-foreground">{classes.length} classes</span>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-2 px-2 font-medium">Classe</th>
-                        <th className="text-center py-2 px-2 font-medium">Présence</th>
-                        <th className="text-center py-2 px-2 font-medium">Devoirs</th>
-                        <th className="text-center py-2 px-2 font-medium">Statut</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {classes.slice(0, 8).map((cls) => (
-                        <tr key={cls.id} className="border-b hover:bg-muted/50 transition-colors">
-                          <td className="py-2 px-2">
-                            <div>
-                              <p className="font-medium">{cls.name}</p>
-                              <p className="text-xs text-muted-foreground">{cls.studentCount} élèves</p>
-                            </div>
-                          </td>
-                          <td className="text-center py-2 px-2">
-                            {cls.attendanceRate !== null ? (
-                              <span className={`font-medium ${
-                                cls.attendanceRate >= 90 ? 'text-green-600' : 
-                                cls.attendanceRate >= 75 ? 'text-orange-600' : 'text-red-600'
-                              }`}>
-                                {cls.attendanceRate}%
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
-                          </td>
-                          <td className="text-center py-2 px-2">
-                            {cls.homeworkPending > 0 ? (
-                              <span className="text-orange-600 font-medium">{cls.homeworkPending}</span>
-                            ) : (
-                              <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />
-                            )}
-                          </td>
-                          <td className="text-center py-2 px-2">
-                            <StatusBadge status={cls.status} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+      {/* BLOC 3 & 4 - Classes and Teachers Tables */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Classes Table */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-5 h-5 text-purple-500" />
+                <CardTitle className="text-lg">Surveillance des Classes</CardTitle>
+              </div>
+              <span className="text-sm text-muted-foreground">{classes.length} classes</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-2 font-medium">Classe</th>
+                    <th className="text-center py-2 px-2 font-medium">Présence</th>
+                    <th className="text-center py-2 px-2 font-medium">Devoirs</th>
+                    <th className="text-center py-2 px-2 font-medium">Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {classes.slice(0, 8).map((cls) => (
+                    <tr key={cls.id} className="border-b hover:bg-muted/50 transition-colors">
+                      <td className="py-2 px-2">
+                        <div>
+                          <p className="font-medium">{cls.name}</p>
+                          <p className="text-xs text-muted-foreground">{cls.studentCount} élèves</p>
+                        </div>
+                      </td>
+                      <td className="text-center py-2 px-2">
+                        {cls.attendanceRate !== null ? (
+                          <span className={`font-medium ${
+                            cls.attendanceRate >= 90 ? 'text-green-600' : 
+                            cls.attendanceRate >= 75 ? 'text-orange-600' : 'text-red-600'
+                          }`}>
+                            {cls.attendanceRate}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="text-center py-2 px-2">
+                        {cls.homeworkPending > 0 ? (
+                          <span className="text-orange-600 font-medium">{cls.homeworkPending}</span>
+                        ) : (
+                          <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />
+                        )}
+                      </td>
+                      <td className="text-center py-2 px-2">
+                        <StatusBadge status={cls.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
 
-            {/* Teachers Table */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-5 h-5 text-blue-500" />
-                    <CardTitle className="text-lg">Suivi des Professeurs</CardTitle>
-                  </div>
-                  <span className="text-sm text-muted-foreground">{teachers.length} professeurs</span>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-2 px-2 font-medium">Professeur</th>
-                        <th className="text-center py-2 px-2 font-medium">Classes</th>
-                        <th className="text-center py-2 px-2 font-medium">Devoirs en retard</th>
-                        <th className="text-center py-2 px-2 font-medium">Statut</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teachers.slice(0, 8).map((teacher) => (
-                        <tr key={teacher.id} className="border-b hover:bg-muted/50 transition-colors">
-                          <td className="py-2 px-2">
-                            <div>
-                              <p className="font-medium">{teacher.first_name} {teacher.last_name}</p>
-                              <p className="text-xs text-muted-foreground">{teacher.email}</p>
-                            </div>
-                          </td>
-                          <td className="text-center py-2 px-2">{teacher.classCount}</td>
-                          <td className="text-center py-2 px-2">
-                            {teacher.homeworkLate > 0 ? (
-                              <span className="text-orange-600 font-medium">{teacher.homeworkLate}</span>
-                            ) : (
-                              <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />
-                            )}
-                          </td>
-                          <td className="text-center py-2 px-2">
-                            <StatusBadge status={teacher.status} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </CardContent>
-      </Card>
+        {/* Teachers Table */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-500" />
+                <CardTitle className="text-lg">Suivi des Professeurs</CardTitle>
+              </div>
+              <span className="text-sm text-muted-foreground">{teachers.length} professeurs</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-2 font-medium">Professeur</th>
+                    <th className="text-center py-2 px-2 font-medium">Classes</th>
+                    <th className="text-center py-2 px-2 font-medium">Devoirs en retard</th>
+                    <th className="text-center py-2 px-2 font-medium">Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teachers.slice(0, 8).map((teacher) => (
+                    <tr key={teacher.id} className="border-b hover:bg-muted/50 transition-colors">
+                      <td className="py-2 px-2">
+                        <div>
+                          <p className="font-medium">{teacher.first_name} {teacher.last_name}</p>
+                          <p className="text-xs text-muted-foreground">{teacher.email}</p>
+                        </div>
+                      </td>
+                      <td className="text-center py-2 px-2">{teacher.classCount}</td>
+                      <td className="text-center py-2 px-2">
+                        {teacher.homeworkLate > 0 ? (
+                          <span className="text-orange-600 font-medium">{teacher.homeworkLate}</span>
+                        ) : (
+                          <CheckCircle className="w-4 h-4 text-green-500 mx-auto" />
+                        )}
+                      </td>
+                      <td className="text-center py-2 px-2">
+                        <StatusBadge status={teacher.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       </>}
 
