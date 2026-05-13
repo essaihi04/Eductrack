@@ -29,9 +29,11 @@ export default function ActiveTripPage() {
   const [collapsed, setCollapsed] = useState(false);
   const lastPushRef = useRef(0);
   const offlineBufferRef = useRef([]);
+  const [pushError, setPushError] = useState(null);
+  const [pushCount, setPushCount] = useState(0);
 
   // GPS partagé toutes les 5s
-  const { position } = useGeolocation(true, async (p) => {
+  const { position, error: gpsError } = useGeolocation(true, async (p) => {
     const now = Date.now();
     if (now - lastPushRef.current < POSITION_PUSH_INTERVAL_MS) return;
     lastPushRef.current = now;
