@@ -30,6 +30,12 @@ const Dashboard = () => {
       return <Navigate to="/teacher/dashboard" replace />;
     case 'finance_manager':
       return <Navigate to="/finance" replace />;
+    case 'transport_manager':
+      return <Navigate to="/transport" replace />;
+    case 'driver':
+      return <Navigate to="/driver" replace />;
+    case 'parent':
+      return <Navigate to="/parent/transport" replace />;
     case 'student':
       return <StudentDashboard />;
     default:

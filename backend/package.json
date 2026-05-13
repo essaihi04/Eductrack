@@ -21,6 +21,7 @@
     "node-cron": "^4.2.1",
     "openai": "^6.19.0",
     "uuid": "^9.0.0",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

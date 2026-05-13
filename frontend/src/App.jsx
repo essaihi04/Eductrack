@@ -51,6 +51,15 @@ import PaymentsPage from './pages/finance/PaymentsPage';
 import OverduePage from './pages/finance/OverduePage';
 import FinanceStudentsPage from './pages/finance/FinanceStudentsPage';
 import ExpensesPage from './pages/finance/ExpensesPage';
+import TransportDashboard from './pages/transport/TransportDashboard';
+import BusesPage from './pages/transport/BusesPage';
+import BusDetailPage from './pages/transport/BusDetailPage';
+import LiveMapPage from './pages/transport/LiveMapPage';
+import TransportManagersPage from './pages/transport/TransportManagersPage';
+import DriversPage from './pages/transport/DriversPage';
+import ParentTransportPage from './pages/parent/TransportPage';
+import DriverDashboard from './pages/driver/DriverDashboard';
+import ActiveTripPage from './pages/driver/ActiveTripPage';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -79,6 +88,9 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          {/* Routes chauffeur — interface mobile dédiée, hors layout standard */}
+          <Route path="/driver" element={<ProtectedRoute><DriverDashboard /></ProtectedRoute>} />
+          <Route path="/driver/trip/:id" element={<ProtectedRoute><ActiveTripPage /></ProtectedRoute>} />
           <Route
             path="/*"
             element={
@@ -108,6 +120,14 @@ function App() {
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />
+            <Route path="transport" element={<TransportDashboard />} />
+            <Route path="transport/buses" element={<BusesPage />} />
+            <Route path="transport/buses/:id" element={<BusDetailPage />} />
+            <Route path="transport/live" element={<LiveMapPage />} />
+            <Route path="transport/managers" element={<TransportManagersPage />} />
+            <Route path="transport/drivers" element={<DriversPage />} />
+            <Route path="transport/history" element={<TransportDashboard />} />
+            <Route path="parent/transport" element={<ParentTransportPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />

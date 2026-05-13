@@ -23,6 +23,10 @@ import financeRoutes from './routes/finance.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
 import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
 import pedagogicalManagersRoutes from './routes/pedagogicalManagers.routes.js';
+import transportRoutes from './routes/transport.routes.js';
+import transportManagersRoutes from './routes/transportManagers.routes.js';
+import driversRoutes from './routes/drivers.routes.js';
+import pushRoutes from './routes/push.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 
 dotenv.config();
@@ -73,6 +77,10 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/admin/finance-managers', financeManagersRoutes);
 app.use('/api/admin/pedagogical-managers', pedagogicalManagersRoutes);
 app.use('/api/admin/pedagogical-directors', pedagogicalDirectorsRoutes);
+app.use('/api/transport', transportRoutes);
+app.use('/api/admin/transport-managers', transportManagersRoutes);
+app.use('/api/admin/drivers', driversRoutes);
+app.use('/api/push', pushRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {

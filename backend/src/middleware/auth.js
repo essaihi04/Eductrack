@@ -161,3 +161,31 @@ export const requireFinanceAccess = (req, res, next) => {
   }
   next();
 };
+
+// Accès au module transport (gestion) : admin, school_admin, super_admin,
+// pedagogical_director, transport_manager
+export const requireTransportAccess = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
+  if (!['super_admin', 'admin', 'school_admin', 'pedagogical_director', 'transport_manager'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé au personnel transport' });
+  }
+  next();
+};
+
+// Réservé aux personnes habilitées à créer/gérer responsables transport et chauffeurs
+export const requireTransportManagement = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
+  if (!['super_admin', 'admin', 'school_admin', 'pedagogical_director', 'transport_manager'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé à la direction transport' });
+  }
+  next();
+};
+
+// Vérifie qu'un chauffeur (driver) ne touche qu'à ses propres trajets
+export const requireDriverOrTransportAccess = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
+  const ok = ['super_admin', 'admin', 'school_admin', 'pedagogical_director', 'transport_manager', 'driver'].includes(req.user.role);
+  if (!ok) return res.status(403).json({ error: 'Accès refusé' });
+  next();
+};
+

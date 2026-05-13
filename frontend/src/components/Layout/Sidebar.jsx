@@ -28,7 +28,10 @@ import {
   Layers,
   TrendingDown,
   UserCog,
-  Wallet
+  Wallet,
+  Bus,
+  MapPin,
+  Home as HomeIcon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
@@ -99,6 +102,31 @@ const Sidebar = () => {
           ]),
           { icon: UserCog, label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers' },
         ]),
+        // Section Transport — masquée pour le pedagogical_manager
+        ...(isManager ? [] : [
+          { section: 'Transport', isSection: true },
+          { icon: LayoutDashboard, label: 'Tableau transport', path: '/transport' },
+          { icon: MapPin, label: 'Suivi en direct', path: '/transport/live' },
+          { icon: Bus, label: 'Bus & élèves', path: '/transport/buses' },
+          { icon: UserCircle, label: 'Chauffeurs', path: '/transport/drivers' },
+          { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
+        ]),
+      ];
+    }
+
+    if (profile?.role === 'transport_manager') {
+      return [
+        { icon: LayoutDashboard, label: 'Tableau de bord', path: '/transport' },
+        { icon: MapPin, label: 'Suivi en direct', path: '/transport/live' },
+        { icon: Bus, label: 'Bus & élèves', path: '/transport/buses' },
+        { icon: UserCircle, label: 'Chauffeurs', path: '/transport/drivers' },
+      ];
+    }
+
+    if (profile?.role === 'parent') {
+      return [
+        { icon: Bus, label: 'Transport', path: '/parent/transport' },
+        { icon: Edit, label: 'Profil', path: '/profile' },
       ];
     }
 
