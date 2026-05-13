@@ -231,7 +231,7 @@ export default function ActiveTripPage() {
       {nav.recalculating && <div className="bg-blue-100 text-blue-800 text-xs px-3 py-1 text-center">🔄 Recalcul de l'itinéraire...</div>}
 
       {/* Carte */}
-      <div className="relative overflow-hidden" style={{ height: navMode ? (collapsed ? '40vh' : '60vh') : (collapsed ? '30vh' : '45vh') }}>
+      <div className="relative overflow-hidden" style={{ height: navMode ? (collapsed ? '28vh' : '45vh') : (collapsed ? '25vh' : '38vh') }}>
         <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={navMode ? 17 : 15} style={{ height: '100%', width: '100%' }} zoomControl={!navMode} attributionControl={!navMode}>
           <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
           <MapAutoCenter position={position} navMode={navMode} />
@@ -265,24 +265,12 @@ export default function ActiveTripPage() {
         </div>
       </div>
 
-      {/* Prochain élève */}
-      {nextStudent && (
-        <div className="bg-white border-y p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center font-bold text-amber-700">{nextStudent.pickup_order || '?'}</div>
-          <div className="flex-1">
-            <div className="font-bold">{nextStudent.student.first_name} {nextStudent.student.last_name}</div>
-            <div className="text-xs text-gray-500 truncate">{nextStudent.student.home_address || nextStudent.student.classes?.name || ''}</div>
-            {nextStudent.student.transport_notes && <div className="text-xs text-orange-600">📝 {nextStudent.student.transport_notes}</div>}
-          </div>
-          {nextStudent.student.phone && (
-            <a href={`tel:${nextStudent.student.phone}`} className="bg-blue-100 text-blue-700 p-2 rounded-full"><Phone className="w-4 h-4" /></a>
-          )}
+      {/* Liste élèves avec drag-and-drop (l'élève courant est highlighté en ambre) */}
+      <div className="flex-1 overflow-y-auto bg-gray-50 min-h-[35vh]">
+        <div className="sticky top-0 z-10 text-[10px] text-gray-600 px-3 py-1.5 bg-gray-100 border-b flex items-center justify-between">
+          <span>🔀 Glissez pour réordonner</span>
+          <span className="font-semibold">{sortedStudents.filter(a => statusOf(a.student.id) === 'pending').length} restant(s) / {sortedStudents.length}</span>
         </div>
-      )}
-
-      {/* Liste élèves avec drag-and-drop */}
-      <div className="flex-1 overflow-y-auto bg-gray-50">
-        <div className="text-[10px] text-gray-500 px-3 py-1 bg-gray-100 border-b">🔀 Glissez les élèves en attente pour réorganiser l'ordre de tournée</div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={sortedStudents.filter(a => statusOf(a.student.id) === 'pending').map(a => a.id)} strategy={verticalListSortingStrategy}>
             {sortedStudents.map(a => (
