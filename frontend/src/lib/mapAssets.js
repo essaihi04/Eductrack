@@ -23,35 +23,66 @@ export const TILE_MAX_ZOOM = 20;
 export const TILE_URL_FALLBACK = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
 export const TILE_ATTRIBUTION_FALLBACK = '&copy; OpenStreetMap &copy; CARTO';
 
-// SVG bus vu de dessus (style inDrive automobile)
-// heading en degrés (0 = nord, sens horaire), color = couleur principale du bus
-export const busTopViewIcon = (color = '#f59e0b', heading = 0, size = 48, highlighted = false) => {
+// SVG bus scolaire vu de côté (style cartoon jaune).
+// Le bus se "retourne" horizontalement (scaleX) selon la direction GPS :
+//   - Heading 0°-180° (est / sud) → face à droite (par défaut)
+//   - Heading 180°-360° (ouest / nord) → face à gauche (miroir)
+// Le nom `busTopViewIcon` est conservé pour compatibilité avec le code existant.
+export const busTopViewIcon = (color = '#fcd34d', heading = 0, size = 56, highlighted = false) => {
   const w = size;
-  const h = Math.round(size * 1.6);
+  const h = Math.round(size * 0.72); // ratio side-view (largeur > hauteur)
+  // Flip horizontalement si le bus roule vers l'ouest / nord
+  const flip = heading > 180 && heading < 360;
+  const transform = flip ? 'scaleX(-1)' : 'scaleX(1)';
+  // Couleur secondaire (toit / bandes) plus claire
+  const lighter = color === '#fcd34d' ? '#fde68a' : color;
   const svg = `
-    <svg width="${w}" height="${h}" viewBox="0 0 40 64" xmlns="http://www.w3.org/2000/svg"
-         style="transform: rotate(${heading || 0}deg); transition: transform 0.5s ease-out; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));">
+    <svg width="${w}" height="${h}" viewBox="0 0 100 72" xmlns="http://www.w3.org/2000/svg"
+         style="transform: ${transform}; transition: transform 0.4s ease-out; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.35));">
       <!-- Ombre sous le bus -->
-      <ellipse cx="20" cy="58" rx="14" ry="3" fill="rgba(0,0,0,0.25)"/>
-      <!-- Carrosserie -->
-      <rect x="5" y="4" width="30" height="54" rx="7" ry="7" fill="${color}" stroke="white" stroke-width="2"/>
-      <!-- Pare-brise avant (haut) -->
-      <path d="M 8 8 Q 20 4 32 8 L 30 14 L 10 14 Z" fill="#bae6fd" opacity="0.95"/>
-      <!-- Vitres latérales -->
-      <rect x="7" y="18" width="3" height="8" rx="1" fill="#bae6fd" opacity="0.85"/>
-      <rect x="30" y="18" width="3" height="8" rx="1" fill="#bae6fd" opacity="0.85"/>
-      <rect x="7" y="28" width="3" height="8" rx="1" fill="#bae6fd" opacity="0.85"/>
-      <rect x="30" y="28" width="3" height="8" rx="1" fill="#bae6fd" opacity="0.85"/>
-      <rect x="7" y="38" width="3" height="8" rx="1" fill="#bae6fd" opacity="0.85"/>
-      <rect x="30" y="38" width="3" height="8" rx="1" fill="#bae6fd" opacity="0.85"/>
-      <!-- Vitre arrière -->
-      <rect x="10" y="50" width="20" height="5" rx="2" fill="#fef3c7" opacity="0.9"/>
+      <ellipse cx="50" cy="68" rx="40" ry="3" fill="rgba(0,0,0,0.22)"/>
+
+      <!-- Carrosserie principale (jaune) -->
+      <path d="M 8 22 L 8 56 Q 8 60 12 60 L 88 60 Q 92 60 92 56 L 92 30 Q 92 26 88 26 L 78 26 L 72 20 Q 70 18 67 18 L 14 18 Q 8 18 8 22 Z"
+            fill="${color}" stroke="#1f2937" stroke-width="1.5"/>
+
+      <!-- Capot avant -->
+      <path d="M 78 26 L 88 26 Q 92 26 92 30 L 92 40 L 78 40 Z" fill="${lighter}" stroke="#1f2937" stroke-width="1.2"/>
+
+      <!-- Bande noire latérale -->
+      <rect x="10" y="44" width="80" height="3" fill="#1f2937"/>
+
+      <!-- Pare-brise avant -->
+      <path d="M 79 28 L 88 28 Q 90 28 90 30 L 90 38 L 79 38 Z" fill="#bfdbfe" opacity="0.95" stroke="#1f2937" stroke-width="0.8"/>
+
+      <!-- Vitres latérales (bleu clair) -->
+      <rect x="12" y="24" width="14" height="14" rx="2" fill="#bae6fd" stroke="#1f2937" stroke-width="0.8"/>
+      <rect x="28" y="24" width="14" height="14" rx="2" fill="#bae6fd" stroke="#1f2937" stroke-width="0.8"/>
+      <rect x="44" y="24" width="14" height="14" rx="2" fill="#bae6fd" stroke="#1f2937" stroke-width="0.8"/>
+      <rect x="60" y="24" width="14" height="14" rx="2" fill="#bae6fd" stroke="#1f2937" stroke-width="0.8"/>
+
+      <!-- Porte (au milieu, plus foncée) -->
+      <rect x="58" y="24" width="6" height="32" fill="${color}" stroke="#1f2937" stroke-width="0.8"/>
+      <rect x="58.5" y="40" width="5" height="2" fill="#1f2937" opacity="0.5"/>
+
       <!-- Phares avant -->
-      <circle cx="10" cy="7" r="1.5" fill="#fef08a"/>
-      <circle cx="30" cy="7" r="1.5" fill="#fef08a"/>
-      <!-- Feu central toit -->
-      <rect x="18" y="15" width="4" height="2" rx="1" fill="white" opacity="0.9"/>
-      ${highlighted ? '<rect x="3" y="2" width="34" height="58" rx="9" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.8"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.5s" repeatCount="indefinite"/></rect>' : ''}
+      <circle cx="89" cy="50" r="2.5" fill="#fef08a" stroke="#1f2937" stroke-width="0.6"/>
+
+      <!-- Rétroviseur -->
+      <rect x="74" y="14" width="3" height="6" fill="#1f2937"/>
+      <rect x="71" y="13" width="6" height="3" fill="#1f2937"/>
+
+      <!-- Roue avant -->
+      <circle cx="78" cy="60" r="7" fill="#1f2937"/>
+      <circle cx="78" cy="60" r="3.5" fill="#9ca3af"/>
+      <circle cx="78" cy="60" r="1.5" fill="#1f2937"/>
+
+      <!-- Roue arrière -->
+      <circle cx="22" cy="60" r="7" fill="#1f2937"/>
+      <circle cx="22" cy="60" r="3.5" fill="#9ca3af"/>
+      <circle cx="22" cy="60" r="1.5" fill="#1f2937"/>
+
+      ${highlighted ? '<rect x="4" y="14" width="92" height="50" rx="6" fill="none" stroke="#fbbf24" stroke-width="2.5" opacity="0.85"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.5s" repeatCount="indefinite"/></rect>' : ''}
     </svg>
   `;
   return L.divIcon({
