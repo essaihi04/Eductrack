@@ -53,7 +53,7 @@ export default function ActiveTripPage() {
   const [students, setStudents] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false); // bottom sheet liste élèves
   const [navMode, setNavMode] = useState(true); // mode navigation plein écran style Waze
   const lastPushRef = useRef(0);
   const offlineBufferRef = useRef([]);
@@ -230,8 +230,8 @@ export default function ActiveTripPage() {
       )}
       {nav.recalculating && <div className="bg-blue-100 text-blue-800 text-xs px-3 py-1 text-center">🔄 Recalcul de l'itinéraire...</div>}
 
-      {/* Carte */}
-      <div className="relative overflow-hidden" style={{ height: navMode ? (collapsed ? '28vh' : '45vh') : (collapsed ? '25vh' : '38vh') }}>
+      {/* Carte plein écran avec bannière élève clignotante + boutons flottants */}
+      <div className="relative overflow-hidden flex-1">
         <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={navMode ? 17 : 15} style={{ height: '100%', width: '100%' }} zoomControl={!navMode} attributionControl={!navMode}>
           <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
           <MapAutoCenter position={position} navMode={navMode} />
@@ -239,13 +239,44 @@ export default function ActiveTripPage() {
           {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, navMode ? 60 : 48, true)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={homeIcon} />}
         </MapContainer>
-        <button onClick={() => setCollapsed(!collapsed)} className="absolute bottom-2 right-2 bg-white rounded-full p-2 shadow z-[1000]">
-          {collapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
 
-        {/* HUD vitesse + ETA en bas */}
-        <div className="absolute bottom-2 left-2 right-14 flex gap-2 z-[1000]">
-          <div className="bg-white rounded-xl shadow px-3 py-2 flex items-center gap-2">
+        {/* Bannière élève en cours (clignotante) en haut de la carte */}
+        {nextStudent && (
+          <div className="absolute top-3 left-3 right-3 z-[1000] pointer-events-none">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-xl shadow-2xl px-4 py-2.5 flex items-center gap-3 student-banner-pulse pointer-events-auto">
+              <div className="w-10 h-10 rounded-full bg-white text-amber-700 flex items-center justify-center font-black text-lg shrink-0 shadow ring-2 ring-white/60">
+                {nextStudent.pickup_order || '?'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-wide opacity-90 leading-none">🎯 Destination en cours</div>
+                <div className="font-black text-base leading-tight truncate">{nextStudent.student.first_name} {nextStudent.student.last_name}</div>
+                <div className="text-[11px] opacity-95 truncate">{nextStudent.student.classes?.name || nextStudent.student.home_address || ''}</div>
+              </div>
+              {nextStudent.student.phone && (
+                <a href={`tel:${nextStudent.student.phone}`} className="bg-white/25 hover:bg-white/40 p-2 rounded-full shrink-0"><Phone className="w-4 h-4" /></a>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Boutons d'action flottants pour l'élève en cours */}
+        {nextStudent && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[1000] flex flex-col gap-2.5">
+            <button onClick={() => sendEvent(nextStudent.student.id, 'boarded')} className="bg-green-600 hover:bg-green-700 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Monté">
+              <CheckCircle className="w-7 h-7" />
+            </button>
+            <button onClick={() => sendEvent(nextStudent.student.id, 'dropped')} className="bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Déposé">
+              <Home className="w-7 h-7" />
+            </button>
+            <button onClick={() => sendEvent(nextStudent.student.id, 'absent')} className="bg-red-600 hover:bg-red-700 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Absent">
+              <XCircle className="w-7 h-7" />
+            </button>
+          </div>
+        )}
+
+        {/* HUD vitesse + ETA en bas (au-dessus de la poignée du bottom sheet) */}
+        <div className="absolute bottom-14 left-2 right-2 flex gap-2 z-[1000]">
+          <div className="bg-white rounded-xl shadow-lg px-3 py-2 flex items-center gap-2">
             <Gauge className="w-5 h-5 text-amber-600" />
             <div>
               <div className="text-xl font-bold leading-none">{position?.speed != null ? Math.round(position.speed) : 0}</div>
@@ -253,32 +284,58 @@ export default function ActiveTripPage() {
             </div>
           </div>
           {nav.route && (
-            <div className="bg-white rounded-xl shadow px-3 py-2 flex-1">
+            <div className="bg-white rounded-xl shadow-lg px-3 py-2 flex-1">
               <div className="text-xs text-gray-500">Arrivée</div>
               <div className="text-sm font-bold leading-tight">{formatDuration(nav.remainingDuration)} · {formatDistance(nav.remainingDistance)}</div>
             </div>
           )}
-          <div className="bg-white rounded-xl shadow px-3 py-2">
+          <div className="bg-white rounded-xl shadow-lg px-3 py-2">
             <div className="text-xs text-gray-500">Parcouru</div>
             <div className="text-sm font-bold">{totalKm.toFixed(1)} km</div>
           </div>
         </div>
+
+        {/* Bottom sheet : liste des élèves, fermé par défaut */}
+        <div
+          className={`absolute left-0 right-0 bottom-0 bg-white shadow-[0_-8px_24px_rgba(0,0,0,0.15)] rounded-t-2xl z-[1001] transition-[height] duration-300 ease-out flex flex-col`}
+          style={{ height: sheetOpen ? '60vh' : '48px' }}
+        >
+          {/* Poignée toujours visible */}
+          <button onClick={() => setSheetOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-2 border-b shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-1 bg-gray-300 rounded-full"></div>
+              <span className="text-xs font-semibold text-gray-700">
+                📋 {sortedStudents.filter(a => statusOf(a.student.id) === 'pending').length} restant(s) / {sortedStudents.length}
+              </span>
+            </div>
+            {sheetOpen ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronUp className="w-5 h-5 text-gray-500" />}
+          </button>
+
+          {/* Liste (visible uniquement quand ouvert) */}
+          {sheetOpen && (
+            <div className="flex-1 overflow-y-auto bg-gray-50">
+              <div className="text-[10px] text-gray-500 px-3 py-1.5 bg-gray-100 border-b">🔀 Glissez les élèves pour réordonner</div>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={sortedStudents.filter(a => statusOf(a.student.id) === 'pending').map(a => a.id)} strategy={verticalListSortingStrategy}>
+                  {sortedStudents.map(a => (
+                    <StudentRow key={a.id} assignment={a} status={statusOf(a.student.id)} onEvent={(sid, t) => { sendEvent(sid, t); }} isNext={nextStudent?.id === a.id} />
+                  ))}
+                </SortableContext>
+              </DndContext>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Liste élèves avec drag-and-drop (l'élève courant est highlighté en ambre) */}
-      <div className="flex-1 overflow-y-auto bg-gray-50 min-h-[35vh]">
-        <div className="sticky top-0 z-10 text-[10px] text-gray-600 px-3 py-1.5 bg-gray-100 border-b flex items-center justify-between">
-          <span>🔀 Glissez pour réordonner</span>
-          <span className="font-semibold">{sortedStudents.filter(a => statusOf(a.student.id) === 'pending').length} restant(s) / {sortedStudents.length}</span>
-        </div>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={sortedStudents.filter(a => statusOf(a.student.id) === 'pending').map(a => a.id)} strategy={verticalListSortingStrategy}>
-            {sortedStudents.map(a => (
-              <StudentRow key={a.id} assignment={a} status={statusOf(a.student.id)} onEvent={sendEvent} isNext={nextStudent?.id === a.id} />
-            ))}
-          </SortableContext>
-        </DndContext>
-      </div>
+      <style>{`
+        @keyframes studentBannerPulse {
+          0%, 100% { box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.7), 0 0 0 0 rgba(245, 158, 11, 0.6); transform: scale(1); }
+          50% { box-shadow: 0 10px 35px -5px rgba(245, 158, 11, 1), 0 0 0 8px rgba(245, 158, 11, 0); transform: scale(1.02); }
+        }
+        .student-banner-pulse {
+          animation: studentBannerPulse 1.6s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 }
