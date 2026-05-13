@@ -101,6 +101,9 @@ const Sidebar = () => {
             { icon: UserCog, label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors' },
           ]),
           { icon: UserCog, label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers' },
+          ...(isPedagogical ? [] : [
+            { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
+          ]),
         ]),
         // Section Transport — masquée pour le pedagogical_manager
         ...(isManager ? [] : [
