@@ -155,11 +155,17 @@ router.put('/assignments/:id', requireTransportAccess, async (req, res) => {
   }
 });
 
-router.put('/buses/:id/assignments/order', requireTransportAccess, async (req, res) => {
+router.put('/buses/:id/assignments/order', requireDriverOrTransportAccess, async (req, res) => {
   // body: { items: [{ id, pickup_order }] }
   try {
+    const { id: busId } = req.params;
     const { items } = req.body || {};
     if (!Array.isArray(items)) return res.status(400).json({ error: 'items array requis' });
+    // Si chauffeur, vérifier qu'il est bien chauffeur de ce bus
+    if (req.user.role === 'driver') {
+      const { data: bus } = await supabaseAdmin.from('buses').select('driver_id').eq('id', busId).maybeSingle();
+      if (!bus || bus.driver_id !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
+    }
     await Promise.all(items.map(it =>
       supabaseAdmin.from('bus_assignments').update({ pickup_order: it.pickup_order }).eq('id', it.id)
     ));
