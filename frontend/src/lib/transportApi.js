@@ -35,6 +35,7 @@ export const transportApi = {
   reorderAssignments: (busId, items) => request(`/api/transport/buses/${busId}/assignments/order`, { method: 'PUT', body: { items } }),
   removeAssignment: (id) => request(`/api/transport/assignments/${id}`, { method: 'DELETE' }),
   updateStudentHome: (studentId, body) => request(`/api/transport/students/${studentId}/home`, { method: 'PUT', body }),
+  updateStudentHomeByDriver: (studentId, body) => request(`/api/transport/students/${studentId}/home/by-driver`, { method: 'PUT', body }),
   listAvailableStudents: () => request('/api/transport/students/available'),
   // Trajets
   todayTrips: () => request('/api/transport/trips/today'),

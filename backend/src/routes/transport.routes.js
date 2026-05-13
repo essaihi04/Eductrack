@@ -187,6 +187,36 @@ router.delete('/assignments/:id', requireTransportAccess, async (req, res) => {
   }
 });
 
+// PUT /students/:id/home/by-driver — le chauffeur met à jour le GPS d'un élève
+// (uniquement les élèves de son bus, sur sa tournée en cours)
+router.put('/students/:id/home/by-driver', async (req, res) => {
+  try {
+    if (req.user.role !== 'driver') return res.status(403).json({ error: 'Réservé au chauffeur' });
+    const { id } = req.params;
+    const { home_lat, home_lng, home_address } = req.body;
+    if (typeof home_lat !== 'number' || typeof home_lng !== 'number') {
+      return res.status(400).json({ error: 'home_lat/home_lng requis' });
+    }
+    // Vérifier que cet élève est bien assigné à un bus dont le chauffeur est req.user
+    const { data: bus } = await supabaseAdmin
+      .from('buses').select('id').eq('driver_id', req.user.id).maybeSingle();
+    if (!bus) return res.status(403).json({ error: 'Aucun bus assigné à votre compte' });
+    const { data: assign } = await supabaseAdmin
+      .from('bus_assignments').select('id').eq('bus_id', bus.id).eq('student_id', id).eq('active', true).maybeSingle();
+    if (!assign) return res.status(403).json({ error: 'Élève non assigné à votre bus' });
+
+    const update = { home_lat, home_lng };
+    if (home_address !== undefined) update.home_address = home_address;
+    const { data, error } = await supabaseAdmin
+      .from('profiles').update(update).eq('id', id).eq('role', 'student').select('id, home_lat, home_lng, home_address').single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('Erreur update home by driver:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // PUT /students/:id/home — admin/transport_manager met à jour adresse + GPS d'un élève
 router.put('/students/:id/home', requireTransportAccess, async (req, res) => {
   try {

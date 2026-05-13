@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical, School } from 'lucide-react';
+import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical, School, Crosshair } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -135,6 +135,23 @@ export default function ActiveTripPage() {
       // Mise à jour locale immédiate
       setEvents(prev => [{ trip_id: id, student_id: studentId, event_type, recorded_at: new Date().toISOString() }, ...prev]);
     } catch (e) { alert('Erreur : ' + e.message); }
+  };
+
+  // Le chauffeur met à jour la position GPS de l'élève en cours avec sa position actuelle
+  const updateStudentLocationHere = async (studentId) => {
+    if (!position) { alert('Position GPS non disponible'); return; }
+    if (!confirm('Mettre à jour le domicile de cet élève avec votre position actuelle ?')) return;
+    try {
+      await transportApi.updateStudentHomeByDriver(studentId, {
+        home_lat: position.lat,
+        home_lng: position.lng,
+      });
+      // Mise à jour locale immédiate
+      setStudents(prev => prev.map(a => a.student.id === studentId
+        ? { ...a, student: { ...a.student, home_lat: position.lat, home_lng: position.lng } }
+        : a
+      ));
+    } catch (e) { alert('Erreur : ' + (e.message || e)); }
   };
 
   const endTrip = async () => {
@@ -283,10 +300,24 @@ export default function ActiveTripPage() {
                 <div className="font-black text-base leading-tight truncate">{nextStudent.student.first_name} {nextStudent.student.last_name}</div>
                 <div className="text-[11px] opacity-95 truncate">{nextStudent.student.classes?.name || nextStudent.student.home_address || ''}</div>
               </div>
-              {nextStudent.student.phone && (
-                <a href={`tel:${nextStudent.student.phone}`} className="bg-white/25 hover:bg-white/40 p-2 rounded-full shrink-0"><Phone className="w-4 h-4" /></a>
-              )}
+              <div className="flex flex-col gap-1.5 shrink-0">
+                <button
+                  onClick={() => updateStudentLocationHere(nextStudent.student.id)}
+                  className="bg-white/25 hover:bg-white/40 p-2 rounded-full"
+                  title="Mettre à jour la position GPS de cet élève avec ma position actuelle"
+                >
+                  <Crosshair className="w-4 h-4" />
+                </button>
+                {nextStudent.student.phone && (
+                  <a href={`tel:${nextStudent.student.phone}`} className="bg-white/25 hover:bg-white/40 p-2 rounded-full"><Phone className="w-4 h-4" /></a>
+                )}
+              </div>
             </div>
+            {!nextStudent.student.home_lat && (
+              <div className="mt-2 bg-red-600/90 text-white text-[11px] rounded-lg px-3 py-1.5 pointer-events-auto flex items-center gap-2">
+                ⚠️ Position GPS de cet élève non définie. Cliquez sur 🎯 pour la définir à votre position actuelle.
+              </div>
+            )}
           </div>
         )}
 
