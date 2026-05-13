@@ -22,6 +22,7 @@ import webhooksRoutes from './routes/webhooks.routes.js';
 import financeRoutes from './routes/finance.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
 import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
+import pedagogicalManagersRoutes from './routes/pedagogicalManagers.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 
 dotenv.config();
@@ -70,6 +71,7 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/admin/whatsapp', whatsappRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/admin/finance-managers', financeManagersRoutes);
+app.use('/api/admin/pedagogical-managers', pedagogicalManagersRoutes);
 app.use('/api/admin/pedagogical-directors', pedagogicalDirectorsRoutes);
 
 // Route de test

@@ -63,8 +63,9 @@ const Sidebar = () => {
       { icon: LayoutDashboard, label: 'Tableau de bord', path: '/dashboard' },
     ];
 
-    if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director') {
-      const isPedagogical = profile?.role === 'pedagogical_director';
+    if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager') {
+      const isPedagogical = profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
+      const isManager = profile?.role === 'pedagogical_manager';
       return [
         ...commonItems,
         { icon: BarChart3, label: 'Comportement', path: '/behavior' },
@@ -86,11 +87,16 @@ const Sidebar = () => {
           { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
           { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
         ]),
-        // Section Équipe — uniquement pour les admins complets (pas le directeur pédagogique)
-        ...(isPedagogical ? [] : [
+        // Section Équipe
+        // - Resp. financiers + Direct. pédagogiques : réservés aux admins complets
+        // - Resp. pédagogiques : visible par admins + directeur pédagogique (pas le manager lui-même)
+        ...(isManager ? [] : [
           { section: 'Équipe', isSection: true },
-          { icon: UserCog, label: 'Resp. financiers', path: '/admin/finance-managers' },
-          { icon: UserCog, label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors' },
+          ...(isPedagogical ? [] : [
+            { icon: UserCog, label: 'Resp. financiers', path: '/admin/finance-managers' },
+            { icon: UserCog, label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors' },
+          ]),
+          { icon: UserCog, label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers' },
         ]),
       ];
     }

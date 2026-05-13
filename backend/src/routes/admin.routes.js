@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -91,6 +91,15 @@ const createParentProfile = async ({ email, firstName, lastName, phone, schoolId
 const getSchoolId = (req) => {
   if (req.user.role === 'super_admin') return null;
   return req.user.school_id || null;
+};
+
+// Applique le filtre de scope (classes assignées) pour pedagogical_manager
+// Renvoie {query, empty} — si empty=true, la route doit renvoyer [] sans appeler la BDD
+const applyScopeFilterClass = async (query, req, column = 'class_id') => {
+  const scopedIds = await getScopedClassIds(req);
+  if (scopedIds === null) return { query, empty: false };
+  if (scopedIds.length === 0) return { query, empty: true };
+  return { query: query.in(column, scopedIds), empty: false };
 };
 
 // Applique le filtre school_id sur une requête Supabase (table qui a school_id directement)
@@ -1802,6 +1811,18 @@ router.get('/teachers', async (req, res) => {
       .select('*')
       .eq('role', 'teacher');
     query = applySchoolFilter(query, req);
+    // Filtre de scope : profs qui enseignent dans les classes assignées
+    const scopedIds = await getScopedClassIds(req);
+    if (scopedIds !== null) {
+      if (scopedIds.length === 0) return res.json([]);
+      const { data: ct } = await supabaseAdmin
+        .from('class_teachers')
+        .select('teacher_id')
+        .in('class_id', scopedIds);
+      const teacherIds = [...new Set((ct || []).map(r => r.teacher_id))];
+      if (teacherIds.length === 0) return res.json([]);
+      query = query.in('id', teacherIds);
+    }
     const { data, error } = await query;
 
     if (error) throw error;
@@ -4876,6 +4897,14 @@ router.get('/cahier-de-texte', async (req, res) => {
   } catch (error) {
     console.error('Erreur cahier de texte admin:', error);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+export default router;
+  }
+});
+
+export default router;
   }
 });
 

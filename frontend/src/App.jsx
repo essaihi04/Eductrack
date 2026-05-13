@@ -43,6 +43,7 @@ import AuditLogPage from './pages/superadmin/AuditLogPage';
 import WhatsAppPage from './pages/admin/WhatsAppPage';
 import FinanceManagersPage from './pages/admin/FinanceManagersPage';
 import PedagogicalDirectorsPage from './pages/admin/PedagogicalDirectorsPage';
+import PedagogicalManagersPage from './pages/admin/PedagogicalManagersPage';
 import FinanceDashboard from './pages/finance/FinanceDashboard';
 import FeeTemplatesPage from './pages/finance/FeeTemplatesPage';
 import InvoicesPage from './pages/finance/InvoicesPage';
@@ -105,6 +106,7 @@ function App() {
             <Route path="finance/students" element={<FinanceStudentsPage />} />
             <Route path="finance/expenses" element={<ExpensesPage />} />
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
+            <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
