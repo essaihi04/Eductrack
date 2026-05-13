@@ -174,7 +174,8 @@ const PriorityAlert = ({ alert, onAction }) => {
 };
 
 const AdminDashboard = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isPedagogical = profile?.role === 'pedagogical_director';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
