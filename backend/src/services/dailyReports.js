@@ -599,8 +599,8 @@ class MessageQueue {
 
 // ==================== PROCESS SINGLE SCHOOL (PARALLEL-SAFE) ====================
 
-async function processSchoolReports(settings, today) {
-  console.log(`[DailyReports] 🏫 Processing school ${settings.school_id}...`);
+async function processSchoolReports(settings, today, scopedClassIds = null) {
+  console.log(`[DailyReports] 🏫 Processing school ${settings.school_id}${scopedClassIds ? ` (scoped to ${scopedClassIds.length} classes)` : ''}...`);
   
   const queue = new MessageQueue(1, WASENDER_MIN_INTERVAL_MS); // 1 message / 5 seconds
   let processed = 0, sent = 0, failed = 0;
@@ -613,12 +613,18 @@ async function processSchoolReports(settings, today) {
       return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
     }
 
-    // Get all students in this school
-    const { data: students } = await supabaseAdmin
+    // Get all students in this school (optionally restricted to scoped classes)
+    let studentsQuery = supabaseAdmin
       .from('profiles')
       .select('id, first_name, last_name, class_id')
       .eq('role', 'student')
       .eq('school_id', settings.school_id);
+    if (scopedClassIds && scopedClassIds.length > 0) {
+      studentsQuery = studentsQuery.in('class_id', scopedClassIds);
+    } else if (scopedClassIds && scopedClassIds.length === 0) {
+      return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
+    }
+    const { data: students } = await studentsQuery;
 
     console.log(`[DailyReports] 👥 Found ${students?.length || 0} students`);
     if (!students?.length) return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
@@ -756,7 +762,7 @@ async function processSchoolReports(settings, today) {
 
 // ==================== MAIN: PROCESS DAILY REPORTS (PARALLEL BY SCHOOL) ====================
 
-export async function processDailyReports(schoolId = null) {
+export async function processDailyReports(schoolId = null, scopedClassIds = null) {
   const today = new Date().toISOString().split('T')[0];
   console.log(`[DailyReports] 📅 Processing reports for ${today}...`);
 
@@ -778,7 +784,7 @@ export async function processDailyReports(schoolId = null) {
 
   // Process all schools in parallel
   const schoolResults = await Promise.all(
-    allSettings.map(settings => processSchoolReports(settings, today))
+    allSettings.map(settings => processSchoolReports(settings, today, scopedClassIds))
   );
 
   // Aggregate results

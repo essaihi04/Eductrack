@@ -765,6 +765,26 @@ router.get('/conversations', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
 
+    // Pour pedagogical_manager : pré-calculer les parent_ids autorisés (parents des élèves dans les classes assignées)
+    const scopedClassIds = await getScopedClassIds(req);
+    let allowedParentIds = null; // null = pas de restriction
+    if (scopedClassIds !== null) {
+      if (scopedClassIds.length === 0) return res.json({ conversations: [] });
+      const { data: scopedStudents } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('role', 'student')
+        .in('class_id', scopedClassIds);
+      const sIds = (scopedStudents || []).map(s => s.id);
+      if (sIds.length === 0) return res.json({ conversations: [] });
+      const { data: ps } = await supabaseAdmin
+        .from('parent_students')
+        .select('parent_id')
+        .in('student_id', sIds);
+      allowedParentIds = new Set((ps || []).map(p => p.parent_id));
+      if (allowedParentIds.size === 0) return res.json({ conversations: [] });
+    }
+
     // Get all message recipients with message info, grouped by phone
     let msgQuery = supabaseAdmin
       .from('whatsapp_messages')
@@ -791,6 +811,11 @@ router.get('/conversations', async (req, res) => {
           .in('message_id', chunk);
         if (recs) allRecipients = allRecipients.concat(recs);
       }
+    }
+
+    // Filtre de scope : ne garder que les recipients dont le parent est dans le périmètre
+    if (allowedParentIds !== null) {
+      allRecipients = allRecipients.filter(r => r.parent_id && allowedParentIds.has(r.parent_id));
     }
 
     // Get parent names
@@ -855,6 +880,10 @@ router.get('/conversations', async (req, res) => {
       .limit(500);
 
     if (schoolId) dailyReportsQuery = dailyReportsQuery.eq('school_id', schoolId);
+    // Restreindre aux parents du périmètre pour pedagogical_manager
+    if (allowedParentIds !== null) {
+      dailyReportsQuery = dailyReportsQuery.in('parent_id', Array.from(allowedParentIds));
+    }
 
     const { data: dailyReports } = await dailyReportsQuery;
 
@@ -1369,9 +1398,15 @@ router.post('/daily-reports/trigger', async (req, res) => {
     const schoolId = getSchoolId(req);
     if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
 
+    // Restriction de scope pour pedagogical_manager
+    const scopedClassIds = await getScopedClassIds(req);
+    if (scopedClassIds !== null && scopedClassIds.length === 0) {
+      return res.status(400).json({ error: 'Aucune classe assignée à votre périmètre' });
+    }
+
     res.json({ success: true, message: 'Génération des rapports lancée en arrière-plan.' });
 
-    processDailyReports(schoolId).then(result => {
+    processDailyReports(schoolId, scopedClassIds).then(result => {
       console.log('[DailyReports] Manual trigger result:', result);
     }).catch(err => {
       console.error('[DailyReports] Manual trigger error:', err);
@@ -1709,6 +1744,13 @@ router.get('/daily-reports/students', async (req, res) => {
       .order('last_name');
 
     if (schoolId) query = query.eq('school_id', schoolId);
+
+    // Filtre de scope pour pedagogical_manager
+    const scopedIds = await getScopedClassIds(req);
+    if (scopedIds !== null) {
+      if (scopedIds.length === 0) return res.json([]);
+      query = query.in('class_id', scopedIds);
+    }
 
     const { data, error } = await query;
     if (error) throw error;
