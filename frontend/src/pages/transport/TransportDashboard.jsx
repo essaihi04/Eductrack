@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Bus, MapPin, Users, AlertCircle, CheckCircle, Activity, History, UserCog, User } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
+import { directionLabel } from '../../lib/tripDirection';
 
 export default function TransportDashboard() {
   const [summary, setSummary] = useState(null);
@@ -69,7 +70,7 @@ export default function TransportDashboard() {
                 <Bus className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <div className="font-semibold">{t.bus?.plate_number} • {t.direction === 'morning_pickup' ? 'Ramassage matin' : 'Retour soir'}</div>
+                <div className="font-semibold">{t.bus?.plate_number} • {directionLabel(t.direction)}</div>
                 <div className="text-xs text-gray-500">Démarré à {new Date(t.started_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
               </div>
               {t.last_position ? (

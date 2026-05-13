@@ -12,6 +12,7 @@ import { transportApi } from '../../lib/transportApi';
 import { useGeolocation } from '../../hooks/useGeolocation';
 import { useNavigation, formatDistance, formatDuration } from '../../hooks/useNavigation';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon, homeTopViewIcon } from '../../lib/mapAssets';
+import { isPickupDirection, DIRECTIONS } from '../../lib/tripDirection';
 
 const maneuverIcon = (type, modifier) => {
   if (type === 'arrive') return <CheckCircle className="w-10 h-10" />;
@@ -50,6 +51,7 @@ export default function ActiveTripPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [bus, setBus] = useState(null);
+  const [tripDirection, setTripDirection] = useState(null);
   const [students, setStudents] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +105,7 @@ export default function ActiveTripPage() {
       const trip = (trips.trips || []).find(t => t.id === id);
       if (!trip) { alert('Trajet introuvable'); navigate('/driver'); return; }
       setBus(trip.bus);
+      setTripDirection(trip.direction);
       const [s, e] = await Promise.all([
         transportApi.listBusStudents(trip.bus_id),
         transportApi.getEvents(id)
@@ -116,6 +119,9 @@ export default function ActiveTripPage() {
   const lastEventByStudent = events.reduce((acc, e) => { if (!acc[e.student_id]) acc[e.student_id] = e; return acc; }, {});
   const statusOf = (sid) => lastEventByStudent[sid]?.event_type || 'pending';
   const remaining = students.filter(a => statusOf(a.student.id) === 'pending').length;
+  // Type de tournée (ramassage vs retour) — détermine quels boutons d'action afficher
+  const isPickup = isPickupDirection(tripDirection);
+  const tripInfo = DIRECTIONS[tripDirection];
 
   const sendEvent = async (studentId, event_type) => {
     try {
@@ -176,13 +182,13 @@ export default function ActiveTripPage() {
   return (
     <div className="h-screen flex flex-col bg-gray-100">
       {/* Header */}
-      <div className="bg-amber-600 text-white p-3 flex items-center justify-between">
+      <div className={`${isPickup ? 'bg-amber-600' : 'bg-indigo-700'} text-white p-3 flex items-center justify-between`}>
         <div>
           <div className="font-bold flex items-center gap-2">
             <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
-            🚌 {bus?.plate_number}
+            🚌 {bus?.plate_number} · {tripInfo?.short || ''}
           </div>
-          <div className="text-xs opacity-90">{remaining} élève(s) restant(s) sur {students.length}</div>
+          <div className="text-xs opacity-90">{remaining} élève(s) restant(s) sur {students.length} · {isPickup ? 'Ramassage' : 'Retour'}</div>
         </div>
         <button onClick={endTrip} className="bg-red-600 px-3 py-2 rounded-lg flex items-center gap-1 text-sm hover:bg-red-700">
           <Square className="w-4 h-4" /> Terminer
@@ -259,17 +265,23 @@ export default function ActiveTripPage() {
           </div>
         )}
 
-        {/* Boutons d'action flottants pour l'élève en cours */}
+        {/* Boutons d'action flottants pour l'élève en cours (adaptés au type de tournée) */}
         {nextStudent && (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[1000] flex flex-col gap-2.5">
-            <button onClick={() => sendEvent(nextStudent.student.id, 'boarded')} className="bg-green-600 hover:bg-green-700 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Monté">
-              <CheckCircle className="w-7 h-7" />
-            </button>
-            <button onClick={() => sendEvent(nextStudent.student.id, 'dropped')} className="bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Déposé">
-              <Home className="w-7 h-7" />
-            </button>
-            <button onClick={() => sendEvent(nextStudent.student.id, 'absent')} className="bg-red-600 hover:bg-red-700 text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Absent">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[1000] flex flex-col gap-3">
+            {isPickup ? (
+              <button onClick={() => sendEvent(nextStudent.student.id, 'boarded')} className="bg-green-600 hover:bg-green-700 text-white w-16 h-16 rounded-full shadow-2xl flex flex-col items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Marquer monté">
+                <CheckCircle className="w-7 h-7" />
+                <span className="text-[9px] font-bold mt-0.5">MONTÉ</span>
+              </button>
+            ) : (
+              <button onClick={() => sendEvent(nextStudent.student.id, 'dropped')} className="bg-blue-600 hover:bg-blue-700 text-white w-16 h-16 rounded-full shadow-2xl flex flex-col items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Marquer déposé">
+                <Home className="w-7 h-7" />
+                <span className="text-[9px] font-bold mt-0.5">DÉPOSÉ</span>
+              </button>
+            )}
+            <button onClick={() => sendEvent(nextStudent.student.id, 'absent')} className="bg-red-600 hover:bg-red-700 text-white w-16 h-16 rounded-full shadow-2xl flex flex-col items-center justify-center ring-4 ring-white/40 active:scale-95 transition" title="Marquer absent">
               <XCircle className="w-7 h-7" />
+              <span className="text-[9px] font-bold mt-0.5">ABSENT</span>
             </button>
           </div>
         )}
@@ -318,7 +330,7 @@ export default function ActiveTripPage() {
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <SortableContext items={sortedStudents.filter(a => statusOf(a.student.id) === 'pending').map(a => a.id)} strategy={verticalListSortingStrategy}>
                   {sortedStudents.map(a => (
-                    <StudentRow key={a.id} assignment={a} status={statusOf(a.student.id)} onEvent={(sid, t) => { sendEvent(sid, t); }} isNext={nextStudent?.id === a.id} />
+                    <StudentRow key={a.id} assignment={a} status={statusOf(a.student.id)} onEvent={(sid, t) => { sendEvent(sid, t); }} isNext={nextStudent?.id === a.id} isPickup={isPickup} />
                   ))}
                 </SortableContext>
               </DndContext>
@@ -340,7 +352,7 @@ export default function ActiveTripPage() {
   );
 }
 
-function StudentRow({ assignment: a, status: st, onEvent, isNext }) {
+function StudentRow({ assignment: a, status: st, onEvent, isNext, isPickup = true }) {
   const isDone = st !== 'pending';
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: a.id, disabled: isDone });
   const style = {
@@ -369,8 +381,11 @@ function StudentRow({ assignment: a, status: st, onEvent, isNext }) {
       </div>
       {!isDone && (
         <div className="flex gap-1 shrink-0">
-          <button onClick={() => onEvent(a.student.id, 'boarded')} className="bg-green-600 text-white p-2 rounded-lg" title="Monté"><CheckCircle className="w-5 h-5" /></button>
-          <button onClick={() => onEvent(a.student.id, 'dropped')} className="bg-blue-600 text-white p-2 rounded-lg" title="Déposé"><Home className="w-5 h-5" /></button>
+          {isPickup ? (
+            <button onClick={() => onEvent(a.student.id, 'boarded')} className="bg-green-600 text-white p-2 rounded-lg" title="Monté"><CheckCircle className="w-5 h-5" /></button>
+          ) : (
+            <button onClick={() => onEvent(a.student.id, 'dropped')} className="bg-blue-600 text-white p-2 rounded-lg" title="Déposé"><Home className="w-5 h-5" /></button>
+          )}
           <button onClick={() => onEvent(a.student.id, 'absent')} className="bg-red-600 text-white p-2 rounded-lg" title="Absent"><XCircle className="w-5 h-5" /></button>
         </div>
       )}

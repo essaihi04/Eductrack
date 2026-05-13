@@ -7,6 +7,7 @@ import { Bus, RefreshCw, User, Phone, Clock, Navigation, Menu, X } from 'lucide-
 import { transportApi } from '../../lib/transportApi';
 import { supabase } from '../../lib/supabase';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon } from '../../lib/mapAssets';
+import { directionShort } from '../../lib/tripDirection';
 
 function FitBounds({ trips, selectedId }) {
   const map = useMap();
@@ -28,7 +29,7 @@ function FitBounds({ trips, selectedId }) {
   return null;
 }
 
-const directionLabel = (d) => d === 'morning_pickup' ? '☀️ Matin' : '🌙 Soir';
+const directionLabel = (d) => directionShort(d);
 
 export default function LiveMapPage() {
   const [trips, setTrips] = useState([]);

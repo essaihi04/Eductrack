@@ -234,7 +234,7 @@ router.post('/trips/start', async (req, res) => {
   try {
     if (req.user.role !== 'driver') return res.status(403).json({ error: 'Réservé au chauffeur' });
     const { direction, lat, lng } = req.body;
-    if (!['morning_pickup','evening_dropoff'].includes(direction)) {
+    if (!['morning_pickup','noon_dropoff','afternoon_pickup','evening_dropoff'].includes(direction)) {
       return res.status(400).json({ error: 'direction invalide' });
     }
     // Trouver bus du chauffeur
