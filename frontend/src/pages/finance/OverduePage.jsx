@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertCircle, MessageSquare, RefreshCw, CheckSquare, Square } from 'lucide-react';
+import { AlertCircle, MessageSquare, RefreshCw, CheckSquare, Square, Eye } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
