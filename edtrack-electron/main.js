@@ -1,8 +1,14 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const APP_URL = 'https://etrack.ma';
+
+// Permet la géolocalisation sur les Chromebooks/Windows sans clé API Google
+// (utilise le service Mozilla Location Service en fallback, ou ip-api)
+app.commandLine.appendSwitch('enable-features', 'WebContentsForceDark');
+// Autorise les API web de localisation
+app.commandLine.appendSwitch('enable-geolocation');
 
 function getLogoBase64() {
   try {
@@ -161,7 +167,8 @@ function createWindow() {
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js')
     },
     show: false,
     backgroundColor: '#1e3a5f'
@@ -183,7 +190,32 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Autorise automatiquement les permissions pour etrack.ma (géolocalisation, notifications, etc.)
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const url = (details && details.requestingUrl) || (webContents && webContents.getURL && webContents.getURL()) || '';
+    const allowed = ['geolocation', 'notifications', 'media', 'mediaKeySystem', 'background-sync', 'clipboard-read', 'clipboard-sanitized-write'];
+    if (allowed.includes(permission) && url.startsWith('https://etrack.ma')) {
+      return callback(true);
+    }
+    callback(false);
+  });
+
+  // Pour les vérifications synchrones (navigator.permissions.query)
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+    if (!requestingOrigin) return false;
+    const allowed = ['geolocation', 'notifications', 'media', 'background-sync', 'clipboard-read'];
+    if (allowed.includes(permission) && requestingOrigin.startsWith('https://etrack.ma')) {
+      return true;
+    }
+    return false;
+  });
+
+  // Permet l'accès aux périphériques (capteurs)
+  session.defaultSession.setDevicePermissionHandler(() => true);
+
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
