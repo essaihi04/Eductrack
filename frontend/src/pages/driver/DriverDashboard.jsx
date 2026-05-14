@@ -4,6 +4,8 @@ import { Bus, LogOut, Play, MapPin, CheckCircle, XCircle, Sparkles } from 'lucid
 import { transportApi } from '../../lib/transportApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { DIRECTIONS, suggestDirectionByTime, directionShort } from '../../lib/tripDirection';
+import { getCurrentPositionUnified } from '../../lib/geolocation';
+import { Capacitor } from '@capacitor/core';
 
 export default function DriverDashboard() {
   const navigate = useNavigate();
@@ -15,19 +17,19 @@ export default function DriverDashboard() {
 
   const testGps = async () => {
     setTesting(true); setGpsTest(null);
-    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+    // Sur navigateur web : exiger HTTPS (sauf localhost). Sur app native, ce check ne s'applique pas.
+    if (!Capacitor.isNativePlatform() && location.protocol !== 'https:' && location.hostname !== 'localhost') {
       setGpsTest({ ok: false, error: 'Site doit être en HTTPS (actuellement HTTP)' });
       setTesting(false); return;
     }
-    if (!('geolocation' in navigator)) {
-      setGpsTest({ ok: false, error: 'Géolocalisation non supportée par le navigateur' });
-      setTesting(false); return;
-    }
     try {
-      const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 15000 }));
-      setGpsTest({ ok: true, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+      const pos = await getCurrentPositionUnified({ enableHighAccuracy: true, timeout: 15000 });
+      setGpsTest({ ok: true, lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy });
     } catch (e) {
-      setGpsTest({ ok: false, error: e.message + ' (autorisez la localisation pour ce site)' });
+      const msg = e?.code === 1
+        ? 'Permission GPS refusée. Activez la localisation dans les paramètres de l\'app.'
+        : (e.message || 'Erreur GPS');
+      setGpsTest({ ok: false, error: msg });
     } finally { setTesting(false); }
   };
 

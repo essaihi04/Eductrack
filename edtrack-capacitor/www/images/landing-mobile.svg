@@ -1,0 +1,38 @@
+<svg width="800" height="520" viewBox="0 0 800 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Application mobile EduTrack">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B3B66"/>
+      <stop offset="100%" stop-color="#1E7AB8"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#EAF4FF" stop-opacity="0.95"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="800" height="520" rx="32" fill="url(#bg)"/>
+  <circle cx="720" cy="84" r="72" fill="#66C2FF" fill-opacity="0.25"/>
+  <circle cx="84" cy="452" r="96" fill="#B9E4FF" fill-opacity="0.2"/>
+
+  <rect x="250" y="60" width="300" height="400" rx="38" fill="#0D1A2B"/>
+  <rect x="262" y="84" width="276" height="348" rx="28" fill="url(#card)"/>
+
+  <rect x="286" y="112" width="228" height="72" rx="16" fill="#DFF0FF"/>
+  <rect x="302" y="128" width="116" height="14" rx="7" fill="#0B3B66"/>
+  <rect x="302" y="150" width="178" height="10" rx="5" fill="#4D6F8D"/>
+  <circle cx="486" cy="148" r="16" fill="#2EA6FF"/>
+
+  <rect x="286" y="198" width="228" height="54" rx="12" fill="#FFFFFF"/>
+  <rect x="300" y="214" width="92" height="10" rx="5" fill="#0B3B66"/>
+  <rect x="300" y="230" width="150" height="8" rx="4" fill="#6888A6"/>
+  <rect x="286" y="264" width="228" height="54" rx="12" fill="#FFFFFF"/>
+  <rect x="300" y="280" width="112" height="10" rx="5" fill="#0B3B66"/>
+  <rect x="300" y="296" width="168" height="8" rx="4" fill="#6888A6"/>
+
+  <rect x="286" y="334" width="228" height="68" rx="14" fill="#E8F6EE"/>
+  <rect x="300" y="352" width="114" height="10" rx="5" fill="#156B44"/>
+  <rect x="300" y="370" width="172" height="8" rx="4" fill="#4E8C71"/>
+
+  <text x="44" y="62" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="700">EduTrack Mobile</text>
+  <text x="44" y="94" fill="#CFE9FF" font-family="Segoe UI, Arial, sans-serif" font-size="18">Suivi instantané • Notifications WhatsApp • Agenda</text>
+</svg>

@@ -13,13 +13,19 @@
     "android": "npx cap open android",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["eductrack", "mobile", "capacitor", "android"],
+  "keywords": [
+    "eductrack",
+    "mobile",
+    "capacitor",
+    "android"
+  ],
   "author": "Eductrack Team",
   "license": "ISC",
   "dependencies": {
     "@capacitor/android": "^8.1.0",
     "@capacitor/cli": "^8.1.0",
     "@capacitor/core": "^8.1.0",
+    "@capacitor/geolocation": "^8.2.0",
     "@capacitor/ios": "^8.1.0"
   },
   "description": "Application mobile Eductrack - Suivi pédagogique"

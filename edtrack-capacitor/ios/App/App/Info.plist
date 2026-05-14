@@ -47,5 +47,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Eductrack utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Eductrack utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
 </dict>
 </plist>

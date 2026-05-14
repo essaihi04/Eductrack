@@ -4,6 +4,7 @@ import { Bus, MapPin, Users, AlertCircle, CheckCircle, Activity, History, UserCo
 import { transportApi } from '../../lib/transportApi';
 import { directionLabel } from '../../lib/tripDirection';
 import HomeMapPicker from '../../components/transport/HomeMapPicker';
+import { getCurrentPositionUnified } from '../../lib/geolocation';
 
 export default function TransportDashboard() {
   const [summary, setSummary] = useState(null);
@@ -32,35 +33,24 @@ export default function TransportDashboard() {
   };
 
   // Détecte la position actuelle et l'enregistre directement comme localisation école (sans modal)
-  const detectAndSaveSchool = () => {
-    if (!('geolocation' in navigator)) {
-      setSchoolMsg({ type: 'error', text: 'Géolocalisation non supportée par ce navigateur' });
-      return;
-    }
+  // Utilise le plugin Capacitor sur app native, sinon navigator.geolocation
+  const detectAndSaveSchool = async () => {
     setDetectingSchool(true);
     setSchoolMsg(null);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const updated = await transportApi.updateSchool({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-          });
-          setSchool(updated);
-          setSchoolMsg({ type: 'success', text: '✅ Position de l\'école enregistrée à votre position actuelle' });
-          setTimeout(() => setSchoolMsg(null), 4000);
-        } catch (e) {
-          setSchoolMsg({ type: 'error', text: 'Erreur enregistrement : ' + (e.message || e) });
-        } finally {
-          setDetectingSchool(false);
-        }
-      },
-      (err) => {
-        setDetectingSchool(false);
-        setSchoolMsg({ type: 'error', text: 'GPS impossible : ' + (err.message || 'erreur') });
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    try {
+      const pos = await getCurrentPositionUnified({ enableHighAccuracy: true, timeout: 15000 });
+      const updated = await transportApi.updateSchool({ lat: pos.lat, lng: pos.lng });
+      setSchool(updated);
+      setSchoolMsg({ type: 'success', text: '✅ Position de l\'école enregistrée à votre position actuelle' });
+      setTimeout(() => setSchoolMsg(null), 4000);
+    } catch (e) {
+      const msg = e?.code === 1
+        ? 'Permission GPS refusée. Activez la localisation dans les paramètres de l\'app/navigateur.'
+        : 'GPS impossible : ' + (e?.message || 'erreur');
+      setSchoolMsg({ type: 'error', text: msg });
+    } finally {
+      setDetectingSchool(false);
+    }
   };
 
   return (
@@ -209,25 +199,18 @@ function SchoolLocationModal({ school, onClose, onSaved }) {
   const [error, setError] = useState(null);
   const [locating, setLocating] = useState(false);
 
-  const useCurrentPosition = () => {
-    if (!('geolocation' in navigator)) {
-      setError('Géolocalisation non supportée');
-      return;
-    }
+  const useCurrentPosition = async () => {
     setLocating(true);
     setError(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLat(pos.coords.latitude);
-        setLng(pos.coords.longitude);
-        setLocating(false);
-      },
-      (err) => {
-        setError(err.message || 'Erreur GPS');
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    try {
+      const pos = await getCurrentPositionUnified({ enableHighAccuracy: true, timeout: 15000 });
+      setLat(pos.lat);
+      setLng(pos.lng);
+    } catch (err) {
+      setError(err?.code === 1 ? 'Permission GPS refusée' : (err?.message || 'Erreur GPS'));
+    } finally {
+      setLocating(false);
+    }
   };
 
   const save = async () => {

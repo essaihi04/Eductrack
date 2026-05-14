@@ -67,7 +67,7 @@ export default function ActiveTripPage() {
   const lastPosForKmRef = useRef(null);
 
   // GPS partagé toutes les 5s
-  const { position, error: gpsError } = useGeolocation(true, async (p) => {
+  const { position, error: gpsError, errorCode: gpsErrorCode, retry: retryGps, isSecureContext: gpsSecure } = useGeolocation(true, async (p) => {
     const now = Date.now();
     if (now - lastPushRef.current < POSITION_PUSH_INTERVAL_MS) return;
     lastPushRef.current = now;
@@ -221,10 +221,43 @@ export default function ActiveTripPage() {
         </button>
       </div>
 
-      {/* Bandeau diagnostic GPS */}
+      {/* Bandeau diagnostic GPS — instructions claires + bouton réessayer */}
       {(gpsError || (!position && !gpsError)) && (
-        <div className={`px-3 py-2 text-xs font-medium ${gpsError ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
-          {gpsError ? `⚠️ GPS bloqué : ${gpsError}. Activez la localisation pour ce site dans les paramètres du navigateur.` : '⏳ En attente du signal GPS...'}
+        <div className={`px-3 py-2 text-xs ${gpsError ? 'bg-red-100 text-red-900' : 'bg-yellow-100 text-yellow-800'}`}>
+          {gpsError ? (
+            <div className="space-y-1">
+              <div className="font-bold flex items-center gap-2">
+                ⚠️ GPS non disponible
+                <button onClick={retryGps} className="ml-auto bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 rounded text-[10px] font-bold">
+                  RÉESSAYER
+                </button>
+              </div>
+              {!gpsSecure && (
+                <div className="bg-red-200 rounded px-2 py-1">
+                  🔒 <strong>Site en HTTP non sécurisé.</strong> Les navigateurs mobiles bloquent le GPS sur HTTP. Demandez à votre admin d'activer HTTPS.
+                </div>
+              )}
+              {gpsErrorCode === 1 && gpsSecure && (
+                <div>
+                  <strong>Permission refusée.</strong> Comment réactiver :
+                  <ul className="list-disc ml-4 mt-0.5 text-[11px]">
+                    <li><strong>Chrome Android</strong> : ⋮ → Paramètres du site → Localisation → Autoriser</li>
+                    <li><strong>iPhone Safari</strong> : Réglages iOS → Safari → Localisation → Autoriser</li>
+                    <li><strong>Desktop</strong> : 🔒 dans la barre d'adresse → Localisation → Autoriser</li>
+                  </ul>
+                </div>
+              )}
+              {gpsErrorCode === 2 && (
+                <div>📡 Position indisponible. Vérifiez que le GPS de l'appareil est activé (icône GPS dans la barre de statut).</div>
+              )}
+              {gpsErrorCode === 3 && (
+                <div>⏱️ Délai dépassé. Sortez à l'extérieur ou près d'une fenêtre pour capter le signal.</div>
+              )}
+              <div className="text-[10px] opacity-75">Détail : {gpsError}</div>
+            </div>
+          ) : (
+            <div className="font-medium">⏳ En attente du signal GPS... (cela peut prendre 10-30 secondes au démarrage)</div>
+          )}
         </div>
       )}
       {position && pushError && (

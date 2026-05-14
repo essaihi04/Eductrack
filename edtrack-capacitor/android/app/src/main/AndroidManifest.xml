@@ -39,4 +39,14 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- GPS / Géolocalisation (suivi des bus en temps réel par les chauffeurs) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Empêche la mise en veille pendant un trajet actif -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Pour suivi GPS quand l'écran est éteint pendant un trajet (optionnel) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>
