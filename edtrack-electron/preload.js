@@ -3,8 +3,6 @@
 // On utilise un fallback IP-based gratuit (ipapi.co) puisque les desktops
 // n'ont généralement pas de GPS matériel.
 
-const { contextBridge } = require('electron');
-
 async function fetchIpLocation() {
   // Essaie plusieurs services gratuits avec fallback
   const providers = [

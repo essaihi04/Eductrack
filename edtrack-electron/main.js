@@ -166,8 +166,9 @@ function createWindow() {
     title: 'Eductrack',
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
-      contextIsolation: true,
+      contextIsolation: false,
       nodeIntegration: false,
+      sandbox: false,
       preload: path.join(__dirname, 'preload.js')
     },
     show: false,
