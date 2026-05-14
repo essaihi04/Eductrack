@@ -28,6 +28,71 @@ const getSchoolId = (req) => {
   return req.user.school_id || null;
 };
 
+// ==================== READ-ONLY DATA (accessible à tous les rôles autorisés sur ce router) ====================
+// Ces endpoints permettent aux finance_manager, transport_manager, pedagogical_manager
+// d'accéder aux listes nécessaires (classes, profs, matières) sans toucher à /api/admin/*
+
+router.get('/classes', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    let query = supabaseAdmin.from('classes').select('*').order('name');
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('Erreur classes:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.get('/teachers', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, email, phone')
+      .eq('role', 'teacher')
+      .order('first_name');
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('Erreur teachers:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.get('/subjects', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    let query = supabaseAdmin.from('subjects').select('*').order('name');
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('Erreur subjects:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+router.get('/teachers/:teacherId/subjects', async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('teacher_subjects')
+      .select('subjects(*)')
+      .eq('teacher_id', teacherId);
+    if (error) throw error;
+    res.json((data || []).map(r => r.subjects).filter(Boolean));
+  } catch (error) {
+    console.error('Erreur teacher subjects:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // Global Wasender API key (Personal Access Token) — shared by all schools
 const getGlobalApiKey = () => process.env.WASENDER_API_KEY || null;
 

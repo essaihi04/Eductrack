@@ -202,10 +202,13 @@ const WhatsAppPage = () => {
     const loadData = async () => {
       try {
         const token = await getAuthToken();
+        // Les non-admins n'ont pas accès à /api/admin/* — on utilise les endpoints proxy du router whatsapp
+        const isAdminUser = profile?.role === 'admin' || profile?.role === 'school_admin';
+        const baseRead = isAdminUser ? `${apiUrl}/api/admin` : `${apiUrl}/api/admin/whatsapp`;
         const [classesRes, teachersRes, subjectsRes] = await Promise.all([
-          fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${apiUrl}/api/admin/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${apiUrl}/api/admin/subjects`, { headers: { Authorization: `Bearer ${token}` } })
+          fetch(`${baseRead}/classes`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${baseRead}/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${baseRead}/subjects`, { headers: { Authorization: `Bearer ${token}` } })
         ]);
         const classesData = await classesRes.json();
         const teachersData = await teachersRes.json();
@@ -227,7 +230,7 @@ const WhatsAppPage = () => {
         // Charger les matières pour chaque professeur
         for (const teacher of tchs) {
           try {
-            const res = await fetch(`${apiUrl}/api/admin/teachers/${teacher.id}/subjects`, {
+            const res = await fetch(`${baseRead}/teachers/${teacher.id}/subjects`, {
               headers: { Authorization: `Bearer ${token}` }
             });
             const data = await res.json();
