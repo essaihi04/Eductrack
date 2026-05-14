@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertCircle, MessageSquare, RefreshCw, CheckSquare, Square, Eye } from 'lucide-react';
+import { AlertCircle, MessageSquare, RefreshCw, CheckSquare, Square, Eye, X } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -97,7 +97,8 @@ export default function OverduePage() {
             body: JSON.stringify({
               message,
               type: 'text',
-              filter: { parent_phones: phones }
+              filter: { parent_phones: phones },
+              category: 'financial'
             })
           });
 
