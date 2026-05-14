@@ -7,7 +7,7 @@ import { processDailyReports, generatePreview, generateComprehensivePreview } fr
 const router = express.Router();
 
 router.use(authenticate);
-router.use(authorize('admin', 'school_admin'));
+router.use(authorize('admin', 'school_admin', 'pedagogical_manager'));
 
 const WASENDER_BASE = 'https://www.wasenderapi.com';
 

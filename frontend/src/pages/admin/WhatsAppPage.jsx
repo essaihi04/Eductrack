@@ -1082,16 +1082,12 @@ const WhatsAppPage = () => {
   };
 
   // ===================== TABS CONFIG =====================
-  // Le responsable pédagogique n'a pas accès à la gestion de la session WhatsApp
-  const isPedagogicalManager = profile?.role === 'pedagogical_manager';
   const tabs = [
     { key: 'send', label: 'Parents', icon: Send, desc: 'Envoyer aux parents' },
     { key: 'teachers', label: 'Professeurs', icon: Users, desc: 'Envoyer aux profs' },
     { key: 'inbox', label: 'Messages', icon: Inbox, desc: 'Boîte de réception' },
     { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
-    ...(isPedagogicalManager ? [] : [
-      { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
-    ])
+    { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
   ];
 
   return (
