@@ -65,11 +65,21 @@ export default function BusDetailPage() {
   };
 
   const assignedIds = new Set(assignments.map(a => a.student.id));
-  const filtered = available.filter(s =>
-    !assignedIds.has(s.id) &&
-    (`${s.first_name} ${s.last_name}`.toLowerCase().includes(search.toLowerCase()) ||
-     s.classes?.name?.toLowerCase().includes(search.toLowerCase()))
-  );
+  // Normalisation : minuscules + suppression des accents pour recherche tolérante
+  const norm = (s) => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const searchNorm = norm(search.trim());
+  const candidates = available.filter(s => !assignedIds.has(s.id));
+  const filtered = !searchNorm ? candidates : candidates.filter(s => {
+    const hay = norm(`${s.first_name} ${s.last_name} ${s.classes?.name || ''}`);
+    return hay.includes(searchNorm);
+  });
+  // Regroupement par classe
+  const grouped = filtered.reduce((acc, s) => {
+    const key = s.classes?.name || 'Sans classe';
+    (acc[key] = acc[key] || []).push(s);
+    return acc;
+  }, {});
+  const groupedSorted = Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0], 'fr'));
 
   return (
     <div className="p-6 space-y-6">
@@ -138,23 +148,93 @@ export default function BusDetailPage() {
 
       {showAdd && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-lg max-h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-lg font-bold">Assigner un élève</h2>
-              <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" /></button>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex justify-between items-center p-5 border-b">
+              <div>
+                <h2 className="text-lg font-bold">Assigner un élève</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {filtered.length} élève(s) disponible(s) sur {candidates.length} non assigné(s)
+                </p>
+              </div>
+              <button onClick={() => { setShowAdd(false); setSearch(''); }} className="text-gray-400 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="relative mb-3">
-              <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
-              <input className="border rounded w-full pl-9 p-2" placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} />
+
+            {/* Search bar (sticky) */}
+            <div className="p-4 border-b bg-gray-50">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  autoFocus
+                  className="border rounded-lg w-full pl-9 pr-9 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  placeholder="Rechercher par nom, prénom ou classe..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="overflow-y-auto flex-1 space-y-1">
-              {filtered.length === 0 && <div className="text-center text-gray-400 py-6">Aucun élève trouvé</div>}
-              {filtered.slice(0, 50).map(s => (
-                <button key={s.id} onClick={() => assign(s)} className="w-full text-left p-3 hover:bg-orange-50 rounded border">
-                  <div className="font-medium">{s.first_name} {s.last_name}</div>
-                  <div className="text-xs text-gray-500">{s.classes?.name || '—'} {s.home_lat ? '📍' : ''}</div>
-                </button>
-              ))}
+
+            {/* List grouped by class */}
+            <div className="overflow-y-auto flex-1 p-3">
+              {filtered.length === 0 ? (
+                <div className="text-center text-gray-400 py-12">
+                  {search ? 'Aucun élève ne correspond à la recherche' : 'Tous les élèves sont déjà assignés'}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {groupedSorted.map(([className, students]) => (
+                    <div key={className}>
+                      <div className="sticky top-0 bg-white z-10 flex items-center gap-2 px-2 py-1.5 border-b border-gray-200 mb-1">
+                        <span className="text-xs font-bold uppercase tracking-wide text-orange-700">{className}</span>
+                        <span className="text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">{students.length}</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {students.map(s => (
+                          <button
+                            key={s.id}
+                            onClick={() => assign(s)}
+                            className="text-left p-3 rounded-lg border border-gray-200 hover:border-orange-400 hover:bg-orange-50 transition group"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-gray-900 truncate group-hover:text-orange-700">
+                                  {s.first_name} {s.last_name}
+                                </div>
+                                <div className="flex items-center gap-2 mt-1">
+                                  {s.home_lat && s.home_lng ? (
+                                    <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">📍 GPS</span>
+                                  ) : (
+                                    <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">⚠ Sans GPS</span>
+                                  )}
+                                  {s.phone && (
+                                    <span className="text-[10px] text-gray-500 truncate">{s.phone}</span>
+                                  )}
+                                </div>
+                              </div>
+                              <Plus className="w-4 h-4 text-gray-300 group-hover:text-orange-600 flex-shrink-0 mt-1" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer hint */}
+            <div className="p-3 border-t bg-gray-50 text-xs text-gray-500 text-center">
+              Cliquez sur un élève pour l'assigner à ce bus
             </div>
           </div>
         </div>
