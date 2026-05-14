@@ -10,6 +10,8 @@ export default function TransportDashboard() {
   const [live, setLive] = useState([]);
   const [school, setSchool] = useState(null);
   const [showSchoolEdit, setShowSchoolEdit] = useState(false);
+  const [detectingSchool, setDetectingSchool] = useState(false);
+  const [schoolMsg, setSchoolMsg] = useState(null); // { type: 'success'|'error', text }
 
   useEffect(() => {
     load();
@@ -27,6 +29,38 @@ export default function TransportDashboard() {
 
   const loadSchool = async () => {
     try { setSchool(await transportApi.getSchool()); } catch (e) { console.error(e); }
+  };
+
+  // Détecte la position actuelle et l'enregistre directement comme localisation école (sans modal)
+  const detectAndSaveSchool = () => {
+    if (!('geolocation' in navigator)) {
+      setSchoolMsg({ type: 'error', text: 'Géolocalisation non supportée par ce navigateur' });
+      return;
+    }
+    setDetectingSchool(true);
+    setSchoolMsg(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const updated = await transportApi.updateSchool({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
+          setSchool(updated);
+          setSchoolMsg({ type: 'success', text: '✅ Position de l\'école enregistrée à votre position actuelle' });
+          setTimeout(() => setSchoolMsg(null), 4000);
+        } catch (e) {
+          setSchoolMsg({ type: 'error', text: 'Erreur enregistrement : ' + (e.message || e) });
+        } finally {
+          setDetectingSchool(false);
+        }
+      },
+      (err) => {
+        setDetectingSchool(false);
+        setSchoolMsg({ type: 'error', text: 'GPS impossible : ' + (err.message || 'erreur') });
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   return (
@@ -103,13 +137,30 @@ export default function TransportDashboard() {
               </p>
             )}
           </div>
-          <button
-            onClick={() => setShowSchoolEdit(true)}
-            className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-lg text-sm shrink-0 flex items-center gap-1"
-          >
-            <MapPin className="w-4 h-4" /> {school?.lat ? 'Modifier' : 'Définir'}
-          </button>
+          <div className="flex flex-col gap-1.5 shrink-0">
+            <button
+              onClick={detectAndSaveSchool}
+              disabled={detectingSchool}
+              className="bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white px-3 py-2 rounded-lg text-sm flex items-center gap-1.5 font-medium"
+              title="Détecte votre position GPS actuelle et l'enregistre automatiquement"
+            >
+              <Crosshair className="w-4 h-4" />
+              {detectingSchool ? 'Détection...' : (school?.lat ? 'Re-détecter ici' : 'Détecter ici')}
+            </button>
+            <button
+              onClick={() => setShowSchoolEdit(true)}
+              className="text-xs text-gray-600 hover:text-orange-700 hover:underline flex items-center gap-1 justify-center"
+              title="Choisir manuellement sur la carte"
+            >
+              <MapPin className="w-3 h-3" /> Choisir sur carte
+            </button>
+          </div>
         </div>
+        {schoolMsg && (
+          <div className={`mx-4 mb-3 px-3 py-2 rounded-lg text-xs ${schoolMsg.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+            {schoolMsg.text}
+          </div>
+        )}
       </div>
 
       {showSchoolEdit && (
