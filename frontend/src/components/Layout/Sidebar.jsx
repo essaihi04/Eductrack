@@ -124,6 +124,7 @@ const Sidebar = () => {
         { icon: Bus, label: 'Bus & élèves', path: '/transport/buses' },
         { icon: UserCircle, label: 'Chauffeurs', path: '/transport/drivers' },
         { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
+        { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }
 
@@ -142,6 +143,7 @@ const Sidebar = () => {
         { icon: FileText, label: 'Factures', path: '/finance/invoices' },
         { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
         { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
+        { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }
 

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import OpenAI from 'openai';
 import { extractDateFromMessage, extractMonthFromMessage } from './dateExtractor.js';
+import { categorizeIncoming } from '../utils/whatsappCategory.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -156,7 +157,10 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
     
     console.log('[Chatbot] Parent identifié:', parentInfo.parent_name, '- École:', parentInfo.school_name);
     
-    // 3. Enregistrer le message entrant
+    // 3. Catégoriser le message entrant (pédagogique / financier / transport)
+    const incomingCategory = categorizeIncoming(messageText);
+
+    // 4. Enregistrer le message entrant
     const { data: incomingMsg } = await supabaseAdmin
       .from('whatsapp_incoming_messages')
       .insert({
@@ -165,7 +169,8 @@ export async function handleIncomingWhatsAppMessage(messageInfo) {
         school_id: parentInfo.school_id,
         message_text: messageText,
         wasender_message_id: messageId,
-        processed: false
+        processed: false,
+        category: incomingCategory
       })
       .select()
       .single();

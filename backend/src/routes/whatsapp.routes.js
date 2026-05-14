@@ -3,11 +3,12 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { processDailyReports, generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
+import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
 
 const router = express.Router();
 
 router.use(authenticate);
-router.use(authorize('admin', 'school_admin', 'pedagogical_manager'));
+router.use(authorize('admin', 'school_admin', 'pedagogical_manager', 'pedagogical_director', 'finance_manager', 'transport_manager'));
 
 const WASENDER_BASE = 'https://www.wasenderapi.com';
 
@@ -296,8 +297,9 @@ router.get('/recipients-list', async (req, res) => {
 // POST /send — send WhatsApp message to filtered parents
 router.post('/send', async (req, res) => {
   try {
-    const { message, type, mediaUrl, fileName, filter } = req.body;
+    const { message, type, mediaUrl, fileName, filter, category: requestedCategory } = req.body;
     const schoolId = getSchoolId(req);
+    const category = resolveCategoryForSending(requestedCategory, req.user?.role);
 
     if (!message && !mediaUrl) {
       return res.status(400).json({ error: 'Message ou média requis' });
@@ -390,7 +392,8 @@ router.post('/send', async (req, res) => {
         file_name: fileName || null,
         recipient_filter: filter || {},
         total_recipients: recipients.length,
-        status: 'sending'
+        status: 'sending',
+        category
       })
       .select()
       .single();
@@ -526,7 +529,8 @@ router.post('/send', async (req, res) => {
 router.post('/send-direct', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { phone, message, type, mediaUrl, fileName, parentId } = req.body;
+    const { phone, message, type, mediaUrl, fileName, parentId, category: requestedCategory } = req.body;
+    const category = resolveCategoryForSending(requestedCategory, req.user?.role);
 
     if (!phone) {
       return res.status(400).json({ error: 'Numéro de téléphone requis' });
@@ -554,7 +558,8 @@ router.post('/send-direct', async (req, res) => {
         file_name: fileName || null,
         recipient_filter: { direct: true, phone },
         total_recipients: 1,
-        status: 'sending'
+        status: 'sending',
+        category
       })
       .select()
       .single();
@@ -652,7 +657,7 @@ router.get('/messages/:messageId/progress', async (req, res) => {
 router.get('/history', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, category: categoryFilter } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let query = supabaseAdmin
@@ -663,6 +668,17 @@ router.get('/history', async (req, res) => {
 
     if (schoolId) {
       query = query.eq('school_id', schoolId);
+    }
+
+    // Filtre par catégorie (rôle ou query param)
+    const allowedCats = allowedCategoriesForRole(req.user?.role);
+    if (categoryFilter && allowedCats && !allowedCats.includes(categoryFilter)) {
+      return res.status(403).json({ error: 'Catégorie non autorisée pour ce rôle' });
+    }
+    if (categoryFilter) {
+      query = query.eq('category', categoryFilter);
+    } else if (allowedCats) {
+      query = query.in('category', allowedCats);
     }
 
     const { data, error, count } = await query;
@@ -788,11 +804,17 @@ router.get('/conversations', async (req, res) => {
     // Get all message recipients with message info, grouped by phone
     let msgQuery = supabaseAdmin
       .from('whatsapp_messages')
-      .select('id, content, message_type, media_url, file_name, status, sent_count, failed_count, total_recipients, recipient_filter, created_at, updated_at, sender:profiles!whatsapp_messages_sent_by_fkey(first_name, last_name)')
+      .select('id, content, message_type, media_url, file_name, status, sent_count, failed_count, total_recipients, recipient_filter, created_at, updated_at, category, sender:profiles!whatsapp_messages_sent_by_fkey(first_name, last_name)')
       .order('created_at', { ascending: false });
 
     if (schoolId) {
       msgQuery = msgQuery.eq('school_id', schoolId);
+    }
+
+    // Filtre par catégorie selon le rôle
+    const allowedCatsConv = allowedCategoriesForRole(req.user?.role);
+    if (allowedCatsConv) {
+      msgQuery = msgQuery.in('category', allowedCatsConv);
     }
 
     const { data: messages, error: msgError } = await msgQuery;
@@ -1494,7 +1516,8 @@ router.post('/daily-reports/send-report', async (req, res) => {
         file_name: null,
         recipient_filter: { type: 'comprehensive_report', student_id: studentId, student_name: studentName },
         total_recipients: contacts.length,
-        status: 'sending'
+        status: 'sending',
+        category: 'pedagogical'
       })
       .select()
       .single();

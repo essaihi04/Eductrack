@@ -33,6 +33,16 @@ const WhatsAppPage = () => {
   const [loadingRecipients, setLoadingRecipients] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messageType, setMessageType] = useState('text');
+  // Catégorie du message (boîte cible)
+  const [messageCategory, setMessageCategory] = useState(() => {
+    const r = profile?.role;
+    if (r === 'finance_manager') return 'financial';
+    if (r === 'transport_manager') return 'transport';
+    if (r === 'pedagogical_manager' || r === 'pedagogical_director') return 'pedagogical';
+    return 'general';
+  });
+  // Filtre catégorie pour la lecture (admin uniquement)
+  const [historyCategoryFilter, setHistoryCategoryFilter] = useState('all');
   const [mediaFile, setMediaFile] = useState(null);
   const [mediaPreview, setMediaPreview] = useState(null);
   const [mediaUrl, setMediaUrl] = useState('');
@@ -267,7 +277,8 @@ const WhatsAppPage = () => {
     setLoadingHistory(true);
     try {
       const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/history?page=${historyPage}&limit=10`, {
+      const catQ = historyCategoryFilter !== 'all' ? `&category=${historyCategoryFilter}` : '';
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/history?page=${historyPage}&limit=10${catQ}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -278,7 +289,7 @@ const WhatsAppPage = () => {
     } finally {
       setLoadingHistory(false);
     }
-  }, [apiUrl, historyPage]);
+  }, [apiUrl, historyPage, historyCategoryFilter]);
 
   useEffect(() => {
     if (activeTab === 'send') fetchHistory();
@@ -385,7 +396,7 @@ const WhatsAppPage = () => {
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter })
+        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory })
       });
       const data = await res.json();
       if (data.success && data.messageId) {
@@ -1303,6 +1314,36 @@ const WhatsAppPage = () => {
                   placeholder="Tapez votre message ici..." rows="5"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
 
+                {/* Sélecteur de catégorie — visible uniquement aux admins ; les responsables ont leur catégorie imposée */}
+                {(profile?.role === 'admin' || profile?.role === 'school_admin') ? (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                      <Filter className="w-3 h-3" /> Boîte cible :
+                    </label>
+                    <select
+                      value={messageCategory}
+                      onChange={(e) => setMessageCategory(e.target.value)}
+                      className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="general">📨 Général (admin)</option>
+                      <option value="pedagogical">📚 Pédagogique</option>
+                      <option value="financial">💰 Financier</option>
+                      <option value="transport">🚌 Transport</option>
+                    </select>
+                    <span className="text-[10px] text-gray-400 ml-auto">Visible uniquement par le resp. correspondant</span>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500 flex items-center gap-1.5 bg-blue-50 px-3 py-1.5 rounded-md">
+                    <Info className="w-3 h-3" />
+                    Ce message sera classé dans votre boîte :
+                    <strong>
+                      {messageCategory === 'pedagogical' && '📚 Pédagogique'}
+                      {messageCategory === 'financial' && '💰 Financier'}
+                      {messageCategory === 'transport' && '🚌 Transport'}
+                    </strong>
+                  </div>
+                )}
+
                 {mediaFile && (
                   <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                     {mediaPreview ? (
@@ -1371,6 +1412,28 @@ const WhatsAppPage = () => {
                     <RefreshCw className={`w-4 h-4 text-gray-500 ${loadingHistory ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
+                {/* Filtre catégorie (admins seulement) */}
+                {(profile?.role === 'admin' || profile?.role === 'school_admin') && (
+                  <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-1 overflow-x-auto">
+                    {[
+                      { k: 'all', label: 'Tous', emoji: '📋' },
+                      { k: 'general', label: 'Général', emoji: '📨' },
+                      { k: 'pedagogical', label: 'Péda.', emoji: '📚' },
+                      { k: 'financial', label: 'Finance', emoji: '💰' },
+                      { k: 'transport', label: 'Transport', emoji: '🚌' }
+                    ].map(f => (
+                      <button key={f.k}
+                        onClick={() => { setHistoryCategoryFilter(f.k); setHistoryPage(1); }}
+                        className={`px-2 py-1 text-xs rounded-md whitespace-nowrap transition ${
+                          historyCategoryFilter === f.k
+                            ? 'bg-green-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}>
+                        {f.emoji} {f.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="divide-y divide-gray-100 max-h-[600px] overflow-y-auto">
                   {sendHistory.length === 0 ? (
                     <div className="px-4 py-8 text-center text-gray-400 text-sm">Aucun message envoyé</div>
@@ -1380,8 +1443,20 @@ const WhatsAppPage = () => {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-gray-800 truncate">{msg.content || `[${typeLabel(msg.message_type)}]`}</p>
                           <p className="text-xs text-gray-500 mt-0.5">{formatFullDate(msg.created_at)}</p>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
                             {statusBadge(msg.status)}
+                            {msg.category && msg.category !== 'general' && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                msg.category === 'pedagogical' ? 'bg-blue-100 text-blue-700' :
+                                msg.category === 'financial' ? 'bg-emerald-100 text-emerald-700' :
+                                msg.category === 'transport' ? 'bg-orange-100 text-orange-700' :
+                                'bg-gray-100 text-gray-700'
+                              }`}>
+                                {msg.category === 'pedagogical' && '📚 Péda.'}
+                                {msg.category === 'financial' && '💰 Finance'}
+                                {msg.category === 'transport' && '🚌 Transport'}
+                              </span>
+                            )}
                             <span className="text-xs text-gray-500">{msg.sent_count}/{msg.total_recipients}</span>
                           </div>
                         </div>
