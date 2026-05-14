@@ -11,7 +11,7 @@ const features = [
 ];
 
 const apkLink = 'https://drive.google.com/file/d/1Mais1usf4RstKcTIDK7bVCe4cK7PrFNN/view?usp=sharing';
-const desktopLink = 'https://drive.google.com/file/d/1dAUq7TkLZd9oWDhDDzfPe5VsSv6M1Mqw/view?usp=sharing';
+const desktopLink = 'https://drive.google.com/file/d/1FTNWEBKlwKqBtSGYjCnf_dz3-JwHohyH/view?usp=sharing';
 
 const platformCards = [
   {
