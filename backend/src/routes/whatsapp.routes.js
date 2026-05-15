@@ -83,10 +83,10 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
     const { teacherId } = req.params;
     const { data, error } = await supabaseAdmin
       .from('teacher_subjects')
-      .select('subjects(*)')
+      .select('subject_id, subjects(*)')
       .eq('teacher_id', teacherId);
     if (error) throw error;
-    res.json((data || []).map(r => r.subjects).filter(Boolean));
+    res.json(data || []);
   } catch (error) {
     console.error('Erreur teacher subjects:', error);
     res.status(500).json({ error: 'Erreur serveur' });
