@@ -265,24 +265,7 @@ const ParentChildPage = () => {
       {tab === 'tracking' && (
         <div className="space-y-3">
           {history.length === 0 && <Empty>Pas de suivi récent.</Empty>}
-          {history.map(t => (
-            <div key={t.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <p className="font-semibold text-gray-900 text-sm">
-                  {t.session_date && new Date(t.session_date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
-                </p>
-                <p className="text-xs text-gray-500">{t.subject_name || '—'}</p>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {t.presence && <Tag value={t.presence} kind="presence" />}
-                {t.discipline && <Tag value={t.discipline} kind="discipline" />}
-                {t.participation && <Tag value={t.participation} kind="participation" />}
-                {t.homework && <Tag value={t.homework} kind="homework" />}
-                {t.phone_use && <Tag value="téléphone" kind="phone" />}
-              </div>
-              {t.comment && <p className="mt-2 text-sm text-gray-700 italic">« {t.comment} »</p>}
-            </div>
-          ))}
+          {history.map(t => <TrackingCard key={t.id} t={t} />)}
         </div>
       )}
 
@@ -374,6 +357,149 @@ const Tag = ({ value, kind }) => {
 };
 
 const dayName = (d) => ({ 1: 'Lundi', 2: 'Mardi', 3: 'Mercredi', 4: 'Jeudi', 5: 'Vendredi', 6: 'Samedi', 7: 'Dimanche', 0: 'Dimanche' }[d] || d);
+
+// ---------- Suivi détaillé (tous les paramètres trackés par le prof) ----------
+
+// Tonalité d'une valeur : positive (vert), neutre (gris), négative (rouge), warning (orange)
+const VALUE_TONE = {
+  // présence
+  present: 'pos', absent: 'neg', late: 'warn', excused: 'neutral',
+  // discipline
+  concentre: 'pos', moyen: 'warn', distrait: 'neg',
+  // participation
+  excellent: 'pos', bon: 'pos', faible: 'neg',
+  // devoirs
+  done: 'pos', not_done: 'neg', partial: 'warn', forgotten: 'neg',
+  // qualité cahier
+  good: 'pos', complete: 'pos', readable: 'pos',
+  bad: 'neg', missing: 'neg', incomplete: 'neg', illegible: 'neg', unreadable: 'neg',
+  partially: 'warn',
+  // attitude
+  positive: 'pos', neutral: 'neutral', negative: 'neg', perturbateur: 'neg',
+  // écriture
+  applique: 'pos', soigneuse: 'pos', neglige: 'neg', moyenne: 'warn',
+};
+
+const VALUE_LABELS = {
+  // présence
+  present: 'Présent', absent: 'Absent', late: 'En retard', excused: 'Excusé',
+  // discipline
+  concentre: 'Concentré', moyen: 'Moyen', distrait: 'Distrait',
+  // participation
+  excellent: 'Excellente', bon: 'Bonne', faible: 'Faible',
+  // devoirs
+  done: 'Fait', not_done: 'Non fait', partial: 'Partiel', forgotten: 'Oublié',
+  // qualité cahier
+  good: 'Bonne', complete: 'Complet', readable: 'Lisible',
+  bad: 'Mauvaise', missing: 'Manquant', incomplete: 'Incomplet',
+  illegible: 'Illisible', unreadable: 'Illisible', partially: 'Partiel',
+  // attitude
+  positive: 'Positive', neutral: 'Neutre', negative: 'Négative', perturbateur: 'Perturbateur',
+  // écriture
+  applique: 'Appliquée', soigneuse: 'Soignée', neglige: 'Négligée', moyenne: 'Moyenne',
+};
+
+const TONE_CLS = {
+  pos: 'bg-green-100 text-green-700 border-green-200',
+  neg: 'bg-red-100 text-red-700 border-red-200',
+  warn: 'bg-orange-100 text-orange-700 border-orange-200',
+  neutral: 'bg-gray-100 text-gray-700 border-gray-200',
+};
+
+// Définit les paramètres affichés et leur libellé / icône
+const TRACKING_DIMENSIONS = [
+  { key: 'presence', label: 'Présence', icon: '🧍' },
+  { key: 'participation', label: 'Participation', icon: '🙋' },
+  { key: 'discipline', label: 'Discipline', icon: '🎯' },
+  { key: 'homework', label: 'Devoir maison', icon: '📚' },
+  { key: 'attitude', label: 'Attitude', icon: '😊' },
+  { key: 'writing', label: 'Écriture', icon: '✍️' },
+  { key: 'cahier_present', label: 'Cahier présent', icon: '📓', isBool: true },
+  { key: 'sleeping', label: 'Endormi en classe', icon: '😴', isBool: true, badIfTrue: true },
+  { key: 'phone_use', label: 'Usage téléphone', icon: '📱', isBool: true, badIfTrue: true },
+  { key: 'cahier_lesson', label: 'Cahier — leçon', icon: '📖' },
+  { key: 'cahier_documents', label: 'Cahier — documents', icon: '🗂️' },
+  { key: 'cahier_readability', label: 'Cahier — lisibilité', icon: '🔍' },
+];
+
+const renderTrackingValue = (dim, raw) => {
+  if (raw === null || raw === undefined || raw === '') return null;
+
+  if (dim.isBool) {
+    const truthy = raw === true || raw === 'true' || raw === 1;
+    const tone = dim.badIfTrue ? (truthy ? 'neg' : 'pos') : (truthy ? 'pos' : 'neg');
+    return { tone, text: truthy ? 'Oui' : 'Non' };
+  }
+
+  const tone = VALUE_TONE[String(raw)] || 'neutral';
+  const text = VALUE_LABELS[String(raw)] || String(raw);
+  return { tone, text };
+};
+
+const TrackingCard = ({ t }) => {
+  const sessionDate = t.session_date && new Date(t.session_date).toLocaleDateString('fr-FR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+
+  const items = TRACKING_DIMENSIONS
+    .map(dim => ({ dim, value: renderTrackingValue(dim, t[dim.key]) }))
+    .filter(x => x.value !== null);
+
+  // Mini-évaluation (note numérique)
+  const miniEval = t.mini_eval !== null && t.mini_eval !== undefined && t.mini_eval !== '' ? Number(t.mini_eval) : null;
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <p className="font-semibold text-gray-900 text-sm capitalize">{sessionDate || 'Date inconnue'}</p>
+        <p className="text-xs text-gray-500 bg-gray-50 px-2 py-0.5 rounded-full">
+          {t.subject_name || '—'}
+        </p>
+      </div>
+
+      {items.length === 0 && miniEval === null && !t.comment && !t.notes && (
+        <p className="text-xs text-gray-500">Aucun paramètre renseigné.</p>
+      )}
+
+      {items.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {items.map(({ dim, value }) => (
+            <div
+              key={dim.key}
+              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs ${TONE_CLS[value.tone]}`}
+            >
+              <span className="flex items-center gap-1.5 text-gray-700">
+                <span>{dim.icon}</span>
+                <span className="font-medium">{dim.label}</span>
+              </span>
+              <span className="font-semibold capitalize">{value.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {miniEval !== null && (
+        <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-800 text-xs font-medium">
+          📝 Mini-évaluation : <span className="font-bold">{miniEval}/20</span>
+        </div>
+      )}
+
+      {t.comment && (
+        <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-2.5">
+          <p className="text-[10px] uppercase font-semibold text-amber-800 mb-0.5">Commentaire du prof</p>
+          <p className="text-sm text-amber-900 italic">« {t.comment} »</p>
+        </div>
+      )}
+
+      {t.notes && t.notes !== t.comment && (
+        <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 p-2.5">
+          <p className="text-[10px] uppercase font-semibold text-gray-600 mb-0.5">Notes</p>
+          <p className="text-sm text-gray-700">{t.notes}</p>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const DocumentCard = ({ doc, childId }) => {
   const [busy, setBusy] = useState('');
