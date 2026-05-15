@@ -148,8 +148,15 @@ async function getStudentNotificationContext(studentId) {
   return { student, parents };
 }
 
+// Heure locale Maroc (Africa/Casablanca = UTC+1)
+const SCHOOL_TZ = process.env.SCHOOL_TIMEZONE || 'Africa/Casablanca';
 function fmtTime(date = new Date()) {
-  return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return date.toLocaleTimeString('fr-FR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: SCHOOL_TZ,
+  });
 }
 
 // 🚌 Notif "élève monté dans le bus" — texte adapté à la direction

@@ -61,6 +61,7 @@ import DriversPage from './pages/transport/DriversPage';
 import ParentTransportPage from './pages/parent/TransportPage';
 import ParentDashboard from './pages/parent/ParentDashboard';
 import ParentChildPage from './pages/parent/ParentChildPage';
+import ParentNotificationsPage from './pages/parent/ParentNotificationsPage';
 import DriverDashboard from './pages/driver/DriverDashboard';
 import ActiveTripPage from './pages/driver/ActiveTripPage';
 
@@ -133,6 +134,7 @@ function App() {
             <Route path="transport/history" element={<TransportStatsPage />} />
             <Route path="parent" element={<ParentDashboard />} />
             <Route path="parent/children/:childId" element={<ParentChildPage />} />
+            <Route path="parent/notifications" element={<ParentNotificationsPage />} />
             <Route path="parent/transport" element={<ParentTransportPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />

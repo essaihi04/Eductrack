@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { GraduationCap, Bus, BookOpen, AlertCircle, CheckCircle2, ChevronRight, User } from 'lucide-react';
+import { GraduationCap, Bus, BookOpen, AlertCircle, CheckCircle2, ChevronRight, User, Bell } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -57,6 +57,19 @@ const ParentDashboard = () => {
 
       {children.length > 0 && (
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <button
+            onClick={() => navigate('/parent/notifications')}
+            className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition"
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-lg bg-purple-100 p-3"><Bell className="w-6 h-6 text-purple-600" /></div>
+              <div className="text-left">
+                <p className="font-semibold text-gray-900">Notifications</p>
+                <p className="text-sm text-gray-500">Messages de l'école (absences, contrôles, transport…)</p>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-400" />
+          </button>
           <button
             onClick={() => navigate('/parent/transport')}
             className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition"

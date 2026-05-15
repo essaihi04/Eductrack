@@ -397,4 +397,64 @@ router.get('/children/:childId/timetable', loadChild, async (req, res) => {
   }
 });
 
+// ============================================================
+// GET /api/parent/notifications
+// Historique des notifications WhatsApp envoyées au parent connecté
+// (toutes catégories : transport, pédagogique, financier, général)
+// ============================================================
+router.get('/notifications', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const category = req.query.category; // optionnel : transport | pedagogical | financial | general
+
+    // 1) Récupérer les destinataires (recipients) liés à ce parent
+    const { data: recipients, error: rErr } = await supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .select('id, message_id, phone_e164, status, sent_at, error_message, created_at')
+      .eq('parent_id', parentId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (rErr) throw rErr;
+    if (!recipients || recipients.length === 0) return res.json([]);
+
+    // 2) Récupérer les messages associés
+    const messageIds = [...new Set(recipients.map(r => r.message_id))];
+    let msgQuery = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id, content, message_type, media_url, file_name, category, created_at, sent_by')
+      .in('id', messageIds);
+    if (category) msgQuery = msgQuery.eq('category', category);
+    const { data: messages, error: mErr } = await msgQuery;
+    if (mErr) throw mErr;
+
+    const messageById = new Map((messages || []).map(m => [m.id, m]));
+
+    const result = recipients
+      .map(r => {
+        const m = messageById.get(r.message_id);
+        if (!m) return null;
+        return {
+          id: r.id,
+          message_id: r.message_id,
+          status: r.status,
+          sent_at: r.sent_at || r.created_at,
+          phone: r.phone_e164,
+          content: m.content,
+          message_type: m.message_type,
+          media_url: m.media_url,
+          file_name: m.file_name,
+          category: m.category || 'general',
+          created_at: m.created_at,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(result);
+  } catch (e) {
+    console.error('[parent] notifications error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;
