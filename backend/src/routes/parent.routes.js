@@ -1,4 +1,6 @@
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
@@ -292,6 +294,63 @@ router.get('/children/:childId/documents', loadChild, async (req, res) => {
     res.json(data || []);
   } catch (e) {
     console.error('[parent] documents error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/documents/:docId/download
+// Téléchargement / aperçu d'un document de la classe de l'enfant.
+// Query: ?inline=1 → ouvert dans le navigateur (preview), sinon attachment.
+// ============================================================
+router.get('/children/:childId/documents/:docId/download', loadChild, async (req, res) => {
+  try {
+    const { docId } = req.params;
+    const studentId = req.childId;
+
+    // Récupérer la classe de l'élève
+    const { data: studentProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('class_id')
+      .eq('id', studentId)
+      .single();
+    if (!studentProfile?.class_id) return res.status(404).json({ error: 'Classe introuvable' });
+
+    // Récupérer le document
+    const { data: doc, error: docErr } = await supabaseAdmin
+      .from('teaching_documents')
+      .select('id, class_id, file_path, file_name, file_type')
+      .eq('id', docId)
+      .single();
+    if (docErr || !doc) return res.status(404).json({ error: 'Document non trouvé' });
+
+    // Vérifier que le document appartient bien à la classe de l'enfant
+    if (doc.class_id !== studentProfile.class_id) {
+      return res.status(403).json({ error: 'Accès refusé à ce document' });
+    }
+
+    if (!doc.file_path || !fs.existsSync(doc.file_path)) {
+      return res.status(404).json({ error: 'Fichier non trouvé sur le serveur' });
+    }
+
+    const inline = req.query.inline === '1' || req.query.inline === 'true';
+    const safeName = (doc.file_name || `document-${docId}`).replace(/"/g, '');
+    const ext = path.extname(safeName).toLowerCase();
+    const mime = doc.file_type ||
+      (ext === '.pdf' ? 'application/pdf' :
+       ext === '.png' ? 'image/png' :
+       (ext === '.jpg' || ext === '.jpeg') ? 'image/jpeg' :
+       'application/octet-stream');
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader(
+      'Content-Disposition',
+      `${inline ? 'inline' : 'attachment'}; filename="${safeName}"`
+    );
+
+    fs.createReadStream(doc.file_path).pipe(res);
+  } catch (e) {
+    console.error('[parent] document download error', e);
     res.status(500).json({ error: e.message });
   }
 });

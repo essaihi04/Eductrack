@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, BookOpen, FileText, Activity, Bus, GraduationCap,
   CheckCircle2, XCircle, Clock, AlertCircle, Calendar, Award,
+  Eye, Download, BookOpen as BookOpenIcon, Edit3, Home as HomeIcon, RotateCcw, Star, FileImage,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
@@ -27,6 +28,42 @@ const fetchJson = async (path) => {
     throw new Error(msg);
   }
   return res.json();
+};
+
+const fetchBlob = async (path) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  const res = await fetch(`${apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    let msg = `Erreur (${res.status})`;
+    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
+  return res.blob();
+};
+
+const DOCUMENT_TYPE_META = {
+  cours: { label: 'Cours', icon: BookOpenIcon, color: 'bg-blue-100 text-blue-700' },
+  exercice: { label: 'Exercice', icon: Edit3, color: 'bg-purple-100 text-purple-700' },
+  devoir: { label: 'Devoir maison', icon: HomeIcon, color: 'bg-emerald-100 text-emerald-700' },
+  rattrapage: { label: 'Rattrapage', icon: RotateCcw, color: 'bg-orange-100 text-orange-700' },
+  approfondissement: { label: 'Approfondissement', icon: Star, color: 'bg-amber-100 text-amber-700' },
+};
+
+const getFileIcon = (fileName = '') => {
+  const ext = (fileName.split('.').pop() || '').toLowerCase();
+  if (ext === 'pdf') return <FileText className="w-8 h-8 text-red-500" />;
+  if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return <FileImage className="w-8 h-8 text-blue-500" />;
+  if (['doc', 'docx'].includes(ext)) return <FileText className="w-8 h-8 text-blue-600" />;
+  if (['ppt', 'pptx'].includes(ext)) return <FileText className="w-8 h-8 text-orange-500" />;
+  return <FileText className="w-8 h-8 text-gray-500" />;
+};
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return '';
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(0)} Ko`;
+  return `${(kb / 1024).toFixed(1)} Mo`;
 };
 
 const ParentChildPage = () => {
@@ -250,25 +287,10 @@ const ParentChildPage = () => {
       )}
 
       {tab === 'documents' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="space-y-3">
           {documents.length === 0 && <Empty>Aucun document partagé.</Empty>}
           {documents.map(d => (
-            <a
-              key={d.id}
-              href={d.file_url}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition"
-            >
-              <div className="flex items-start gap-3">
-                <FileText className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{d.title || d.name || 'Document'}</p>
-                  <p className="text-xs text-gray-500">{d.subjects?.name || '—'}</p>
-                  {d.created_at && <p className="text-[10px] text-gray-400 mt-1">{new Date(d.created_at).toLocaleDateString('fr-FR')}</p>}
-                </div>
-              </div>
-            </a>
+            <DocumentCard key={d.id} doc={d} childId={childId} />
           ))}
         </div>
       )}
@@ -352,5 +374,108 @@ const Tag = ({ value, kind }) => {
 };
 
 const dayName = (d) => ({ 1: 'Lundi', 2: 'Mardi', 3: 'Mercredi', 4: 'Jeudi', 5: 'Vendredi', 6: 'Samedi', 7: 'Dimanche', 0: 'Dimanche' }[d] || d);
+
+const DocumentCard = ({ doc, childId }) => {
+  const [busy, setBusy] = useState('');
+  const meta = DOCUMENT_TYPE_META[doc.document_type] || { label: doc.document_type || 'Document', icon: FileText, color: 'bg-gray-100 text-gray-700' };
+  const TypeIcon = meta.icon;
+  const teacher = doc.profiles ? `${doc.profiles.first_name || ''} ${doc.profiles.last_name || ''}`.trim() : '';
+
+  const handleAction = async (mode) => {
+    try {
+      setBusy(mode);
+      const inline = mode === 'view' ? '?inline=1' : '';
+      const blob = await fetchBlob(`/api/parent/children/${childId}/documents/${doc.id}/download${inline}`);
+      const url = window.URL.createObjectURL(blob);
+      if (mode === 'view') {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        // Révocation différée pour laisser le temps au navigateur d'ouvrir le blob
+        setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+      } else {
+        const a = window.document.createElement('a');
+        a.href = url;
+        a.download = doc.file_name || `document-${doc.id}`;
+        window.document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      alert(`❌ ${e.message}`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition">
+      <div className="flex items-start gap-4">
+        <div className="shrink-0">{getFileIcon(doc.file_name)}</div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${meta.color}`}>
+              <TypeIcon className="w-3 h-3" />
+              {meta.label}
+            </span>
+            {doc.subjects?.name && (
+              <span className="text-[11px] text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">
+                {doc.subjects.name}
+              </span>
+            )}
+          </div>
+
+          <h3 className="text-base font-semibold text-gray-900 truncate">{doc.title}</h3>
+          <p className="text-xs text-gray-500 truncate">{doc.file_name}</p>
+
+          {doc.description && (
+            <p className="mt-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">{doc.description}</p>
+          )}
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-xs text-gray-500">
+            {teacher && (
+              <span className="flex items-center gap-1">
+                <GraduationCap className="w-3.5 h-3.5" />
+                {teacher}
+              </span>
+            )}
+            {doc.created_at && (
+              <span className="flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5" />
+                {new Date(doc.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </span>
+            )}
+            {doc.file_size && <span>{formatFileSize(doc.file_size)}</span>}
+          </div>
+
+          {doc.controls_plan?.name && (
+            <div className="mt-2 text-xs text-blue-600">🔗 Lié au contrôle : {doc.controls_plan.name}</div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2 shrink-0">
+          <button
+            onClick={() => handleAction('view')}
+            disabled={!!busy}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            title="Aperçu"
+          >
+            <Eye className="w-4 h-4" />
+            <span className="hidden sm:inline">{busy === 'view' ? '…' : 'Voir'}</span>
+          </button>
+          <button
+            onClick={() => handleAction('download')}
+            disabled={!!busy}
+            className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            title="Télécharger"
+          >
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">{busy === 'download' ? '…' : 'Télécharger'}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default ParentChildPage;
