@@ -96,8 +96,9 @@ export const requirePedagogicalLeadership = (req, res, next) => {
  */
 export const getScopedClassIds = async (req) => {
   if (!req.user) return [];
-  // Rôles non restreints
-  if (['super_admin', 'admin', 'school_admin', 'pedagogical_director'].includes(req.user.role)) {
+  // Rôles non restreints (pas de scope class-level)
+  // Inclut finance_manager / transport_manager : ils opèrent à l'échelle de toute l'école
+  if (['super_admin', 'admin', 'school_admin', 'pedagogical_director', 'finance_manager', 'transport_manager'].includes(req.user.role)) {
     return null;
   }
   if (req.user.role !== 'pedagogical_manager') {
