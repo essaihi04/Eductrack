@@ -234,6 +234,7 @@ router.get('/children/:childId/homework', loadChild, async (req, res) => {
       .select('class_id')
       .eq('id', studentId)
       .single();
+
     if (!student?.class_id) return res.json([]);
 
     const { data, error } = await supabaseAdmin
@@ -242,7 +243,6 @@ router.get('/children/:childId/homework', loadChild, async (req, res) => {
         *,
         classes(name, level),
         profiles(first_name, last_name),
-        subjects(name),
         homework_students(student_id),
         homework_submissions(student_id, status, submission_date, grade, feedback)
       `)
@@ -250,12 +250,32 @@ router.get('/children/:childId/homework', loadChild, async (req, res) => {
       .order('due_date', { ascending: true });
     if (error) throw error;
 
-    const filtered = (data || []).filter(hw => {
+    const filteredRaw = (data || []).filter(hw => {
       if (hw.target_type === 'all') return true;
       if (hw.target_type === 'group') return (hw.homework_students || []).some(hs => hs.student_id === studentId);
       return false;
-    }).map(hw => ({
+    });
+
+    // Déduire la matière depuis le prof qui a créé le devoir (teacher_subjects)
+    // car la table homework n'a pas de colonne subject_id.
+    const teacherIds = [...new Set(filteredRaw.map(h => h.created_by).filter(Boolean))];
+    const subjectByTeacher = new Map();
+    if (teacherIds.length > 0) {
+      const { data: ts } = await supabaseAdmin
+        .from('teacher_subjects')
+        .select('teacher_id, subjects(name)')
+        .in('teacher_id', teacherIds);
+      (ts || []).forEach(row => {
+        const name = row?.subjects?.name;
+        if (name && !subjectByTeacher.has(row.teacher_id)) {
+          subjectByTeacher.set(row.teacher_id, name);
+        }
+      });
+    }
+
+    const filtered = filteredRaw.map(hw => ({
       ...hw,
+      subject_name: subjectByTeacher.get(hw.created_by) || null,
       homework_submissions: (hw.homework_submissions || []).filter(s => s.student_id === studentId),
     }));
     res.json(filtered);

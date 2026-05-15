@@ -214,7 +214,9 @@ const ParentChildPage = () => {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-gray-900">{hw.title || 'Devoir'}</p>
-                    <p className="text-sm text-gray-600">{hw.subjects?.name || '—'} • {hw.profiles?.first_name} {hw.profiles?.last_name}</p>
+                    <p className="text-sm font-medium text-blue-700">
+                      {hw.subject_name || hw.subjects?.name || 'Matière non renseignée'}
+                    </p>
                     {hw.description && <p className="text-sm text-gray-700 mt-2 whitespace-pre-line">{hw.description}</p>}
                     {hw.due_date && (
                       <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
