@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronUp, Link2, Unlink, Star, FileSpreadsheet, Download, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronUp, Link2, Unlink, Star, FileSpreadsheet, Download, Edit2, Key, Send, Copy, CheckCheck } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 
@@ -30,6 +30,16 @@ const ParentsPage = () => {
   // Add contact
   const [addingContactParentId, setAddingContactParentId] = useState(null);
   const [newContactPhone, setNewContactPhone] = useState('');
+
+  // Credentials modal
+  const [credentialsModal, setCredentialsModal] = useState(null); // { email, password, first_name, last_name, parent_id }
+  const [generatingCreds, setGeneratingCreds] = useState(null); // parentId currently generating
+  const [copied, setCopied] = useState(false);
+
+  // Bulk send credentials
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedParents, setSelectedParents] = useState(new Set());
+  const [bulkSending, setBulkSending] = useState(false);
 
   // Import
   const [showImport, setShowImport] = useState(false);
@@ -86,9 +96,19 @@ const ParentsPage = () => {
         body: JSON.stringify(createForm)
       });
       if (res.ok) {
+        const created = await res.json();
         setCreateForm({ parent_full_name: '', phone_1: '', email: '' });
         setShowCreateForm(false);
         await fetchData();
+        if (created?.password && created?.email) {
+          setCredentialsModal({
+            parent_id: created.id,
+            email: created.email,
+            password: created.password,
+            first_name: created.first_name,
+            last_name: created.last_name,
+          });
+        }
       } else {
         const err = await res.json();
         alert(err.error || 'Erreur création parent');
@@ -446,6 +466,113 @@ const ParentsPage = () => {
     }
   };
 
+  // ---- CREATE / RESET CREDENTIALS (single parent) ----
+  const handleCreateCredentials = async (parent, force = false) => {
+    setGeneratingCreds(parent.id);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${apiUrl}/api/admin/parents/${parent.id}/create-credentials`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Erreur génération identifiants');
+        return;
+      }
+      setCredentialsModal({
+        parent_id: parent.id,
+        email: data.email,
+        password: data.password,
+        first_name: data.first_name,
+        last_name: data.last_name,
+      });
+      await fetchData();
+    } catch (e) {
+      console.error(e);
+      alert('Erreur génération identifiants');
+    } finally {
+      setGeneratingCreds(null);
+    }
+  };
+
+  // ---- COPY CREDENTIALS ----
+  const copyCredentials = async () => {
+    if (!credentialsModal) return;
+    const text = `Login : ${credentialsModal.email}\nMot de passe : ${credentialsModal.password}\nLien : https://etrack.ma/login`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  // ---- SEND CREDENTIALS WHATSAPP (single) ----
+  const sendCredentialsWhatsApp = async (parentId) => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${apiUrl}/api/admin/parents/send-credentials-whatsapp`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_ids: [parentId] }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Erreur envoi WhatsApp');
+        return;
+      }
+      alert(data.message || 'Identifiants envoyés');
+      setCredentialsModal(null);
+      await fetchData();
+    } catch (e) {
+      console.error(e);
+      alert('Erreur envoi WhatsApp');
+    }
+  };
+
+  // ---- BULK SEND CREDENTIALS ----
+  const handleBulkSend = async (mode /* 'all' | 'selected' */) => {
+    const ids = mode === 'all' ? null : Array.from(selectedParents);
+    if (mode === 'selected' && ids.length === 0) {
+      alert('Sélectionnez au moins un parent');
+      return;
+    }
+    const label = mode === 'all' ? 'TOUS les parents' : `${ids.length} parent(s) sélectionné(s)`;
+    if (!confirm(`Envoyer (et régénérer) les identifiants par WhatsApp à ${label} ?`)) return;
+    setBulkSending(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${apiUrl}/api/admin/parents/send-credentials-whatsapp`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(mode === 'all' ? { all: true } : { parent_ids: ids }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Erreur envoi en masse');
+        return;
+      }
+      alert(`${data.message}\n${data.errors > 0 ? `Échecs : ${data.errors}` : ''}`);
+      setBulkMode(false);
+      setSelectedParents(new Set());
+      await fetchData();
+    } catch (e) {
+      console.error(e);
+      alert('Erreur envoi en masse');
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
+  const toggleSelectParent = (parentId) => {
+    setSelectedParents(prev => {
+      const n = new Set(prev);
+      if (n.has(parentId)) n.delete(parentId); else n.add(parentId);
+      return n;
+    });
+  };
+
   // ---- FILTER ----
   const filteredParents = parents.filter(p => {
     const name = `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase();
@@ -475,7 +602,33 @@ const ParentsPage = () => {
           <h1 className="text-3xl font-bold">Parents</h1>
           <p className="text-muted-foreground">{parents.length} parent(s) enregistré(s)</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => { setBulkMode(!bulkMode); setSelectedParents(new Set()); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${bulkMode ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
+          >
+            <CheckCheck className="w-4 h-4" />
+            {bulkMode ? `${selectedParents.size} sélectionné(s)` : 'Sélection multiple'}
+          </button>
+          {bulkMode && (
+            <button
+              onClick={() => handleBulkSend('selected')}
+              disabled={bulkSending || selectedParents.size === 0}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+            >
+              <Send className="w-4 h-4" />
+              {bulkSending ? 'Envoi…' : `Envoyer ID (${selectedParents.size})`}
+            </button>
+          )}
+          <button
+            onClick={() => handleBulkSend('all')}
+            disabled={bulkSending}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+            title="Régénérer + envoyer les identifiants à tous les parents"
+          >
+            <Send className="w-4 h-4" />
+            {bulkSending ? 'Envoi…' : 'Envoyer ID à tous'}
+          </button>
           <button
             onClick={() => setShowImport(!showImport)}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -738,6 +891,15 @@ const ParentsPage = () => {
                   className="flex items-center gap-4 p-4 cursor-pointer hover:bg-accent/50 transition-colors"
                   onClick={() => setExpandedParent(isExpanded ? null : parent.id)}
                 >
+                  {bulkMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedParents.has(parent.id)}
+                      onChange={() => toggleSelectParent(parent.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-4 h-4 shrink-0"
+                    />
+                  )}
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
                     {(parent.first_name?.[0] || '').toUpperCase()}{(parent.last_name?.[0] || '').toUpperCase()}
                   </div>
@@ -752,6 +914,11 @@ const ParentsPage = () => {
                           {primaryContact.phone_e164}
                         </span>
                       )}
+                      {parent.email && !parent.email.endsWith('@parents.local') && !parent.email.startsWith('parent_') ? (
+                        <span className="text-xs text-emerald-700 truncate" title="Login actif">🔐 {parent.email}</span>
+                      ) : (
+                        <span className="text-xs text-orange-600">⚠️ Pas de login</span>
+                      )}
                       {childrenList.length > 0 && (
                         <span>{childrenList.length} enfant(s)</span>
                       )}
@@ -765,6 +932,14 @@ const ParentsPage = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleCreateCredentials(parent, false)}
+                      disabled={generatingCreds === parent.id}
+                      className="p-1.5 text-purple-600 hover:bg-purple-100 rounded transition-colors disabled:opacity-50"
+                      title="Créer / Réinitialiser le login"
+                    >
+                      <Key className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={() => openEditParent(parent)}
                       className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
@@ -1020,6 +1195,58 @@ const ParentsPage = () => {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Credentials Modal */}
+      {credentialsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCredentialsModal(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Key className="w-5 h-5 text-purple-600" />
+                Identifiants générés
+              </h2>
+              <button onClick={() => setCredentialsModal(null)} className="text-gray-500 hover:text-gray-900">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Identifiants de <strong>{credentialsModal.first_name} {credentialsModal.last_name}</strong> :
+            </p>
+
+            <div className="space-y-3 mb-4">
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-800 p-3">
+                <p className="text-xs uppercase font-semibold text-gray-500 mb-1">Login (email)</p>
+                <p className="font-mono text-sm break-all">{credentialsModal.email}</p>
+              </div>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-800 p-3">
+                <p className="text-xs uppercase font-semibold text-gray-500 mb-1">Mot de passe</p>
+                <p className="font-mono text-base font-bold">{credentialsModal.password}</p>
+              </div>
+              <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 p-3 text-xs text-blue-800 dark:text-blue-300">
+                ⚠️ Ce mot de passe ne sera plus affiché. Copiez-le ou envoyez-le maintenant.
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={copyCredentials}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                {copied ? <CheckCheck className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'Copié !' : 'Copier'}
+              </button>
+              <button
+                onClick={() => sendCredentialsWhatsApp(credentialsModal.parent_id)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+              >
+                <Send className="w-4 h-4" />
+                Envoyer WhatsApp
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

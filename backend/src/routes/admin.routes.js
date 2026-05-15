@@ -48,11 +48,71 @@ const normalizePhoneToE164 = (raw) => {
 const generatePlaceholderParentEmail = () =>
   `parent_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}@parents.local`;
 
+const isPlaceholderParentEmail = (email) => {
+  if (!email) return true;
+  const e = String(email).toLowerCase();
+  return e.endsWith('@parents.local') || e.startsWith('parent_');
+};
+
+const sanitizeForEmail = (str) =>
+  String(str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+const getSchoolEmailDomain = async (schoolId) => {
+  if (!schoolId) return 'ecole.ma';
+  const { data: school } = await supabaseAdmin
+    .from('schools')
+    .select('name, code')
+    .eq('id', schoolId)
+    .single();
+  if (!school) return 'ecole.ma';
+  const base = sanitizeForEmail(school.name || school.code || 'ecole') || 'ecole';
+  return `${base}.ma`;
+};
+
+const buildParentEmail = (firstName, lastName, schoolDomain) => {
+  const f = sanitizeForEmail(firstName);
+  const l = sanitizeForEmail(lastName);
+  if (!f && !l) {
+    const ts = Date.now().toString().slice(-6);
+    return `parent${ts}@${schoolDomain}`;
+  }
+  return `${f}${l}@${schoolDomain}`;
+};
+
+const buildParentPassword = (firstName) => {
+  const year = new Date().getFullYear();
+  const clean = String(firstName || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z]/g, '').trim();
+  if (!clean) return `Parent${year}${Math.random().toString(36).slice(2, 6)}`;
+  return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase() + year;
+};
+
 const generateRandomPassword = () => crypto.randomBytes(10).toString('hex');
 
+// Génère email + mot de passe lisibles pour un parent (basé sur l'école)
+const generateParentCredentials = async ({ firstName, lastName, schoolId }) => {
+  const schoolDomain = await getSchoolEmailDomain(schoolId);
+  return {
+    email: buildParentEmail(firstName, lastName, schoolDomain),
+    password: buildParentPassword(firstName),
+  };
+};
+
 const createParentProfile = async ({ email, firstName, lastName, phone, schoolId }) => {
-  const finalEmail = (email || '').trim() || generatePlaceholderParentEmail();
-  const password = generateRandomPassword();
+  // Si pas d'email réel fourni → générer un email lisible (prenomnom@ecole.ma)
+  let finalEmail = (email || '').trim();
+  let usedAutoEmail = false;
+  if (!finalEmail) {
+    const schoolDomain = await getSchoolEmailDomain(schoolId);
+    finalEmail = buildParentEmail(firstName, lastName, schoolDomain);
+    usedAutoEmail = true;
+  }
+  // Mot de passe lisible basé sur prénom + année
+  const password = buildParentPassword(firstName);
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: finalEmail,
@@ -82,7 +142,8 @@ const createParentProfile = async ({ email, firstName, lastName, phone, schoolId
     .single();
 
   if (parentError) throw parentError;
-  return parent;
+  // Renvoyer les credentials générés pour que l'admin puisse les copier/envoyer
+  return { ...parent, password, generatedEmail: finalEmail, autoEmail: usedAutoEmail };
 };
 
 // ==================== MULTI-SCHOOL HELPERS ====================
@@ -430,6 +491,249 @@ router.delete('/parents/:parentId', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Erreur DELETE /parents:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// (Re)générer les identifiants de connexion d'un parent existant
+// Crée/répare le compte auth.users si nécessaire, force un email lisible et un nouveau mot de passe
+router.post('/parents/:parentId/create-credentials', async (req, res) => {
+  try {
+    const { parentId } = req.params;
+    const { force } = req.body || {};
+
+    const { data: parent, error: pErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, email, school_id, role')
+      .eq('id', parentId)
+      .eq('role', 'parent')
+      .single();
+    if (pErr) throw pErr;
+    if (!parent) return res.status(404).json({ error: 'Parent introuvable' });
+
+    // Toujours générer un mot de passe lisible
+    const password = buildParentPassword(parent.first_name);
+
+    // Si email actuel est un placeholder (ou force) → générer un email lisible
+    let newEmail = parent.email;
+    if (force || isPlaceholderParentEmail(parent.email)) {
+      const schoolDomain = await getSchoolEmailDomain(parent.school_id);
+      newEmail = buildParentEmail(parent.first_name, parent.last_name, schoolDomain);
+    }
+
+    // Mettre à jour le compte auth.users (créer s'il n'existe pas)
+    const { data: existingAuth } = await supabaseAdmin.auth.admin.getUserById(parentId);
+    if (existingAuth?.user) {
+      const updates = { password };
+      if (newEmail && newEmail !== parent.email) {
+        updates.email = newEmail;
+        updates.email_confirm = true;
+      }
+      const { error: upErr } = await supabaseAdmin.auth.admin.updateUserById(parentId, updates);
+      if (upErr) throw upErr;
+    } else {
+      // Pas de compte auth → en créer un avec le même id ? Impossible, l'id auth est généré.
+      // Création d'un nouveau compte auth, et on bascule profile.id ? Trop risqué.
+      // Solution simple : créer le compte avec l'id du profil via createUser n'est pas autorisé.
+      // On crée donc un nouvel auth et on conserve les associations en migrant le profile.id.
+      // Pour rester safe, on retourne une erreur ici.
+      return res.status(409).json({ error: 'Aucun compte auth existant pour ce parent. Recréez le parent.' });
+    }
+
+    // Mettre à jour profiles.email
+    if (newEmail !== parent.email) {
+      const { error: profUpErr } = await supabaseAdmin
+        .from('profiles')
+        .update({ email: newEmail })
+        .eq('id', parentId);
+      if (profUpErr) throw profUpErr;
+    }
+
+    res.json({
+      success: true,
+      email: newEmail,
+      password,
+      first_name: parent.first_name,
+      last_name: parent.last_name,
+    });
+  } catch (error) {
+    console.error('Erreur POST /parents/:id/create-credentials:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Envoyer en masse les identifiants par WhatsApp
+// Body: { parent_ids?: string[], all?: boolean }
+router.post('/parents/send-credentials-whatsapp', async (req, res) => {
+  try {
+    const { parent_ids, all } = req.body || {};
+    const schoolId = getSchoolId(req);
+
+    let parentsQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, email, first_name, last_name, phone, school_id')
+      .eq('role', 'parent');
+    if (schoolId) parentsQuery = parentsQuery.eq('school_id', schoolId);
+    if (!all && Array.isArray(parent_ids) && parent_ids.length) {
+      parentsQuery = parentsQuery.in('id', parent_ids);
+    } else if (!all) {
+      return res.status(400).json({ error: 'Spécifier parent_ids ou all=true' });
+    }
+
+    const { data: parents, error: parentsError } = await parentsQuery;
+    if (parentsError) throw parentsError;
+    if (!parents || parents.length === 0) {
+      return res.status(400).json({ error: 'Aucun parent trouvé' });
+    }
+
+    // Récupérer les contacts WhatsApp officiels (parent_contacts)
+    const ids = parents.map(p => p.id);
+    const { data: contacts } = await supabaseAdmin
+      .from('parent_contacts')
+      .select('parent_id, phone_e164, channel, is_primary')
+      .in('parent_id', ids)
+      .eq('channel', 'whatsapp');
+    const phoneByParent = new Map();
+    (contacts || []).forEach(c => {
+      if (!phoneByParent.has(c.parent_id) || c.is_primary) {
+        phoneByParent.set(c.parent_id, c.phone_e164);
+      }
+    });
+
+    const candidates = parents.map(p => ({
+      ...p,
+      phone_e164: phoneByParent.get(p.id) || normalizePhoneToE164(p.phone),
+    })).filter(p => !!p.phone_e164);
+
+    if (candidates.length === 0) {
+      return res.status(400).json({ error: 'Aucun parent n\'a de numéro WhatsApp' });
+    }
+
+    const sessionApiKey = await getSessionApiKey(schoolId);
+    if (!sessionApiKey) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école' });
+    }
+
+    const schoolDomain = await getSchoolEmailDomain(schoolId);
+
+    let sentCount = 0, errorCount = 0;
+    const sentDetails = [];
+
+    for (const parent of candidates) {
+      try {
+        // (Re)générer email si placeholder, et toujours un nouveau mot de passe lisible
+        const password = buildParentPassword(parent.first_name);
+        const newEmail = isPlaceholderParentEmail(parent.email)
+          ? buildParentEmail(parent.first_name, parent.last_name, schoolDomain)
+          : parent.email;
+
+        const updates = { password };
+        if (newEmail !== parent.email) {
+          updates.email = newEmail;
+          updates.email_confirm = true;
+        }
+
+        const { error: upErr } = await supabaseAdmin.auth.admin.updateUserById(parent.id, updates);
+        if (upErr) {
+          console.error('[Parents WhatsApp] update auth failed', parent.id, upErr.message);
+          errorCount++;
+          continue;
+        }
+
+        if (newEmail !== parent.email) {
+          await supabaseAdmin.from('profiles').update({ email: newEmail }).eq('id', parent.id);
+        }
+
+        const messageText =
+          `🔐 *Identifiants de connexion — Espace parent*\n\n` +
+          `Bonjour ${parent.first_name || ''},\n\n` +
+          `Voici vos accès à la plateforme EduTrack pour suivre votre/vos enfant(s) :\n\n` +
+          `📧 *Login (email)*\n${newEmail}\n\n` +
+          `🔑 *Mot de passe*\n${password}\n\n` +
+          `🌐 *Lien de connexion*\nhttps://etrack.ma/login\n\n` +
+          `_Vous pouvez copier ces informations séparément._\n\n` +
+          `⚠️ Conservez ces identifiants en sécurité.`;
+
+        // Logger via la pipeline whatsapp_messages avec category=general
+        const { data: msgLog } = await supabaseAdmin
+          .from('whatsapp_messages')
+          .insert({
+            school_id: schoolId,
+            sent_by: req.user.id,
+            message_type: 'text',
+            content: messageText,
+            total_recipients: 1,
+            status: 'sending',
+            category: 'general',
+          })
+          .select()
+          .single();
+
+        if (!msgLog) { errorCount++; continue; }
+
+        const { data: recipientLog } = await supabaseAdmin
+          .from('whatsapp_message_recipients')
+          .insert({
+            message_id: msgLog.id,
+            phone_e164: parent.phone_e164,
+            parent_id: parent.id,
+            status: 'pending',
+          })
+          .select()
+          .single();
+
+        if (!recipientLog) { errorCount++; continue; }
+
+        const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${sessionApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ to: parent.phone_e164, text: messageText }),
+        });
+
+        if (response.ok) {
+          await supabaseAdmin
+            .from('whatsapp_message_recipients')
+            .update({ status: 'sent', sent_at: new Date().toISOString() })
+            .eq('id', recipientLog.id);
+          await supabaseAdmin
+            .from('whatsapp_messages')
+            .update({ status: 'sent', sent_count: 1 })
+            .eq('id', msgLog.id);
+          sentCount++;
+          sentDetails.push({ parent_id: parent.id, email: newEmail });
+        } else {
+          const txt = await response.text().catch(() => '');
+          console.error('[Parents WhatsApp] send failed', parent.id, response.status, txt?.slice(0, 200));
+          await supabaseAdmin
+            .from('whatsapp_message_recipients')
+            .update({ status: 'failed', error_message: 'Échec envoi API' })
+            .eq('id', recipientLog.id);
+          await supabaseAdmin
+            .from('whatsapp_messages')
+            .update({ status: 'failed', failed_count: 1 })
+            .eq('id', msgLog.id);
+          errorCount++;
+        }
+
+        await waitWasenderInterval();
+      } catch (err) {
+        console.error('Erreur pour parent', parent.id, err);
+        errorCount++;
+      }
+    }
+
+    res.json({
+      message: `Identifiants envoyés à ${sentCount} parent(s)`,
+      sent: sentCount,
+      errors: errorCount,
+      total: candidates.length,
+      details: sentDetails,
+    });
+  } catch (error) {
+    console.error('Erreur POST /parents/send-credentials-whatsapp:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
