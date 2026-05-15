@@ -130,6 +130,7 @@ const Sidebar = () => {
 
     if (profile?.role === 'parent') {
       return [
+        { icon: Users2, label: 'Mes enfants', path: '/parent' },
         { icon: Bus, label: 'Transport', path: '/parent/transport' },
         { icon: Edit, label: 'Profil', path: '/profile' },
       ];

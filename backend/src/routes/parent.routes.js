@@ -1,0 +1,400 @@
+import express from 'express';
+import { supabaseAdmin } from '../config/supabase.js';
+import { authenticate, authorize } from '../middleware/auth.js';
+
+const router = express.Router();
+
+router.use(authenticate);
+router.use(authorize('parent'));
+
+// Helper: vérifier que l'enfant appartient bien au parent connecté
+async function verifyChild(parentId, childId) {
+  const { data, error } = await supabaseAdmin
+    .from('parent_students')
+    .select('student_id, relationship')
+    .eq('parent_id', parentId)
+    .eq('student_id', childId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+// Middleware: charge l'enfant ciblé via :childId
+async function loadChild(req, res, next) {
+  try {
+    const { childId } = req.params;
+    const link = await verifyChild(req.user.id, childId);
+    if (!link) return res.status(403).json({ error: 'Accès refusé : cet élève n\'est pas votre enfant' });
+    req.childId = childId;
+    req.childRelationship = link.relationship;
+    next();
+  } catch (e) {
+    console.error('[parent] loadChild error', e);
+    res.status(500).json({ error: e.message });
+  }
+}
+
+// ============================================================
+// GET /api/parent/children — liste des enfants avec résumé
+// ============================================================
+router.get('/children', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+
+    const { data: links, error: linksErr } = await supabaseAdmin
+      .from('parent_students')
+      .select(`
+        relationship,
+        student:profiles!parent_students_student_id_fkey(
+          id, first_name, last_name, avatar_url, date_of_birth, class_id,
+          classes:classes!fk_profiles_class(id, name, level)
+        )
+      `)
+      .eq('parent_id', parentId);
+
+    if (linksErr) throw linksErr;
+
+    const children = (links || [])
+      .filter(l => l.student)
+      .map(l => ({
+        id: l.student.id,
+        first_name: l.student.first_name,
+        last_name: l.student.last_name,
+        avatar_url: l.student.avatar_url,
+        date_of_birth: l.student.date_of_birth,
+        class: l.student.classes ? { id: l.student.classes.id, name: l.student.classes.name, level: l.student.classes.level } : null,
+        relationship: l.relationship,
+      }));
+
+    // Pour chaque enfant : résumé rapide (présence, devoirs en attente)
+    const summaries = await Promise.all(children.map(async (child) => {
+      const [{ data: tracking }, { data: pendingHw }] = await Promise.all([
+        supabaseAdmin
+          .from('session_tracking')
+          .select('presence')
+          .eq('student_id', child.id),
+        supabaseAdmin
+          .from('homework')
+          .select('id, due_date, target_type, homework_students(student_id), homework_submissions(student_id, status)')
+          .eq('class_id', child.class?.id || '00000000-0000-0000-0000-000000000000')
+          .gte('due_date', new Date().toISOString().slice(0, 10))
+      ]);
+
+      const total = (tracking || []).length;
+      const present = (tracking || []).filter(t => t.presence === 'present').length;
+      const absent = (tracking || []).filter(t => t.presence === 'absent').length;
+      const presenceRate = total > 0 ? Math.round((present / total) * 100) : null;
+
+      const filteredHw = (pendingHw || []).filter(hw => {
+        if (hw.target_type === 'all') return true;
+        if (hw.target_type === 'group') return (hw.homework_students || []).some(hs => hs.student_id === child.id);
+        return false;
+      });
+      const pendingCount = filteredHw.filter(hw => {
+        const sub = (hw.homework_submissions || []).find(s => s.student_id === child.id);
+        return !sub || sub.status !== 'submitted';
+      }).length;
+
+      return {
+        ...child,
+        summary: {
+          total_sessions: total,
+          present_count: present,
+          absent_count: absent,
+          presence_rate: presenceRate,
+          pending_homework: pendingCount,
+        }
+      };
+    }));
+
+    res.json(summaries);
+  } catch (e) {
+    console.error('[parent] GET /children error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/profile
+// ============================================================
+router.get('/children/:childId/profile', loadChild, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select(`
+        id, first_name, last_name, avatar_url, date_of_birth, email, phone, class_id,
+        classes:classes!fk_profiles_class(id, name, level)
+      `)
+      .eq('id', req.childId)
+      .single();
+    if (error) throw error;
+    res.json({ ...data, relationship: req.childRelationship });
+  } catch (e) {
+    console.error('[parent] profile error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/tracking-stats
+// (réplique /api/students/me/tracking-stats)
+// ============================================================
+router.get('/children/:childId/tracking-stats', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    const { data: tracking, error } = await supabaseAdmin
+      .from('session_tracking')
+      .select('presence, cahier_present, participation, homework, discipline, phone_use, writing, attitude, sessions(date)')
+      .eq('student_id', studentId);
+    if (error) throw error;
+
+    const t = tracking || [];
+    res.json({
+      present_count: t.filter(x => x.presence === 'present').length,
+      absent_count: t.filter(x => x.presence === 'absent').length,
+      late_count: t.filter(x => x.presence === 'late').length,
+      cahier_present_count: t.filter(x => x.cahier_present).length,
+      excellent_participation: t.filter(x => x.participation === 'excellent').length,
+      good_participation: t.filter(x => x.participation === 'bon').length,
+      faible_participation: t.filter(x => x.participation === 'faible').length,
+      homework_done: t.filter(x => x.homework === 'done').length,
+      concentre_count: t.filter(x => x.discipline === 'concentre').length,
+      moyen_count: t.filter(x => x.discipline === 'moyen').length,
+      distrait_count: t.filter(x => x.discipline === 'distrait').length,
+      correct_attitude: t.filter(x => x.attitude === 'correct').length,
+      bavarre_attitude: t.filter(x => x.attitude === 'bavarre').length,
+      perturbateur_attitude: t.filter(x => x.attitude === 'perturbateur').length,
+      phone_use_count: t.filter(x => x.phone_use).length,
+      writing_count: t.filter(x => x.writing).length,
+      total_sessions: t.length,
+    });
+  } catch (e) {
+    console.error('[parent] tracking-stats error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/tracking-history?limit=60
+// ============================================================
+router.get('/children/:childId/tracking-history', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    const { limit = 30 } = req.query;
+    const { data, error } = await supabaseAdmin
+      .from('session_tracking')
+      .select('*, sessions(date, subject_id, teacher_id, subjects(name))')
+      .eq('student_id', studentId)
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit));
+    if (error) throw error;
+
+    const teacherIdsNeedingSubject = Array.from(new Set(
+      (data || []).filter(t => !t?.sessions?.subject_id && t?.sessions?.teacher_id).map(t => t.sessions.teacher_id)
+    ));
+    let subjectByTeacherId = new Map();
+    if (teacherIdsNeedingSubject.length) {
+      const { data: ts } = await supabaseAdmin
+        .from('teacher_subjects')
+        .select('teacher_id, subjects(name)')
+        .in('teacher_id', teacherIdsNeedingSubject);
+      (ts || []).forEach(row => {
+        const n = row?.subjects?.name;
+        if (n && !subjectByTeacherId.has(row.teacher_id)) subjectByTeacherId.set(row.teacher_id, n);
+      });
+    }
+
+    const formatted = (data || []).map(t => {
+      const direct = t.sessions?.subjects?.name || null;
+      const fallback = !direct && t.sessions?.teacher_id ? subjectByTeacherId.get(t.sessions.teacher_id) || null : null;
+      return {
+        ...t,
+        session_date: t.sessions?.date,
+        session_subject_id: t.sessions?.subject_id || null,
+        subject_name: direct || fallback,
+      };
+    });
+    res.json(formatted);
+  } catch (e) {
+    console.error('[parent] tracking-history error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/homework
+// ============================================================
+router.get('/children/:childId/homework', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('class_id')
+      .eq('id', studentId)
+      .single();
+    if (!student?.class_id) return res.json([]);
+
+    const { data, error } = await supabaseAdmin
+      .from('homework')
+      .select(`
+        *,
+        classes(name, level),
+        profiles(first_name, last_name),
+        subjects(name),
+        homework_students(student_id),
+        homework_submissions(student_id, status, submission_date, grade, feedback)
+      `)
+      .eq('class_id', student.class_id)
+      .order('due_date', { ascending: true });
+    if (error) throw error;
+
+    const filtered = (data || []).filter(hw => {
+      if (hw.target_type === 'all') return true;
+      if (hw.target_type === 'group') return (hw.homework_students || []).some(hs => hs.student_id === studentId);
+      return false;
+    }).map(hw => ({
+      ...hw,
+      homework_submissions: (hw.homework_submissions || []).filter(s => s.student_id === studentId),
+    }));
+    res.json(filtered);
+  } catch (e) {
+    console.error('[parent] homework error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/documents
+// ============================================================
+router.get('/children/:childId/documents', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('class_id')
+      .eq('id', studentId)
+      .single();
+    if (!profile?.class_id) return res.json([]);
+
+    const { data, error } = await supabaseAdmin
+      .from('teaching_documents')
+      .select(`
+        *,
+        classes(name, level),
+        subjects(name),
+        controls_plan(name),
+        profiles!teaching_documents_teacher_id_fkey(first_name, last_name)
+      `)
+      .eq('class_id', profile.class_id)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+
+    res.json(data || []);
+  } catch (e) {
+    console.error('[parent] documents error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/control-grades
+// (réplique /api/students/me/control-grades)
+// ============================================================
+router.get('/children/:childId/control-grades', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    res.set('Cache-Control', 'no-store');
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles').select('class_id').eq('id', studentId).single();
+    if (!profile?.class_id) return res.json([]);
+
+    const { data: controls, error: controlsError } = await supabaseAdmin
+      .from('controls_plan')
+      .select(`
+        id, name, date, description, status, teacher_id, class_id,
+        profiles!controls_plan_teacher_id_fkey(first_name, last_name),
+        classes(name, level)
+      `)
+      .eq('class_id', profile.class_id)
+      .eq('status', 'completed')
+      .order('date', { ascending: false });
+    if (controlsError) throw controlsError;
+
+    const controlIds = (controls || []).map(c => c.id);
+    if (!controlIds.length) return res.json([]);
+
+    const teacherIds = Array.from(new Set((controls || []).map(c => c.teacher_id).filter(Boolean)));
+
+    const { data: notes } = await supabaseAdmin
+      .from('control_notes')
+      .select('id, control_id, note, appreciation, created_at')
+      .eq('student_id', studentId)
+      .in('control_id', controlIds);
+
+    const noteByControlId = new Map();
+    (notes || []).forEach(n => { if (!noteByControlId.has(n.control_id)) noteByControlId.set(n.control_id, n); });
+
+    let subjectByTeacherId = new Map();
+    if (teacherIds.length) {
+      const { data: ts } = await supabaseAdmin
+        .from('teacher_subjects')
+        .select('teacher_id, subjects(name)')
+        .in('teacher_id', teacherIds);
+      (ts || []).forEach(row => {
+        const n = row?.subjects?.name;
+        if (n && !subjectByTeacherId.has(row.teacher_id)) subjectByTeacherId.set(row.teacher_id, n);
+      });
+    }
+
+    const formatted = (controls || []).map(c => {
+      const note = noteByControlId.get(c.id) || null;
+      const teacher = c?.profiles;
+      return {
+        id: c.id,
+        note_id: note?.id || null,
+        note: note?.note ?? null,
+        appreciation: note?.appreciation ?? null,
+        control_id: c.id,
+        control_name: c.name,
+        control_date: c.date,
+        control_description: c.description,
+        subject_name: subjectByTeacherId.get(c.teacher_id) || null,
+        teacher_name: teacher ? `${teacher.first_name} ${teacher.last_name}` : null,
+        class_name: c?.classes?.name,
+        class_level: c?.classes?.level,
+        created_at: note?.created_at || null,
+      };
+    });
+    res.json(formatted);
+  } catch (e) {
+    console.error('[parent] control-grades error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/timetable
+// ============================================================
+router.get('/children/:childId/timetable', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    const { data: profile } = await supabaseAdmin
+      .from('profiles').select('class_id').eq('id', studentId).single();
+    if (!profile?.class_id) return res.json([]);
+
+    const { data, error } = await supabaseAdmin
+      .from('timetable_slots')
+      .select('*, subjects(name), profiles!timetable_slots_teacher_id_fkey(first_name, last_name)')
+      .eq('class_id', profile.class_id)
+      .order('day_of_week', { ascending: true })
+      .order('start_time', { ascending: true });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (e) {
+    console.error('[parent] timetable error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+export default router;

@@ -35,7 +35,7 @@ const Dashboard = () => {
     case 'driver':
       return <Navigate to="/driver" replace />;
     case 'parent':
-      return <Navigate to="/parent/transport" replace />;
+      return <Navigate to="/parent" replace />;
     case 'student':
       return <StudentDashboard />;
     default:

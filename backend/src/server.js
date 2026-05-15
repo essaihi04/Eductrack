@@ -27,6 +27,7 @@ import transportRoutes from './routes/transport.routes.js';
 import transportManagersRoutes from './routes/transportManagers.routes.js';
 import driversRoutes from './routes/drivers.routes.js';
 import pushRoutes from './routes/push.routes.js';
+import parentRoutes from './routes/parent.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 
 dotenv.config();
@@ -83,6 +84,7 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/transport', transportRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/parent', parentRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {
