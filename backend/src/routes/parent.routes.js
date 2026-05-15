@@ -311,7 +311,28 @@ router.get('/children/:childId/documents', loadChild, async (req, res) => {
       .order('created_at', { ascending: false });
     if (error) throw error;
 
-    res.json(data || []);
+    // Statut vue / téléchargement de l'ENFANT (pas du parent)
+    const docIds = (data || []).map(d => d.id);
+    const viewByDoc = new Map();
+    if (docIds.length > 0) {
+      const { data: views } = await supabaseAdmin
+        .from('document_views')
+        .select('document_id, viewed_at, downloaded_at')
+        .eq('student_id', studentId)
+        .in('document_id', docIds);
+      (views || []).forEach(v => viewByDoc.set(v.document_id, v));
+    }
+
+    const enriched = (data || []).map(d => {
+      const v = viewByDoc.get(d.id);
+      return {
+        ...d,
+        child_viewed_at: v?.viewed_at || null,
+        child_downloaded_at: v?.downloaded_at || null,
+      };
+    });
+
+    res.json(enriched);
   } catch (e) {
     console.error('[parent] documents error', e);
     res.status(500).json({ error: e.message });

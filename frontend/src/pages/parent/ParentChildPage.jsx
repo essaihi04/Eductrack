@@ -503,6 +503,42 @@ const TrackingCard = ({ t }) => {
   );
 };
 
+const ChildActivityBadge = ({ kind, date }) => {
+  const seen = !!date;
+  const label = kind === 'view' ? 'Vu' : 'Téléchargé';
+  const labelNo = kind === 'view' ? 'Pas encore vu' : 'Non téléchargé';
+  const Icon = kind === 'view' ? Eye : Download;
+
+  const cls = seen
+    ? 'bg-green-50 text-green-700 border-green-200'
+    : 'bg-gray-50 text-gray-500 border-gray-200';
+
+  let dateStr = '';
+  if (seen) {
+    try {
+      dateStr = new Date(date).toLocaleString('fr-FR', {
+        day: '2-digit', month: 'short',
+        hour: '2-digit', minute: '2-digit',
+        timeZone: 'Africa/Casablanca',
+      });
+    } catch {}
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] font-medium ${cls}`}>
+      <Icon className="w-3 h-3" />
+      {seen ? (
+        <>
+          <span>{label} par votre enfant</span>
+          <span className="opacity-70">• {dateStr}</span>
+        </>
+      ) : (
+        <span>{labelNo} par votre enfant</span>
+      )}
+    </span>
+  );
+};
+
 const DocumentCard = ({ doc, childId }) => {
   const [busy, setBusy] = useState('');
   const meta = DOCUMENT_TYPE_META[doc.document_type] || { label: doc.document_type || 'Document', icon: FileText, color: 'bg-gray-100 text-gray-700' };
@@ -579,6 +615,18 @@ const DocumentCard = ({ doc, childId }) => {
           {doc.controls_plan?.name && (
             <div className="mt-2 text-xs text-blue-600">🔗 Lié au contrôle : {doc.controls_plan.name}</div>
           )}
+
+          {/* Statut de consultation par l'enfant */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <ChildActivityBadge
+              kind="view"
+              date={doc.child_viewed_at}
+            />
+            <ChildActivityBadge
+              kind="download"
+              date={doc.child_downloaded_at}
+            />
+          </div>
         </div>
 
         <div className="flex flex-col gap-2 shrink-0">
