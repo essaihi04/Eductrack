@@ -15,7 +15,9 @@ import {
   notifyDropped,
   notifyAbsent,
   notifyApproaching,
-  notifyTripStarted
+  notifyTripStarted,
+  notifyArrivedAtSchool,
+  checkProximityAndNotify
 } from '../services/transportNotifications.js';
 
 const router = express.Router();
@@ -358,7 +360,7 @@ router.post('/trips/:id/end', async (req, res) => {
   try {
     const { id } = req.params;
     const { total_km } = req.body || {};
-    const { data: trip } = await supabaseAdmin.from('bus_trips').select('id, driver_id, started_at').eq('id', id).single();
+    const { data: trip } = await supabaseAdmin.from('bus_trips').select('id, driver_id, started_at, direction').eq('id', id).single();
     if (!trip) return res.status(404).json({ error: 'Trajet introuvable' });
     if (req.user.role === 'driver' && trip.driver_id !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
 
@@ -370,6 +372,12 @@ router.post('/trips/:id/end', async (req, res) => {
         total_duration_min: durationMin, total_km: total_km ?? null
       }).eq('id', id).select().single();
     if (error) throw error;
+
+    // Si tournée de ramassage → notifier les parents que le bus est arrivé à l'école (background)
+    if (trip.direction === 'morning_pickup' || trip.direction === 'afternoon_pickup') {
+      notifyArrivedAtSchool(id).catch(err => console.error('notifyArrivedAtSchool:', err));
+    }
+
     res.json(data);
   } catch (e) {
     console.error('Erreur end trip:', e);
@@ -396,6 +404,10 @@ router.post('/trips/:id/position', async (req, res) => {
       heading: heading ?? null, accuracy_m: accuracy_m ?? null
     });
     if (error) throw error;
+
+    // Vérifier proximité élèves à notifier (background, non bloquant)
+    checkProximityAndNotify(id, lat, lng, speed_kmh).catch(err => console.error('checkProximityAndNotify:', err));
+
     res.json({ success: true });
   } catch (e) {
     console.error('Erreur position:', e);
@@ -429,7 +441,7 @@ router.post('/trips/:id/students/:sid/event', async (req, res) => {
       return res.status(400).json({ error: 'event_type invalide' });
     }
     const { data: trip } = await supabaseAdmin
-      .from('bus_trips').select('id, driver_id, bus_id').eq('id', id).single();
+      .from('bus_trips').select('id, driver_id, bus_id, direction').eq('id', id).single();
     if (!trip) return res.status(404).json({ error: 'Trajet introuvable' });
     if (req.user.role === 'driver' && trip.driver_id !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
 
@@ -439,11 +451,12 @@ router.post('/trips/:id/students/:sid/event', async (req, res) => {
     }).select().single();
     if (error) throw error;
 
-    // Notifications parents (background)
-    if (event_type === 'boarded') notifyBoarded(sid, trip.bus_id).catch(()=>{});
-    else if (event_type === 'dropped') notifyDropped(sid, trip.bus_id).catch(()=>{});
-    else if (event_type === 'absent' || event_type === 'no_show') notifyAbsent(sid, note || '').catch(()=>{});
-    else if (event_type === 'approaching') notifyApproaching(sid, req.body.eta_min || 5).catch(()=>{});
+    // Notifications parents (background) — avec direction et driverId pour adapter le message
+    const opts = { direction: trip.direction, driverId: trip.driver_id };
+    if (event_type === 'boarded') notifyBoarded(sid, trip.bus_id, opts).catch(err => console.error('notifyBoarded:', err));
+    else if (event_type === 'dropped') notifyDropped(sid, trip.bus_id, opts).catch(err => console.error('notifyDropped:', err));
+    else if (event_type === 'absent' || event_type === 'no_show') notifyAbsent(sid, note || '', opts).catch(err => console.error('notifyAbsent:', err));
+    else if (event_type === 'approaching') notifyApproaching(sid, req.body.eta_min || 5, opts).catch(err => console.error('notifyApproaching:', err));
 
     // Marquer notifié
     await supabaseAdmin.from('trip_student_events').update({ notified_parent: true }).eq('id', ev.id);
