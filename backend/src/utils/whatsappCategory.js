@@ -63,6 +63,7 @@ export function getCategoryForRole(role) {
 
 // Catégories autorisées pour chaque rôle (filtrage lecture).
 // null = toutes catégories.
+// Les managers ne voient PAS 'general' : seuls les admins voient les messages non catégorisés.
 export function allowedCategoriesForRole(role) {
   switch (role) {
     case 'admin':
@@ -70,14 +71,19 @@ export function allowedCategoriesForRole(role) {
       return null;
     case 'pedagogical_manager':
     case 'pedagogical_director':
-      return ['pedagogical', 'general'];
+      return ['pedagogical'];
     case 'finance_manager':
-      return ['financial', 'general'];
+      return ['financial'];
     case 'transport_manager':
-      return ['transport', 'general'];
+      return ['transport'];
     default:
-      return ['pedagogical', 'general'];
+      return ['pedagogical'];
   }
+}
+
+// Indique si le rôle peut voir les rapports pédagogiques quotidiens
+export function canSeePedagogicalReports(role) {
+  return ['admin', 'school_admin', 'pedagogical_manager', 'pedagogical_director'].includes(role);
 }
 
 // Valide une catégorie soumise par l'utilisateur, sinon retourne celle par défaut du rôle.

@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { processDailyReports, generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
-import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
+import { resolveCategoryForSending, allowedCategoriesForRole, canSeePedagogicalReports } from '../utils/whatsappCategory.js';
 
 const router = express.Router();
 
@@ -958,21 +958,25 @@ router.get('/conversations', async (req, res) => {
       if (r.status === 'failed') conversationMap[phone].totalFailed++;
     });
 
-    // Also fetch daily AI reports that were sent
-    let dailyReportsQuery = supabaseAdmin
-      .from('daily_reports')
-      .select('id, student_id, parent_id, phone_e164, report_date, report_content_fr, report_content_ar, status, sent_at, created_at')
-      .in('status', ['sent', 'failed'])
-      .order('created_at', { ascending: false })
-      .limit(500);
+    // Also fetch daily AI reports that were sent — uniquement pour les rôles pédagogiques + admin
+    let dailyReports = [];
+    if (canSeePedagogicalReports(req.user?.role)) {
+      let dailyReportsQuery = supabaseAdmin
+        .from('daily_reports')
+        .select('id, student_id, parent_id, phone_e164, report_date, report_content_fr, report_content_ar, status, sent_at, created_at')
+        .in('status', ['sent', 'failed'])
+        .order('created_at', { ascending: false })
+        .limit(500);
 
-    if (schoolId) dailyReportsQuery = dailyReportsQuery.eq('school_id', schoolId);
-    // Restreindre aux parents du périmètre pour pedagogical_manager
-    if (allowedParentIds !== null) {
-      dailyReportsQuery = dailyReportsQuery.in('parent_id', Array.from(allowedParentIds));
+      if (schoolId) dailyReportsQuery = dailyReportsQuery.eq('school_id', schoolId);
+      // Restreindre aux parents du périmètre pour pedagogical_manager
+      if (allowedParentIds !== null) {
+        dailyReportsQuery = dailyReportsQuery.in('parent_id', Array.from(allowedParentIds));
+      }
+
+      const { data } = await dailyReportsQuery;
+      dailyReports = data || [];
     }
-
-    const { data: dailyReports } = await dailyReportsQuery;
 
     // Get student names for daily reports
     const reportStudentIds = [...new Set((dailyReports || []).map(r => r.student_id).filter(Boolean))];
