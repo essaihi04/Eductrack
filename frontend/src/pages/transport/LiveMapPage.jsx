@@ -9,23 +9,39 @@ import { supabase } from '../../lib/supabase';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon } from '../../lib/mapAssets';
 import { directionShort } from '../../lib/tripDirection';
 
-function FitBounds({ trips, selectedId }) {
+function FitBounds({ trips, selectedId, followSelected }) {
   const map = useMap();
+  const initialFitDoneRef = useRef(false);
+
+  // Position courante du bus sélectionné (déclenche un re-render à chaque update GPS)
+  const selected = selectedId ? trips.find(x => x.id === selectedId) : null;
+  const selLat = selected?.last_position?.lat;
+  const selLng = selected?.last_position?.lng;
+
   useEffect(() => {
-    if (selectedId) {
-      const t = trips.find(x => x.id === selectedId);
-      if (t?.last_position) {
-        map.flyTo([t.last_position.lat, t.last_position.lng], 16, { duration: 0.8 });
-      }
+    // Bus sélectionné + suivi actif → la carte panne en douceur à chaque nouvelle position
+    if (selectedId && followSelected && selLat != null && selLng != null) {
+      map.panTo([selLat, selLng], { animate: true, duration: 0.6 });
       return;
     }
-    const pts = trips.filter(t => t.last_position).map(t => [t.last_position.lat, t.last_position.lng]);
-    if (pts.length === 1) {
-      map.setView(pts[0], 14);
-    } else if (pts.length > 1) {
-      map.fitBounds(pts, { padding: [50, 50], maxZoom: 14 });
+
+    // Premier chargement : centre sur le(s) bus
+    if (!initialFitDoneRef.current) {
+      const pts = trips.filter(t => t.last_position).map(t => [t.last_position.lat, t.last_position.lng]);
+      if (pts.length === 1) map.setView(pts[0], 14);
+      else if (pts.length > 1) map.fitBounds(pts, { padding: [50, 50], maxZoom: 14 });
+      if (pts.length > 0) initialFitDoneRef.current = true;
     }
-  }, [trips.length, selectedId]);
+  }, [selectedId, followSelected, selLat, selLng, trips.length]);
+
+  // Quand on sélectionne un bus → flyTo une fois pour zoomer
+  useEffect(() => {
+    if (selectedId && selLat != null && selLng != null) {
+      map.flyTo([selLat, selLng], 16, { duration: 0.8 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   return null;
 }
 
@@ -151,7 +167,7 @@ export default function LiveMapPage() {
       <div className="flex-1 relative">
         <MapContainer center={center} zoom={12} style={{ height: '100%', width: '100%' }}>
           <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
-          <FitBounds trips={trips} selectedId={selectedId} />
+          <FitBounds trips={trips} selectedId={selectedId} followSelected={true} />
           {trips.filter(t => t.last_position).map(t => {
             const isSel = t.id === selectedId;
             return (

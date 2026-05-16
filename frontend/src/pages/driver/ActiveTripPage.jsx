@@ -4,7 +4,8 @@ import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical, School, Crosshair } from 'lucide-react';
+import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical, School, Crosshair, ExternalLink } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -158,6 +159,28 @@ export default function ActiveTripPage() {
     if (!confirm('Terminer la tournée ?')) return;
     try { await transportApi.endTrip(id, { total_km: Number(totalKm.toFixed(2)) }); navigate('/driver'); }
     catch (e) { alert('Erreur : ' + e.message); }
+  };
+
+  // Ouvre une app de navigation externe (Google Maps ou Waze) vers une destination GPS.
+  // Sur Android/iOS (Capacitor) : ouvre l'app native si installée, sinon navigateur.
+  // Sur web : ouvre dans un nouvel onglet (l'app installée sur le téléphone gère le deep link).
+  const openExternalNav = (lat, lng, app = 'google') => {
+    if (lat == null || lng == null) {
+      alert("Position GPS de la destination non définie.");
+      return;
+    }
+    let url;
+    if (app === 'waze') {
+      url = `https://waze.com/ul?ll=${lat}%2C${lng}&navigate=yes`;
+    } else {
+      url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+    }
+    if (Capacitor.isNativePlatform()) {
+      // _system → ouvre dans le navigateur externe / app native (deep link)
+      window.open(url, '_system');
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
   };
 
   // Tri : pending d'abord par pickup_order, puis terminés
@@ -318,6 +341,24 @@ export default function ActiveTripPage() {
                 <div className="text-[11px] opacity-95 truncate">{school?.name || 'École'} · {school?.address || ''}</div>
               </div>
             </div>
+            <div className="mt-2 flex gap-2 pointer-events-auto">
+              <button
+                onClick={() => openExternalNav(schoolDest.lat, schoolDest.lng, 'google')}
+                className="flex-1 bg-white text-gray-900 font-bold rounded-lg py-2 px-3 shadow-lg flex items-center justify-center gap-2 active:scale-95 transition text-sm"
+              >
+                <span className="text-base">🗺️</span>
+                <span>Google Maps</span>
+                <ExternalLink className="w-3.5 h-3.5 opacity-60" />
+              </button>
+              <button
+                onClick={() => openExternalNav(schoolDest.lat, schoolDest.lng, 'waze')}
+                className="flex-1 bg-[#33ccff] text-white font-bold rounded-lg py-2 px-3 shadow-lg flex items-center justify-center gap-2 active:scale-95 transition text-sm"
+              >
+                <span className="text-base">🚗</span>
+                <span>Waze</span>
+                <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -346,6 +387,31 @@ export default function ActiveTripPage() {
                 )}
               </div>
             </div>
+
+            {/* Boutons navigation externe (Google Maps + Waze) — ouvrent l'app native du téléphone */}
+            {nextStudent.student.home_lat && nextStudent.student.home_lng && (
+              <div className="mt-2 flex gap-2 pointer-events-auto">
+                <button
+                  onClick={() => openExternalNav(Number(nextStudent.student.home_lat), Number(nextStudent.student.home_lng), 'google')}
+                  className="flex-1 bg-white text-gray-900 font-bold rounded-lg py-2 px-3 shadow-lg flex items-center justify-center gap-2 active:scale-95 transition text-sm"
+                  title="Ouvrir l'itinéraire dans Google Maps"
+                >
+                  <span className="text-base">🗺️</span>
+                  <span>Google Maps</span>
+                  <ExternalLink className="w-3.5 h-3.5 opacity-60" />
+                </button>
+                <button
+                  onClick={() => openExternalNav(Number(nextStudent.student.home_lat), Number(nextStudent.student.home_lng), 'waze')}
+                  className="flex-1 bg-[#33ccff] text-white font-bold rounded-lg py-2 px-3 shadow-lg flex items-center justify-center gap-2 active:scale-95 transition text-sm"
+                  title="Ouvrir l'itinéraire dans Waze"
+                >
+                  <span className="text-base">🚗</span>
+                  <span>Waze</span>
+                  <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                </button>
+              </div>
+            )}
+
             {!nextStudent.student.home_lat && (
               <div className="mt-2 bg-red-600/90 text-white text-[11px] rounded-lg px-3 py-1.5 pointer-events-auto flex items-center gap-2">
                 ⚠️ Position GPS de cet élève non définie. Cliquez sur 🎯 pour la définir à votre position actuelle.
