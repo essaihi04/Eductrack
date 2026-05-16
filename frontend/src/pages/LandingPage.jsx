@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import Hero from '../components/landing/Hero';
 import Features from '../components/landing/Features';
+import TransportTracking from '../components/landing/TransportTracking';
 import HowItWorks from '../components/landing/HowItWorks';
 import Benefits from '../components/landing/Benefits';
 import Stats from '../components/landing/Stats';
@@ -43,6 +44,12 @@ const LandingPage = () => {
                 Fonctionnalités
               </button>
               <button
+                onClick={() => document.getElementById('transport')?.scrollIntoView({ behavior: 'smooth' })}
+                className="text-gray-600 dark:text-gray-300 hover:text-primary transition-colors"
+              >
+                Transport
+              </button>
+              <button
                 onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
                 className="text-gray-600 dark:text-gray-300 hover:text-primary transition-colors"
               >
@@ -82,7 +89,11 @@ const LandingPage = () => {
         <div id="features">
           <Features />
         </div>
-        
+
+        <div id="transport">
+          <TransportTracking />
+        </div>
+
         <div id="how-it-works">
           <HowItWorks />
         </div>
