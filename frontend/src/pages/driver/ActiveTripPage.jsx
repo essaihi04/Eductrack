@@ -1,48 +1,30 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Volume2, VolumeX, Navigation, ArrowRight, ArrowLeft, ArrowUp, RotateCcw, Gauge, GripVertical, School, Crosshair, ExternalLink } from 'lucide-react';
+import { CheckCircle, XCircle, Home, Square, MapPin, Phone, ChevronDown, ChevronUp, Gauge, GripVertical, School, Crosshair, ExternalLink } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { transportApi } from '../../lib/transportApi';
 import { useGeolocation } from '../../hooks/useGeolocation';
-import { useNavigation, formatDistance, formatDuration } from '../../hooks/useNavigation';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon, homeTopViewIcon } from '../../lib/mapAssets';
 import { isPickupDirection, DIRECTIONS } from '../../lib/tripDirection';
 
-const maneuverIcon = (type, modifier) => {
-  if (type === 'arrive') return <CheckCircle className="w-10 h-10" />;
-  if (type === 'turn' || type === 'end of road') {
-    if (modifier?.includes('left')) return <ArrowLeft className="w-10 h-10" />;
-    if (modifier?.includes('right')) return <ArrowRight className="w-10 h-10" />;
-    if (modifier === 'uturn') return <RotateCcw className="w-10 h-10" />;
-  }
-  if (type === 'roundabout' || type === 'rotary') return <RotateCcw className="w-10 h-10" />;
-  return <ArrowUp className="w-10 h-10" />;
-};
-
 const homeIcon = homeTopViewIcon(34);
 
-function MapAutoCenter({ position, navMode }) {
+// Recentre la carte en douceur sur la position GPS du chauffeur (suivi direct).
+// Pas de turn-by-turn : la navigation réelle se fait dans Google Maps / Waze externes.
+function MapAutoCenter({ position }) {
   const map = useMap();
   useEffect(() => {
     if (!position) return;
-    const targetZoom = navMode ? 17 : (map.getZoom() < 14 ? 15 : map.getZoom());
-    // Décale le centre de la carte vers le bas pour voir plus loin devant le bus (style Waze)
-    if (navMode) {
-      const offset = map.getSize().y * 0.2;
-      const point = map.project([position.lat, position.lng], targetZoom).subtract([0, -offset]);
-      const newCenter = map.unproject(point, targetZoom);
-      map.flyTo(newCenter, targetZoom, { duration: 0.5, animate: true });
-    } else {
-      map.flyTo([position.lat, position.lng], targetZoom, { duration: 0.6, animate: true });
-    }
-  }, [position?.lat, position?.lng, navMode]);
+    const targetZoom = map.getZoom() < 14 ? 15 : map.getZoom();
+    map.flyTo([position.lat, position.lng], targetZoom, { duration: 0.6, animate: true });
+  }, [position?.lat, position?.lng]);
   return null;
 }
 
@@ -58,12 +40,10 @@ export default function ActiveTripPage() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false); // bottom sheet liste élèves
-  const [navMode, setNavMode] = useState(true); // mode navigation plein écran style Waze
   const lastPushRef = useRef(0);
   const offlineBufferRef = useRef([]);
   const [pushError, setPushError] = useState(null);
   const [pushCount, setPushCount] = useState(0);
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [totalKm, setTotalKm] = useState(0);
   const lastPosForKmRef = useRef(null);
 
@@ -202,7 +182,6 @@ export default function ActiveTripPage() {
     if (allDone && schoolDest) return schoolDest;
     return null;
   }, [nextStudent?.student?.id, allDone, schoolDest?.lat, schoolDest?.lng]);
-  const nav = useNavigation({ position, destination, voiceEnabled });
 
   // Drag-and-drop sensors (souris + tactile)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }));
@@ -293,38 +272,12 @@ export default function ActiveTripPage() {
         </div>
       )}
 
-      {/* HUD instruction de navigation style Waze */}
-      {nav.currentStep && destination && (
-        <div className="bg-gradient-to-b from-blue-600 to-blue-700 text-white px-4 py-4 shadow-xl">
-          <div className="flex items-center gap-4">
-            <div className="shrink-0 bg-white/20 rounded-2xl p-3">{maneuverIcon(nav.currentStep.maneuver?.type, nav.currentStep.maneuver?.modifier)}</div>
-            <div className="flex-1 min-w-0">
-              <div className="text-5xl font-black leading-none">{formatDistance(nav.distToNextManeuver)}</div>
-              <div className="text-sm opacity-95 truncate mt-1">{nav.currentStep.name || 'Continuez'}</div>
-              {nav.route?.steps?.[nav.stepIndex + 1] && (
-                <div className="text-xs opacity-75 truncate mt-0.5">puis {nav.route.steps[nav.stepIndex + 1].name || 'continuer'}</div>
-              )}
-            </div>
-            <div className="flex flex-col gap-2 shrink-0">
-              <button onClick={() => setVoiceEnabled(v => !v)} className="bg-white/20 p-2.5 rounded-full hover:bg-white/30">
-                {voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-              </button>
-              <button onClick={() => setNavMode(v => !v)} className="bg-white/20 p-2.5 rounded-full hover:bg-white/30" title="Basculer mode navigation">
-                <Navigation className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {nav.recalculating && <div className="bg-blue-100 text-blue-800 text-xs px-3 py-1 text-center">🔄 Recalcul de l'itinéraire...</div>}
-
       {/* Carte plein écran avec bannière élève clignotante + boutons flottants */}
       <div className="relative overflow-hidden flex-1">
-        <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={navMode ? 17 : 15} style={{ height: '100%', width: '100%' }} zoomControl={!navMode} attributionControl={!navMode}>
+        <MapContainer center={position ? [position.lat, position.lng] : [33.5731, -7.5898]} zoom={15} style={{ height: '100%', width: '100%' }}>
           <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
-          <MapAutoCenter position={position} navMode={navMode} />
-          {nav.route?.geometry && <Polyline positions={nav.route.geometry} color="#2563eb" weight={8} opacity={0.9} />}
-          {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, navMode ? 60 : 48, true)} />}
+          <MapAutoCenter position={position} />
+          {position && <Marker position={[position.lat, position.lng]} icon={busTopViewIcon('#f59e0b', position.heading || 0, 48, true)} />}
           {destination && <Marker position={[destination.lat, destination.lng]} icon={homeIcon} />}
         </MapContainer>
 
@@ -450,13 +403,7 @@ export default function ActiveTripPage() {
               <div className="text-[10px] text-gray-500">km/h</div>
             </div>
           </div>
-          {nav.route && (
-            <div className="bg-white rounded-xl shadow-lg px-3 py-2 flex-1">
-              <div className="text-xs text-gray-500">Arrivée</div>
-              <div className="text-sm font-bold leading-tight">{formatDuration(nav.remainingDuration)} · {formatDistance(nav.remainingDistance)}</div>
-            </div>
-          )}
-          <div className="bg-white rounded-xl shadow-lg px-3 py-2">
+          <div className="bg-white rounded-xl shadow-lg px-3 py-2 flex-1">
             <div className="text-xs text-gray-500">Parcouru</div>
             <div className="text-sm font-bold">{totalKm.toFixed(1)} km</div>
           </div>
