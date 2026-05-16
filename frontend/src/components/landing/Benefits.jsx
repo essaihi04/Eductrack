@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Users, GraduationCap, Heart } from 'lucide-react';
+import { Shield, Users, GraduationCap, Heart, Bus } from 'lucide-react';
 
 const roleImages = {
   'Administration': '/images/dahboard-centralise.png',
   'Professeurs': '/images/suivie-rapide-prof.png',
   'Parents': '/images/arabe-discussion.png',
-  'Élèves': '/images/rapport-journalier.png'
+  'Élèves': '/images/rapport-journalier.png',
+  'Chauffeurs': '/images/dahboard-centralise.png'
 };
 
 const benefitsData = [
@@ -15,10 +16,10 @@ const benefitsData = [
     icon: Shield,
     color: 'blue',
     benefits: [
-      { title: 'Gain de temps', description: '-70% sur les tâches administratives' },
-      { title: 'Vue d\'ensemble', description: 'Complète de l\'école en temps réel' },
-      { title: 'Décisions éclairées', description: 'Basées sur les données précises' },
-      { title: 'Communication efficace', description: 'Avec toute la communauté scolaire' }
+      { title: 'Vue centralisée', description: 'Pédagogie, transport, finance et communication dans un seul tableau de bord' },
+      { title: 'Création de comptes auto', description: 'Identifiants parents générés automatiquement et envoyés par WhatsApp' },
+      { title: 'Audit & traçabilité', description: 'Historique complet des actions et des notifications envoyées' },
+      { title: 'Multi-rôles', description: 'Délégation à des responsables pédagogiques et financiers' }
     ]
   },
   {
@@ -26,10 +27,10 @@ const benefitsData = [
     icon: GraduationCap,
     color: 'green',
     benefits: [
-      { title: 'Interface intuitive', description: 'Rapide et facile à utiliser' },
-      { title: 'Moins de paperasse', description: 'Tout est numérisé et centralisé' },
-      { title: 'Plus de temps', description: 'Pour l\'enseignement et les élèves' },
-      { title: 'Suivi précis', description: 'De chaque élève individuellement' }
+      { title: 'Suivi Rapide', description: 'Présence, comportement, cahier et participation en quelques clics par séance' },
+      { title: 'Contrôles & devoirs', description: 'Saisie des notes, devoirs avec soumissions et statistiques de classe' },
+      { title: 'Documents pédagogiques', description: 'Partage de fiches et corrigés avec stats de vues et téléchargements' },
+      { title: 'Cahier de texte & planificateur', description: 'Préparation des séances et calendrier de classe partagé' }
     ]
   },
   {
@@ -37,10 +38,10 @@ const benefitsData = [
     icon: Users,
     color: 'purple',
     benefits: [
-      { title: 'Transparence totale', description: 'Sur le parcours de leur enfant' },
-      { title: 'Notifications instantanées', description: 'En temps réel via WhatsApp' },
-      { title: 'Communication directe', description: 'Avec les professeurs et l\'école' },
-      { title: 'Suivi des progrès', description: 'Détaillé et accessible 24/7' }
+      { title: 'Portail dédié', description: 'Un compte par parent, plusieurs enfants suivis en un seul endroit' },
+      { title: 'Notifications WhatsApp', description: 'Absences, contrôles, montée bus et arrivée à l\'école automatiques' },
+      { title: 'Suivi complet', description: 'Devoirs par matière, notes, suivi pédagogique, documents, emploi du temps' },
+      { title: 'Transport en direct', description: 'Position du bus sur la carte + notifications à chaque étape' }
     ]
   },
   {
@@ -48,10 +49,21 @@ const benefitsData = [
     icon: Heart,
     color: 'pink',
     benefits: [
-      { title: 'Motivation accrue', description: 'Par la gamification et badges' },
-      { title: 'Accès facile', description: 'Aux devoirs et documents de cours' },
-      { title: 'Suivi personnel', description: 'De leurs progrès et objectifs' },
-      { title: 'Responsabilisation', description: 'Dans leur parcours scolaire' }
+      { title: 'Gamification', description: 'Badges, système de niveaux et tableau personnel motivant' },
+      { title: 'Devoirs en ligne', description: 'Réception des consignes et soumission directe depuis l\'app' },
+      { title: 'Documents de cours', description: 'Téléchargement des fiches et corrigés partagés par les profs' },
+      { title: 'Suivi personnel', description: 'Notes, présences et emploi du temps accessibles à tout moment' }
+    ]
+  },
+  {
+    role: 'Chauffeurs',
+    icon: Bus,
+    color: 'orange',
+    benefits: [
+      { title: 'Tournée guidée', description: 'Liste ordonnée des élèves avec drag-and-drop, bannière élève courant' },
+      { title: 'Navigation externe', description: 'Ouverture directe dans Google Maps ou Waze d\'un seul clic' },
+      { title: 'Marquage simple', description: 'Boutons Monté / Déposé / Absent avec notifications WhatsApp auto aux parents' },
+      { title: 'GPS partagé', description: 'Position envoyée toutes les 5s, vue admin et parents en temps réel' }
     ]
   }
 ];
@@ -63,7 +75,8 @@ const Benefits = () => {
     blue: 'bg-blue-500 text-blue-500 border-blue-500',
     green: 'bg-green-500 text-green-500 border-green-500',
     purple: 'bg-purple-500 text-purple-500 border-purple-500',
-    pink: 'bg-pink-500 text-pink-500 border-pink-500'
+    pink: 'bg-pink-500 text-pink-500 border-pink-500',
+    orange: 'bg-orange-500 text-orange-500 border-orange-500'
   };
 
   return (

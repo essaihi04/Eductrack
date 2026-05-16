@@ -1,39 +1,39 @@
 import { useEffect, useState } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { useRef } from 'react';
-import { BarChart, Clock, Target, TrendingUp } from 'lucide-react';
+import { Layers, Users, Target, Smartphone } from 'lucide-react';
 
 const stats = [
   {
-    icon: Clock,
-    value: 15,
-    suffix: 'h',
-    label: 'Temps gagné par semaine',
-    description: 'Par professeur',
+    icon: Layers,
+    value: 10,
+    suffix: '+',
+    label: 'Modules intégrés',
+    description: 'Pédagogie, transport, finance, parents…',
     color: 'from-blue-500 to-blue-600'
   },
   {
-    icon: TrendingUp,
-    value: 95,
-    suffix: '%',
-    label: 'Taux de satisfaction',
-    description: 'Des parents satisfaits',
+    icon: Users,
+    value: 6,
+    suffix: '',
+    label: 'Rôles utilisateurs',
+    description: 'Admin, prof, parent, élève, chauffeur, responsable',
     color: 'from-green-500 to-green-600'
   },
   {
     icon: Target,
     value: 30,
     suffix: 's',
-    label: 'Rapidité',
-    description: 'Prise de présence',
+    label: 'Prise de présence',
+    description: 'Pour une classe entière',
     color: 'from-purple-500 to-purple-600'
   },
   {
-    icon: BarChart,
-    value: 24,
-    suffix: '/7',
-    label: 'Suivi en temps réel',
-    description: 'Accessible partout',
+    icon: Smartphone,
+    value: 3,
+    suffix: '',
+    label: 'Plateformes',
+    description: 'Web, Android (APK), Desktop',
     color: 'from-orange-500 to-orange-600'
   }
 ];
@@ -88,10 +88,10 @@ const Stats = () => {
           className="text-center mb-16"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Des Résultats Mesurables
+            Une plateforme complète
           </h2>
           <p className="text-xl text-blue-100 max-w-2xl mx-auto">
-            Les chiffres parlent d'eux-mêmes
+            Conçue pour couvrir toute la chaîne de la vie scolaire
           </p>
         </motion.div>
 

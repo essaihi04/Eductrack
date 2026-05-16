@@ -1,24 +1,30 @@
 import { motion } from 'framer-motion';
-import { UserPlus, Settings, Rocket } from 'lucide-react';
+import { UserPlus, Settings, Rocket, MessageCircle } from 'lucide-react';
 
 const steps = [
   {
     icon: UserPlus,
-    title: 'Inscription Rapide',
-    description: 'Créez votre compte école en 2 minutes. Ajoutez vos classes et professeurs.',
+    title: 'Création de l\'école',
+    description: 'L\'admin crée l\'école, les classes et importe les élèves, professeurs et parents en masse (Excel).',
     step: '01'
   },
   {
     icon: Settings,
-    title: 'Configuration Simple',
-    description: 'Importez vos élèves, créez l\'emploi du temps, invitez les professeurs.',
+    title: 'Configuration des modules',
+    description: 'Emploi du temps, bus et tournées de transport, modèles de frais, matières et affectations des professeurs.',
     step: '02'
   },
   {
     icon: Rocket,
-    title: 'Commencez à Suivre',
-    description: 'Les professeurs enregistrent les présences, les parents reçoivent les notifications.',
+    title: 'Utilisation quotidienne',
+    description: 'Les profs saisissent présence, notes et devoirs ; les chauffeurs marquent les montées ; la finance émet les factures.',
     step: '03'
+  },
+  {
+    icon: MessageCircle,
+    title: 'Notifications automatiques',
+    description: 'Les parents reçoivent en temps réel via WhatsApp les alertes pédagogiques, transport et financières, et consultent tout dans leur portail.',
+    step: '04'
   }
 ];
 
@@ -37,7 +43,7 @@ const HowItWorks = () => {
             Comment ça Marche
           </h2>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            Trois étapes simples pour transformer la gestion de votre école
+            Quatre étapes simples, du setup initial aux notifications WhatsApp automatiques
           </p>
         </motion.div>
 
@@ -45,7 +51,7 @@ const HowItWorks = () => {
           {/* Connection line */}
           <div className="hidden lg:block absolute top-1/2 left-0 right-0 h-1 bg-gradient-to-r from-blue-200 via-indigo-200 to-purple-200 dark:from-blue-800 dark:via-indigo-800 dark:to-purple-800 transform -translate-y-1/2"></div>
 
-          <div className="grid md:grid-cols-3 gap-8 relative">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 relative">
             {steps.map((step, index) => (
               <motion.div
                 key={index}

@@ -42,13 +42,22 @@ const Hero = () => {
             </motion.div>
 
             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 dark:text-white mb-6 leading-tight">
-              Transformez la Gestion de{' '}
-              <span className="text-primary">Votre École</span>
+              Toute votre école dans{' '}
+              <span className="text-primary">une seule plateforme</span>
             </h1>
 
-            <p className="text-xl text-gray-600 dark:text-gray-300 mb-8 leading-relaxed">
-              La plateforme tout-en-un pour le suivi des élèves, la gestion des classes et la communication avec les parents
+            <p className="text-xl text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
+              Suivi pédagogique, transport scolaire GPS, gestion financière, communication WhatsApp et portail parents — un système unifié pour la direction, les professeurs, les chauffeurs, les parents et les élèves.
             </p>
+
+            {/* Pills modules */}
+            <div className="flex flex-wrap gap-2 mb-8 justify-center md:justify-start">
+              {['Pédagogique', 'Transport GPS', 'Finance', 'WhatsApp', 'Portail Parents'].map((m) => (
+                <span key={m} className="px-3 py-1 rounded-full text-xs font-semibold bg-white/70 dark:bg-gray-800/70 backdrop-blur text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 shadow-sm">
+                  {m}
+                </span>
+              ))}
+            </div>
 
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">

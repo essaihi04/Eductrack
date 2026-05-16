@@ -70,8 +70,7 @@ const CTA = () => {
                 transition={{ delay: 0.3 }}
                 className="text-xl text-blue-100 mb-8 max-w-2xl mx-auto"
               >
-                Rejoignez les écoles qui ont déjà transformé leur gestion avec EduTrack.
-                Présence, devoirs, contrôles, documents pédagogiques et notifications WhatsApp dans une seule plateforme.
+                Pédagogie, transport scolaire GPS, gestion financière, portail parents et communication WhatsApp — toute la vie de l'école dans une seule plateforme, accessible depuis le web, Android et Windows.
               </motion.p>
 
               <motion.div

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Clock, BookOpen, MessageCircle, TrendingUp, Calendar, Award } from 'lucide-react';
+import { Clock, BookOpen, MessageCircle, TrendingUp, Calendar, Award, Bus, Wallet, FolderOpen, Users } from 'lucide-react';
 
 const screenshots = [
   {
@@ -22,38 +22,62 @@ const screenshots = [
 const features = [
   {
     icon: Clock,
-    title: 'Suivi en Temps Réel',
-    description: 'Présences et retards instantanés, évaluation du comportement, contrôle des cahiers',
+    title: 'Suivi Rapide en classe',
+    description: 'Présence, retards, comportement, contrôle des cahiers et participation enregistrés en quelques clics par séance',
     color: 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
   },
   {
     icon: BookOpen,
-    title: 'Gestion des Évaluations',
-    description: 'Contrôles et mini-évaluations, devoirs avec soumissions en ligne, notes automatisées',
+    title: 'Contrôles & Devoirs',
+    description: 'Saisie des notes par contrôle, mini-évaluations, devoirs avec soumissions et statistiques de classe',
     color: 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300'
   },
   {
+    icon: Bus,
+    title: 'Transport scolaire GPS',
+    description: 'Suivi temps réel des bus, 4 directions de tournée, notifications montée/dépose, Google Maps & Waze pour les chauffeurs',
+    color: 'bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-300'
+  },
+  {
+    icon: Wallet,
+    title: 'Gestion financière',
+    description: 'Modèles de frais, génération de factures, suivi des impayés et relances WhatsApp automatiques',
+    color: 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300'
+  },
+  {
     icon: MessageCircle,
-    title: 'Communication Parents',
-    description: 'WhatsApp intégré, notifications automatiques, rapports personnalisés',
+    title: 'WhatsApp intégré',
+    description: 'Notifications automatiques par catégorie (pédagogique, transport, finance) et chatbot pédagogique pour les parents',
     color: 'bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300'
   },
   {
+    icon: Users,
+    title: 'Portail Parents',
+    description: 'Compte automatique par parent : suivi de chaque enfant (devoirs, notes, suivi, documents, emploi du temps, transport en direct)',
+    color: 'bg-rose-100 dark:bg-rose-900 text-rose-600 dark:text-rose-300'
+  },
+  {
+    icon: FolderOpen,
+    title: 'Documents pédagogiques',
+    description: 'Partage de fiches, cours et corrigés avec parents et élèves, suivi des vues et téléchargements par enfant',
+    color: 'bg-cyan-100 dark:bg-cyan-900 text-cyan-600 dark:text-cyan-300'
+  },
+  {
     icon: TrendingUp,
-    title: 'Tableaux de Bord Intelligents',
-    description: 'Statistiques en temps réel, alertes automatiques, rapports détaillés',
+    title: 'Tableaux de bord',
+    description: 'Statistiques classe & élève, heatmap comportementale, alertes automatiques pour la direction',
     color: 'bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300'
   },
   {
     icon: Calendar,
-    title: 'Planification Simplifiée',
-    description: 'Emplois du temps automatiques, calendrier de classe, planificateur de contrôles',
+    title: 'Planification',
+    description: 'Emplois du temps, cahier de texte, planificateur de contrôles, calendrier de classe partagé',
     color: 'bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-300'
   },
   {
     icon: Award,
-    title: 'Gamification pour Élèves',
-    description: 'Badges et récompenses, système de niveaux, motivation accrue',
+    title: 'Gamification élèves',
+    description: 'Badges, système de niveaux et tableau personnel pour motiver les élèves au quotidien',
     color: 'bg-pink-100 dark:bg-pink-900 text-pink-600 dark:text-pink-300'
   }
 ];
