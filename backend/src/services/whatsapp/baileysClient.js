@@ -135,9 +135,12 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         : null;
       const isLoggedOut = code === DisconnectReason.loggedOut;
       const isBanned = code === DisconnectReason.forbidden || code === 403;
+      // 515 = restartRequired : signal normal de WhatsApp juste après le scan du QR,
+      // le socket doit être recréé immédiatement pour finaliser le pairing.
+      const isRestartRequired = code === DisconnectReason.restartRequired || code === 515;
 
       entry.lastError = lastDisconnect?.error?.message || `code=${code}`;
-      console.warn(`[baileys][${schoolId}] Déconnecté code=${code} loggedOut=${isLoggedOut} banned=${isBanned}`);
+      console.warn(`[baileys][${schoolId}] Déconnecté code=${code} loggedOut=${isLoggedOut} banned=${isBanned} restartRequired=${isRestartRequired}`);
 
       if (isLoggedOut) {
         entry.status = 'logged_out';
@@ -160,7 +163,17 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         return;
       }
 
-      // Reconnexion avec backoff
+      // Restart requis (juste après pairing QR) : reconnexion IMMÉDIATE, sans backoff
+      if (isRestartRequired) {
+        console.log(`[baileys][${schoolId}] 🔄 restartRequired : reconnexion immédiate pour finaliser le pairing`);
+        entry.status = 'connecting';
+        // Reset des tentatives — ce n'est pas une erreur
+        entry.reconnectAttempts = 0;
+        setTimeout(() => startSession(schoolId, { onIncoming }), 250);
+        return;
+      }
+
+      // Reconnexion avec backoff pour les vraies erreurs
       entry.reconnectAttempts += 1;
       const delay = reconnectDelay(entry.reconnectAttempts);
       console.log(`[baileys][${schoolId}] Reconnexion dans ${delay}ms (tentative ${entry.reconnectAttempts})`);
