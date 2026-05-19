@@ -1026,12 +1026,17 @@ router.get('/session-status', async (req, res) => {
 
     const status = getStatus(schoolId);
 
-    // Compléter avec les métadonnées DB (numéro, warm-up, quotas)
+    // Métadonnées DB (numéro, warm-up, quotas)
     const { data: row } = await supabaseAdmin
       .from('whatsapp_school_sessions')
-      .select('phone_number, warmup_started_at, last_connected_at, status')
+      .select('phone_number, session_name, warmup_started_at, last_connected_at, status')
       .eq('school_id', schoolId)
       .maybeSingle();
+
+    // Aucun socket en mémoire ET aucune ligne DB → pas de session du tout
+    if (!status.connected && status.status === 'disconnected' && !row) {
+      return res.json({ connected: false, status: 'no_session', session: null, provider: 'baileys' });
+    }
 
     let antiBan = null;
     try { antiBan = await getAntiBanStats(schoolId); } catch {}
@@ -1041,6 +1046,8 @@ router.get('/session-status', async (req, res) => {
       status: status.status,
       provider: 'baileys',
       session: {
+        id: schoolId, // sert d'identifiant logique (utilisé pour DELETE)
+        name: row?.session_name || null,
         phone: status.phone || row?.phone_number || null,
         status: status.status,
         last_error: status.last_error || null,

@@ -635,7 +635,11 @@ const WhatsAppPage = () => {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      if (data.success && data.qrString) {
+      // Nouveau backend Baileys : retourne qrDataUrl (image PNG déjà encodée)
+      // Ancien backend Wasender : retournait qrString (texte brut à transformer)
+      if (data.success && data.qrDataUrl) {
+        setQrCode(data.qrDataUrl);
+      } else if (data.success && data.qrString) {
         setQrCode(await QRCode.toDataURL(data.qrString, { width: 300, margin: 2 }));
       } else { setQrError(data.error || 'QR code non disponible'); }
     } catch (error) { console.error('Erreur QR:', error); setQrError('Erreur de connexion'); }
@@ -660,11 +664,13 @@ const WhatsAppPage = () => {
   };
 
   const handleDeleteSession = async () => {
-    if (!sessionStatus?.session?.id) return;
     setDeleting(true);
     try {
       const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/sessions/${sessionStatus.session.id}`, {
+      // Le backend Baileys identifie la session par school_id (via le JWT),
+      // l'ID dans l'URL est ignoré — on envoie 'current' comme placeholder.
+      const sessionRef = sessionStatus?.session?.id || 'current';
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/sessions/${sessionRef}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
