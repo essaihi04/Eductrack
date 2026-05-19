@@ -629,8 +629,10 @@ const WhatsAppPage = () => {
     if (activeTab === 'connection') fetchStatus();
   }, [activeTab, fetchStatus]);
 
-  const fetchQR = async () => {
-    setQrLoading(true); setQrError(''); setQrCode(null);
+  // fetchQR : récupère un QR. silent=true → pas de spinner ni reset du QR affiché
+  // (utilisé pour le polling auto en arrière-plan)
+  const fetchQR = useCallback(async (silent = false) => {
+    if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); }
     try {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr`, { headers: { Authorization: `Bearer ${token}` } });
@@ -639,12 +641,40 @@ const WhatsAppPage = () => {
       // Ancien backend Wasender : retournait qrString (texte brut à transformer)
       if (data.success && data.qrDataUrl) {
         setQrCode(data.qrDataUrl);
+        setQrError('');
       } else if (data.success && data.qrString) {
         setQrCode(await QRCode.toDataURL(data.qrString, { width: 300, margin: 2 }));
-      } else { setQrError(data.error || 'QR code non disponible'); }
-    } catch (error) { console.error('Erreur QR:', error); setQrError('Erreur de connexion'); }
-    finally { setQrLoading(false); }
-  };
+        setQrError('');
+      } else if (!silent) {
+        setQrError(data.error || 'QR code non disponible');
+      }
+    } catch (error) {
+      console.error('Erreur QR:', error);
+      if (!silent) setQrError('Erreur de connexion');
+    } finally { if (!silent) setQrLoading(false); }
+  }, [apiUrl]);
+
+  // Polling automatique tant que la session n'est pas connectée :
+  //  - /session-status toutes les 3s pour détecter la connexion réussie
+  //  - /session-qr toutes les 18s pour rafraîchir le QR avant expiration (Baileys
+  //    régénère un nouveau QR toutes les ~20s pour sécurité)
+  useEffect(() => {
+    if (activeTab !== 'connection') return;
+    if (!sessionStatus?.session) return;
+    if (sessionStatus.connected) return; // déjà connecté, pas besoin de poll
+
+    const statusTimer = setInterval(() => { fetchStatus(); }, 3000);
+    const qrTimer = setInterval(() => { fetchQR(true); }, 18000);
+    return () => { clearInterval(statusTimer); clearInterval(qrTimer); };
+  }, [activeTab, sessionStatus?.session, sessionStatus?.connected, fetchStatus, fetchQR]);
+
+  // Auto-affichage du QR dès qu'une session existe mais n'est pas connectée
+  useEffect(() => {
+    if (activeTab !== 'connection') return;
+    if (sessionStatus?.session && !sessionStatus.connected && !qrCode && !qrLoading) {
+      fetchQR(false);
+    }
+  }, [activeTab, sessionStatus?.session, sessionStatus?.connected, qrCode, qrLoading, fetchQR]);
 
   const handleCreateSession = async () => {
     if (!newSessionName || !newSessionPhone) { setCreateError('Nom et numéro requis'); return; }
