@@ -5,24 +5,13 @@
 //  - envoyées au numéro WhatsApp officiel du parent (parent_contacts.phone_e164),
 //    avec fallback sur profiles.phone si non configuré.
 import { supabaseAdmin } from '../config/supabase.js';
-import { getSchoolSessionApiKey } from './whatsappChatbot.js';
 import { sendPushToUsers } from './webPush.js';
+import { sendText, getStatus } from './whatsapp/index.js';
 
-const WASENDER_BASE = process.env.WASENDER_BASE_URL || 'https://wasenderapi.com';
-
-// Envoi brut Wasender (utilisé après log DB)
-async function rawSend(phone, text, sessionApiKey) {
-  try {
-    const res = await fetch(`${WASENDER_BASE}/api/send-message`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${sessionApiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: phone, text })
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, data };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
+// Envoi via le provider Baileys (avec anti-ban intégré)
+async function rawSend(schoolId, phone, text, opts = {}) {
+  const result = await sendText(schoolId, phone, text, opts);
+  return { ok: !!result.success, data: result.data, error: result.message };
 }
 
 // Récupère le numéro WhatsApp préféré d'un parent : parent_contacts > profiles.phone
@@ -59,9 +48,9 @@ async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, rec
   const validRecipients = recipients.filter(r => r.phone);
   if (validRecipients.length === 0) return { ok: false, reason: 'no_phones' };
 
-  const sessionApiKey = await getSchoolSessionApiKey(schoolId);
-  if (!sessionApiKey) {
-    console.warn('[TransportNotif] Pas de session WhatsApp pour school', schoolId);
+  const sessStatus = getStatus(schoolId);
+  if (!sessStatus.connected) {
+    console.warn('[TransportNotif] Pas de session WhatsApp pour school', schoolId, 'status:', sessStatus.status);
     return { ok: false, reason: 'no_session' };
   }
 
@@ -95,22 +84,25 @@ async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, rec
   }));
   await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRows);
 
-  // 3) Envoi Wasender en parallèle, puis mise à jour des statuts
+  // 3) Envoi séquentiel via Baileys (l'anti-ban applique délai humain entre chaque)
+  // Les notifs transport sont marquées "urgent" pour ignorer la fenêtre horaire stricte
+  // (un parent doit être notifié à 7h du matin si son enfant monte dans le bus).
   let sentOk = 0, failed = 0;
-  await Promise.all(validRecipients.map(async (r) => {
-    const result = await rawSend(r.phone, text, sessionApiKey);
+  for (const r of validRecipients) {
+    const result = await rawSend(schoolId, r.phone, text, { urgent: true });
     const status = result.ok ? 'sent' : 'failed';
     if (result.ok) sentOk++; else failed++;
     await supabaseAdmin
       .from('whatsapp_message_recipients')
       .update({
         status,
+        provider_msg_id: result.ok ? (result.data?.msgId || null) : null,
         sent_at: result.ok ? new Date().toISOString() : null,
         error_message: result.ok ? null : (result.error || 'send_failed')
       })
       .eq('message_id', msgLog.id)
       .eq('phone_e164', r.phone);
-  }));
+  }
 
   // 4) Statut global du message
   await supabaseAdmin

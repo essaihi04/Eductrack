@@ -29,6 +29,8 @@ import driversRoutes from './routes/drivers.routes.js';
 import pushRoutes from './routes/push.routes.js';
 import parentRoutes from './routes/parent.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
+import { bootstrapAllSessions } from './services/whatsapp/index.js';
+import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
 
 dotenv.config();
 
@@ -102,7 +104,16 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   startDailyReportScheduler();
+
+  // Reconnecte automatiquement toutes les sessions WhatsApp Baileys
+  // pour les écoles déjà appairées (auth state présent sur disque).
+  try {
+    await bootstrapAllSessions(handleBaileysIncoming);
+    console.log('✅ Sessions WhatsApp Baileys initialisées');
+  } catch (e) {
+    console.error('❌ Erreur bootstrap WhatsApp:', e.message);
+  }
 });

@@ -1,27 +1,19 @@
 import express from 'express';
-import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { processDailyReports, generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 import { resolveCategoryForSending, allowedCategoriesForRole, canSeePedagogicalReports } from '../utils/whatsappCategory.js';
+import {
+  sendText, sendImage, sendDocument,
+  startSession, logoutSession, getStatus, getQrDataUrl,
+  getStats as getAntiBanStats,
+} from '../services/whatsapp/index.js';
+import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 router.use(authorize('admin', 'school_admin', 'pedagogical_manager', 'pedagogical_director', 'finance_manager', 'transport_manager'));
-
-const WASENDER_BASE = 'https://www.wasenderapi.com';
-
-// Safe JSON parse — WasenderAPI sometimes returns HTML on errors
-const safeJson = async (response) => {
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    console.error('WasenderAPI returned non-JSON:', text.substring(0, 200));
-    return { success: false, message: `WasenderAPI error (HTTP ${response.status})` };
-  }
-};
 
 const getSchoolId = (req) => {
   if (req.user.role === 'super_admin') return null;
@@ -93,47 +85,22 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
   }
 });
 
-// Global Wasender API key (Personal Access Token) — shared by all schools
-const getGlobalApiKey = () => process.env.WASENDER_API_KEY || null;
-
-const getWasenderHeaders = (apiKey) => ({
-  'Authorization': `Bearer ${apiKey || getGlobalApiKey()}`,
-  'Content-Type': 'application/json'
-});
-
-// Get the Wasender session ID mapped to a specific school from our DB
-const getSchoolSessionId = async (schoolId) => {
-  if (!schoolId) return null;
-  const { data } = await supabaseAdmin
-    .from('whatsapp_school_sessions')
-    .select('wasender_session_id')
-    .eq('school_id', schoolId)
-    .single();
-  return data?.wasender_session_id || null;
+// Vérifie qu'une session WhatsApp est prête pour une école
+const isSessionReady = (schoolId) => {
+  if (!schoolId) return false;
+  return getStatus(schoolId).connected;
 };
 
-// Get the session API key (needed for send-message) for a school's mapped session
-const getSessionApiKey = async (schoolId) => {
-  const globalKey = getGlobalApiKey();
-  if (!globalKey) return null;
-
-  const mappedSessionId = await getSchoolSessionId(schoolId);
-  if (!mappedSessionId) return null;
-
-  // Fetch session detail to get its api_key
-  const detailRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}`, {
-    headers: { 'Authorization': `Bearer ${globalKey}` }
-  });
-  const detailData = await safeJson(detailRes);
-  if (detailData.success && detailData.data?.api_key && detailData.data.status === 'connected') {
-    return detailData.data.api_key;
+// Helper d'envoi unifié (texte / image / document)
+async function sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName }) {
+  if (messageType === 'image' && mediaUrl) {
+    return sendImage(schoolId, phone, mediaUrl, message || '');
   }
-  return null;
-};
-
-const WASENDER_MIN_INTERVAL_MS = 5000;
-// Helper: delay between messages to respect rate limits
-const waitWasenderInterval = () => new Promise(resolve => setTimeout(resolve, WASENDER_MIN_INTERVAL_MS));
+  if (messageType === 'document' && mediaUrl) {
+    return sendDocument(schoolId, phone, mediaUrl, fileName || 'document.pdf', message || '');
+  }
+  return sendText(schoolId, phone, message || '');
+}
 
 // ==================== RECIPIENTS ====================
 
@@ -475,15 +442,13 @@ router.post('/send', async (req, res) => {
 
     await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRecords);
 
-    // Fetch session API key for sending messages
-    const sessionApiKey = await getSessionApiKey(schoolId);
-    if (!sessionApiKey) {
-      // Update message status to failed
+    // Vérifie session Baileys
+    if (!isSessionReady(schoolId)) {
       await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
-      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Configurez la clé API Wasender de votre école et connectez une session.' });
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Connectez le numéro de votre école depuis cette page.' });
     }
 
-    // Respond immediately with message ID, send in background
+    // Répond immédiatement, envoi en arrière-plan
     res.json({
       success: true,
       messageId: msgLog.id,
@@ -491,49 +456,20 @@ router.post('/send', async (req, res) => {
       status: 'sending'
     });
 
-    // Background: send messages sequentially
+    // Background: envoi séquentiel via Baileys (anti-ban intégré)
     let sentCount = 0;
     let failedCount = 0;
 
-    const sendHeaders = {
-      'Authorization': `Bearer ${sessionApiKey}`,
-      'Content-Type': 'application/json'
-    };
-
     for (const recipient of recipients) {
       try {
-        // Build WasenderAPI payload
-        const payload = { to: recipient.phone_e164 };
-
-        if (messageType === 'image' && mediaUrl) {
-          payload.imageUrl = mediaUrl;
-          if (message) payload.text = message;
-        } else if (messageType === 'document' && mediaUrl) {
-          payload.documentUrl = mediaUrl;
-          if (fileName) payload.fileName = fileName;
-          if (message) payload.text = message;
-        } else {
-          payload.text = message;
-        }
-
-        console.log('Sending to:', recipient.phone_e164, 'payload:', JSON.stringify(payload));
-
-        const waRes = await fetch(`${WASENDER_BASE}/api/send-message`, {
-          method: 'POST',
-          headers: sendHeaders,
-          body: JSON.stringify(payload)
-        });
-
-        const waData = await safeJson(waRes);
-        console.log('WasenderAPI send response:', JSON.stringify(waData));
-
-        if (waData.success) {
+        const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message, mediaUrl, fileName });
+        if (result.success) {
           sentCount++;
           await supabaseAdmin
             .from('whatsapp_message_recipients')
             .update({
               status: 'sent',
-              wasender_msg_id: String(waData.data?.msgId || ''),
+              provider_msg_id: String(result.data?.msgId || ''),
               sent_at: new Date().toISOString()
             })
             .eq('message_id', msgLog.id)
@@ -544,7 +480,7 @@ router.post('/send', async (req, res) => {
             .from('whatsapp_message_recipients')
             .update({
               status: 'failed',
-              error_message: waData.message || waData.error || 'Erreur inconnue'
+              error_message: result.message || 'Erreur inconnue'
             })
             .eq('message_id', msgLog.id)
             .eq('phone_e164', recipient.phone_e164);
@@ -566,9 +502,7 @@ router.post('/send', async (req, res) => {
         .from('whatsapp_messages')
         .update({ sent_count: sentCount, failed_count: failedCount, updated_at: new Date().toISOString() })
         .eq('id', msgLog.id);
-
-      // Rate limit delay (Wasender account protection: 1 message / 5 seconds)
-      await waitWasenderInterval();
+      // Pas besoin de waitWasenderInterval : sendText/sendImage intègrent déjà le délai humain anti-ban.
     }
 
     // Final status
@@ -604,8 +538,7 @@ router.post('/send-direct', async (req, res) => {
       return res.status(400).json({ error: 'Message ou média requis' });
     }
 
-    const sessionApiKey = await getSessionApiKey(schoolId);
-    if (!sessionApiKey) {
+    if (!isSessionReady(schoolId)) {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée.' });
     }
 
@@ -639,34 +572,13 @@ router.post('/send-direct', async (req, res) => {
       status: 'pending'
     });
 
-    // Build WasenderAPI payload
-    const payload = { to: phone };
-    if (messageType === 'image' && mediaUrl) {
-      payload.imageUrl = mediaUrl;
-      if (message) payload.text = message;
-    } else if (messageType === 'document' && mediaUrl) {
-      payload.documentUrl = mediaUrl;
-      if (fileName) payload.fileName = fileName;
-      if (message) payload.text = message;
-    } else {
-      payload.text = message;
-    }
+    // Envoi via Baileys
+    const result = await sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName });
 
-    const waRes = await fetch(`${WASENDER_BASE}/api/send-message`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${sessionApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    const waData = await safeJson(waRes);
-
-    if (waData.success) {
+    if (result.success) {
       await supabaseAdmin.from('whatsapp_message_recipients').update({
         status: 'sent',
-        wasender_msg_id: String(waData.data?.msgId || ''),
+        provider_msg_id: String(result.data?.msgId || ''),
         sent_at: new Date().toISOString()
       }).eq('message_id', msgLog.id).eq('phone_e164', phone);
 
@@ -678,14 +590,14 @@ router.post('/send-direct', async (req, res) => {
     } else {
       await supabaseAdmin.from('whatsapp_message_recipients').update({
         status: 'failed',
-        error_message: waData.message || waData.error || 'Erreur inconnue'
+        error_message: result.message || 'Erreur inconnue'
       }).eq('message_id', msgLog.id).eq('phone_e164', phone);
 
       await supabaseAdmin.from('whatsapp_messages').update({
         status: 'failed', sent_count: 0, failed_count: 1, updated_at: new Date().toISOString()
       }).eq('id', msgLog.id);
 
-      res.json({ success: false, error: waData.message || 'Erreur envoi', messageId: msgLog.id });
+      res.json({ success: false, error: result.message || 'Erreur envoi', messageId: msgLog.id });
     }
   } catch (error) {
     console.error('Erreur envoi direct:', error);
@@ -1075,34 +987,29 @@ router.get('/conversations', async (req, res) => {
 
 // ==================== MEDIA UPLOAD ====================
 
-// POST /upload — proxy upload to WasenderAPI
+// POST /upload — upload vers Supabase Storage (bucket whatsapp-media)
+// Avec Baileys, on n'a plus besoin du proxy Wasender. Le base64 est uploadé
+// dans Supabase Storage et l'URL publique est retournée.
 router.post('/upload', async (req, res) => {
   try {
     const { base64, mimetype } = req.body;
+    if (!base64) return res.status(400).json({ error: 'Fichier base64 requis' });
 
-    if (!base64) {
-      return res.status(400).json({ error: 'Fichier base64 requis' });
+    const buffer = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const ext = (mimetype || '').split('/')[1] || 'bin';
+    const filename = `wa-media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+    const { error: upErr } = await supabaseAdmin.storage
+      .from('whatsapp-media')
+      .upload(filename, buffer, { contentType: mimetype || 'application/octet-stream', upsert: false });
+
+    if (upErr) {
+      console.error('Erreur upload Supabase Storage:', upErr);
+      return res.status(400).json({ error: upErr.message || 'Erreur upload' });
     }
 
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée' });
-
-    const payload = { base64 };
-    if (mimetype) payload.mimetype = mimetype;
-
-    const waRes = await fetch(`${WASENDER_BASE}/api/upload`, {
-      method: 'POST',
-      headers: getWasenderHeaders(globalKey),
-      body: JSON.stringify(payload)
-    });
-
-    const waData = await safeJson(waRes);
-
-    if (waData.success && waData.publicUrl) {
-      res.json({ success: true, publicUrl: waData.publicUrl });
-    } else {
-      res.status(400).json({ error: waData.message || 'Erreur upload' });
-    }
+    const { data: pub } = supabaseAdmin.storage.from('whatsapp-media').getPublicUrl(filename);
+    res.json({ success: true, publicUrl: pub.publicUrl });
   } catch (error) {
     console.error('Erreur upload média:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -1111,43 +1018,36 @@ router.post('/upload', async (req, res) => {
 
 // ==================== SESSION STATUS ====================
 
-// GET /session-status — check WasenderAPI session status for THIS school
+// GET /session-status — état de la session Baileys de cette école
 router.get('/session-status', async (req, res) => {
   try {
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) {
-      return res.json({ connected: false, error: 'Clé API Wasender non configurée sur le serveur.' });
-    }
-
     const schoolId = getSchoolId(req);
-    const mappedSessionId = await getSchoolSessionId(schoolId);
+    if (!schoolId) return res.json({ connected: false, status: 'no_school' });
 
-    if (!mappedSessionId) {
-      return res.json({ connected: false, status: 'no_session', session: null });
-    }
+    const status = getStatus(schoolId);
 
-    // Fetch this school's specific session from Wasender
-    const detailRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}`, {
-      headers: { 'Authorization': `Bearer ${globalKey}` }
-    });
-    const detailData = await safeJson(detailRes);
+    // Compléter avec les métadonnées DB (numéro, warm-up, quotas)
+    const { data: row } = await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .select('phone_number, warmup_started_at, last_connected_at, status')
+      .eq('school_id', schoolId)
+      .maybeSingle();
 
-    if (!detailData.success || !detailData.data) {
-      // Session may have been deleted on Wasender side — clean up local mapping
-      await supabaseAdmin.from('whatsapp_school_sessions').delete().eq('school_id', schoolId);
-      return res.json({ connected: false, status: 'no_session', session: null });
-    }
+    let antiBan = null;
+    try { antiBan = await getAntiBanStats(schoolId); } catch {}
 
-    const session = detailData.data;
     res.json({
-      connected: session.status === 'connected',
-      status: session.status,
+      connected: status.connected,
+      status: status.status,
+      provider: 'baileys',
       session: {
-        id: session.id,
-        name: session.name,
-        phone: session.phone || session.phone_number || session.phoneNumber || session.number || null,
-        status: session.status
-      }
+        phone: status.phone || row?.phone_number || null,
+        status: status.status,
+        last_error: status.last_error || null,
+        last_connected_at: row?.last_connected_at || null,
+        warmup_started_at: row?.warmup_started_at || null,
+      },
+      anti_ban: antiBan,
     });
   } catch (error) {
     console.error('Erreur statut session:', error);
@@ -1155,258 +1055,109 @@ router.get('/session-status', async (req, res) => {
   }
 });
 
-// GET /session-qr — connect session + get QR code for THIS school's session
+// GET /session-qr — récupère le QR code Baileys pour appairage
 router.get('/session-qr', async (req, res) => {
   try {
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée' });
-
     const schoolId = getSchoolId(req);
-    const mappedSessionId = await getSchoolSessionId(schoolId);
-    if (!mappedSessionId) {
-      return res.status(404).json({ error: 'Aucune session trouvée. Créez une session depuis cette page.' });
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    // Démarre la session si pas déjà active
+    const status = getStatus(schoolId);
+    if (status.status === 'disconnected' || status.status === 'logged_out') {
+      await startSession(schoolId, { onIncoming: handleBaileysIncoming });
+    } else if (status.connected) {
+      return res.json({ success: false, error: 'Session déjà connectée, pas besoin de QR code', connected: true });
     }
 
-    // Fetch session detail
-    const detailRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}`, {
-      headers: { 'Authorization': `Bearer ${globalKey}` }
-    });
-    const detailData = await safeJson(detailRes);
-    if (!detailData.success || !detailData.data) {
-      return res.status(404).json({ error: 'Session introuvable sur Wasender.' });
-    }
-
-    const sessionStatus = detailData.data.status;
-
-    if (sessionStatus !== 'connected') {
-      // Call connect to initiate the session
-      const connectRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}/connect`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${globalKey}`, 'Content-Type': 'application/json' }
-      });
-      const connectData = await safeJson(connectRes);
-      console.log('WasenderAPI connect response:', JSON.stringify(connectData));
-
-      if (connectData.success && connectData.data?.qrCode) {
-        return res.json({ success: true, qrString: connectData.data.qrCode });
+    // Polling : attend max 15s qu'un QR soit généré
+    const start = Date.now();
+    while (Date.now() - start < 15000) {
+      const qr = getQrDataUrl(schoolId);
+      if (qr) {
+        return res.json({ success: true, qrDataUrl: qr });
       }
-
-      // Try the qrcode endpoint
-      const qrRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}/qrcode`, {
-        headers: { 'Authorization': `Bearer ${globalKey}` }
-      });
-      const qrData = await safeJson(qrRes);
-
-      if (qrData.success && qrData.data?.qrCode) {
-        return res.json({ success: true, qrString: qrData.data.qrCode });
+      const s = getStatus(schoolId);
+      if (s.connected) {
+        return res.json({ success: false, error: 'Session connectée entre-temps', connected: true });
       }
-
-      return res.json({ success: false, error: qrData.message || connectData.message || 'QR non disponible' });
+      await new Promise((r) => setTimeout(r, 500));
     }
 
-    res.json({ success: false, error: 'Session déjà connectée, pas besoin de QR code' });
+    res.json({ success: false, error: 'QR code non disponible. Réessayez dans quelques secondes.' });
   } catch (error) {
     console.error('Erreur QR code:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 
 // ==================== SESSION MANAGEMENT ====================
 
-// POST /sessions — create a new WhatsApp session for THIS school
+// POST /sessions — crée (initialise) une session Baileys pour cette école.
+// Avec Baileys self-hosted, il n'y a plus de création distante : on démarre
+// le socket localement, qui génère un QR code que le frontend récupère via
+// /session-qr puis affiche pour appairage WhatsApp.
 router.post('/sessions', async (req, res) => {
   try {
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée sur le serveur' });
-
     const schoolId = getSchoolId(req);
     if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
 
-    // Check if school already has a session
-    const existingSessionId = await getSchoolSessionId(schoolId);
-    if (existingSessionId) {
-      return res.status(400).json({ error: 'Votre école a déjà une session WhatsApp. Supprimez-la d\'abord pour en créer une nouvelle.' });
-    }
+    const { name, phone_number } = req.body || {};
+    // (name et phone_number sont juste méta-info, le vrai numéro est déterminé
+    // au scan du QR par WhatsApp)
 
-    const { name, phone_number } = req.body;
-    if (!name || !phone_number) {
-      return res.status(400).json({ error: 'Nom et numéro de téléphone requis' });
-    }
+    // Crée/maj le mapping en DB
+    await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .upsert({
+        school_id: schoolId,
+        session_name: name || 'WhatsApp École',
+        phone_number: phone_number || null,
+        provider: 'baileys',
+        status: 'connecting',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'school_id' });
 
-    // Générer un secret webhook unique pour cette session
-    const webhookSecret = crypto.randomBytes(32).toString('hex');
-    const webhookUrl = process.env.WEBHOOK_BASE_URL || 'https://etrack.ma';
-    const fullWebhookUrl = `${webhookUrl}/api/webhooks/whatsapp/incoming`;
+    // Démarre la session Baileys (callback chatbot pour les messages entrants)
+    await startSession(schoolId, { onIncoming: handleBaileysIncoming });
 
-    // Détecter si on est en localhost (webhook ne fonctionnera pas)
-    const isLocalhost = webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1');
-    const webhookEnabled = !isLocalhost;
-
-    if (isLocalhost) {
-      console.warn('[WhatsApp] ⚠️  ATTENTION: Webhook désactivé car environnement localhost');
-      console.warn('[WhatsApp] 💡 Pour activer le webhook en dev, utilisez ngrok:');
-      console.warn('[WhatsApp]    1. ngrok http 3000');
-      console.warn('[WhatsApp]    2. Ajoutez WEBHOOK_BASE_URL=https://xxx.ngrok.io dans .env');
-      console.warn('[WhatsApp]    3. Redémarrez le serveur');
-    }
-
-    const sessionPayload = {
-      name,
-      phone_number,
-      account_protection: true,
-      log_messages: true,
-      read_incoming_messages: false,
-      webhook_url: webhookEnabled ? fullWebhookUrl : undefined,
-      webhook_enabled: webhookEnabled,
-      webhook_events: webhookEnabled ? ['messages.received', 'messages.update'] : undefined
-    };
-
-    console.log('[WhatsApp] 🔧 Création session avec payload:', JSON.stringify(sessionPayload, null, 2));
-
-    // Create session on Wasender with webhook configuration
-    const waRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${globalKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(sessionPayload)
+    res.json({
+      success: true,
+      session: {
+        school_id: schoolId,
+        name: name || 'WhatsApp École',
+        status: 'connecting',
+        provider: 'baileys',
+      },
+      message: 'Session initialisée. Récupérez le QR code via GET /session-qr et scannez-le avec WhatsApp.',
     });
-
-    const waData = await safeJson(waRes);
-    console.log('[WhatsApp] 📥 Réponse WasenderAPI:', JSON.stringify(waData, null, 2));
-
-    if (waData.success && waData.data) {
-      // Save the mapping: school_id → wasender session id with webhook info
-      const { error: mapError } = await supabaseAdmin
-        .from('whatsapp_school_sessions')
-        .upsert({
-          school_id: schoolId,
-          wasender_session_id: waData.data.id,
-          session_name: name,
-          phone_number: phone_number,
-          webhook_url: fullWebhookUrl,
-          webhook_secret: webhookSecret,
-          webhook_enabled: true,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'school_id' });
-
-      if (mapError) console.error('[WhatsApp] ❌ Error saving session mapping:', mapError);
-
-      console.log(`[WhatsApp] ✅ Session créée`);
-      console.log(`[WhatsApp] 📍 Webhook URL: ${webhookEnabled ? fullWebhookUrl : 'Désactivé (localhost)'}`);
-      console.log(`[WhatsApp] 🔑 Webhook dans réponse: ${waData.data.webhook_enabled ? 'OUI' : 'NON'}`);
-      
-      res.json({ 
-        success: true, 
-        session: waData.data, 
-        webhook_configured: waData.data.webhook_enabled || false,
-        webhook_url: webhookEnabled ? fullWebhookUrl : null,
-        localhost_warning: isLocalhost ? 'Le chatbot IA ne fonctionnera qu\'après déploiement en production ou avec ngrok' : null
-      });
-    } else {
-      console.error('[WhatsApp] ❌ Erreur création session:', waData.message);
-      res.status(400).json({ error: waData.message || 'Erreur création session' });
-    }
   } catch (error) {
     console.error('Erreur création session:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 
-// PUT /sessions/:sessionId/webhook — update webhook configuration for existing session
+// PUT /sessions/:sessionId/webhook — déprécié (Baileys n'utilise pas de webhook).
+// Conservé pour rester compatible avec d'anciens frontends.
 router.put('/sessions/:sessionId/webhook', async (req, res) => {
-  try {
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée' });
-
-    const schoolId = getSchoolId(req);
-    const { sessionId } = req.params;
-
-    // Verify this session belongs to this school
-    const mappedSessionId = await getSchoolSessionId(schoolId);
-    if (String(mappedSessionId) !== String(sessionId)) {
-      return res.status(403).json({ error: 'Cette session ne vous appartient pas.' });
-    }
-
-    // Generate webhook configuration
-    const webhookUrl = process.env.WEBHOOK_BASE_URL || 'https://etrack.ma';
-    const fullWebhookUrl = `${webhookUrl}/api/webhooks/whatsapp/incoming`;
-
-    // Update session on WasenderAPI
-    const waRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${sessionId}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${globalKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        webhook_url: fullWebhookUrl,
-        webhook_enabled: true,
-        webhook_events: ['messages.received', 'messages.update']
-      })
-    });
-
-    const waData = await safeJson(waRes);
-
-    if (waData.success) {
-      // Update our database
-      await supabaseAdmin
-        .from('whatsapp_school_sessions')
-        .update({
-          webhook_url: fullWebhookUrl,
-          webhook_enabled: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('school_id', schoolId);
-
-      console.log(`[WhatsApp] Webhook activé pour session ${sessionId}: ${fullWebhookUrl}`);
-      res.json({ 
-        success: true, 
-        message: 'Webhook activé avec succès',
-        webhook_url: fullWebhookUrl,
-        webhook_secret: waData.data?.webhook_secret
-      });
-    } else {
-      res.status(400).json({ error: waData.message || 'Erreur mise à jour webhook' });
-    }
-  } catch (error) {
-    console.error('Erreur mise à jour webhook:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
-  }
+  res.json({
+    success: true,
+    deprecated: true,
+    message: 'Avec Baileys self-hosted, les messages entrants sont reçus en direct via WebSocket. Aucun webhook à configurer.',
+  });
 });
 
-// DELETE /sessions/:sessionId — delete a WhatsApp session and remove school mapping
+// DELETE /sessions/:sessionId — déconnecte la session Baileys et purge l'auth.
 router.delete('/sessions/:sessionId', async (req, res) => {
   try {
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée' });
-
     const schoolId = getSchoolId(req);
-    const { sessionId } = req.params;
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
 
-    // Verify this session belongs to this school
-    const mappedSessionId = await getSchoolSessionId(schoolId);
-    if (String(mappedSessionId) !== String(sessionId)) {
-      return res.status(403).json({ error: 'Cette session ne vous appartient pas.' });
-    }
-
-    const waRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${sessionId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${globalKey}`, 'Content-Type': 'application/json' }
-    });
-
-    // 204 No Content = success
-    if (waRes.status === 204 || waRes.ok) {
-      // Remove the mapping from our DB
-      await supabaseAdmin.from('whatsapp_school_sessions').delete().eq('school_id', schoolId);
-      return res.json({ success: true });
-    }
-
-    const waData = await safeJson(waRes);
-    if (waData.success) {
-      await supabaseAdmin.from('whatsapp_school_sessions').delete().eq('school_id', schoolId);
-      res.json({ success: true });
-    } else {
-      res.status(400).json({ error: waData.message || 'Erreur suppression session' });
-    }
+    await logoutSession(schoolId);
+    await supabaseAdmin.from('whatsapp_school_sessions').delete().eq('school_id', schoolId);
+    res.json({ success: true });
   } catch (error) {
     console.error('Erreur suppression session:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 
@@ -1607,14 +1358,13 @@ router.post('/daily-reports/send-report', async (req, res) => {
       await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRecords);
     }
 
-    // Get session API key for this school
-    const sessionApiKey = await getSessionApiKey(schoolId);
-    if (!sessionApiKey) {
+    // Vérifie session Baileys connectée
+    if (!isSessionReady(schoolId)) {
       if (msgLog) await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
       return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école.' });
     }
 
-    // Split text into chunks of ≤4000 chars at paragraph boundaries (Wasender limit is 4096)
+    // Split text into chunks of ≤4000 chars at paragraph boundaries
     const MAX_CHUNK = 4000;
     const splitTextIntoChunks = (text) => {
       if (text.length <= MAX_CHUNK) return [text];
@@ -1641,17 +1391,9 @@ router.post('/daily-reports/send-report', async (req, res) => {
         try {
           const chunkLabel = textChunks.length > 1 ? ` (${i + 1}/${textChunks.length})` : '';
           console.log(`[SendReport] Sending to ${contact.phone_e164}${chunkLabel}, chunkLen=${textChunks[i].length}`);
-          const sendRes = await fetch(`${WASENDER_BASE}/api/send-message`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${sessionApiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: contact.phone_e164, text: textChunks[i] })
-          });
-          const sendText = await sendRes.text();
-          let sendData;
-          try { sendData = JSON.parse(sendText); } catch { sendData = { success: false, error: sendText }; }
+          const sendData = await sendText(schoolId, contact.phone_e164, textChunks[i]);
           if (!sendData.success) { console.log(`[SendReport] Send failed:`, sendData); contactSuccess = false; break; }
         } catch (err) { console.error(`[SendReport] Send exception:`, err.message); contactSuccess = false; break; }
-        if (i < textChunks.length - 1) await waitWasenderInterval();
       }
 
       // Update recipient status in DB
@@ -1664,7 +1406,6 @@ router.post('/daily-reports/send-report', async (req, res) => {
       }
 
       if (contactSuccess) sent++; else failed++;
-      if (contacts.indexOf(contact) < contacts.length - 1) await waitWasenderInterval();
     }
 
     // Update final message status
@@ -1742,10 +1483,10 @@ router.post('/daily-reports/retry', async (req, res) => {
     if (!report) return res.status(404).json({ error: 'Rapport non trouvé' });
     if (!report.phone_e164) return res.json({ success: false, error: 'Pas de numéro de téléphone' });
 
-    // Get session API key using school from report
     const retrySchoolId = report.school_id || getSchoolId(req);
-    const sessionApiKey = await getSessionApiKey(retrySchoolId);
-    if (!sessionApiKey) return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école' });
+    if (!isSessionReady(retrySchoolId)) {
+      return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école' });
+    }
 
     // Build message text
     let text = '';
@@ -1755,12 +1496,7 @@ router.post('/daily-reports/retry', async (req, res) => {
 
     if (!text) return res.json({ success: false, error: 'Rapport vide' });
 
-    const sendRes = await fetch(`${WASENDER_BASE}/api/send-message`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${sessionApiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: report.phone_e164, text })
-    });
-    const sendData = await sendRes.json();
+    const sendData = await sendText(retrySchoolId, report.phone_e164, text);
 
     if (sendData.success) {
       await supabaseAdmin.from('daily_reports').update({ status: 'sent', sent_at: new Date().toISOString(), error_message: null }).eq('id', reportId);
@@ -1786,27 +1522,22 @@ router.post('/daily-reports/retry-all-failed', async (req, res) => {
 
     if (!failedReports?.length) return res.json({ success: true, sent: 0, failed: 0, total: 0, message: 'Aucun rapport échoué' });
 
-    // Get session API key for this school
-    const sessionApiKey = await getSessionApiKey(schoolId);
-    if (!sessionApiKey) return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école' });
+    if (!isSessionReady(schoolId)) {
+      return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école' });
+    }
 
     let sent = 0, failed = 0;
     for (const report of failedReports) {
       if (!report.phone_e164) { failed++; continue; }
 
-      let text = '';
-      if (report.report_content_fr) text += report.report_content_fr;
-      if (report.report_content_fr && report.report_content_ar) text += '\n\n━━━━━━━━━━━━━━━\n\n';
-      if (report.report_content_ar) text += report.report_content_ar;
-      if (!text) { failed++; continue; }
+      let txt = '';
+      if (report.report_content_fr) txt += report.report_content_fr;
+      if (report.report_content_fr && report.report_content_ar) txt += '\n\n━━━━━━━━━━━━━━━\n\n';
+      if (report.report_content_ar) txt += report.report_content_ar;
+      if (!txt) { failed++; continue; }
 
       try {
-        const sendRes = await fetch(`${WASENDER_BASE}/api/send-message`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${sessionApiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ to: report.phone_e164, text })
-        });
-        const sendData = await sendRes.json();
+        const sendData = await sendText(schoolId, report.phone_e164, txt);
         if (sendData.success) {
           await supabaseAdmin.from('daily_reports').update({ status: 'sent', sent_at: new Date().toISOString(), error_message: null }).eq('id', report.id);
           sent++;
@@ -1815,7 +1546,6 @@ router.post('/daily-reports/retry-all-failed', async (req, res) => {
           failed++;
         }
       } catch { failed++; }
-      await waitWasenderInterval();
     }
 
     res.json({ success: true, sent, failed, total: failedReports.length });

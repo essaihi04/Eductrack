@@ -1,9 +1,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import OpenAI from 'openai';
 import cron from 'node-cron';
-
-const WASENDER_BASE = 'https://www.wasenderapi.com';
-const WASENDER_MIN_INTERVAL_MS = 5000;
+import { sendText, getStatus } from './whatsapp/index.js';
 
 // DeepSeek client (OpenAI-compatible API)
 const deepseek = new OpenAI({
@@ -11,45 +9,10 @@ const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY || ''
 });
 
-// Safe JSON parse
-const safeJson = async (response) => {
-  const text = await response.text();
-  try { return JSON.parse(text); }
-  catch { return { success: false, message: `HTTP ${response.status}` }; }
-};
-
-const waitWasenderInterval = () => new Promise(resolve => setTimeout(resolve, WASENDER_MIN_INTERVAL_MS));
-
-// Global Wasender API key — shared by all schools
-const getGlobalApiKey = () => process.env.WASENDER_API_KEY || null;
-
-// Get the Wasender session ID mapped to a specific school from our DB
-const getSchoolSessionId = async (schoolId) => {
-  if (!schoolId) return null;
-  const { data } = await supabaseAdmin
-    .from('whatsapp_school_sessions')
-    .select('wasender_session_id')
-    .eq('school_id', schoolId)
-    .single();
-  return data?.wasender_session_id || null;
-};
-
-// Get WasenderAPI session API key for a specific school's mapped session
-const getSessionApiKey = async (schoolId = null) => {
-  const globalKey = getGlobalApiKey();
-  if (!globalKey) return null;
-
-  const mappedSessionId = await getSchoolSessionId(schoolId);
-  if (!mappedSessionId) return null;
-
-  const detailRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}`, {
-    headers: { 'Authorization': `Bearer ${globalKey}` }
-  });
-  const detailData = await safeJson(detailRes);
-  if (detailData.success && detailData.data?.api_key && detailData.data.status === 'connected') {
-    return detailData.data.api_key;
-  }
-  return null;
+// Vérifie qu'une session Baileys est connectée pour cette école
+const isSessionReady = (schoolId) => {
+  if (!schoolId) return false;
+  return getStatus(schoolId).connected;
 };
 
 // ==================== COLLECT DAILY DATA ====================
@@ -531,42 +494,38 @@ Continuez ainsi ! 💪`;
 
 // ==================== SEND REPORT VIA WHATSAPP ====================
 
-async function sendReportWhatsApp(phone, reportText, sessionApiKey, retries = 3) {
+// L'anti-ban (délai humain, quota, presence) est intégré dans sendText.
+// Le retry est conservé pour les erreurs réseau ponctuelles.
+async function sendReportWhatsApp(schoolId, phone, reportText, retries = 2) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(`${WASENDER_BASE}/api/send-message`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${sessionApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ to: phone, text: reportText })
-      });
-      const data = await safeJson(res);
-      if (data.success) return { success: true, attempt };
-      
-      // If failed but not last attempt, wait before retry
+      const result = await sendText(schoolId, phone, reportText);
+      if (result.success) return { success: true, attempt, msgId: result.data?.msgId };
+      // Si la raison est anti-ban (quota / horaires), inutile de retry
+      if (result.reason === 'daily_quota_exceeded' || result.reason === 'out_of_hours' || result.reason === 'paused') {
+        return { success: false, attempt, error: result.message };
+      }
       if (attempt < retries) {
-        const backoffDelay = WASENDER_MIN_INTERVAL_MS * attempt;
-        console.log(`[WhatsApp] Retry ${attempt}/${retries} for ${phone} after ${backoffDelay}ms`);
-        await new Promise(r => setTimeout(r, backoffDelay));
+        await new Promise(r => setTimeout(r, 3000 * attempt));
       }
     } catch (error) {
       console.error(`[WhatsApp] Attempt ${attempt}/${retries} error:`, error.message);
       if (attempt < retries) {
-        await new Promise(r => setTimeout(r, WASENDER_MIN_INTERVAL_MS * attempt));
+        await new Promise(r => setTimeout(r, 3000 * attempt));
       }
     }
   }
   return { success: false, attempt: retries };
 }
 
-// ==================== QUEUE SYSTEM FOR PARALLEL PROCESSING ====================
+// ==================== QUEUE SYSTEM ====================
+// Note : l'anti-ban applique déjà un délai humain entre 2 envois sur la même
+// session. La queue garde un comportement séquentiel (concurrency = 1) pour
+// rester prévisible.
 
 class MessageQueue {
-  constructor(concurrency = 1, delayMs = WASENDER_MIN_INTERVAL_MS) {
-    this.concurrency = concurrency; // Messages per second per school
-    this.delayMs = delayMs; // Delay between messages
+  constructor(concurrency = 1) {
+    this.concurrency = concurrency;
     this.queue = [];
     this.processing = 0;
   }
@@ -580,18 +539,14 @@ class MessageQueue {
 
   async process() {
     if (this.processing >= this.concurrency || this.queue.length === 0) return;
-    
     this.processing++;
     const { task, resolve } = this.queue.shift();
-    
     try {
       const result = await task();
       resolve(result);
     } catch (error) {
       resolve({ success: false, error: error.message });
     }
-    
-    await waitWasenderInterval();
     this.processing--;
     this.process();
   }
@@ -602,13 +557,12 @@ class MessageQueue {
 async function processSchoolReports(settings, today, scopedClassIds = null) {
   console.log(`[DailyReports] 🏫 Processing school ${settings.school_id}${scopedClassIds ? ` (scoped to ${scopedClassIds.length} classes)` : ''}...`);
   
-  const queue = new MessageQueue(1, WASENDER_MIN_INTERVAL_MS); // 1 message / 5 seconds
+  const queue = new MessageQueue(1);
   let processed = 0, sent = 0, failed = 0;
 
   try {
-    // Get session API key for THIS school
-    const sessionApiKey = await getSessionApiKey(settings.school_id);
-    if (!sessionApiKey) {
+    // Vérifie session Baileys connectée
+    if (!isSessionReady(settings.school_id)) {
       console.error(`[DailyReports] ❌ No connected WhatsApp session for school ${settings.school_id}`);
       return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
     }
@@ -718,7 +672,7 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
 
         tasks.push(
           queue.add(async () => {
-            const result = await sendReportWhatsApp(phone, finalMessage, sessionApiKey);
+            const result = await sendReportWhatsApp(settings.school_id, phone, finalMessage);
             
             // Log to database
             await supabaseAdmin.from('daily_reports').insert({
