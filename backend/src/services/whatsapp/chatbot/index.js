@@ -396,9 +396,40 @@ export async function handleBaileysIncoming({ schoolId, msg }) {
   if (!text) return;
 
   const remoteJid = msg.key?.remoteJid || '';
-  if (!remoteJid.endsWith('@s.whatsapp.net')) return; // ignore groupes
 
-  const from = '+' + remoteJid.split('@')[0];
+  // Ignore les groupes (toujours @g.us)
+  if (remoteJid.endsWith('@g.us')) {
+    console.log(`[chatbot] Ignoré (groupe): ${remoteJid}`);
+    return;
+  }
+
+  // Pour les messages 1-à-1, WhatsApp utilise désormais 2 formats :
+  //   - @s.whatsapp.net : ancien format, le JID = phone E.164
+  //   - @lid           : nouveau "Linked Identity" pour la confidentialité
+  // Pour @lid, Baileys expose le vrai téléphone dans key.senderPn / participantPn
+  // ou via remoteJidAlt selon la version. On tente chaque champ dans l'ordre.
+  let phoneJid = null;
+  if (remoteJid.endsWith('@s.whatsapp.net')) {
+    phoneJid = remoteJid;
+  } else if (remoteJid.endsWith('@lid')) {
+    phoneJid =
+      msg.key?.senderPn ||
+      msg.key?.participantPn ||
+      msg.key?.remoteJidAlt ||
+      null;
+    if (!phoneJid) {
+      console.warn(
+        `[chatbot] ⚠️  Message @lid sans numéro résoluble — clés disponibles: ${JSON.stringify(Object.keys(msg.key || {}))}`
+      );
+      return;
+    }
+    console.log(`[chatbot] 🔗 LID résolu: ${remoteJid} → ${phoneJid}`);
+  } else {
+    console.log(`[chatbot] Ignoré (format JID inconnu): ${remoteJid}`);
+    return;
+  }
+
+  const from = '+' + phoneJid.split('@')[0];
   const id = msg.key?.id || `${Date.now()}`;
 
   return handleIncomingWhatsAppMessage({ from, text, id, schoolId });
