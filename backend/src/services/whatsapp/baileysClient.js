@@ -56,11 +56,23 @@ const getEntry = (schoolId) => {
   return sockets.get(schoolId);
 };
 
-// Backoff exponentiel pour reconnexion
+// Backoff exponentiel pour reconnexion (erreurs réseau / timeouts)
 const reconnectDelay = (attempts) => {
-  const base = [5_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000];
+  const base = [2_000, 5_000, 15_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
   return base[Math.min(attempts, base.length - 1)];
 };
+
+// Backoff plus court pour les "401 loggedOut" — on essaie plus longtemps
+// avant de considérer la session comme vraiment perdue, car beaucoup de
+// 401 sont en réalité transitoires (race condition creds, conflit MD…).
+const loggedOutRetryDelay = (attempts) => {
+  const base = [3_000, 10_000, 30_000, 2 * 60_000, 10 * 60_000, 30 * 60_000];
+  return base[Math.min(attempts, base.length - 1)];
+};
+
+// Nombre de retries avant d'abandonner sur 401 (sans purger l'auth, juste
+// passer en état needs_reconnect que l'admin pourra relancer manuellement).
+const MAX_LOGGED_OUT_RETRIES = 6;
 
 /**
  * Démarre (ou redémarre) une session pour une école.
@@ -90,6 +102,11 @@ export async function startSession(schoolId, { onIncoming } = {}) {
     syncFullHistory: false,
     markOnlineOnConnect: false, // évite de spammer "online" → ban-tier
     generateHighQualityLinkPreview: false,
+    // Keep-alive WebSocket : envoie un ping toutes les 10s pour éviter les
+    // déconnexions 408 dues à des firewalls / NAT timeouts intermédiaires.
+    keepAliveIntervalMs: 10_000,
+    // Timeout connexion initial — laisse plus de marge sur réseaux lents.
+    connectTimeoutMs: 60_000,
     // Empêche le téléchargement automatique de tous les messages historiques
     shouldSyncHistoryMessage: () => false,
   });
@@ -151,28 +168,11 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       entry.lastError = lastDisconnect?.error?.message || `code=${code}`;
       console.warn(`[baileys][${schoolId}] Déconnecté code=${code} loggedOut=${isLoggedOut} banned=${isBanned} restartRequired=${isRestartRequired}`);
 
-      if (isLoggedOut) {
-        // 401 juste après un restart post-pairing = race condition d'écriture des
-        // credentials sur disque. On retry UNE fois avec délai plus long avant
-        // de purger l'auth et exiger un nouveau scan.
-        const sinceRestart = Date.now() - (entry.lastRestartAt || 0);
-        if (sinceRestart < 8000 && !entry.loggedOutRetried) {
-          entry.loggedOutRetried = true;
-          entry.status = 'disconnected'; // ⚠️ permet à startSession() de recréer le socket
-          entry.sock = null;
-          console.log(`[baileys][${schoolId}] ⚠️ 401 post-restart (${sinceRestart}ms) — retry avec délai prolongé (race creds.update?)`);
-          setTimeout(() => startSession(schoolId, { onIncoming }), 3000);
-          return;
-        }
-
-        entry.status = 'logged_out';
-        entry.loggedOutRetried = false;
-        // Purge auth → nécessite re-scan QR
-        try { fs.rmSync(authDir, { recursive: true, force: true }); } catch {}
-        await supabaseAdmin
-          .from('whatsapp_school_sessions')
-          .update({ status: 'logged_out' })
-          .eq('school_id', schoolId);
+      // Si l'admin a déclenché un logoutSession() explicite, on ne reconnecte
+      // surtout pas (le flag est posé juste avant le logout).
+      if (entry.adminLogout) {
+        console.log(`[baileys][${schoolId}] Logout admin reçu — pas de reconnexion auto`);
+        entry.adminLogout = false;
         return;
       }
 
@@ -182,25 +182,54 @@ export async function startSession(schoolId, { onIncoming } = {}) {
           .from('whatsapp_school_sessions')
           .update({ status: 'banned' })
           .eq('school_id', schoolId);
-        console.error(`[baileys][${schoolId}] ⚠️ NUMÉRO BANNI PAR WHATSAPP`);
+        console.error(`[baileys][${schoolId}] ⚠️ NUMÉRO BANNI PAR WHATSAPP — pas de reconnexion`);
         return;
       }
 
       // Restart requis (juste après pairing QR) : reconnexion rapide mais en
       // laissant le temps à `creds.update` d'écrire les credentials sur disque.
-      // 250ms était trop court → race condition → 401 au restart.
       if (isRestartRequired) {
-        console.log(`[baileys][${schoolId}] 🔄 restartRequired : reconnexion dans 1500ms pour finaliser le pairing`);
-        entry.status = 'disconnected'; // ⚠️ important : permet à startSession() de re-créer un socket
-        entry.sock = null;             // libère l'ancien socket fermé
+        console.log(`[baileys][${schoolId}] 🔄 restartRequired : reconnexion dans 3000ms pour finaliser le pairing`);
+        entry.status = 'disconnected';
+        entry.sock = null;
         entry.reconnectAttempts = 0;
         entry.lastRestartAt = Date.now();
-        entry.loggedOutRetried = false;
-        setTimeout(() => startSession(schoolId, { onIncoming }), 1500);
+        entry.loggedOutAttempts = 0;
+        // Délai plus long pour éviter que creds.update ne soit pas encore flushé
+        // sur disque (cause majoritaire des 401 post-restart en boucle).
+        setTimeout(() => startSession(schoolId, { onIncoming }), 3000);
         return;
       }
 
-      // Reconnexion avec backoff pour les vraies erreurs
+      if (isLoggedOut) {
+        // 401 = credentials rejetés. La plupart des 401 sont en réalité
+        // TRANSITOIRES (race condition d'écriture creds, conflit multi-device,
+        // session sync server-side). On NE PURGE JAMAIS l'auth automatiquement —
+        // l'admin doit explicitement appeler logoutSession() pour ça.
+        entry.loggedOutAttempts = (entry.loggedOutAttempts || 0) + 1;
+        entry.sock = null;
+
+        if (entry.loggedOutAttempts <= MAX_LOGGED_OUT_RETRIES) {
+          const delay = loggedOutRetryDelay(entry.loggedOutAttempts - 1);
+          entry.status = 'disconnected';
+          console.log(`[baileys][${schoolId}] ⚠️ 401 (tentative ${entry.loggedOutAttempts}/${MAX_LOGGED_OUT_RETRIES}) — retry dans ${delay}ms (auth conservé)`);
+          setTimeout(() => startSession(schoolId, { onIncoming }), delay);
+          return;
+        }
+
+        // Trop d'échecs → on s'arrête mais SANS purger l'auth.
+        // L'admin pourra relancer manuellement via le bouton "Reconnecter"
+        // (qui rappelle startSession), ou cliquer "Déconnecter" pour purger.
+        entry.status = 'needs_reconnect';
+        console.warn(`[baileys][${schoolId}] ❌ ${MAX_LOGGED_OUT_RETRIES} tentatives 401 échouées — pause. Auth files conservés. Admin doit relancer.`);
+        await supabaseAdmin
+          .from('whatsapp_school_sessions')
+          .update({ status: 'needs_reconnect' })
+          .eq('school_id', schoolId);
+        return;
+      }
+
+      // Reconnexion avec backoff pour les erreurs réseau / 408 timeouts
       entry.status = 'disconnected';
       entry.sock = null;
       entry.reconnectAttempts += 1;
@@ -261,17 +290,24 @@ export function getQrDataUrl(schoolId) {
 }
 
 /**
- * Déconnexion volontaire (logout) → invalide aussi côté téléphone.
+ * Déconnexion volontaire DÉCLENCHÉE PAR L'ADMIN → invalide côté téléphone
+ * ET purge les credentials. C'est le SEUL endroit qui supprime les fichiers
+ * d'auth — toute autre déconnexion (401, 408, 515, network) conserve l'auth
+ * pour permettre la reconnexion automatique sans nouveau scan QR.
  */
 export async function logoutSession(schoolId) {
   const entry = sockets.get(schoolId);
-  if (!entry?.sock) return false;
-  try {
-    await entry.sock.logout();
-  } catch (e) {
-    console.warn(`[baileys][${schoolId}] Logout error:`, e.message);
+  // Marque l'opération comme un logout admin pour que l'event 'close'
+  // ne déclenche PAS de reconnexion automatique.
+  if (entry) entry.adminLogout = true;
+  if (entry?.sock) {
+    try {
+      await entry.sock.logout();
+    } catch (e) {
+      console.warn(`[baileys][${schoolId}] Logout error:`, e.message);
+    }
   }
-  // Purge auth + état
+  // Purge auth + état (uniquement sur action admin explicite)
   try { fs.rmSync(path.join(AUTH_ROOT, String(schoolId)), { recursive: true, force: true }); } catch {}
   sockets.delete(schoolId);
   await supabaseAdmin
@@ -315,13 +351,29 @@ export async function bootstrapAllSessions(onIncoming) {
     .select('school_id, status')
     .neq('status', 'banned');
 
-  for (const row of rows || []) {
-    const authDir = path.join(AUTH_ROOT, String(row.school_id));
+  // En plus des sessions enregistrées en DB, on tente aussi de bootstrapper
+  // toute école qui a un dossier d'auth sur le filesystem (cas où la session
+  // s'est déconnectée avec needs_reconnect mais l'auth a été conservée).
+  const dbSchoolIds = new Set((rows || []).map(r => r.school_id));
+  const fsSchoolIds = [];
+  try {
+    if (fs.existsSync(AUTH_ROOT)) {
+      for (const entry of fs.readdirSync(AUTH_ROOT)) {
+        const dir = path.join(AUTH_ROOT, entry);
+        if (fs.statSync(dir).isDirectory()) fsSchoolIds.push(entry);
+      }
+    }
+  } catch {}
+
+  const allIds = new Set([...dbSchoolIds, ...fsSchoolIds]);
+  for (const schoolId of allIds) {
+    const authDir = path.join(AUTH_ROOT, String(schoolId));
     if (!fs.existsSync(authDir)) continue; // pas encore appairé
     try {
-      await startSession(row.school_id, { onIncoming });
+      console.log(`[baileys] bootstrap ${schoolId} (auth présent)`);
+      await startSession(schoolId, { onIncoming });
     } catch (e) {
-      console.error(`[baileys] bootstrap ${row.school_id}:`, e.message);
+      console.error(`[baileys] bootstrap ${schoolId}:`, e.message);
     }
   }
 }
