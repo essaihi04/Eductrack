@@ -121,6 +121,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       entry.qr = null;
       entry.qrDataUrl = null;
       entry.reconnectAttempts = 0;
+      entry.loggedOutRetried = false;
       // Récupère le numéro
       const me = sock.user?.id?.split(':')[0]?.split('@')[0] || null;
       entry.phone = me;
@@ -151,7 +152,20 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       console.warn(`[baileys][${schoolId}] Déconnecté code=${code} loggedOut=${isLoggedOut} banned=${isBanned} restartRequired=${isRestartRequired}`);
 
       if (isLoggedOut) {
+        // 401 juste après un restart post-pairing = race condition d'écriture des
+        // credentials sur disque. On retry UNE fois avec délai plus long avant
+        // de purger l'auth et exiger un nouveau scan.
+        const sinceRestart = Date.now() - (entry.lastRestartAt || 0);
+        if (sinceRestart < 8000 && !entry.loggedOutRetried) {
+          entry.loggedOutRetried = true;
+          entry.status = 'connecting';
+          console.log(`[baileys][${schoolId}] ⚠️ 401 post-restart (${sinceRestart}ms) — retry avec délai prolongé (race creds.update?)`);
+          setTimeout(() => startSession(schoolId, { onIncoming }), 3000);
+          return;
+        }
+
         entry.status = 'logged_out';
+        entry.loggedOutRetried = false;
         // Purge auth → nécessite re-scan QR
         try { fs.rmSync(authDir, { recursive: true, force: true }); } catch {}
         await supabaseAdmin
@@ -171,13 +185,16 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         return;
       }
 
-      // Restart requis (juste après pairing QR) : reconnexion IMMÉDIATE, sans backoff
+      // Restart requis (juste après pairing QR) : reconnexion rapide mais en
+      // laissant le temps à `creds.update` d'écrire les credentials sur disque.
+      // 250ms était trop court → race condition → 401 au restart.
       if (isRestartRequired) {
-        console.log(`[baileys][${schoolId}] 🔄 restartRequired : reconnexion immédiate pour finaliser le pairing`);
+        console.log(`[baileys][${schoolId}] 🔄 restartRequired : reconnexion dans 1500ms pour finaliser le pairing`);
         entry.status = 'connecting';
-        // Reset des tentatives — ce n'est pas une erreur
         entry.reconnectAttempts = 0;
-        setTimeout(() => startSession(schoolId, { onIncoming }), 250);
+        entry.lastRestartAt = Date.now();
+        entry.loggedOutRetried = false;
+        setTimeout(() => startSession(schoolId, { onIncoming }), 1500);
         return;
       }
 
