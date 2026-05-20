@@ -5,7 +5,8 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { sendWhatsAppResponse, getSchoolSessionApiKey } from '../services/whatsappChatbot.js';
+import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { getStatus as getWhatsAppStatus } from '../services/whatsapp/index.js';
 
 const router = express.Router();
 
@@ -398,16 +399,17 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
               .single();
 
             const schoolId = classInfoWa?.school_id || req.user.school_id;
-            const sessionApiKey = await getSchoolSessionApiKey(schoolId);
+            const waStatus = getWhatsAppStatus(schoolId);
 
             console.log(`[Documents][${requestId}] WhatsApp session check`, {
               classId: targetClassId,
               schoolId,
-              hasSessionApiKey: Boolean(sessionApiKey)
+              connected: waStatus.connected,
+              status: waStatus.status
             });
 
-            if (!sessionApiKey) {
-              console.warn(`[Documents][${requestId}] WhatsApp session non connectée, notifications WhatsApp ignorées`);
+            if (!waStatus.connected) {
+              console.warn(`[Documents][${requestId}] WhatsApp session non connectée (status=${waStatus.status}), notifications WhatsApp ignorées`);
               return;
             }
 
