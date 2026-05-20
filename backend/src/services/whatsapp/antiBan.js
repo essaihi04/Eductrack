@@ -37,8 +37,10 @@ const CONFIG = {
   WARMUP_DAYS: [80, 150, 250, 400, 600, 800, 1000],
   STEADY_DAILY_LIMIT: 1000,
   // Plage horaire autorisée (heure locale école, 24h)
+  // 7h–23h : permet aux écoles de planifier les rapports quotidiens
+  // jusqu'à 22:59 (configuré via daily_report_settings.send_time).
   ALLOWED_HOUR_START: 7,
-  ALLOWED_HOUR_END: 21,   // dernière heure d'envoi : 20:59
+  ALLOWED_HOUR_END: 23,   // dernière heure d'envoi : 22:59
   // Pause après timelock (erreur 463)
   TIMELOCK_PAUSE_MS: 60 * 60 * 1000, // 1h
 };
