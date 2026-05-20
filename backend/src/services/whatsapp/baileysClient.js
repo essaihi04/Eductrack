@@ -240,19 +240,33 @@ export async function startSession(schoolId, { onIncoming } = {}) {
   });
 
   // Messages entrants → callback fourni par le chatbot
-  if (onIncoming) {
-    sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
-      for (const msg of messages) {
-        if (!msg.message || msg.key.fromMe) continue;
-        try {
-          await onIncoming({ schoolId, msg, sock });
-        } catch (e) {
-          console.error(`[baileys][${schoolId}] Erreur handler entrant:`, e.message);
-        }
+  // On loggue TOUS les événements pour faciliter le debug du chatbot.
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    console.log(`[baileys][${schoolId}] 📨 messages.upsert type=${type} count=${messages?.length || 0}`);
+    if (type !== 'notify') {
+      console.log(`[baileys][${schoolId}] ⏭️  Ignoré (type≠notify): ${type}`);
+      return;
+    }
+    for (const msg of messages) {
+      const from = msg.key?.remoteJid;
+      const fromMe = msg.key?.fromMe;
+      const hasContent = !!msg.message;
+      console.log(`[baileys][${schoolId}] 📩 from=${from} fromMe=${fromMe} hasMessage=${hasContent}`);
+      if (!hasContent || fromMe) {
+        console.log(`[baileys][${schoolId}] ⏭️  Filtré (fromMe ou pas de contenu)`);
+        continue;
       }
-    });
-  }
+      if (!onIncoming) {
+        console.warn(`[baileys][${schoolId}] ⚠️  Pas de onIncoming callback configuré — message ignoré`);
+        continue;
+      }
+      try {
+        await onIncoming({ schoolId, msg, sock });
+      } catch (e) {
+        console.error(`[baileys][${schoolId}] ❌ Erreur handler entrant:`, e.message);
+      }
+    }
+  });
 
   return entry;
 }
