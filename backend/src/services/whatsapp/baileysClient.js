@@ -109,6 +109,11 @@ export async function startSession(schoolId, { onIncoming } = {}) {
     connectTimeoutMs: 60_000,
     // Empêche le téléchargement automatique de tous les messages historiques
     shouldSyncHistoryMessage: () => false,
+    // Durée de vie de chaque QR. Par défaut Baileys donne 60s au PREMIER QR
+    // puis seulement 20s aux suivants — trop court pour le flux mobile
+    // "scan depuis l'app chat → ouverture page Appareils liés → re-scan".
+    // On force 60s pour TOUS les QR (équivalent à WhatsApp Web officiel).
+    qrTimeout: 60_000,
   });
 
   entry.sock = sock;
