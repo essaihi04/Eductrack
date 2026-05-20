@@ -27,9 +27,12 @@ const CONFIG = {
   // Présence "typing…" avant envoi
   TYPING_MIN_MS: 1_500,
   TYPING_MAX_MS: 4_000,
-  // Quota journalier
-  WARMUP_DAYS: [5, 10, 20, 40, 80, 150, 250, 350, 450, 500],
-  STEADY_DAILY_LIMIT: 500,
+  // Quota journalier (warm-up progressif)
+  // J1 doit déjà permettre un usage opérationnel normal (1 bus = ~30 parents,
+  // boarded + dropped + start + arrived = ~120 notifs/jour pour un seul bus).
+  // Valeurs ajustées pour ne pas bloquer le transport scolaire en J1.
+  WARMUP_DAYS: [80, 150, 250, 400, 600, 800, 1000],
+  STEADY_DAILY_LIMIT: 1000,
   // Plage horaire autorisée (heure locale école, 24h)
   ALLOWED_HOUR_START: 7,
   ALLOWED_HOUR_END: 21,   // dernière heure d'envoi : 20:59
@@ -185,10 +188,17 @@ export async function checkAllowed(schoolId, { urgent = false } = {}) {
     };
   }
 
-  // Quota journalier
+  // Quota journalier — bypass possible pour les notifs urgentes (transport,
+  // alertes opérationnelles) qui sont opt-in par enrôlement à l'école et
+  // ne doivent pas être bloquées par le warm-up.
   const limit = await getDailyLimit(schoolId);
   const dbCount = await getDbCount(schoolId);
   if (dbCount >= limit) {
+    if (urgent) {
+      // On laisse passer mais on log pour visibilité
+      console.warn(`[anti-ban] Quota dépassé (${dbCount}/${limit}) mais message urgent → autorisé`);
+      return { allowed: true, dbCount, limit, overQuota: true };
+    }
     return {
       allowed: false,
       reason: 'daily_quota_exceeded',
