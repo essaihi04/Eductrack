@@ -1068,12 +1068,16 @@ router.get('/session-qr', async (req, res) => {
     const schoolId = getSchoolId(req);
     if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
 
-    // Démarre la session si pas déjà active
+    // Démarre la session si pas déjà active.
+    // On déclenche un (re)start sur tous les états "non actifs" : disconnected,
+    // logged_out, needs_reconnect (auth conservé après 6 échecs 401). Sinon
+    // l'utilisateur restait bloqué sans pouvoir relancer le QR.
     const status = getStatus(schoolId);
-    if (status.status === 'disconnected' || status.status === 'logged_out') {
-      await startSession(schoolId, { onIncoming: handleBaileysIncoming });
-    } else if (status.connected) {
+    if (status.connected) {
       return res.json({ success: false, error: 'Session déjà connectée, pas besoin de QR code', connected: true });
+    }
+    if (['disconnected', 'logged_out', 'needs_reconnect'].includes(status.status)) {
+      await startSession(schoolId, { onIncoming: handleBaileysIncoming });
     }
 
     // Polling : attend max 15s qu'un QR soit généré
@@ -1111,6 +1115,16 @@ router.post('/sessions', async (req, res) => {
     const { name, phone_number } = req.body || {};
     // (name et phone_number sont juste méta-info, le vrai numéro est déterminé
     // au scan du QR par WhatsApp)
+
+    // Si une session précédente existait avec auth corrompu (status
+    // needs_reconnect, logged_out ou banned), on purge tout pour repartir
+    // propre — sinon on restait coincé en boucle 401 sur creds périmés.
+    const existing = getStatus(schoolId);
+    const needsClean = ['needs_reconnect', 'logged_out', 'banned'].includes(existing.status);
+    if (needsClean) {
+      console.log(`[whatsapp] POST /sessions : purge auth (status=${existing.status})`);
+      try { await logoutSession(schoolId); } catch (e) { console.warn('purge logout:', e.message); }
+    }
 
     // Crée/maj le mapping en DB
     await supabaseAdmin
