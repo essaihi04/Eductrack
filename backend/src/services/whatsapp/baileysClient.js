@@ -103,9 +103,17 @@ export async function startSession(schoolId, { onIncoming } = {}) {
 
     if (qr) {
       entry.qr = qr;
-      entry.qrDataUrl = await QRCode.toDataURL(qr, { errorCorrectionLevel: 'L', margin: 2, width: 320 });
+      // errorCorrectionLevel: 'M' = robustesse moyenne (15% des données récupérables
+      // si camera de mauvaise qualité / reflets). Plus fiable que 'L' à l'écran.
+      // width: 512 = QR HD, downscalé en CSS, reste net même sur écrans Retina.
+      entry.qrDataUrl = await QRCode.toDataURL(qr, {
+        errorCorrectionLevel: 'M',
+        margin: 4,
+        width: 512,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      });
       entry.status = 'qr';
-      console.log(`[baileys][${schoolId}] QR code généré`);
+      console.log(`[baileys][${schoolId}] QR code généré (${qr.length} chars)`);
     }
 
     if (connection === 'open') {

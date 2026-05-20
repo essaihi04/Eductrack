@@ -2826,7 +2826,7 @@ const WhatsAppPage = () => {
                   <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div></div>
                 ) : qrCode ? (
                   <div className="flex flex-col items-center gap-4">
-                    <div className="p-4 bg-white border-2 border-gray-200 rounded-xl"><img src={qrCode} alt="QR Code" className="w-64 h-64" /></div>
+                    <div className="p-4 bg-white border-2 border-gray-200 rounded-xl"><img src={qrCode} alt="QR Code" className="w-80 h-80" style={{ imageRendering: 'pixelated' }} /></div>
                     <div className="text-center">
                       <p className="text-sm text-gray-700 font-medium">Scannez avec WhatsApp</p>
                       <p className="text-xs text-gray-500 mt-1">Menu (⋮) → Appareils connectés → Connecter</p>
