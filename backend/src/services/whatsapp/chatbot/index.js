@@ -109,6 +109,68 @@ async function getStudentById(studentId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Helpers : conversion chiffres arabes-indic + matching enfant
+// ─────────────────────────────────────────────────────────────────────────
+
+const ARABIC_INDIC = '٠١٢٣٤٥٦٧٨٩';
+const EXT_ARABIC_INDIC = '۰۱۲۳۴۵۶۷۸۹';
+
+/**
+ * Convertit les chiffres arabes-indic (٠-٩) et persans (۰-۹) en chiffres ASCII.
+ * Ex: "١" → "1", "٢" → "2".
+ */
+function normalizeDigits(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/[٠-٩]/g, (c) => ARABIC_INDIC.indexOf(c).toString())
+    .replace(/[۰-۹]/g, (c) => EXT_ARABIC_INDIC.indexOf(c).toString());
+}
+
+/**
+ * Tente d'identifier un enfant à partir d'une saisie texte du parent.
+ * Accepte :
+ *   - un numéro (1, 2, ١, ٢, …)
+ *   - le prénom ou nom de famille (FR ou AR), même partiel
+ *   - le nom complet dans n'importe quel ordre
+ */
+function matchChildFromInput(rawText, children) {
+  if (!children || children.length === 0) return null;
+  const text = normalizeDigits(String(rawText || '').trim());
+  if (!text) return null;
+
+  // 1. Tentative index numérique
+  const idx = parseInt(text, 10);
+  if (Number.isFinite(idx) && idx >= 1 && idx <= children.length) {
+    return children[idx - 1];
+  }
+
+  // 2. Tentative match par nom (insensible à la casse / espaces multiples)
+  const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const t = norm(text);
+  if (t.length < 2) return null;
+
+  for (const c of children) {
+    const first = norm(c.first_name);
+    const last = norm(c.last_name);
+    const full1 = `${first} ${last}`;
+    const full2 = `${last} ${first}`;
+    if (
+      t === first ||
+      t === last ||
+      t === full1 ||
+      t === full2 ||
+      full1.includes(t) ||
+      full2.includes(t) ||
+      (first.length >= 3 && t.includes(first)) ||
+      (last.length >= 3 && t.includes(last))
+    ) {
+      return c;
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Envoi du menu de sélection enfant
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -288,7 +350,9 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
   // 4. State machine
   let state = State.getState(phone);
 
-  // Pas d'état (1re interaction ou expiré) → demande de sélection enfant
+  // Pas d'état (1re interaction, expiré, ou redémarrage serveur) → essayer
+  // d'abord d'interpréter la saisie comme une sélection d'enfant (numéro ou
+  // nom), sinon afficher le menu de sélection.
   if (!state || !state.studentId) {
     const children = await getParentChildren(parentInfo.parent_id);
     if (children.length === 1) {
@@ -300,6 +364,24 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       await markProcessed(incomingMsg?.id);
       return;
     }
+
+    // Plusieurs enfants : tenter de matcher la saisie courante (utile quand
+    // l'état en mémoire a été perdu après un redémarrage PM2 alors que le
+    // parent vient de recevoir le menu de sélection).
+    const matched = matchChildFromInput(text, children);
+    if (matched) {
+      State.selectStudent(phone, matched.id);
+      await sendText(
+        parentInfo.school_id,
+        phone,
+        `✅ Enfant sélectionné : *${matched.first_name} ${matched.last_name}*`,
+        { urgent: true }
+      );
+      await sendMainMenu(parentInfo.school_id, phone, matched, parentInfo);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
     await sendChildSelectionMenu(parentInfo.school_id, phone, children, parentInfo);
     await markProcessed(incomingMsg?.id);
     return;
@@ -313,20 +395,37 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
     return;
   }
 
-  // Mode CHILD : attente sélection numéro
+  // Mode CHILD : attente sélection enfant (numéro OU nom, FR/AR/Darija)
   if (state.state === 'CHILD') {
     const childrenList = state.childrenList || [];
-    const idx = parseInt(text.trim(), 10);
-    if (Number.isFinite(idx) && idx >= 1 && idx <= childrenList.length) {
-      const studentId = childrenList[idx - 1];
-      State.selectStudent(phone, studentId);
-      const student2 = await getStudentById(studentId);
-      await sendText(parentInfo.school_id, phone, `✅ Enfant sélectionné : *${student2.first_name} ${student2.last_name}*`, { urgent: true });
-      await sendMainMenu(parentInfo.school_id, phone, student2, parentInfo);
+    // Reconstitue la liste d'objets enfants pour pouvoir matcher par nom
+    const children = await getParentChildren(parentInfo.parent_id);
+    const orderedChildren = childrenList.length
+      ? childrenList
+          .map((id) => children.find((c) => c.id === id))
+          .filter(Boolean)
+      : children;
+
+    const matched = matchChildFromInput(text, orderedChildren);
+    if (matched) {
+      State.selectStudent(phone, matched.id);
+      await sendText(
+        parentInfo.school_id,
+        phone,
+        `✅ Enfant sélectionné : *${matched.first_name} ${matched.last_name}*`,
+        { urgent: true }
+      );
+      await sendMainMenu(parentInfo.school_id, phone, matched, parentInfo);
       await markProcessed(incomingMsg?.id);
       return;
     }
-    await sendText(parentInfo.school_id, phone, `Numéro invalide. Veuillez répondre avec un numéro entre 1 et ${childrenList.length}.`, { urgent: true });
+
+    await sendText(
+      parentInfo.school_id,
+      phone,
+      `🤔 Sélection non reconnue. Répondez avec :\n• le *numéro* de l'enfant (1, 2, ١, ٢…)\n• ou son *prénom* / *nom*`,
+      { urgent: true }
+    );
     await markProcessed(incomingMsg?.id);
     return;
   }
