@@ -1,10 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, BookOpen, FileText, Activity, Bus, GraduationCap,
   CheckCircle2, XCircle, Clock, AlertCircle, Calendar, Award,
   Eye, Download, BookOpen as BookOpenIcon, Edit3, Home as HomeIcon, RotateCcw, Star, FileImage,
+  ChevronDown, ChevronUp, TrendingUp, AlertTriangle,
 } from 'lucide-react';
+import {
+  LineChart, Line, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
+  PieChart, Pie, Cell, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
 import { supabase } from '../../lib/supabase';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -264,12 +269,7 @@ const ParentChildPage = () => {
         </div>
       )}
 
-      {tab === 'tracking' && (
-        <div className="space-y-3">
-          {history.length === 0 && <Empty>Pas de suivi récent.</Empty>}
-          {history.map(t => <TrackingCard key={t.id} t={t} />)}
-        </div>
-      )}
+      {tab === 'tracking' && <TrackingAnalytics history={history} />}
 
       {tab === 'documents' && (
         <div className="space-y-3">
@@ -649,6 +649,370 @@ const DocumentCard = ({ doc, childId }) => {
             <span className="hidden sm:inline">{busy === 'download' ? '…' : 'Télécharger'}</span>
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────
+// TrackingAnalytics — Visualisations intelligentes du suivi pédagogique
+// ─────────────────────────────────────────────────────────────────────
+
+const CHART_COLORS = {
+  green: '#22c55e',
+  blue: '#3b82f6',
+  yellow: '#eab308',
+  orange: '#f97316',
+  red: '#ef4444',
+  purple: '#8b5cf6',
+  gray: '#94a3b8',
+};
+
+const formatShortDate = (iso) => {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+  } catch { return iso; }
+};
+
+const computeAnalytics = (history) => {
+  if (!history || history.length === 0) return null;
+
+  const total = history.length;
+  const present = history.filter((h) => h.presence === 'present').length;
+  const late = history.filter((h) => h.presence === 'late').length;
+  const absent = history.filter((h) => h.presence === 'absent').length;
+
+  const partGood = history.filter((h) => ['excellent', 'bon', 'bonne'].includes(h.participation)).length;
+  const partTotal = history.filter((h) => h.participation).length;
+
+  const discGood = history.filter((h) => h.discipline === 'concentre').length;
+  const discMid = history.filter((h) => h.discipline === 'moyen').length;
+  const discTotal = history.filter((h) => h.discipline).length;
+
+  const hwGood = history.filter((h) => h.homework === 'done').length;
+  const hwTotal = history.filter((h) => h.homework).length;
+
+  const attGood = history.filter((h) => h.attitude === 'positive').length;
+  const attTotal = history.filter((h) => h.attitude).length;
+
+  // 1. Radar — profil global
+  const radarData = [
+    { dim: 'Présence', score: total ? Math.round(((present + late * 0.5) / total) * 100) : 0 },
+    { dim: 'Participation', score: partTotal ? Math.round((partGood / partTotal) * 100) : 0 },
+    { dim: 'Discipline', score: discTotal ? Math.round(((discGood + discMid * 0.5) / discTotal) * 100) : 0 },
+    { dim: 'Devoirs', score: hwTotal ? Math.round((hwGood / hwTotal) * 100) : 0 },
+    { dim: 'Attitude', score: attTotal ? Math.round((attGood / attTotal) * 100) : 0 },
+  ];
+
+  // 2. Mini-évaluations — série temporelle
+  const evalSeries = history
+    .filter((h) => h.mini_eval !== null && h.mini_eval !== undefined && h.mini_eval !== '')
+    .map((h) => ({
+      date: h.session_date,
+      label: formatShortDate(h.session_date),
+      note: Number(h.mini_eval),
+      subject: h.subject_name || '—',
+    }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const evalAvg = evalSeries.length
+    ? Number((evalSeries.reduce((s, e) => s + e.note, 0) / evalSeries.length).toFixed(1))
+    : null;
+
+  // 3. Présence par semaine (8 dernières)
+  const weeks = {};
+  history.forEach((h) => {
+    if (!h.session_date) return;
+    const d = new Date(h.session_date);
+    const day = d.getDay();
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - ((day + 6) % 7));
+    const wk = monday.toISOString().slice(0, 10);
+    if (!weeks[wk]) weeks[wk] = { week: wk, label: formatShortDate(wk), present: 0, late: 0, absent: 0 };
+    if (h.presence === 'present') weeks[wk].present += 1;
+    else if (h.presence === 'late') weeks[wk].late += 1;
+    else if (h.presence === 'absent') weeks[wk].absent += 1;
+  });
+  const weeklyAttendance = Object.values(weeks)
+    .sort((a, b) => a.week.localeCompare(b.week))
+    .slice(-8);
+
+  // 4. Distributions (donuts)
+  const disciplineDist = [
+    { name: 'Concentré', value: discGood, color: CHART_COLORS.green },
+    { name: 'Moyen', value: discMid, color: CHART_COLORS.yellow },
+    { name: 'Distrait', value: history.filter((h) => h.discipline === 'distrait').length, color: CHART_COLORS.red },
+  ].filter((d) => d.value > 0);
+
+  const participationDist = [
+    { name: 'Excellente', value: history.filter((h) => h.participation === 'excellent').length, color: CHART_COLORS.green },
+    { name: 'Bonne', value: history.filter((h) => ['bon', 'bonne'].includes(h.participation)).length, color: CHART_COLORS.blue },
+    { name: 'Faible', value: history.filter((h) => h.participation === 'faible').length, color: CHART_COLORS.red },
+  ].filter((d) => d.value > 0);
+
+  // 5. Incidents
+  const incidents = [
+    { name: 'Téléphone', value: history.filter((h) => h.phone_use === true || h.phone_use === 'true').length, color: CHART_COLORS.red },
+    { name: 'Endormi', value: history.filter((h) => h.sleeping === true || h.sleeping === 'true').length, color: CHART_COLORS.orange },
+    { name: 'Devoirs ✗', value: history.filter((h) => h.homework === 'not_done').length, color: CHART_COLORS.red },
+    { name: 'Absences', value: absent, color: CHART_COLORS.red },
+    { name: 'Retards', value: late, color: CHART_COLORS.orange },
+  ].filter((i) => i.value > 0).sort((a, b) => b.value - a.value);
+
+  // 6. Stats par matière
+  const bySubject = {};
+  history.forEach((h) => {
+    const s = h.subject_name || '— (non renseignée)';
+    if (!bySubject[s]) bySubject[s] = { subject: s, sessions: 0, present: 0, evalSum: 0, evalCount: 0, partGood: 0, partTotal: 0 };
+    const x = bySubject[s];
+    x.sessions += 1;
+    if (h.presence === 'present') x.present += 1;
+    if (h.mini_eval !== null && h.mini_eval !== undefined && h.mini_eval !== '') {
+      x.evalSum += Number(h.mini_eval);
+      x.evalCount += 1;
+    }
+    if (h.participation) {
+      x.partTotal += 1;
+      if (['excellent', 'bon', 'bonne'].includes(h.participation)) x.partGood += 1;
+    }
+  });
+  const subjectStats = Object.values(bySubject)
+    .map((s) => ({
+      subject: s.subject,
+      sessions: s.sessions,
+      presenceRate: Math.round((s.present / s.sessions) * 100),
+      participationRate: s.partTotal ? Math.round((s.partGood / s.partTotal) * 100) : null,
+      avgEval: s.evalCount > 0 ? Number((s.evalSum / s.evalCount).toFixed(1)) : null,
+    }))
+    .sort((a, b) => b.sessions - a.sessions);
+
+  return {
+    counts: { total, present, late, absent },
+    radarData,
+    evalSeries,
+    evalAvg,
+    weeklyAttendance,
+    disciplineDist,
+    participationDist,
+    incidents,
+    subjectStats,
+  };
+};
+
+const ChartCard = ({ title, subtitle, icon: Icon, children }) => (
+  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="flex items-center gap-2 mb-3">
+      {Icon && <Icon className="w-4 h-4 text-gray-600" />}
+      <div>
+        <h3 className="font-semibold text-gray-900 text-sm">{title}</h3>
+        {subtitle && <p className="text-xs text-gray-500">{subtitle}</p>}
+      </div>
+    </div>
+    {children}
+  </div>
+);
+
+const TrackingAnalytics = ({ history }) => {
+  const [showDetails, setShowDetails] = useState(false);
+  const data = useMemo(() => computeAnalytics(history), [history]);
+
+  if (!history || history.length === 0) {
+    return (
+      <Empty>
+        Aucune séance n'a encore été enregistrée par les enseignants.
+        <br />
+        Les graphiques s'afficheront dès que le suivi commencera.
+      </Empty>
+    );
+  }
+
+  const { counts, radarData, evalSeries, evalAvg, weeklyAttendance, disciplineDist, participationDist, incidents, subjectStats } = data;
+  const presenceRate = counts.total ? Math.round((counts.present / counts.total) * 100) : 0;
+
+  return (
+    <div className="space-y-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KPI label="Séances suivies" value={counts.total} icon={GraduationCap} color="text-purple-600" />
+        <KPI label="Présence" value={`${presenceRate}%`} icon={CheckCircle2} color="text-green-600" />
+        <KPI
+          label="Mini-éval. moy."
+          value={evalAvg !== null ? `${evalAvg}/20` : '—'}
+          icon={Award}
+          color={evalAvg === null ? 'text-gray-400' : evalAvg >= 15 ? 'text-green-600' : evalAvg >= 10 ? 'text-blue-600' : 'text-red-600'}
+        />
+        <KPI label="Incidents" value={incidents.reduce((s, i) => s + i.value, 0)} icon={AlertTriangle} color="text-orange-600" />
+      </div>
+
+      {/* Radar + Pies */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <ChartCard title="Profil global" subtitle="Score sur 100 par dimension" icon={Activity}>
+          <ResponsiveContainer width="100%" height={260}>
+            <RadarChart data={radarData}>
+              <PolarGrid stroke="#e5e7eb" />
+              <PolarAngleAxis dataKey="dim" tick={{ fontSize: 11, fill: '#4b5563' }} />
+              <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10, fill: '#9ca3af' }} />
+              <Radar name="Score" dataKey="score" stroke={CHART_COLORS.blue} fill={CHART_COLORS.blue} fillOpacity={0.4} />
+              <Tooltip formatter={(v) => `${v}/100`} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Discipline" subtitle="Concentration en classe" icon={Activity}>
+          {disciplineDist.length === 0 ? (
+            <p className="text-xs text-gray-500 text-center py-10">Aucune donnée disponible.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={disciplineDist} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                  {disciplineDist.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip formatter={(v, n) => [`${v} séances`, n]} />
+                <Legend verticalAlign="bottom" height={28} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="Participation" subtitle="Implication en classe" icon={Award}>
+          {participationDist.length === 0 ? (
+            <p className="text-xs text-gray-500 text-center py-10">Aucune donnée disponible.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={participationDist} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                  {participationDist.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip formatter={(v, n) => [`${v} séances`, n]} />
+                <Legend verticalAlign="bottom" height={28} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Mini-évaluations dans le temps */}
+      <ChartCard title="Évolution des mini-évaluations" subtitle={`${evalSeries.length} notes — moyenne ${evalAvg !== null ? evalAvg + '/20' : '—'}`} icon={TrendingUp}>
+        {evalSeries.length === 0 ? (
+          <p className="text-xs text-gray-500 text-center py-10">Aucune mini-évaluation enregistrée pour le moment.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={evalSeries} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <YAxis domain={[0, 20]} tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <Tooltip
+                formatter={(v) => [`${v}/20`, 'Note']}
+                labelFormatter={(l, payload) => {
+                  const p = payload && payload[0]?.payload;
+                  return p ? `${l} — ${p.subject}` : l;
+                }}
+              />
+              <Line type="monotone" dataKey="note" stroke={CHART_COLORS.purple} strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
+
+      {/* Présence hebdomadaire empilée */}
+      <ChartCard title="Présence par semaine" subtitle="8 dernières semaines" icon={Calendar}>
+        {weeklyAttendance.length === 0 ? (
+          <p className="text-xs text-gray-500 text-center py-10">Pas de données hebdomadaires.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={weeklyAttendance} margin={{ top: 5, right: 20, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+              <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} allowDecimals={false} />
+              <Tooltip />
+              <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="present" stackId="a" name="Présent" fill={CHART_COLORS.green} radius={[0, 0, 0, 0]} />
+              <Bar dataKey="late" stackId="a" name="Retard" fill={CHART_COLORS.orange} />
+              <Bar dataKey="absent" stackId="a" name="Absent" fill={CHART_COLORS.red} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
+
+      {/* Incidents */}
+      {incidents.length > 0 && (
+        <ChartCard title="Points de vigilance" subtitle="Incidents et oublis cumulés" icon={AlertTriangle}>
+          <ResponsiveContainer width="100%" height={Math.max(180, incidents.length * 40)}>
+            <BarChart layout="vertical" data={incidents} margin={{ top: 5, right: 20, left: 20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+              <XAxis type="number" tick={{ fontSize: 11, fill: '#6b7280' }} allowDecimals={false} />
+              <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#374151' }} width={90} />
+              <Tooltip formatter={(v) => [`${v} fois`, 'Occurrences']} />
+              <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                {incidents.map((i, idx) => <Cell key={idx} fill={i.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      {/* Par matière */}
+      {subjectStats.length > 0 && (
+        <ChartCard title="Performances par matière" subtitle={`${subjectStats.length} matière${subjectStats.length > 1 ? 's' : ''}`} icon={BookOpen}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-gray-600 text-xs uppercase">
+                  <th className="py-2 px-2 font-semibold">Matière</th>
+                  <th className="py-2 px-2 font-semibold text-center">Séances</th>
+                  <th className="py-2 px-2 font-semibold text-center">Présence</th>
+                  <th className="py-2 px-2 font-semibold text-center">Participation</th>
+                  <th className="py-2 px-2 font-semibold text-center">Moy. /20</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subjectStats.map((s) => (
+                  <tr key={s.subject} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="py-2 px-2 font-medium text-gray-900">{s.subject}</td>
+                    <td className="py-2 px-2 text-center text-gray-700">{s.sessions}</td>
+                    <td className="py-2 px-2 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        s.presenceRate >= 90 ? 'bg-green-100 text-green-700'
+                        : s.presenceRate >= 75 ? 'bg-blue-100 text-blue-700'
+                        : s.presenceRate >= 60 ? 'bg-yellow-100 text-yellow-700'
+                        : 'bg-red-100 text-red-700'
+                      }`}>
+                        {s.presenceRate}%
+                      </span>
+                    </td>
+                    <td className="py-2 px-2 text-center text-gray-700">
+                      {s.participationRate !== null ? `${s.participationRate}%` : '—'}
+                    </td>
+                    <td className="py-2 px-2 text-center font-semibold text-gray-900">
+                      {s.avgEval !== null ? s.avgEval : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ChartCard>
+      )}
+
+      {/* Détail des séances (collapsible) */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        <button
+          onClick={() => setShowDetails((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition"
+        >
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-gray-600" />
+            <span className="font-semibold text-gray-900 text-sm">
+              Détail des {history.length} séance{history.length > 1 ? 's' : ''}
+            </span>
+          </div>
+          {showDetails ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+        </button>
+        {showDetails && (
+          <div className="p-4 space-y-3 border-t border-gray-100 bg-gray-50">
+            {history.map((t) => <TrackingCard key={t.id} t={t} />)}
+          </div>
+        )}
       </div>
     </div>
   );
