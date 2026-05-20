@@ -352,7 +352,39 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       await markProcessed(incomingMsg?.id);
       return;
     }
-    // Saisie non reconnue : ré-afficher le menu courant
+
+    // Pas de correspondance avec une option. Heuristique : si l'utilisateur a
+    // tapé une vraie phrase / question (> 4 caractères, contient au moins 1
+    // espace OU plus de 8 caractères), on considère que c'est une question
+    // libre (français, arabe, darja, etc.) et on la route vers l'IA au lieu
+    // de répondre "Option non reconnue".
+    const trimmed = text.trim();
+    const looksLikeQuestion =
+      trimmed.length >= 5 && (trimmed.includes(' ') || trimmed.length > 8);
+
+    if (looksLikeQuestion) {
+      console.log(`[chatbot] MENU → IA fallback (texte libre): "${trimmed.substring(0, 40)}"`);
+      const reply = await answerWithAI({ messageText: text, student, parentInfo });
+      await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+      await supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .update({ ai_response_sent: true, ai_response_text: reply })
+        .eq('id', incomingMsg.id);
+      // Petit rappel pour revenir au menu
+      setTimeout(() => {
+        sendText(
+          parentInfo.school_id,
+          phone,
+          `_Tapez *menu* pour revenir aux options ou continuez à poser vos questions._`,
+          { urgent: true }
+        );
+      }, 1500);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
+    // Saisie courte non reconnue (probable typo de numéro de menu) :
+    // ré-afficher le menu courant.
     await sendText(parentInfo.school_id, phone, `🤔 Option non reconnue : "${text.substring(0, 30)}".`, { urgent: true });
     await sendMenu(parentInfo.school_id, phone, menu, {
       studentName: `${student.first_name} ${student.last_name}`,

@@ -45,18 +45,46 @@ async function buildStudentContext(student, parentInfo) {
     school: parentInfo.school_name,
   };
 
-  // Notes récentes (3 dernières)
-  const { data: grades } = await supabaseAdmin
-    .from('control_scores')
-    .select('score, max_score, control:control_plans(date, subjects(name))')
+  // Suivi pédagogique récent (5 dernières séances tracées par les profs)
+  // C'est la VRAIE source de données : présence, comportement, participation.
+  const { data: tracking } = await supabaseAdmin
+    .from('session_tracking')
+    .select('presence, participation, discipline, attitude, homework, comment, session:sessions(date, subjects(name))')
     .eq('student_id', student.id)
     .order('created_at', { ascending: false })
-    .limit(5);
-  ctx.recent_grades = (grades || []).map((g) => ({
-    subject: g.control?.subjects?.name || '—',
-    score: `${g.score}/${g.max_score}`,
-    date: g.control?.date || null,
-  }));
+    .limit(10);
+  ctx.recent_tracking = (tracking || [])
+    .filter((t) => t.session)
+    .map((t) => ({
+      subject: t.session.subjects?.name || null,
+      date: t.session.date,
+      presence: t.presence,
+      participation: t.participation,
+      discipline: t.discipline,
+      attitude: t.attitude,
+      homework_done: t.homework,
+      teacher_comment: t.comment ? String(t.comment).slice(0, 150) : null,
+    }));
+
+  // Stats globales de présence (sur les 200 dernières séances)
+  const { data: allTracking } = await supabaseAdmin
+    .from('session_tracking')
+    .select('presence')
+    .eq('student_id', student.id)
+    .limit(200);
+  if (allTracking?.length) {
+    const total = allTracking.length;
+    const present = allTracking.filter((t) => t.presence === 'present').length;
+    const absent = allTracking.filter((t) => t.presence === 'absent').length;
+    const late = allTracking.filter((t) => t.presence === 'late').length;
+    ctx.attendance_stats = {
+      total_sessions: total,
+      present,
+      absent,
+      late,
+      presence_rate: Math.round((present / total) * 100) + '%',
+    };
+  }
 
   // Devoirs en cours
   const today = new Date().toISOString().slice(0, 10);

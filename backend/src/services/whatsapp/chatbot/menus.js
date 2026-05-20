@@ -36,8 +36,8 @@ export const PEDAGOGY_MENU = {
   title: 'Suivi pédagogique 📚',
   description: 'Choisissez ce que vous voulez consulter',
   options: [
-    { id: '1', emoji: '📝', label: 'Dernières notes',                action: A.getLastControlGrades },
-    { id: '2', emoji: '📊', label: 'Moyennes par matière',            action: A.getAverageBySubject },
+    { id: '1', emoji: '📝', label: 'Dernier suivi',                  action: A.getLastControlGrades },
+    { id: '2', emoji: '📊', label: 'Bilan par matière',               action: A.getAverageBySubject },
     { id: '3', emoji: '📅', label: 'Présence cette semaine',          action: A.getWeeklyAttendance },
     { id: '4', emoji: '✍️', label: 'Devoirs à faire',                action: A.getPendingHomework },
     { id: '5', emoji: '📆', label: 'Programme du jour',              action: A.getTodaySchedule },

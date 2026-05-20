@@ -39,62 +39,120 @@ const footer = (schoolName) => `\n━━━━━━━━━━━━━━━�
 // PÉDAGOGIE
 // ─────────────────────────────────────────────────────────────────────────
 
-/** P1 — Notes du dernier contrôle */
+// Helpers pour libellés du suivi pédagogique (alignés avec la fiche "Suivi rapide" du prof)
+const presenceLabel = (p) => ({
+  present: '✅ Présent',
+  absent: '❌ Absent',
+  late: '⏰ Retard',
+}[p] || '—');
+
+const disciplineLabel = (d) => ({
+  excellent: '🟢 Excellent',
+  concentre: '🟢 Concentré',
+  good: '🟢 Bon',
+  correct: '🔵 Correct',
+  agite: '🟠 Agité',
+  perturbateur: '🔴 Perturbateur',
+  bad: '🔴 Mauvais',
+}[d] || (d ? `▫️ ${d}` : '—'));
+
+const participationLabel = (p) => ({
+  excellent: '🟢 Excellente',
+  bonne: '🔵 Bonne',
+  moyenne: '🟡 Moyenne',
+  faible: '🟠 Faible',
+  passive: '🔴 Passive',
+}[p] || (p ? `▫️ ${p}` : '—'));
+
+/** P1 — Dernier suivi (5 dernières séances renseignées par les profs) */
 export async function getLastControlGrades(student, parentInfo) {
-  const { data: grades } = await supabaseAdmin
-    .from('control_scores')
-    .select('score, max_score, control:control_plans(date, title, subjects(name))')
+  // Note : aucune table de notes/scores avec données en prod. On affiche à la
+  // place le "Suivi rapide" récent des professeurs (session_tracking), qui
+  // contient présence + comportement + participation par séance.
+  const { data: tracking } = await supabaseAdmin
+    .from('session_tracking')
+    .select(`
+      presence, participation, attitude, discipline, work_status, homework, comment,
+      session:sessions(date, start_time, subjects(name), profiles(first_name, last_name))
+    `)
     .eq('student_id', student.id)
     .order('created_at', { ascending: false })
     .limit(5);
 
-  if (!grades || grades.length === 0) {
-    return `${header('Dernières notes', '📝')}\n\nAucune note de contrôle enregistrée pour le moment.${footer(parentInfo.school_name)}`;
+  const valid = (tracking || []).filter((t) => t.session);
+  if (valid.length === 0) {
+    return `${header('Dernier suivi', '📝')}\n\nAucun suivi enregistré pour le moment.${footer(parentInfo.school_name)}`;
   }
 
-  const lines = grades.map((g) => {
-    const subj = g.control?.subjects?.name || g.control?.title || 'Matière';
-    const date = fmtDate(g.control?.date);
-    return `${scoreEmoji(g.score, g.max_score)} *${subj}* — ${g.score}/${g.max_score}\n   _${date}_`;
+  // Trier par date décroissante (le filter created_at ci-dessus peut différer
+  // de la date de séance si le prof saisit en retard)
+  valid.sort((a, b) => (b.session.date || '').localeCompare(a.session.date || ''));
+
+  const lines = valid.map((t) => {
+    const subj = t.session.subjects?.name || 'Séance';
+    const date = fmtDate(t.session.date);
+    const teacher = t.session.profiles
+      ? `${t.session.profiles.first_name || ''} ${t.session.profiles.last_name || ''}`.trim()
+      : '';
+    let block = `*${subj}* — _${date}_${teacher ? ` (${teacher})` : ''}\n`;
+    block += `   ${presenceLabel(t.presence)}`;
+    if (t.participation) block += `\n   👋 Participation : ${participationLabel(t.participation)}`;
+    if (t.discipline) block += `\n   🧘 Discipline : ${disciplineLabel(t.discipline)}`;
+    if (t.attitude) block += `\n   🙂 Attitude : ${disciplineLabel(t.attitude)}`;
+    if (t.homework) block += `\n   📚 Devoirs : ${t.homework === 'fait' ? '✅ Fait' : t.homework === 'non_fait' ? '❌ Non fait' : t.homework}`;
+    if (t.comment) block += `\n   💬 _${String(t.comment).slice(0, 120)}_`;
+    return block;
   });
 
-  return `${header(`Notes de ${student.first_name}`, '📝')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  return `${header(`Dernier suivi — ${student.first_name}`, '📝')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
-/** P2 — Moyenne par matière (sur tous les contrôles) */
+/** P2 — Bilan par matière (statistiques sur le suivi par matière) */
 export async function getAverageBySubject(student, parentInfo) {
-  const { data: grades } = await supabaseAdmin
-    .from('control_scores')
-    .select('score, max_score, control:control_plans(subjects(id, name))')
-    .eq('student_id', student.id);
+  const { data: tracking } = await supabaseAdmin
+    .from('session_tracking')
+    .select('presence, participation, discipline, session:sessions(subjects(id, name))')
+    .eq('student_id', student.id)
+    .limit(500);
 
-  if (!grades || grades.length === 0) {
-    return `${header('Moyennes', '📊')}\n\nAucune note disponible pour calculer une moyenne.${footer(parentInfo.school_name)}`;
+  const valid = (tracking || []).filter((t) => t.session?.subjects);
+  if (valid.length === 0) {
+    return `${header('Bilan par matière', '📊')}\n\nAucune donnée de suivi disponible pour le moment.${footer(parentInfo.school_name)}`;
   }
 
   const bySubject = {};
-  grades.forEach((g) => {
-    const name = g.control?.subjects?.name || 'Autre';
-    if (!bySubject[name]) bySubject[name] = { sum: 0, max: 0, n: 0 };
-    bySubject[name].sum += Number(g.score) || 0;
-    bySubject[name].max += Number(g.max_score) || 20;
-    bySubject[name].n += 1;
+  valid.forEach((t) => {
+    const name = t.session.subjects.name || 'Autre';
+    if (!bySubject[name]) bySubject[name] = { total: 0, present: 0, absent: 0, late: 0, goodPart: 0, goodDisc: 0 };
+    const s = bySubject[name];
+    s.total += 1;
+    if (t.presence === 'present') s.present += 1;
+    if (t.presence === 'absent') s.absent += 1;
+    if (t.presence === 'late') s.late += 1;
+    if (['excellent', 'bonne'].includes(t.participation)) s.goodPart += 1;
+    if (['excellent', 'concentre', 'good'].includes(t.discipline)) s.goodDisc += 1;
   });
 
   const lines = Object.entries(bySubject)
+    .sort()
     .map(([name, s]) => {
-      const avg = (s.sum / s.n).toFixed(2);
-      const avg20 = ((s.sum / s.max) * 20).toFixed(2);
-      return `${scoreEmoji(avg20, 20)} *${name}* — ${avg20}/20  (${s.n} note${s.n > 1 ? 's' : ''})`;
-    })
-    .sort();
+      const presPct = Math.round((s.present / s.total) * 100);
+      const partPct = Math.round((s.goodPart / s.total) * 100);
+      const indic = presPct >= 90 ? '🟢' : presPct >= 75 ? '🔵' : presPct >= 60 ? '🟡' : '🔴';
+      let line = `${indic} *${name}* — ${s.total} séance${s.total > 1 ? 's' : ''}\n`;
+      line += `   ✅ Présence : *${presPct}%*`;
+      if (s.absent > 0) line += `  ❌ ${s.absent} absence${s.absent > 1 ? 's' : ''}`;
+      if (s.late > 0) line += `  ⏰ ${s.late} retard${s.late > 1 ? 's' : ''}`;
+      if (s.goodPart > 0) line += `\n   👋 Bonne participation : ${partPct}%`;
+      return line;
+    });
 
-  // Moyenne générale
-  const totalSum = Object.values(bySubject).reduce((a, s) => a + s.sum, 0);
-  const totalMax = Object.values(bySubject).reduce((a, s) => a + s.max, 0);
-  const general = totalMax > 0 ? ((totalSum / totalMax) * 20).toFixed(2) : '—';
+  // Stats globales
+  const total = valid.length;
+  const presentTotal = valid.filter((t) => t.presence === 'present').length;
+  const globalPct = total > 0 ? Math.round((presentTotal / total) * 100) : 0;
 
-  return `${header(`Moyennes — ${student.first_name}`, '📊')}\n\n${lines.join('\n')}\n\n━━━━━━━━━━━━━━━━━━━\n📈 *Moyenne générale : ${general}/20*${footer(parentInfo.school_name)}`;
+  return `${header(`Bilan — ${student.first_name}`, '📊')}\n\n${lines.join('\n\n')}\n\n━━━━━━━━━━━━━━━━━━━\n📈 *Présence globale : ${globalPct}%* (${total} séance${total > 1 ? 's' : ''})${footer(parentInfo.school_name)}`;
 }
 
 /** P3 — Présence / absences de la semaine en cours */
@@ -108,25 +166,34 @@ export async function getWeeklyAttendance(student, parentInfo) {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
 
+  // PostgREST ne permet pas de filtrer .gte/.lte sur une colonne d'une
+  // relation jointe. On récupère donc le tracking + session, puis on filtre
+  // côté JS sur la date de séance.
   const { data: tracking } = await supabaseAdmin
     .from('session_tracking')
-    .select('present, late, absent, session:sessions(date, subjects(name))')
+    .select('presence, session:sessions(date, subjects(name))')
     .eq('student_id', student.id)
-    .gte('session.date', monday.toISOString().slice(0, 10))
-    .lte('session.date', sunday.toISOString().slice(0, 10));
+    .order('created_at', { ascending: false })
+    .limit(200);
 
-  const valid = (tracking || []).filter((t) => t.session);
+  const mondayISO = monday.toISOString().slice(0, 10);
+  const sundayISO = sunday.toISOString().slice(0, 10);
+  const valid = (tracking || []).filter(
+    (t) => t.session?.date && t.session.date >= mondayISO && t.session.date <= sundayISO
+  );
   if (valid.length === 0) {
     return `${header('Présence cette semaine', '📅')}\n\nAucune séance enregistrée cette semaine.${footer(parentInfo.school_name)}`;
   }
 
-  const present = valid.filter((t) => t.present).length;
-  const absent = valid.filter((t) => t.absent).length;
-  const late = valid.filter((t) => t.late).length;
+  const present = valid.filter((t) => t.presence === 'present').length;
+  const absent = valid.filter((t) => t.presence === 'absent').length;
+  const late = valid.filter((t) => t.presence === 'late').length;
   const total = valid.length;
   const pct = total > 0 ? Math.round((present / total) * 100) : 0;
 
-  const absences = valid.filter((t) => t.absent).map((t) => `   • ${fmtDate(t.session.date)} — ${t.session.subjects?.name || 'Séance'}`);
+  const absences = valid
+    .filter((t) => t.presence === 'absent')
+    .map((t) => `   • ${fmtDate(t.session.date)} — ${t.session.subjects?.name || 'Séance'}`);
 
   let body = `✅ Présent : *${present}/${total}* (${pct}%)\n`;
   if (late > 0) body += `⏰ Retards : *${late}*\n`;
@@ -199,9 +266,10 @@ export async function getTodaySchedule(student, parentInfo) {
 
 /** P6 — Documents partagés par les profs */
 export async function getRecentDocuments(student, parentInfo) {
+  // La vraie table est `teaching_documents` (l'ancienne `documents` est vide).
   const { data: docs } = await supabaseAdmin
-    .from('documents')
-    .select('id, title, file_name, created_at, subject:subjects(name), uploader:profiles!documents_uploaded_by_fkey(first_name, last_name)')
+    .from('teaching_documents')
+    .select('id, title, file_name, document_type, description, created_at, subjects(name), profiles!teacher_id(first_name, last_name)')
     .eq('class_id', student.class_id)
     .order('created_at', { ascending: false })
     .limit(5);
@@ -210,9 +278,23 @@ export async function getRecentDocuments(student, parentInfo) {
     return `${header('Documents partagés', '📎')}\n\nAucun document partagé pour le moment.${footer(parentInfo.school_name)}`;
   }
 
+  const typeLabel = {
+    cours: 'Cours',
+    exercice: 'Exercice',
+    correction: 'Correction',
+    support: 'Support',
+    devoir: 'Devoir',
+    rattrapage: 'Rattrapage',
+    approfondissement: 'Approfondissement',
+  };
+
   const lines = docs.map((d) => {
-    const teacher = d.uploader ? `${d.uploader.first_name} ${d.uploader.last_name}` : 'Enseignant';
-    return `📄 *${d.title || d.file_name}*\n   👨‍🏫 ${teacher}${d.subject?.name ? ` — ${d.subject.name}` : ''}\n   📅 ${fmtDate(d.created_at)}`;
+    const teacher = d.profiles
+      ? `${d.profiles.first_name || ''} ${d.profiles.last_name || ''}`.trim()
+      : 'Enseignant';
+    const subj = d.subjects?.name ? ` — ${d.subjects.name}` : '';
+    const type = typeLabel[d.document_type] || d.document_type || 'Document';
+    return `📄 *${d.title || d.file_name}*\n   � ${type}${subj}\n   👨‍🏫 ${teacher}\n   📅 ${fmtDate(d.created_at)}`;
   });
 
   return `${header('Documents récents', '📎')}\n\n${lines.join('\n\n')}\n\n_Connectez-vous à l'application pour les télécharger._${footer(parentInfo.school_name)}`;
