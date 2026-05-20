@@ -253,8 +253,26 @@ router.post('/homework', async (req, res) => {
           day: 'numeric', month: 'long', year: 'numeric'
         });
 
+        // Récupérer la / les matière(s) enseignée(s) par le professeur pour
+        // les inclure dans la notification (le formulaire devoir ne demande
+        // pas explicitement la matière, on prend donc celle(s) du prof).
+        let subjectLabel = '';
+        try {
+          const { data: teacherSubjects } = await supabaseAdmin
+            .from('teacher_subjects')
+            .select('subjects(name)')
+            .eq('teacher_id', teacherId);
+          const names = (teacherSubjects || [])
+            .map(ts => ts.subjects?.name)
+            .filter(Boolean);
+          if (names.length > 0) subjectLabel = names.join(', ');
+        } catch (e) {
+          console.warn('[Homework] Impossible de récupérer la matière du prof:', e.message);
+        }
+
         const messageText = `📚 *Nouveau devoir assigné*\n\n` +
           `Classe: *${classInfo?.name || 'N/A'}*\n` +
+          (subjectLabel ? `Matière: *${subjectLabel}*\n` : '') +
           `Type: ${type || 'Devoir'}\n\n` +
           `📝 *${title}*\n` +
           (description ? `${description}\n\n` : '\n') +
