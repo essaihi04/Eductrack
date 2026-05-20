@@ -27,10 +27,13 @@ const CONFIG = {
   // Présence "typing…" avant envoi
   TYPING_MIN_MS: 1_500,
   TYPING_MAX_MS: 4_000,
-  // Quota journalier (warm-up progressif)
-  // J1 doit déjà permettre un usage opérationnel normal (1 bus = ~30 parents,
-  // boarded + dropped + start + arrived = ~120 notifs/jour pour un seul bus).
-  // Valeurs ajustées pour ne pas bloquer le transport scolaire en J1.
+  // Quota journalier — DÉSACTIVÉ (numéros déjà chauffés en production).
+  // La protection anti-ban repose uniquement sur :
+  //   - le délai humain entre messages (waitHumanDelay)
+  //   - la pause forcée après erreur grave (timelock 463, 401, 403)
+  //   - la variation de contenu (zero-width space)
+  // Si besoin de réactiver le warm-up, mettre ENABLE_DAILY_QUOTA à true.
+  ENABLE_DAILY_QUOTA: false,
   WARMUP_DAYS: [80, 150, 250, 400, 600, 800, 1000],
   STEADY_DAILY_LIMIT: 1000,
   // Plage horaire autorisée (heure locale école, 24h)
@@ -188,14 +191,17 @@ export async function checkAllowed(schoolId, { urgent = false } = {}) {
     };
   }
 
-  // Quota journalier — bypass possible pour les notifs urgentes (transport,
-  // alertes opérationnelles) qui sont opt-in par enrôlement à l'école et
-  // ne doivent pas être bloquées par le warm-up.
+  // Quota journalier — désactivé via CONFIG.ENABLE_DAILY_QUOTA.
+  // Les numéros utilisés en production sont déjà chauffés ; le rate-limiting
+  // se fait uniquement via le délai humain entre messages (waitHumanDelay).
+  if (!CONFIG.ENABLE_DAILY_QUOTA) {
+    return { allowed: true };
+  }
+
   const limit = await getDailyLimit(schoolId);
   const dbCount = await getDbCount(schoolId);
   if (dbCount >= limit) {
     if (urgent) {
-      // On laisse passer mais on log pour visibilité
       console.warn(`[anti-ban] Quota dépassé (${dbCount}/${limit}) mais message urgent → autorisé`);
       return { allowed: true, dbCount, limit, overQuota: true };
     }
