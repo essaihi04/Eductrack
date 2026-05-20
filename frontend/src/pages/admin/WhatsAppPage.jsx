@@ -654,27 +654,30 @@ const WhatsAppPage = () => {
     } finally { if (!silent) setQrLoading(false); }
   }, [apiUrl]);
 
+  // Booléen stable : true si on doit poller la connexion (évite que les timers
+  // se réinitialisent à chaque rafraîchissement de sessionStatus).
+  const needsPolling = activeTab === 'connection'
+    && Boolean(sessionStatus?.session)
+    && !sessionStatus?.connected;
+
   // Polling automatique tant que la session n'est pas connectée :
   //  - /session-status toutes les 3s pour détecter la connexion réussie
   //  - /session-qr toutes les 18s pour rafraîchir le QR avant expiration (Baileys
   //    régénère un nouveau QR toutes les ~20s pour sécurité)
   useEffect(() => {
-    if (activeTab !== 'connection') return;
-    if (!sessionStatus?.session) return;
-    if (sessionStatus.connected) return; // déjà connecté, pas besoin de poll
+    if (!needsPolling) return;
 
     const statusTimer = setInterval(() => { fetchStatus(); }, 3000);
-    const qrTimer = setInterval(() => { fetchQR(true); }, 18000);
+    const qrTimer = setInterval(() => { fetchQR(true); }, 15000);
     return () => { clearInterval(statusTimer); clearInterval(qrTimer); };
-  }, [activeTab, sessionStatus?.session, sessionStatus?.connected, fetchStatus, fetchQR]);
+  }, [needsPolling, fetchStatus, fetchQR]);
 
   // Auto-affichage du QR dès qu'une session existe mais n'est pas connectée
   useEffect(() => {
-    if (activeTab !== 'connection') return;
-    if (sessionStatus?.session && !sessionStatus.connected && !qrCode && !qrLoading) {
+    if (needsPolling && !qrCode && !qrLoading) {
       fetchQR(false);
     }
-  }, [activeTab, sessionStatus?.session, sessionStatus?.connected, qrCode, qrLoading, fetchQR]);
+  }, [needsPolling, qrCode, qrLoading, fetchQR]);
 
   const handleCreateSession = async () => {
     if (!newSessionName || !newSessionPhone) { setCreateError('Nom et numéro requis'); return; }
