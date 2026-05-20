@@ -9,6 +9,7 @@ export default defineConfig({
     force: true
   },
   build: {
+    sourcemap: true, // active les sourcemaps pour identifier les crashes en prod
     rollupOptions: {
       output: {
         manualChunks: {

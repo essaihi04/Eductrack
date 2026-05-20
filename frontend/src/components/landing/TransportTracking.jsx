@@ -77,12 +77,16 @@ const TransportTracking = () => {
   }, []);
 
   // Progression du bus (0 → 1) basée sur le temps écoulé
-  const progress = Math.min(elapsed / (LOOP_DURATION - 1), 1);
+  // Garde-fou : si elapsed est NaN/négatif/Infinity, force à 0 → progress=0.
+  const safeElapsed = Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : 0;
+  const progress = Math.max(0, Math.min(safeElapsed / (LOOP_DURATION - 1), 1));
   // Interpolation linéaire entre les waypoints du chemin
-  const segIndex = Math.min(Math.floor(progress * (BUS_PATH.length - 1)), BUS_PATH.length - 2);
-  const segT = (progress * (BUS_PATH.length - 1)) - segIndex;
-  const p0 = BUS_PATH[segIndex];
-  const p1 = BUS_PATH[segIndex + 1];
+  // clamp segIndex dans [0, length-2] pour garantir que p0 et p1 existent toujours
+  const rawSeg = Math.floor(progress * (BUS_PATH.length - 1));
+  const segIndex = Math.max(0, Math.min(rawSeg, BUS_PATH.length - 2));
+  const segT = Math.max(0, Math.min(1, (progress * (BUS_PATH.length - 1)) - segIndex));
+  const p0 = BUS_PATH[segIndex] || BUS_PATH[0];
+  const p1 = BUS_PATH[segIndex + 1] || BUS_PATH[BUS_PATH.length - 1] || p0;
   const busX = p0.x + (p1.x - p0.x) * segT;
   const busY = p0.y + (p1.y - p0.y) * segT;
   // Angle du bus pour l'orientation
