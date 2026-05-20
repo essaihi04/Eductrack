@@ -661,14 +661,16 @@ const WhatsAppPage = () => {
     && !sessionStatus?.connected;
 
   // Polling automatique tant que la session n'est pas connectée :
-  //  - /session-status toutes les 3s pour détecter la connexion réussie
-  //  - /session-qr toutes les 18s pour rafraîchir le QR avant expiration (Baileys
-  //    régénère un nouveau QR toutes les ~20s pour sécurité)
+  //  - /session-status toutes les 2s pour détecter la connexion réussie
+  //  - /session-qr toutes les 3s pour suivre les rotations Baileys (~20s) ET
+  //    surtout pour récupérer immédiatement le nouveau QR après le restart
+  //    post-scan (WhatsApp demande "Scannez à nouveau" pendant le restart
+  //    Baileys et envoie un nouveau QR ~1s après).
   useEffect(() => {
     if (!needsPolling) return;
 
-    const statusTimer = setInterval(() => { fetchStatus(); }, 3000);
-    const qrTimer = setInterval(() => { fetchQR(true); }, 15000);
+    const statusTimer = setInterval(() => { fetchStatus(); }, 2000);
+    const qrTimer = setInterval(() => { fetchQR(true); }, 3000);
     return () => { clearInterval(statusTimer); clearInterval(qrTimer); };
   }, [needsPolling, fetchStatus, fetchQR]);
 
