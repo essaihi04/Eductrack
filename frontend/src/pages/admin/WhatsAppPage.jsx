@@ -2408,20 +2408,33 @@ const WhatsAppPage = () => {
                         )}
 
                         {/* Charts */}
-                        {reportPeriodData?.dailyEvolution?.length > 1 && (
+                        {(() => {
+                          // Sanitize chart data : recharts crash ("reading 'x'") quand
+                          // les dataKey sont undefined/null ou la date est manquante.
+                          const safeDaily = (reportPeriodData?.dailyEvolution || [])
+                            .filter(d => d && typeof d.date === 'string' && d.date.length >= 5)
+                            .map(d => ({
+                              date: d.date.substring(5),
+                              presenceRate: Number.isFinite(+d.presenceRate) ? +d.presenceRate : 0,
+                              homeworkRate: Number.isFinite(+d.homeworkRate) ? +d.homeworkRate : 0,
+                              avgParticipation: Number.isFinite(+d.avgParticipation) ? +d.avgParticipation : 0,
+                              avgDiscipline: Number.isFinite(+d.avgDiscipline) ? +d.avgDiscipline : 0,
+                            }));
+                          if (safeDaily.length <= 1) return null;
+                          return (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {/* Evolution line chart */}
                             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                               <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-500" /> Évolution quotidienne</h4>
                               <ResponsiveContainer width="100%" height={250}>
-                                <LineChart data={reportPeriodData.dailyEvolution.map(d => ({ ...d, date: d.date.substring(5) }))}>
+                                <LineChart data={safeDaily}>
                                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                                   <YAxis tick={{ fontSize: 10 }} />
                                   <Tooltip contentStyle={{ fontSize: 12 }} />
                                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                                  <Line type="monotone" dataKey="presenceRate" name="Présence %" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
-                                  <Line type="monotone" dataKey="homeworkRate" name="Devoirs %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                  <Line type="monotone" dataKey="presenceRate" name="Présence %" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} connectNulls />
+                                  <Line type="monotone" dataKey="homeworkRate" name="Devoirs %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} connectNulls />
                                 </LineChart>
                               </ResponsiveContainer>
                             </div>
@@ -2430,19 +2443,20 @@ const WhatsAppPage = () => {
                             <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                               <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-purple-500" /> Participation & Discipline</h4>
                               <ResponsiveContainer width="100%" height={250}>
-                                <BarChart data={reportPeriodData.dailyEvolution.map(d => ({ ...d, date: d.date.substring(5) }))}>
+                                <BarChart data={safeDaily}>
                                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                                   <YAxis tick={{ fontSize: 10 }} domain={[0, 5]} />
                                   <Tooltip contentStyle={{ fontSize: 12 }} />
                                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                                  <Bar dataKey="avgParticipation" name="Participation" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                                  <Bar dataKey="avgDiscipline" name="Discipline" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                                  <Bar dataKey="avgParticipation" name="Participation" fill="#8b5cf6" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                                  <Bar dataKey="avgDiscipline" name="Discipline" fill="#6366f1" radius={[4, 4, 0, 0]} isAnimationActive={false} />
                                 </BarChart>
                               </ResponsiveContainer>
                             </div>
                           </div>
-                        )}
+                          );
+                        })()}
 
                         {/* Subject radar chart + subject stats table */}
                         {reportPeriodData?.subjectStats && Object.keys(reportPeriodData.subjectStats).length > 0 && (
@@ -2452,13 +2466,19 @@ const WhatsAppPage = () => {
                               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-indigo-500" /> Profil par matière</h4>
                                 <ResponsiveContainer width="100%" height={280}>
-                                  <RadarChart data={Object.entries(reportPeriodData.subjectStats).map(([name, s]) => ({
-                                    subject: name.length > 10 ? name.substring(0, 10) + '...' : name,
-                                    participation: s.avgParticipation || 0,
-                                    discipline: s.avgDiscipline || 0,
-                                    miniEval: s.avgMiniEval ? s.avgMiniEval / 2 : 0,
-                                    presence: s.totalTracked > 0 ? (s.presence.present / s.totalTracked) * 5 : 0
-                                  }))}>
+                                  <RadarChart data={Object.entries(reportPeriodData.subjectStats)
+                                    .filter(([name, s]) => name && s)
+                                    .map(([name, s]) => {
+                                      const tot = Number(s?.totalTracked) || 0;
+                                      const pres = Number(s?.presence?.present) || 0;
+                                      return {
+                                        subject: name.length > 10 ? name.substring(0, 10) + '...' : name,
+                                        participation: Number.isFinite(+s?.avgParticipation) ? +s.avgParticipation : 0,
+                                        discipline: Number.isFinite(+s?.avgDiscipline) ? +s.avgDiscipline : 0,
+                                        miniEval: Number.isFinite(+s?.avgMiniEval) ? (+s.avgMiniEval) / 2 : 0,
+                                        presence: tot > 0 ? (pres / tot) * 5 : 0,
+                                      };
+                                    })}>
                                     <PolarGrid />
                                     <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10 }} />
                                     <PolarRadiusAxis angle={30} domain={[0, 5]} tick={{ fontSize: 9 }} />
