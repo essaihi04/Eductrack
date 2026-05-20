@@ -158,7 +158,8 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         const sinceRestart = Date.now() - (entry.lastRestartAt || 0);
         if (sinceRestart < 8000 && !entry.loggedOutRetried) {
           entry.loggedOutRetried = true;
-          entry.status = 'connecting';
+          entry.status = 'disconnected'; // ⚠️ permet à startSession() de recréer le socket
+          entry.sock = null;
           console.log(`[baileys][${schoolId}] ⚠️ 401 post-restart (${sinceRestart}ms) — retry avec délai prolongé (race creds.update?)`);
           setTimeout(() => startSession(schoolId, { onIncoming }), 3000);
           return;
@@ -190,7 +191,8 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       // 250ms était trop court → race condition → 401 au restart.
       if (isRestartRequired) {
         console.log(`[baileys][${schoolId}] 🔄 restartRequired : reconnexion dans 1500ms pour finaliser le pairing`);
-        entry.status = 'connecting';
+        entry.status = 'disconnected'; // ⚠️ important : permet à startSession() de re-créer un socket
+        entry.sock = null;             // libère l'ancien socket fermé
         entry.reconnectAttempts = 0;
         entry.lastRestartAt = Date.now();
         entry.loggedOutRetried = false;
@@ -199,6 +201,8 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       }
 
       // Reconnexion avec backoff pour les vraies erreurs
+      entry.status = 'disconnected';
+      entry.sock = null;
       entry.reconnectAttempts += 1;
       const delay = reconnectDelay(entry.reconnectAttempts);
       console.log(`[baileys][${schoolId}] Reconnexion dans ${delay}ms (tentative ${entry.reconnectAttempts})`);
