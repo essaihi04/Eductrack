@@ -13,8 +13,64 @@
 
 import { handleIncomingWhatsAppMessage as v2Handler, handleBaileysIncoming as v2Baileys } from './whatsapp/chatbot/index.js';
 import { sendText, sendMediaBuffer, getStatus } from './whatsapp/index.js';
+import { supabaseAdmin } from '../config/supabase.js';
 import path from 'path';
 import fs from 'fs';
+
+// Log un envoi de message WhatsApp dans whatsapp_messages + whatsapp_message_recipients
+// pour que l'admin puisse le voir dans l'historique. Toute erreur ici est silencieuse
+// (le log ne doit pas casser l'envoi réel).
+async function logWhatsAppSend({
+  schoolId,
+  phoneNumber,
+  content,
+  messageType = 'text',
+  mediaUrl = null,
+  fileName = null,
+  category = 'general',
+  senderId = null,
+  parentId = null,
+  recipientFilter = null,
+  status, // 'sent' | 'failed'
+  errorMessage = null,
+}) {
+  if (!schoolId) return;
+  try {
+    const { data: msgLog } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .insert({
+        school_id: schoolId,
+        sent_by: senderId,
+        message_type: messageType,
+        content: content || '',
+        media_url: mediaUrl,
+        file_name: fileName,
+        category,
+        recipient_filter: recipientFilter,
+        total_recipients: 1,
+        sent_count: status === 'sent' ? 1 : 0,
+        failed_count: status === 'failed' ? 1 : 0,
+        status: status === 'sent' ? 'completed' : 'failed',
+      })
+      .select('id')
+      .single();
+
+    if (msgLog?.id) {
+      await supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .insert({
+          message_id: msgLog.id,
+          phone_e164: phoneNumber,
+          parent_id: parentId,
+          status,
+          sent_at: status === 'sent' ? new Date().toISOString() : null,
+          error_message: errorMessage,
+        });
+    }
+  } catch (e) {
+    console.warn('[whatsapp][log] Échec log message:', e.message);
+  }
+}
 
 // Adapter pour l'ancien webhook Wasender (compat) — le webhook n'est plus utilisé
 // avec Baileys, mais on garde l'export pour ne pas casser les imports legacy.
@@ -30,33 +86,66 @@ export const handleBaileysIncoming = v2Baileys;
 
 /**
  * Envoyer une réponse WhatsApp simple — utilisé par teacher / homework / controls
- * routes pour notifier les parents.
+ * routes pour notifier les parents. Enregistre automatiquement le log dans
+ * whatsapp_messages pour visibilité côté admin.
+ *
+ * @param {object} opts  { category, senderId, parentId, recipientFilter }
  */
-export async function sendWhatsAppResponse(phoneNumber, message, schoolId) {
+export async function sendWhatsAppResponse(phoneNumber, message, schoolId, opts = {}) {
   if (!getStatus(schoolId).connected) {
     console.error('[whatsapp] Pas de session active pour school', schoolId);
+    await logWhatsAppSend({
+      schoolId, phoneNumber, content: message, messageType: 'text',
+      category: opts.category, senderId: opts.senderId, parentId: opts.parentId,
+      recipientFilter: opts.recipientFilter,
+      status: 'failed', errorMessage: 'Session WhatsApp non connectée',
+    });
     return false;
   }
   const result = await sendText(schoolId, phoneNumber, message);
+  await logWhatsAppSend({
+    schoolId, phoneNumber, content: message, messageType: 'text',
+    category: opts.category, senderId: opts.senderId, parentId: opts.parentId,
+    recipientFilter: opts.recipientFilter,
+    status: result.success ? 'sent' : 'failed',
+    errorMessage: result.success ? null : (result.message || 'Erreur envoi'),
+  });
   return !!result.success;
 }
 
 /**
  * Envoyer un fichier (PDF, image, etc.) — utilisé par documents.routes.
+ * Enregistre automatiquement le log dans whatsapp_messages pour visibilité admin.
+ *
+ * @param {object} opts  { category, senderId, parentId, recipientFilter, mediaUrl }
  */
-export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId) {
+export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId, opts = {}) {
+  let type = 'document';
+  let fileName = path.basename(filePath || 'file');
   try {
     if (!getStatus(schoolId).connected) {
       console.error('[whatsapp] Pas de session active pour school', schoolId);
+      await logWhatsAppSend({
+        schoolId, phoneNumber, content: caption || '', messageType: 'document',
+        mediaUrl: opts.mediaUrl, fileName,
+        category: opts.category, senderId: opts.senderId, parentId: opts.parentId,
+        recipientFilter: opts.recipientFilter,
+        status: 'failed', errorMessage: 'Session WhatsApp non connectée',
+      });
       return false;
     }
     if (!fs.existsSync(filePath)) {
       console.error('[whatsapp] Fichier introuvable:', filePath);
+      await logWhatsAppSend({
+        schoolId, phoneNumber, content: caption || '', messageType: 'document',
+        mediaUrl: opts.mediaUrl, fileName,
+        category: opts.category, senderId: opts.senderId, parentId: opts.parentId,
+        status: 'failed', errorMessage: 'Fichier introuvable',
+      });
       return false;
     }
 
     const ext = path.extname(filePath).toLowerCase().slice(1);
-    let type = 'document';
     let mimetype = 'application/octet-stream';
 
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
@@ -72,7 +161,6 @@ export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId)
     }
 
     const buffer = fs.readFileSync(filePath);
-    const fileName = path.basename(filePath);
 
     const result = await sendMediaBuffer(schoolId, phoneNumber, buffer, {
       type,
@@ -80,9 +168,24 @@ export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId)
       mimetype,
       caption,
     });
+
+    await logWhatsAppSend({
+      schoolId, phoneNumber, content: caption || '', messageType: type,
+      mediaUrl: opts.mediaUrl, fileName,
+      category: opts.category, senderId: opts.senderId, parentId: opts.parentId,
+      recipientFilter: opts.recipientFilter,
+      status: result.success ? 'sent' : 'failed',
+      errorMessage: result.success ? null : (result.message || 'Erreur envoi fichier'),
+    });
     return !!result.success;
   } catch (e) {
     console.error('[whatsapp] Erreur envoi fichier:', e);
+    await logWhatsAppSend({
+      schoolId, phoneNumber, content: caption || '', messageType: type,
+      mediaUrl: opts.mediaUrl, fileName,
+      category: opts.category, senderId: opts.senderId, parentId: opts.parentId,
+      status: 'failed', errorMessage: e.message || 'Erreur envoi fichier',
+    });
     return false;
   }
 }

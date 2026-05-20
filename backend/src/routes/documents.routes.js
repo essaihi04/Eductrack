@@ -517,7 +517,17 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
                 const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
 
                 // Envoyer le fichier avec la légende
-                const fileSent = await sendWhatsAppFile(e164Phone, req.file.path, messageCaption, schoolId);
+                const fileSent = await sendWhatsAppFile(e164Phone, req.file.path, messageCaption, schoolId, {
+                  category: 'pedagogical',
+                  senderId: req.user.id,
+                  recipientFilter: {
+                    event: 'document_shared',
+                    document_id: createdDoc?.id || null,
+                    document_title: title,
+                    document_type: documentType,
+                    class_id: targetClassId,
+                  },
+                });
 
                 console.log(`[Documents][${requestId}] Notification document parent`, {
                   classId: targetClassId,

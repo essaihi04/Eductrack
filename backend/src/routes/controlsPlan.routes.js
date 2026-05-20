@@ -238,7 +238,17 @@ router.post('/controls-plan', authenticateUser, async (req, res) => {
             if (!phone || sentPhones.has(phone)) continue;
             sentPhones.add(phone);
             const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-            await sendWhatsAppResponse(e164Phone, messageText, schoolId);
+            await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
+              category: 'pedagogical',
+              senderId: teacher_id,
+              recipientFilter: {
+                event: 'control_planned',
+                control_id: control?.id || null,
+                control_name: name,
+                class_id: class_id || null,
+                date: date || null,
+              },
+            });
             console.log(`[Controls] Notification contrôle envoyée au parent (${e164Phone})`);
           }
         } else {

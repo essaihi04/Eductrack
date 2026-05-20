@@ -728,7 +728,17 @@ router.post('/session-tracking', async (req, res) => {
             const parentPhone = link.profiles?.phone;
             if (parentPhone) {
               const e164Phone = parentPhone.startsWith('+') ? parentPhone : `+${parentPhone}`;
-              await sendWhatsAppResponse(e164Phone, message, schoolId);
+              await sendWhatsAppResponse(e164Phone, message, schoolId, {
+                category: 'pedagogical',
+                senderId: req.user.id,
+                recipientFilter: {
+                  event: 'absence_notification',
+                  student_id,
+                  student_name: studentName,
+                  session_id,
+                  date: sessionInfo.date,
+                },
+              });
               console.log(`[Tracking] Notification absence envoyée au parent (${e164Phone}) pour l'élève ${studentName}`);
             }
           }

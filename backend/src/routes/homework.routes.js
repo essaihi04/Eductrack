@@ -268,7 +268,16 @@ router.post('/homework', async (req, res) => {
           if (!phone || sentPhones.has(phone)) continue;
           sentPhones.add(phone);
           const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-          const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId);
+          const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
+            category: 'pedagogical',
+            senderId: req.user.id,
+            recipientFilter: {
+              event: 'homework_assigned',
+              homework_id: homework?.id || null,
+              homework_title: title,
+              class_id: classId || null,
+            },
+          });
           if (sent) {
             console.log(`[Homework] Notification devoir envoyée au parent (${e164Phone})`);
           } else {
