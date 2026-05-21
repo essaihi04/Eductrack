@@ -19,7 +19,7 @@ import { sendText } from '../index.js';
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
-import { answerWithAI, detectSpecialCommand } from './ai.js';
+import { answerWithAI, detectSpecialCommand, menuFooterForText } from './ai.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -474,7 +474,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
         sendText(
           parentInfo.school_id,
           phone,
-          `_Tapez *menu* pour revenir aux options ou continuez à poser vos questions._`,
+          menuFooterForText(text),
           { urgent: true }
         );
       }, 1500);
