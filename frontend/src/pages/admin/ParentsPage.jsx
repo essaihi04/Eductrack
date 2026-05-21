@@ -21,6 +21,8 @@ const ParentsPage = () => {
   const [linkingParentId, setLinkingParentId] = useState(null);
   const [linkStudentId, setLinkStudentId] = useState('');
   const [linkRelationship, setLinkRelationship] = useState('');
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linkClassFilter, setLinkClassFilter] = useState('');
 
   // Edit parent
   const [editingParent, setEditingParent] = useState(null);
@@ -193,6 +195,8 @@ const ParentsPage = () => {
         setLinkingParentId(null);
         setLinkStudentId('');
         setLinkRelationship('');
+        setLinkSearch('');
+        setLinkClassFilter('');
         await fetchData();
       } else {
         const err = await res.json();
@@ -1052,47 +1056,144 @@ const ParentsPage = () => {
 
                       {/* Link student form */}
                       {linkingParentId === parent.id ? (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <select
-                            value={linkStudentId}
-                            onChange={e => setLinkStudentId(e.target.value)}
-                            className="px-2 py-1.5 border rounded-lg bg-background text-sm flex-1 min-w-[200px]"
-                          >
-                            <option value="">-- Sélectionner un élève --</option>
-                            {students
+                        <div className="mt-3 border rounded-xl bg-background shadow-sm overflow-hidden">
+                          {/* Header */}
+                          <div className="px-3 py-2.5 bg-primary/5 border-b flex items-center justify-between">
+                            <span className="text-sm font-semibold text-primary flex items-center gap-1.5">
+                              <UserPlus className="w-4 h-4" />
+                              Associer un élève
+                            </span>
+                            <button
+                              onClick={() => { setLinkingParentId(null); setLinkStudentId(''); setLinkRelationship(''); setLinkSearch(''); setLinkClassFilter(''); }}
+                              className="p-1 rounded hover:bg-accent text-muted-foreground"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Filters */}
+                          <div className="px-3 pt-3 pb-2 flex gap-2 flex-wrap">
+                            <div className="relative flex-1 min-w-[160px]">
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                              <input
+                                autoFocus
+                                type="text"
+                                placeholder="Nom ou prénom..."
+                                value={linkSearch}
+                                onChange={e => setLinkSearch(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 border rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                              />
+                            </div>
+                            <select
+                              value={linkClassFilter}
+                              onChange={e => setLinkClassFilter(e.target.value)}
+                              className="px-2 py-1.5 border rounded-lg text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            >
+                              <option value="">Toutes les classes</option>
+                              {classes.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Student list */}
+                          {(() => {
+                            const q = linkSearch.trim().toLowerCase();
+                            const filtered = students
                               .filter(s => !childrenList.some(c => c.id === s.id))
-                              .map(s => {
-                                const cls = classes.find(c => c.id === s.class_id);
-                                return (
-                                  <option key={s.id} value={s.id}>
-                                    {s.first_name} {s.last_name}{cls ? ` (${cls.name})` : ''}
-                                  </option>
-                                );
-                              })}
-                          </select>
-                          <select
-                            value={linkRelationship}
-                            onChange={e => setLinkRelationship(e.target.value)}
-                            className="px-2 py-1.5 border rounded-lg bg-background text-sm"
-                          >
-                            <option value="">Relation</option>
-                            <option value="père">Père</option>
-                            <option value="mère">Mère</option>
-                            <option value="tuteur">Tuteur</option>
-                          </select>
-                          <button
-                            onClick={() => handleLinkStudent(parent.id)}
-                            disabled={!linkStudentId}
-                            className="px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm disabled:opacity-50"
-                          >
-                            Associer
-                          </button>
-                          <button
-                            onClick={() => { setLinkingParentId(null); setLinkStudentId(''); setLinkRelationship(''); }}
-                            className="px-3 py-1.5 border rounded-lg text-sm hover:bg-accent"
-                          >
-                            Annuler
-                          </button>
+                              .filter(s => !linkClassFilter || s.class_id === linkClassFilter)
+                              .filter(s => !q || `${s.first_name} ${s.last_name}`.toLowerCase().includes(q));
+
+                            const grouped = {};
+                            filtered.forEach(s => {
+                              const cls = classes.find(c => c.id === s.class_id);
+                              const key = cls ? cls.name : 'Sans classe';
+                              if (!grouped[key]) grouped[key] = [];
+                              grouped[key].push({ ...s, _cls: cls });
+                            });
+
+                            const avatarColors = ['bg-blue-100 text-blue-700','bg-purple-100 text-purple-700','bg-green-100 text-green-700','bg-orange-100 text-orange-700','bg-pink-100 text-pink-700','bg-teal-100 text-teal-700'];
+                            const colorFor = (name) => {
+                              let h = 0;
+                              for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+                              return avatarColors[Math.abs(h) % avatarColors.length];
+                            };
+
+                            const highlight = (text) => {
+                              if (!q) return text;
+                              const idx = text.toLowerCase().indexOf(q);
+                              if (idx === -1) return text;
+                              return <>{text.slice(0,idx)}<mark className="bg-yellow-200 rounded px-0.5">{text.slice(idx, idx+q.length)}</mark>{text.slice(idx+q.length)}</>;
+                            };
+
+                            return filtered.length === 0 ? (
+                              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                <Search className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                                Aucun élève trouvé
+                              </div>
+                            ) : (
+                              <div className="max-h-52 overflow-y-auto px-2 pb-2 divide-y">
+                                {Object.entries(grouped).map(([clsName, slist]) => (
+                                  <div key={clsName}>
+                                    <div className="px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide sticky top-0 bg-background/95 backdrop-blur-sm">
+                                      {clsName} <span className="font-normal text-xs">({slist.length})</span>
+                                    </div>
+                                    {slist.map(s => {
+                                      const initials = `${s.first_name?.[0] || ''}${s.last_name?.[0] || ''}`.toUpperCase();
+                                      const color = colorFor(`${s.first_name}${s.last_name}`);
+                                      const isSelected = linkStudentId === s.id;
+                                      return (
+                                        <button
+                                          key={s.id}
+                                          type="button"
+                                          onClick={() => setLinkStudentId(isSelected ? '' : s.id)}
+                                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+                                            isSelected
+                                              ? 'bg-primary text-primary-foreground'
+                                              : 'hover:bg-accent'
+                                          }`}
+                                        >
+                                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                                            isSelected ? 'bg-white/20 text-white' : color
+                                          }`}>
+                                            {initials}
+                                          </span>
+                                          <span className="flex-1 font-medium">
+                                            {highlight(`${s.first_name} ${s.last_name}`)}
+                                          </span>
+                                          {isSelected && (
+                                            <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded">✓ Sélectionné</span>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
+                          {/* Footer actions */}
+                          <div className="px-3 py-2.5 border-t bg-muted/20 flex items-center gap-2 flex-wrap">
+                            <select
+                              value={linkRelationship}
+                              onChange={e => setLinkRelationship(e.target.value)}
+                              className="px-2 py-1.5 border rounded-lg text-sm bg-background flex-1 min-w-[120px] focus:outline-none focus:ring-2 focus:ring-primary/30"
+                            >
+                              <option value="">Relation...</option>
+                              <option value="père">Père</option>
+                              <option value="mère">Mère</option>
+                              <option value="tuteur">Tuteur</option>
+                            </select>
+                            <button
+                              onClick={() => handleLinkStudent(parent.id)}
+                              disabled={!linkStudentId}
+                              className="px-4 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium disabled:opacity-40 flex items-center gap-1.5"
+                            >
+                              <Link2 className="w-3.5 h-3.5" />
+                              Associer
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <button
