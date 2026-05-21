@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
+import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
 
 const router = express.Router();
 
@@ -609,9 +610,9 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun parent n\'a de numéro WhatsApp' });
     }
 
-    const sessionApiKey = await getSessionApiKey(schoolId);
-    if (!sessionApiKey) {
-      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école' });
+    const waStatus = getStatus(schoolId);
+    if (!waStatus.connected) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école. Connectez le numéro de votre école depuis la page WhatsApp.' });
     }
 
     const schoolDomain = await getSchoolEmailDomain(schoolId);
@@ -684,16 +685,9 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
 
         if (!recipientLog) { errorCount++; continue; }
 
-        const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${sessionApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ to: parent.phone_e164, text: messageText }),
-        });
+        const waResult = await sendText(schoolId, parent.phone_e164, messageText, { urgent: true });
 
-        if (response.ok) {
+        if (waResult.success) {
           await supabaseAdmin
             .from('whatsapp_message_recipients')
             .update({ status: 'sent', sent_at: new Date().toISOString() })
@@ -705,11 +699,10 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
           sentCount++;
           sentDetails.push({ parent_id: parent.id, email: newEmail });
         } else {
-          const txt = await response.text().catch(() => '');
-          console.error('[Parents WhatsApp] send failed', parent.id, response.status, txt?.slice(0, 200));
+          console.error('[Parents WhatsApp] send failed', parent.id, waResult.message);
           await supabaseAdmin
             .from('whatsapp_message_recipients')
-            .update({ status: 'failed', error_message: 'Échec envoi API' })
+            .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
             .eq('id', recipientLog.id);
           await supabaseAdmin
             .from('whatsapp_messages')
@@ -717,8 +710,6 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
             .eq('id', msgLog.id);
           errorCount++;
         }
-
-        await waitWasenderInterval();
       } catch (err) {
         console.error('Erreur pour parent', parent.id, err);
         errorCount++;
@@ -1286,9 +1277,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
           continue;
         }
 
-        const sessionApiKey = await getSessionApiKey(schoolId);
-
-        if (!sessionApiKey) {
+        if (!getStatus(schoolId).connected) {
           errorCount++;
           continue;
         }
@@ -1348,19 +1337,9 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 .single();
 
               if (recipientLog.data) {
-                const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${sessionApiKey}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({
-                    to: contact.phone_e164,
-                    text: messageText
-                  })
-                });
+                const waResult = await sendText(schoolId, contact.phone_e164, messageText, { urgent: true });
 
-                if (response.ok) {
+                if (waResult.success) {
                   await supabaseAdmin
                     .from('whatsapp_message_recipients')
                     .update({ status: 'sent', sent_at: new Date().toISOString() })
@@ -1369,11 +1348,9 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 } else {
                   await supabaseAdmin
                     .from('whatsapp_message_recipients')
-                    .update({ status: 'failed', error_message: 'Échec envoi API' })
+                    .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
                     .eq('id', recipientLog.data.id);
                 }
-
-                await waitWasenderInterval();
               }
             } catch (err) {
               console.error('Erreur envoi WhatsApp:', err);
@@ -2514,10 +2491,9 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun professeur n\'a de numéro de téléphone' });
     }
 
-    const sessionApiKey = await getSessionApiKey(schoolId);
-
-    if (!sessionApiKey) {
-      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école' });
+    const waStatusTeacher = getStatus(schoolId);
+    if (!waStatusTeacher.connected) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école. Connectez le numéro de votre école depuis la page WhatsApp.' });
     }
 
     let sentCount = 0;
@@ -2605,65 +2581,38 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             .single();
 
           if (recipientLog.data) {
-            // Préparer le payload Wasender selon le type
-            let wasenderPayload = { to: phoneNumber };
-            
+            // Envoyer via Baileys selon le type de message
+            let waResult;
             if (messageType === 'image' && mediaUrl) {
-              wasenderPayload.imageUrl = mediaUrl;
-              if (messageText) wasenderPayload.text = messageText;
+              waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '', { urgent: true });
             } else if (messageType === 'document' && mediaUrl) {
-              wasenderPayload.documentUrl = mediaUrl;
-              if (fileName) wasenderPayload.fileName = fileName;
-              if (messageText) wasenderPayload.text = messageText;
+              waResult = await sendDocument(schoolId, phoneNumber, mediaUrl, fileName || 'document.pdf', messageText || '', undefined, { urgent: true });
             } else {
-              wasenderPayload.text = messageText;
+              waResult = await sendText(schoolId, phoneNumber, messageText, { urgent: true });
             }
 
-            // Envoyer le message
-            const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${sessionApiKey}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(wasenderPayload)
-            });
-
-            if (response.ok) {
+            if (waResult.success) {
               await supabaseAdmin
                 .from('whatsapp_message_recipients')
                 .update({ status: 'sent', sent_at: new Date().toISOString() })
                 .eq('id', recipientLog.data.id);
-              
               await supabaseAdmin
                 .from('whatsapp_messages')
                 .update({ status: 'sent', sent_count: 1 })
                 .eq('id', msgLog.id);
-              
               sentCount++;
             } else {
-              const waErrorText = await response.text().catch(() => '');
-              console.error('[Teachers WhatsApp] API send failed:', {
-                teacherId: teacher.id,
-                phoneNumber,
-                status: response.status,
-                body: waErrorText?.substring(0, 300)
-              });
-
+              console.error('[Teachers WhatsApp] send failed:', { teacherId: teacher.id, phoneNumber, error: waResult.message });
               await supabaseAdmin
                 .from('whatsapp_message_recipients')
-                .update({ status: 'failed', error_message: 'Échec envoi API' })
+                .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
                 .eq('id', recipientLog.data.id);
-              
               await supabaseAdmin
                 .from('whatsapp_messages')
                 .update({ status: 'failed', failed_count: 1 })
                 .eq('id', msgLog.id);
-              
               errorCount++;
             }
-
-            await waitWasenderInterval();
           }
         }
       } catch (err) {
