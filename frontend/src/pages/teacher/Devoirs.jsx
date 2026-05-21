@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, BookOpen, Calendar, Users, Trash2, Edit2, X, Check, PieChart, Target, TrendingUp, Clock } from 'lucide-react';
+import { Plus, BookOpen, Calendar, Users, Trash2, Edit2, X, Check, PieChart, Target, TrendingUp, Clock, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -13,6 +13,9 @@ const Devoirs = () => {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingHomework, setEditingHomework] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  // toast: { type: 'success' | 'error', message: string } | null
+  const [toast, setToast] = useState(null);
   
   const [formData, setFormData] = useState({
     title: '',
@@ -100,12 +103,15 @@ const Devoirs = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return; // anti double-clic
+    setSubmitting(true);
+    setToast(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
       const method = editingHomework ? 'PUT' : 'POST';
-      const url = editingHomework 
+      const url = editingHomework
         ? `${apiUrl}/api/teacher/homework/${editingHomework.id}`
         : `${apiUrl}/api/teacher/homework`;
 
@@ -127,13 +133,44 @@ const Devoirs = () => {
       });
 
       if (res.ok) {
+        const wasEdit = !!editingHomework;
+        const targetCount = formData.targetType === 'group'
+          ? formData.studentIds.length
+          : (students.length || null);
         await fetchHomework();
         resetForm();
+        setToast({
+          type: 'success',
+          message: wasEdit
+            ? '✅ Devoir modifié avec succès.'
+            : `✅ Devoir envoyé${targetCount ? ` à ${targetCount} élève${targetCount > 1 ? 's' : ''}` : ''} avec succès.`,
+        });
+      } else {
+        let detail = '';
+        try { const j = await res.json(); detail = j?.error || j?.message || ''; } catch {}
+        setToast({
+          type: 'error',
+          message: `❌ Échec de l'envoi du devoir${detail ? ` : ${detail}` : ''}.`,
+        });
       }
     } catch (error) {
       console.error('Error saving homework:', error);
+      setToast({
+        type: 'error',
+        message: `❌ Erreur réseau : ${error.message || 'connexion impossible.'}`,
+      });
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  // Auto-dismiss du toast après 4s (succès) ou 6s (erreur)
+  useEffect(() => {
+    if (!toast) return;
+    const ms = toast.type === 'success' ? 4000 : 6000;
+    const t = setTimeout(() => setToast(null), ms);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const handleEdit = (homework) => {
     setEditingHomework(homework);
@@ -263,6 +300,40 @@ const Devoirs = () => {
 
   return (
     <div className="p-8 space-y-6">
+      {/* Toast feedback (succès / erreur) */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-[60] animate-in slide-in-from-top-4">
+          <div
+            className={`flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border min-w-[280px] max-w-md ${
+              toast.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            {toast.type === 'success'
+              ? <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600" />
+              : <AlertCircle className="w-5 h-5 shrink-0 text-red-600" />}
+            <p className="text-sm font-medium flex-1">{toast.message}</p>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="text-current opacity-60 hover:opacity-100"
+              aria-label="Fermer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Animation barre de progression indetermine */}
+      <style>{`
+        @keyframes progress-slide {
+          0% { transform: translateX(-100%); }
+          50% { transform: translateX(150%); }
+          100% { transform: translateX(400%); }
+        }
+      `}</style>
       {/* En-tête */}
       <div className="flex items-center justify-between">
         <div>
@@ -389,12 +460,24 @@ const Devoirs = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowForm(false)}
-                  className="text-sm text-gray-500 hover:text-gray-700"
+                  onClick={() => !submitting && setShowForm(false)}
+                  disabled={submitting}
+                  className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Fermer
                 </button>
               </CardHeader>
+              {submitting && (
+                <div className="px-6 -mt-2 pb-2">
+                  <div className="flex items-center gap-2 text-sm text-blue-700 mb-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{editingHomework ? 'Mise à jour du devoir…' : 'Envoi du devoir aux élèves…'}</span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-blue-100 overflow-hidden">
+                    <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 animate-[progress_1.2s_ease-in-out_infinite]" style={{ animation: 'progress-slide 1.2s ease-in-out infinite' }} />
+                  </div>
+                </div>
+              )}
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -539,14 +622,23 @@ const Devoirs = () => {
               <div className="flex gap-2">
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={submitting}
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition"
                 >
-                  {editingHomework ? 'Modifier' : 'Créer'}
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      {editingHomework ? 'Modification…' : 'Envoi en cours…'}
+                    </>
+                  ) : (
+                    editingHomework ? 'Modifier' : 'Créer et envoyer'
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+                  disabled={submitting}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Annuler
                 </button>
