@@ -12,7 +12,6 @@
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@supabase/supabase-js": "^2.90.1",
-    "arabic-persian-reshaper": "^1.0.1",
     "baileys": "^7.0.0-rc11",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

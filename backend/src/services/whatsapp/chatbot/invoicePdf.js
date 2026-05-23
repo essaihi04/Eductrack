@@ -2,16 +2,14 @@
  * Génération d'une facture PDF (pdfkit) destinée à être envoyée
  * en pièce jointe sur WhatsApp.
  *
- * NOTE arabe : pdfkit n'effectue pas le RTL/shaping arabe. Les noms en
- * arabe seront tout de même rendus glyphe par glyphe (lisibles pour la
- * plupart des prénoms simples). Pour un rendu parfait, il faudrait
- * embarquer une police Naskh + arabic-reshaper + bidi-js.
+ * Support arabe : la police Noto Naskh Arabic est embarquée, et les features
+ * OpenType `rtla` + `rclt` sont activées pour que fontkit (utilisé en interne
+ * par pdfkit) applique automatiquement le shaping et l'ordre RTL.
  */
 
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import ArabicReshaper from 'arabic-persian-reshaper';
 import { supabaseAdmin } from '../../../config/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,51 +23,11 @@ function hasArabic(text) {
   return ARABIC_RE.test(String(text || ''));
 }
 
-/**
- * Prépare un texte arabe pour rendu PDF :
- * 1. Reshape (formes initiale/médiane/finale/isolée)
- * 2. Inversion (pdfkit pose les glyphes LTR, l'arabe se lit RTL)
- * Pour les chaînes mixtes (FR + AR), on segmente et on inverse uniquement les
- * runs arabes, en plaçant les runs latins à leur position visuelle.
- */
-function shapeArabic(input) {
-  const text = String(input || '');
-  if (!hasArabic(text)) return text;
-
-  // Découpage en runs : arabe vs non-arabe
-  const runs = [];
-  let buffer = '';
-  let mode = null; // 'ar' | 'lat' | null
-  for (const ch of text) {
-    const isAr = ARABIC_RE.test(ch);
-    const m = isAr ? 'ar' : 'lat';
-    if (mode === null) { mode = m; buffer = ch; }
-    else if (m === mode) { buffer += ch; }
-    else {
-      runs.push({ mode, text: buffer });
-      mode = m; buffer = ch;
-    }
-  }
-  if (buffer) runs.push({ mode, text: buffer });
-
-  // Reshape chaque run arabe + inversion locale
-  const reshapedRuns = runs.map((r) => {
-    if (r.mode !== 'ar') return r;
-    const reshaped = ArabicReshaper.ArabicShaper.convertArabic(r.text);
-    // Inversion en respectant les paires de surrogates / graphèmes simples
-    const reversed = Array.from(reshaped).reverse().join('');
-    return { mode: 'ar', text: reversed };
-  });
-
-  // Si on a une majorité arabe et la chaîne entière est principalement RTL,
-  // on inverse aussi l'ordre des runs pour le placement visuel global.
-  const arChars = runs.filter(r => r.mode === 'ar').reduce((s, r) => s + r.text.length, 0);
-  const totalChars = runs.reduce((s, r) => s + r.text.length, 0);
-  if (arChars / Math.max(totalChars, 1) >= 0.5) {
-    return reshapedRuns.reverse().map(r => r.text).join('');
-  }
-  return reshapedRuns.map(r => r.text).join('');
-}
+// OpenType features qui activent le shaping arabe correct dans fontkit
+// (utilisé en interne par pdfkit) : 'rtla' = right-to-left alternates,
+// 'rclt' = required contextual alternates. Avec ces features, pdfkit/fontkit
+// applique correctement les ligatures et l'ordre RTL.
+const ARABIC_FEATURES = ['rtla', 'rclt'];
 
 /**
  * Wrapper qui choisit la police selon le contenu et écrit dans le PDF.
@@ -82,11 +40,13 @@ function smartText(doc, text, x, y, options = {}) {
   if (useArabic) {
     doc.font(ARABIC_FONT_NAME);
   }
-  const shaped = useArabic ? shapeArabic(t) : t;
+  const finalOptions = useArabic
+    ? { ...options, features: [...(options.features || []), ...ARABIC_FEATURES] }
+    : options;
   if (x !== undefined && y !== undefined) {
-    doc.text(shaped, x, y, options);
+    doc.text(t, x, y, finalOptions);
   } else {
-    doc.text(shaped, options);
+    doc.text(t, finalOptions);
   }
   if (useArabic) {
     // Retour à la police précédente pour ne pas affecter les écritures suivantes
