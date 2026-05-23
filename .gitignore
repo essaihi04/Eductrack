@@ -36,3 +36,6 @@ Thumbs.db
 # Misc
 *.pem
 .cache/
+
+backend/test-*.pdf
+backend/test-*.mjs
