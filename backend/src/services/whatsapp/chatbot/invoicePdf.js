@@ -9,7 +9,90 @@
  */
 
 import PDFDocument from 'pdfkit';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import ArabicReshaper from 'arabic-persian-reshaper';
 import { supabaseAdmin } from '../../../config/supabase.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ARABIC_FONT_PATH = path.join(__dirname, 'fonts', 'NotoNaskhArabic-Regular.ttf');
+const ARABIC_FONT_NAME = 'ArabicFont';
+
+// Plage Unicode arabe (lettres + ponctuation)
+const ARABIC_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+function hasArabic(text) {
+  return ARABIC_RE.test(String(text || ''));
+}
+
+/**
+ * Prépare un texte arabe pour rendu PDF :
+ * 1. Reshape (formes initiale/médiane/finale/isolée)
+ * 2. Inversion (pdfkit pose les glyphes LTR, l'arabe se lit RTL)
+ * Pour les chaînes mixtes (FR + AR), on segmente et on inverse uniquement les
+ * runs arabes, en plaçant les runs latins à leur position visuelle.
+ */
+function shapeArabic(input) {
+  const text = String(input || '');
+  if (!hasArabic(text)) return text;
+
+  // Découpage en runs : arabe vs non-arabe
+  const runs = [];
+  let buffer = '';
+  let mode = null; // 'ar' | 'lat' | null
+  for (const ch of text) {
+    const isAr = ARABIC_RE.test(ch);
+    const m = isAr ? 'ar' : 'lat';
+    if (mode === null) { mode = m; buffer = ch; }
+    else if (m === mode) { buffer += ch; }
+    else {
+      runs.push({ mode, text: buffer });
+      mode = m; buffer = ch;
+    }
+  }
+  if (buffer) runs.push({ mode, text: buffer });
+
+  // Reshape chaque run arabe + inversion locale
+  const reshapedRuns = runs.map((r) => {
+    if (r.mode !== 'ar') return r;
+    const reshaped = ArabicReshaper.ArabicShaper.convertArabic(r.text);
+    // Inversion en respectant les paires de surrogates / graphèmes simples
+    const reversed = Array.from(reshaped).reverse().join('');
+    return { mode: 'ar', text: reversed };
+  });
+
+  // Si on a une majorité arabe et la chaîne entière est principalement RTL,
+  // on inverse aussi l'ordre des runs pour le placement visuel global.
+  const arChars = runs.filter(r => r.mode === 'ar').reduce((s, r) => s + r.text.length, 0);
+  const totalChars = runs.reduce((s, r) => s + r.text.length, 0);
+  if (arChars / Math.max(totalChars, 1) >= 0.5) {
+    return reshapedRuns.reverse().map(r => r.text).join('');
+  }
+  return reshapedRuns.map(r => r.text).join('');
+}
+
+/**
+ * Wrapper qui choisit la police selon le contenu et écrit dans le PDF.
+ * Conserve la signature de doc.text() en y ajoutant la sélection auto.
+ */
+function smartText(doc, text, x, y, options = {}) {
+  const t = String(text == null ? '' : text);
+  const useArabic = hasArabic(t);
+  const previousFont = doc._font?.name || 'Helvetica';
+  if (useArabic) {
+    doc.font(ARABIC_FONT_NAME);
+  }
+  const shaped = useArabic ? shapeArabic(t) : t;
+  if (x !== undefined && y !== undefined) {
+    doc.text(shaped, x, y, options);
+  } else {
+    doc.text(shaped, options);
+  }
+  if (useArabic) {
+    // Retour à la police précédente pour ne pas affecter les écritures suivantes
+    try { doc.font(previousFont); } catch (_) { doc.font('Helvetica'); }
+  }
+}
 
 const STATUS_LABEL = {
   issued: 'Émise',
@@ -74,6 +157,14 @@ export function buildInvoicePdfBuffer(invoice) {
         Subject: 'Facture',
       }});
 
+      // Police arabe (chargée à la demande, déclenche une exception si TTF
+      // manquant — capturée plus bas pour éviter de bloquer la génération)
+      try {
+        doc.registerFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH);
+      } catch (fontErr) {
+        console.warn('[invoicePdf] Police arabe non chargée:', fontErr.message);
+      }
+
       const chunks = [];
       doc.on('data', (c) => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -87,9 +178,10 @@ export function buildInvoicePdfBuffer(invoice) {
       const status = invoice.status || 'issued';
 
       // ───── Header école ─────
-      doc.fontSize(20).fillColor('#0f172a').text(school.name || 'École', { align: 'left' });
+      doc.fontSize(20).fillColor('#0f172a');
+      smartText(doc, school.name || 'École', undefined, undefined, { align: 'left' });
       doc.fontSize(10).fillColor('#475569');
-      if (school.address) doc.text(school.address);
+      if (school.address) smartText(doc, school.address);
       const contactBits = [];
       if (school.phone) contactBits.push(`Tél : ${school.phone}`);
       if (school.email) contactBits.push(`Email : ${school.email}`);
@@ -119,16 +211,18 @@ export function buildInvoicePdfBuffer(invoice) {
       // ───── Bloc élève ─────
       const blockY = doc.y;
       doc.fontSize(10).fillColor('#64748b').text('Facturé à :', 50, blockY);
-      doc.fontSize(12).fillColor('#0f172a').text(
+      doc.fontSize(12).fillColor('#0f172a');
+      smartText(
+        doc,
         `${student.first_name || ''} ${student.last_name || ''}`.trim() || '—',
         50, blockY + 14,
       );
       doc.fontSize(10).fillColor('#475569');
       if (student.classes?.name) {
-        doc.text(`Classe : ${student.classes.name}${student.classes.level ? ` (${student.classes.level})` : ''}`, 50, blockY + 32);
+        smartText(doc, `Classe : ${student.classes.name}${student.classes.level ? ` (${student.classes.level})` : ''}`, 50, blockY + 32);
       }
       if (invoice.period_label) {
-        doc.text(`Période : ${invoice.period_label}`, 50, blockY + 48);
+        smartText(doc, `Période : ${invoice.period_label}`, 50, blockY + 48);
       }
       doc.moveDown(3);
 
@@ -159,7 +253,7 @@ export function buildInvoicePdfBuffer(invoice) {
             doc.rect(50, y, 495, 22).fill('#f8fafc');
           }
           doc.fillColor('#0f172a');
-          doc.text(String(l.description || '—'), colDesc + 8, y + 6, { width: 260, ellipsis: true });
+          smartText(doc, String(l.description || '—'), colDesc + 8, y + 6, { width: 260, ellipsis: true });
           doc.text(String(l.quantity ?? 1), colQty, y + 6, { width: 50, align: 'right' });
           doc.text(fmtMoney(l.unit_price ?? l.amount, currency), colUnit, y + 6, { width: 80, align: 'right' });
           doc.text(fmtMoney(l.amount, currency), colAmount, y + 6, { width: 75, align: 'right' });
@@ -194,7 +288,8 @@ export function buildInvoicePdfBuffer(invoice) {
       if (invoice.notes) {
         y += 10;
         doc.fontSize(10).fillColor('#64748b').text('Notes :', 50, y);
-        doc.fontSize(10).fillColor('#334155').text(invoice.notes, 50, y + 14, { width: 495 });
+        doc.fontSize(10).fillColor('#334155');
+        smartText(doc, invoice.notes, 50, y + 14, { width: 495 });
       }
 
       // ───── Footer ─────
