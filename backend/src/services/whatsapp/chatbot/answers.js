@@ -342,7 +342,7 @@ export async function getFinanceBalance(student, parentInfo) {
 export async function getLastInvoice(student, parentInfo) {
   const { data: inv } = await supabaseAdmin
     .from('invoices')
-    .select('invoice_number, period_label, total, amount_paid, status, due_date, currency, created_at, lines:invoice_lines(label, amount)')
+    .select('id, invoice_number, period_label, total, amount_paid, status, due_date, currency, created_at, lines:invoice_lines(description, amount, quantity, unit_price)')
     .eq('student_id', student.id)
     .neq('status', 'cancelled')
     .order('created_at', { ascending: false })
@@ -372,7 +372,7 @@ export async function getLastInvoice(student, parentInfo) {
   if (inv.lines && inv.lines.length > 0) {
     body += `\n*Détail :*\n`;
     inv.lines.slice(0, 6).forEach((l) => {
-      body += `   • ${l.label} — ${fmtMoney(l.amount, inv.currency)}\n`;
+      body += `   • ${l.description} — ${fmtMoney(l.amount, inv.currency)}\n`;
     });
   }
 

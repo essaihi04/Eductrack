@@ -21,6 +21,9 @@ import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText } from './ai.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
+import * as A from './answers.js';
+import { generateInvoicePdfById } from './invoicePdf.js';
+import { sendMediaBuffer } from '../index.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -281,6 +284,34 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     try {
       const reply = await option.action(student, parentInfo);
       await sendText(schoolId, phone, reply, { urgent: true });
+
+      // Cas spécial : pour la "Dernière facture" on envoie aussi le PDF
+      // en pièce jointe juste après le récap texte.
+      if (option.action === A.getLastInvoice) {
+        try {
+          const { data: lastInv } = await supabaseAdmin
+            .from('invoices')
+            .select('id')
+            .eq('student_id', student.id)
+            .neq('status', 'cancelled')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (lastInv?.id) {
+            const pdf = await generateInvoicePdfById(lastInv.id);
+            if (pdf?.buffer) {
+              await sendMediaBuffer(schoolId, phone, pdf.buffer, {
+                type: 'document',
+                fileName: pdf.fileName,
+                mimetype: 'application/pdf',
+                caption: '📎 Votre facture en PDF',
+              }, { urgent: true });
+            }
+          }
+        } catch (pdfErr) {
+          console.error('[chatbot] Erreur génération/envoi PDF facture:', pdfErr);
+        }
+      }
 
       // Petit menu de rappel à la fin
       setTimeout(() => {
