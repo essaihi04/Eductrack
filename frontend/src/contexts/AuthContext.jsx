@@ -135,8 +135,39 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    // Tente d'abord un logout serveur (révoque le refresh token côté Supabase).
+    // Si la session est déjà invalide (ex: mot de passe changé juste avant),
+    // l'appel échoue avec AuthSessionMissingError / 403 — on l'ignore et on
+    // bascule sur un nettoyage purement local pour que l'utilisateur soit
+    // bien déconnecté côté UI dans tous les cas.
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        const msg = String(error?.message || '').toLowerCase();
+        const isSessionMissing =
+          error?.name === 'AuthSessionMissingError' ||
+          msg.includes('session missing') ||
+          msg.includes('session_not_found') ||
+          error?.status === 401 || error?.status === 403;
+        if (!isSessionMissing) {
+          console.warn('[auth] signOut server error (ignoré):', error);
+        }
+        // Fallback : nettoyage local explicite
+        try { await supabase.auth.signOut({ scope: 'local' }); } catch (_) { /* ignore */ }
+      }
+    } catch (e) {
+      console.warn('[auth] signOut exception (ignorée):', e?.message);
+      try { await supabase.auth.signOut({ scope: 'local' }); } catch (_) { /* ignore */ }
+    }
+
+    // Sécurité : on purge en plus tous les artefacts Supabase du storage,
+    // au cas où la lib n'aurait pas réussi.
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('sb-') || k.startsWith('supabase.'))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch (_) { /* ignore */ }
+
     setUser(null);
     setProfile(null);
     setSchool(null);
