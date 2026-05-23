@@ -72,7 +72,13 @@ const STATUS_COLOR = {
 
 function fmtMoney(amount, currency = 'MAD') {
   const n = Number(amount || 0);
-  return `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+  // `toLocaleString('fr-FR')` insère U+202F (NARROW NO-BREAK SPACE) entre
+  // les milliers, ce que Helvetica (police par défaut de pdfkit) ne sait
+  // pas rendre — il affiche alors un `/`. On normalise tous les types
+  // d'espaces (\u00A0, \u202F, \u2009, etc.) en espaces ASCII classiques.
+  const raw = n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const normalized = raw.replace(/[\u00A0\u202F\u2009\u2007\u200A]/g, ' ');
+  return `${normalized} ${currency}`;
 }
 
 function fmtDate(d) {
