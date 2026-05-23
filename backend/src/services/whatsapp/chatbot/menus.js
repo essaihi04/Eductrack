@@ -27,7 +27,8 @@ export const MAIN_MENU = {
     { id: '1', emoji: '📚', label: 'Suivi pédagogique', action: 'goto:pedagogy' },
     { id: '2', emoji: '💰', label: 'Finance / Paiements', action: 'goto:finance' },
     { id: '3', emoji: '💬', label: 'Poser une question libre', action: 'goto:ai' },
-    { id: '4', emoji: '👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
+    { id: '4', emoji: '�', label: 'Mes identifiants (login & mot de passe)', action: 'goto:credentials' },
+    { id: '5', emoji: '�👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
   ],
 };
 

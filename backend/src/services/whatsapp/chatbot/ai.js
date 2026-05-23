@@ -29,9 +29,12 @@ RÈGLES STRICTES :
    - Si la question concerne la PÉDAGOGIE (présence, absences, notes, devoirs, comportement, participation), ne parle QUE de pédagogie.
    - Si la question concerne la FINANCE (paiement, facture, frais, مال, دفع, أداء), ne parle QUE de finance.
    - N'AJOUTE JAMAIS d'information financière dans une réponse pédagogique, et inversement, sauf si le parent le demande explicitement.
-5. Réponse COURTE et structurée (maximum 6 lignes), avec des emojis pertinents (📊 📝 ✅ ⚠️ 🎓).
+5. Réponse COURTE et structurée, avec des emojis pertinents (📊 📝 ✅ ⚠️ 🎓).
+   - Pour les notes : si la question concerne les notes/résultats, utilise le champ "grades_by_subject" et présente TOUTES les matières (moyenne par matière, meilleure note, nombre de contrôles). N'affiche PAS uniquement la dernière note.
+   - Pour les devoirs : utilise "pending_homework" (à rendre), "overdue_homework" (en retard) et "homework_stats". Mentionne explicitement les compteurs.
+   - Maximum ~10 lignes, sois exhaustif quand le parent demande "les notes" ou "les devoirs".
 6. Pour toute question hors-sujet (politique, médical, opinions, autre élève, etc.), redirige poliment dans la langue du parent.
-7. Tu ne divulgues jamais d'informations bancaires, mots de passe, ni informations sur d'autres élèves.
+7. Tu ne divulgues jamais d'informations bancaires ni d'informations sur d'autres élèves. Si on te demande login/mot de passe/identifiants, NE RÉPONDS PAS à la question : un module dédié s'en occupe automatiquement.
 8. NE TERMINE PAS par "Tapez menu..." — un message automatique sera ajouté par le système.
 `;
 
@@ -161,21 +164,80 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   };
 
   // ───── Notes de contrôles (control_notes via controls_plan) ─────
+  // Note: controls_plan n'a pas de subject_id, on infère la matière via :
+  //   1. teacher_subjects (si le prof enseigne une seule matière dans la classe)
+  //   2. match du nom du contrôle avec les noms de matières connues
+  //   3. fallback : nom du contrôle
   const { data: gradeRows } = await supabaseAdmin
     .from('control_notes')
-    .select('note, appreciation, controls_plan!inner(id, name, date, class_id)')
+    .select('note, appreciation, controls_plan!inner(id, name, date, class_id, teacher_id)')
     .eq('student_id', student.id)
     .eq('controls_plan.class_id', student.class_id)
-    .gte('controls_plan.date', threeMonthsAgo)
+    .gte('controls_plan.date', '2000-01-01')
     .order('controls_plan(date)', { ascending: false })
-    .limit(15);
+    .limit(60);
+
+  // Récupère la liste des matières liées à la classe via class_teachers + teacher_subjects
+  const teacherIds = [...new Set((gradeRows || []).map((g) => g.controls_plan?.teacher_id).filter(Boolean))];
+  let teacherSubjectMap = {}; // teacher_id -> [subjects]
+  let allClassSubjects = []; // toutes les matières enseignées dans la classe
+  if (teacherIds.length > 0) {
+    const { data: ts } = await supabaseAdmin
+      .from('teacher_subjects')
+      .select('teacher_id, subjects(id, name)')
+      .in('teacher_id', teacherIds);
+    (ts || []).forEach((t) => {
+      if (!teacherSubjectMap[t.teacher_id]) teacherSubjectMap[t.teacher_id] = [];
+      if (t.subjects?.name) teacherSubjectMap[t.teacher_id].push(t.subjects.name);
+    });
+    allClassSubjects = [...new Set(Object.values(teacherSubjectMap).flat())];
+  }
+
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const inferSubject = (controlName, teacherId) => {
+    const teacherSubs = teacherSubjectMap[teacherId] || [];
+    if (teacherSubs.length === 1) return teacherSubs[0];
+    const cn = norm(controlName);
+    if (cn) {
+      const candidates = teacherSubs.length > 0 ? teacherSubs : allClassSubjects;
+      const matched = candidates.find((s) => {
+        const ns = norm(s);
+        return ns && (cn.includes(ns) || ns.includes(cn));
+      });
+      if (matched) return matched;
+    }
+    return controlName || 'Contrôle';
+  };
+
   ctx.recent_grades = (gradeRows || []).map((g) => ({
     control: g.controls_plan?.name || null,
+    subject: inferSubject(g.controls_plan?.name, g.controls_plan?.teacher_id),
     date: g.controls_plan?.date || null,
     note: Number(g.note),
     max: 20,
     appreciation: g.appreciation || null,
   }));
+
+  // Groupage par matière
+  const bySubject = {};
+  ctx.recent_grades.forEach((g) => {
+    const key = g.subject || 'Autre';
+    if (!bySubject[key]) bySubject[key] = [];
+    bySubject[key].push({ control: g.control, date: g.date, note: g.note, max: g.max });
+  });
+  ctx.grades_by_subject = Object.entries(bySubject).map(([subject, grades]) => {
+    const notes = grades.map((g) => g.note);
+    const sum = notes.reduce((a, b) => a + b, 0);
+    return {
+      subject,
+      count: grades.length,
+      average: Math.round((sum / grades.length) * 10) / 10,
+      best: Math.max(...notes),
+      worst: Math.min(...notes),
+      grades, // détail
+    };
+  }).sort((a, b) => b.count - a.count);
+
   if (ctx.recent_grades.length > 0) {
     const sum = ctx.recent_grades.reduce((s, g) => s + g.note, 0);
     ctx.grade_stats = {

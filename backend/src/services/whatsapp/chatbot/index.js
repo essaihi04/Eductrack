@@ -20,6 +20,7 @@ import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText } from './ai.js';
+import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -259,6 +260,20 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       const children = await getParentChildren(parentInfo.parent_id);
       return sendChildSelectionMenu(schoolId, phone, children, parentInfo);
     }
+    if (target === 'credentials') {
+      // Propose : parent uniquement ou parent + enfant
+      const replyMsg = await handleCredentialRequest({
+        text: 'mes identifiants',
+        parentInfo,
+        student,
+        target: 'both',
+      });
+      await sendText(schoolId, phone, replyMsg, { urgent: true });
+      setTimeout(() => {
+        sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+      }, 1500);
+      return;
+    }
   }
 
   // Action = fonction (réponse prédéfinie)
@@ -333,7 +348,36 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
     .select()
     .single();
 
-  // 3. Commandes spéciales (toujours prioritaires)
+  // 3. Demande d'identifiants (toujours prioritaire — court-circuite le menu)
+  // Permet au parent de récupérer/réinitialiser son login + mot de passe via
+  // n'importe quel message contenant les mots-clés associés.
+  const credReq = detectCredentialRequest(text);
+  if (credReq.wants) {
+    let credStudent = null;
+    if (credReq.target !== 'parent') {
+      const st = State.getState(phone);
+      if (st?.studentId) credStudent = await getStudentById(st.studentId);
+      if (!credStudent) {
+        const children = await getParentChildren(parentInfo.parent_id);
+        if (children.length === 1) credStudent = await getStudentById(children[0].id);
+      }
+    }
+    const replyMsg = await handleCredentialRequest({
+      text,
+      parentInfo,
+      student: credStudent,
+      target: credReq.target,
+    });
+    await sendText(parentInfo.school_id, phone, replyMsg, { urgent: true });
+    await supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .update({ ai_response_sent: true, ai_response_text: replyMsg, category: 'credentials' })
+      .eq('id', incomingMsg?.id);
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+
+  // 3.bis Commandes spéciales (toujours prioritaires)
   const cmd = detectSpecialCommand(text);
   if (cmd === 'menu' || cmd === 'help') {
     const state = State.getState(phone);
