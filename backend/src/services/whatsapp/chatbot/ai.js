@@ -117,15 +117,74 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     };
   }
 
-  // Devoirs en cours
+  // ───── Devoirs (3 derniers mois) avec statut de soumission par élève ─────
+  // Un devoir est "non soumis" si l'élève n'a aucune homework_submissions
+  // avec status ∈ ('submitted', 'graded'). Les autres status (pending,
+  // late, missing) ou l'absence totale comptent comme non soumis.
   const today = new Date().toISOString().slice(0, 10);
-  const { data: hw } = await supabaseAdmin
+  const threeMonthsAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  const { data: hwAll } = await supabaseAdmin
     .from('homework')
-    .select('title, due_date')
+    .select('id, title, due_date, target_type, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
     .eq('class_id', student.class_id)
-    .gte('due_date', today)
-    .limit(5);
-  ctx.pending_homework = (hw || []).map((h) => ({ title: h.title, due: h.due_date }));
+    .gte('due_date', threeMonthsAgo)
+    .order('due_date', { ascending: false })
+    .limit(40);
+
+  const isAssignedToStudent = (h) =>
+    h.target_type === 'all' ||
+    (h.homework_students || []).some((hs) => hs.student_id === student.id);
+
+  const myHw = (hwAll || []).filter(isAssignedToStudent).map((h) => {
+    const mySub = (h.homework_submissions || []).find((s) => s.student_id === student.id);
+    const submitted = mySub && (mySub.status === 'submitted' || mySub.status === 'graded');
+    return {
+      id: h.id,
+      title: h.title,
+      subject: h.subjects?.name || null,
+      due: h.due_date,
+      overdue: h.due_date < today && !submitted,
+      submitted: !!submitted,
+      status: mySub?.status || 'not_submitted',
+      grade: mySub?.grade ?? null,
+    };
+  });
+
+  ctx.pending_homework = myHw.filter((h) => !h.submitted && h.due >= today);
+  ctx.overdue_homework = myHw.filter((h) => h.overdue);
+  ctx.recent_homework_submitted = myHw.filter((h) => h.submitted).slice(0, 5);
+  ctx.homework_stats = {
+    total_assigned_3m: myHw.length,
+    submitted: myHw.filter((h) => h.submitted).length,
+    not_submitted: myHw.filter((h) => !h.submitted).length,
+    overdue: myHw.filter((h) => h.overdue).length,
+  };
+
+  // ───── Notes de contrôles (control_notes via controls_plan) ─────
+  const { data: gradeRows } = await supabaseAdmin
+    .from('control_notes')
+    .select('note, appreciation, controls_plan!inner(id, name, date, class_id)')
+    .eq('student_id', student.id)
+    .eq('controls_plan.class_id', student.class_id)
+    .gte('controls_plan.date', threeMonthsAgo)
+    .order('controls_plan(date)', { ascending: false })
+    .limit(15);
+  ctx.recent_grades = (gradeRows || []).map((g) => ({
+    control: g.controls_plan?.name || null,
+    date: g.controls_plan?.date || null,
+    note: Number(g.note),
+    max: 20,
+    appreciation: g.appreciation || null,
+  }));
+  if (ctx.recent_grades.length > 0) {
+    const sum = ctx.recent_grades.reduce((s, g) => s + g.note, 0);
+    ctx.grade_stats = {
+      count: ctx.recent_grades.length,
+      average: Math.round((sum / ctx.recent_grades.length) * 10) / 10,
+      best: Math.max(...ctx.recent_grades.map((g) => g.note)),
+      worst: Math.min(...ctx.recent_grades.map((g) => g.note)),
+    };
+  }
 
   // Solde finance (résumé) — UNIQUEMENT si la question concerne la finance.
   // Sinon on ne l'inclut PAS dans le contexte, pour éviter que l'IA ne
