@@ -358,8 +358,34 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
     if (children.length === 1) {
       State.selectStudent(phone, children[0].id);
       state = State.getState(phone);
-      // Première interaction silencieuse : on envoie d'abord un accueil
+
+      // Détecte si la 1re saisie est une vraie question (et non une simple
+      // salutation type "bonjour", "salam", "hi"…). Si oui, on répond
+      // directement à la question puis on affiche le menu, comme demandé.
+      const trimmed = String(text || '').trim();
+      const lower = trimmed.toLowerCase();
+      const greetings = /^(bonjour|bonsoir|salut|coucou|hi|hello|hey|salam|salem|sa?lam|marhaba|ahlan|ا?لسلام|مرحبا|سلام|اهلا)[\s!.?,؟]*$/i;
+      const isGreeting = greetings.test(lower) || trimmed.length < 5;
+      const looksLikeQuestion = !isGreeting && (trimmed.includes(' ') || trimmed.length > 8);
+
+      // Accueil
       await sendText(parentInfo.school_id, phone, `Bonjour ${parentInfo.parent_name} 👋\nBienvenue sur le service WhatsApp de *${parentInfo.school_name}*.`, { urgent: true });
+
+      if (looksLikeQuestion) {
+        try {
+          const student = children[0];
+          const reply = await answerWithAI({ messageText: text, student, parentInfo });
+          await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+          await supabaseAdmin
+            .from('whatsapp_incoming_messages')
+            .update({ ai_response_sent: true, ai_response_text: reply })
+            .eq('id', incomingMsg?.id);
+        } catch (e) {
+          console.error('[chatbot] Erreur IA 1re question:', e);
+        }
+      }
+
+      // Menu principal après l'accueil (et la réponse IA si applicable)
       await sendMainMenu(parentInfo.school_id, phone, children[0], parentInfo);
       await markProcessed(incomingMsg?.id);
       return;
