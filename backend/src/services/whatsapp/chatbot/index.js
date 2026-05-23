@@ -32,16 +32,24 @@ function normalizePhone(phone) {
 }
 
 async function getParentByPhone(phone, schoolId = null) {
-  // Cherche d'abord dans parent_contacts (numéro WhatsApp dédié)
+  // Cherche d'abord dans parent_contacts (numéro WhatsApp dédié).
+  // IMPORTANT : un même numéro peut être enregistré pour des parents
+  // appartenant à plusieurs écoles. On DOIT filtrer par schoolId (l'école
+  // qui a reçu le message via sa session Baileys) sinon on risque de router
+  // la conversation vers la mauvaise école (silence total à l'envoi car la
+  // session de l'autre école n'est pas connectée).
   let parentId = null;
   let resolvedSchoolId = schoolId;
 
-  const { data: contacts } = await supabaseAdmin
+  let contactsQuery = supabaseAdmin
     .from('parent_contacts')
-    .select('parent_id, profiles:parent_id(id, school_id, first_name, last_name)')
+    .select('parent_id, profiles:parent_id!inner(id, school_id, first_name, last_name)')
     .eq('phone_e164', phone)
-    .eq('channel', 'whatsapp')
-    .limit(1);
+    .eq('channel', 'whatsapp');
+  if (schoolId) {
+    contactsQuery = contactsQuery.eq('profiles.school_id', schoolId);
+  }
+  const { data: contacts } = await contactsQuery.limit(1);
 
   if (contacts && contacts.length > 0) {
     parentId = contacts[0].parent_id;
