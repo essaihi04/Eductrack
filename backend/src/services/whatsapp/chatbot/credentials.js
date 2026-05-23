@@ -18,35 +18,43 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 // Détection d'intention
 // ─────────────────────────────────────────────────────────────────────────
 
-const CRED_KEYWORDS_RE = new RegExp(
-  [
-    // FR
-    'mot de passe', 'mot pass', 'mdp', 'identifiant', 'identifiants',
-    'login', 'connexion', 'connecter', 'password', 'pass word',
-    'reinitialiser', 'réinitialiser', 'reset', 'oublié', 'oublie',
-    'compte', 'acces', 'accès',
-    // Arabe
-    'كلمة السر', 'كلمة المرور', 'باسوورد', 'باسورد', 'رمز الدخول',
-    'تسجيل الدخول', 'الدخول', 'حساب', 'بيانات الدخول', 'الحساب',
-    'نسيت', 'استرجاع', 'تجديد',
-    // Darija latine
-    'password', 'mdp', 'compte', 'login',
-  ].join('|'),
-  'i',
-);
+// Détection en deux passes : un mot-clé "credential" (qu'est-ce qui est demandé)
+// et — pour limiter les faux positifs sur des mots ambigus comme "compte" ou
+// "accès" — un mot-clé "action" optionnel. Si l'un des credentials forts est
+// présent (login, mot de passe, mdp, …), on déclenche directement.
 
-/**
- * Détecte si le message demande un login/mot de passe.
- * Retourne { wants: boolean, target: 'parent'|'student'|'both' }
- */
+// "mot de passe" tolérant : "mot pass", "mot de pass", "mot de passe",
+// "mot password", "motdepasse" (collé), etc.
+const PASSWORD_RE = /(?:mot\s*(?:de\s+)?pass(?:e|word)?|motdepasse|mdp|password|pass\s*word)/i;
+
+// Login / identifiant
+const LOGIN_RE = /(?:\blogin\b|identifiant|connexion|connecter|se\s+connecter)/i;
+
+// Mots arabes pour identifiants/mot de passe
+const AR_CRED_RE = /(?:كلمة\s*(?:ال)?(?:سر|مرور)|باسو?ورد|رمز\s*الدخول|بيانات\s*الدخول|تسجيل\s*الدخول|نسيت|استرجاع|تجديد)/;
+
+// Mots d'action (changer, réinitialiser, oublier, récupérer, voir...)
+const ACTION_RE = /(?:r[ée]initialis|reset|oubli[ée]?|chang(?:er|e|é)|recuperer|récup[eé]r|nouveau|donne[rz]?|envoy|forgot)/i;
+
+// Compte/accès — uniquement si une action est aussi présente (anti-faux-positif)
+const SOFT_CRED_RE = /(?:\bcompte\b|\bacc[èe]s\b|\bحساب\b|\bالدخول\b)/i;
+
 export function detectCredentialRequest(text) {
   if (!text) return { wants: false };
-  const lower = String(text).toLowerCase();
-  if (!CRED_KEYWORDS_RE.test(lower)) return { wants: false };
+  const t = String(text);
+
+  let wants = false;
+  if (PASSWORD_RE.test(t) || LOGIN_RE.test(t) || AR_CRED_RE.test(t)) {
+    wants = true;
+  } else if (SOFT_CRED_RE.test(t) && ACTION_RE.test(t)) {
+    wants = true;
+  }
+  if (!wants) return { wants: false };
 
   // Détermine la cible : enfant ou parent
-  const mentionsChild = /enfant|fils|fille|elève|élève|ابن|بنت|ولد|طفل|الطالب|التلميذ|wlidi|bnti|bniti|wliddi/i.test(lower);
-  const mentionsParent = /mon|ma compte|mon compte|hsabi|حسابي|الخاص بي|انا|moi/i.test(lower);
+  const lower = t.toLowerCase();
+  const mentionsChild = /enfant|fils|fille|el[eè]ve|ابن|بنت|ولد|طفل|الطالب|التلميذ|wlidi|bnti|bniti|wliddi/i.test(lower);
+  const mentionsParent = /\b(mon|ma|moi|je|hsabi|انا|حسابي|الخاص\s*بي)\b/i.test(lower);
 
   let target = 'parent';
   if (mentionsChild && mentionsParent) target = 'both';
