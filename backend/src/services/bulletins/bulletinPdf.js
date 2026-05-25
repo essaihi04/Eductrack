@@ -152,10 +152,12 @@ export async function generateBulletinPdf({
       doc.font('Helvetica-Bold').fontSize(9).fillColor('#333');
 
       doc.text('Élève :', col1, y);
-      doc.font('Helvetica').text(`${student.first_name || ''} ${student.last_name || ''}`, col1 + 45, y);
+      doc.font('Helvetica');
+      smartText(doc, `${student.first_name || ''} ${student.last_name || ''}`.trim() || '—', col1 + 45, y);
 
       doc.font('Helvetica-Bold').text('Classe :', col2, y);
-      doc.font('Helvetica').text(cls.name || '', col2 + 50, y);
+      doc.font('Helvetica');
+      smartText(doc, cls.name || '', col2 + 50, y);
       y += 14;
 
       doc.font('Helvetica-Bold').text('Code Massar :', col1, y);
