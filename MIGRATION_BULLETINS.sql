@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS school_year_config (
 );
 CREATE INDEX IF NOT EXISTS idx_syc_school_year ON school_year_config(school_id, academic_year);
 
+-- Colonnes year_start / year_end ajoutées plus tard (idempotent)
+ALTER TABLE school_year_config ADD COLUMN IF NOT EXISTS year_start DATE;
+ALTER TABLE school_year_config ADD COLUMN IF NOT EXISTS year_end   DATE;
+
 -- ─── 4. Coefficients par niveau / filière / matière ────────────────────
 CREATE TABLE IF NOT EXISTS subject_coefficients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
