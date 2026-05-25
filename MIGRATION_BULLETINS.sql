@@ -18,6 +18,18 @@ WHERE p.id = u.id
   AND p.massar_code IS NULL
   AND u.raw_user_meta_data->>'massar_code' IS NOT NULL;
 
+-- Backfill depuis l'email (les emails élèves sont générés comme <massar>@ecole.ma).
+-- On ne touche que les codes plausibles (au moins 1 lettre + des chiffres, ou contenant
+-- un chiffre — pour éviter de prendre les emails personnels classiques).
+UPDATE profiles p
+SET massar_code = UPPER(SPLIT_PART(p.email, '@', 1))
+WHERE p.role = 'student'
+  AND p.massar_code IS NULL
+  AND p.email IS NOT NULL
+  AND p.email LIKE '%@%'
+  AND SPLIT_PART(p.email, '@', 1) ~ '[0-9]'
+  AND LENGTH(SPLIT_PART(p.email, '@', 1)) <= 20;
+
 -- ─── 2. Flag controle/activité sur controls_plan ───────────────────────
 ALTER TABLE controls_plan
   ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'control';

@@ -151,19 +151,20 @@ export const computeStudentBulletin = async ({
     .gte('date', start)
     .lte('date', end);
 
-  if (!controls || controls.length === 0) {
-    return { lines: [], general_average: null, mention: null };
-  }
-
-  const controlIds = controls.map(c => c.id);
-  const teacherIds = [...new Set(controls.map(c => c.teacher_id).filter(Boolean))];
+  const controlsArr = controls || [];
+  const controlIds = controlsArr.map(c => c.id);
+  const teacherIds = [...new Set(controlsArr.map(c => c.teacher_id).filter(Boolean))];
 
   // 4. Notes de l'élève sur ces contrôles
-  const { data: notes } = await supabaseAdmin
-    .from('control_notes')
-    .select('control_id, note, appreciation')
-    .eq('student_id', studentId)
-    .in('control_id', controlIds);
+  let notes = [];
+  if (controlIds.length > 0) {
+    const { data } = await supabaseAdmin
+      .from('control_notes')
+      .select('control_id, note, appreciation')
+      .eq('student_id', studentId)
+      .in('control_id', controlIds);
+    notes = data || [];
+  }
 
   // 5. Mapping teacher → subject
   const teacherSubjMap = await getTeacherSubjectsMap(teacherIds);
@@ -173,7 +174,7 @@ export const computeStudentBulletin = async ({
   const buckets = {};
   const noteByControl = new Map((notes || []).map(n => [n.control_id, Number(n.note)]));
 
-  for (const ctrl of controls) {
+  for (const ctrl of controlsArr) {
     const subj = teacherSubjMap.get(ctrl.teacher_id);
     if (!subj || !subj.name) continue;
     const key = subj.name.trim();
@@ -187,39 +188,70 @@ export const computeStudentBulletin = async ({
     }
   }
 
-  // 7. Coefficients
+  // 7. Coefficients (référentiel : on génère une ligne par matière du niveau,
+  //    même sans note, pour avoir un bulletin complet)
   const coefs = await getCoefficients(schoolId, cls.level, cls.filiere);
 
-  // 8. Calculer note par matière
+  // 8. Calculer note par matière (en partant des coefficients pour avoir TOUTES
+  //    les matières du niveau, puis on ajoute aussi celles qui ont des notes
+  //    mais ne sont pas dans le référentiel)
   const lines = [];
+  const seenSubjects = new Set();
+
+  // 8a. Matières du référentiel de coefficients
+  for (const [subjName, coefEntry] of coefs.entries()) {
+    seenSubjects.add(subjName);
+    const b = buckets[subjName];
+    const cAvg = b && b.controls.length ? b.controls.reduce((s, n) => s + n, 0) / b.controls.length : null;
+    const aAvg = b && b.activities.length ? b.activities.reduce((s, n) => s + n, 0) / b.activities.length : null;
+
+    let note20 = null;
+    if (cAvg != null && aAvg != null) note20 = cAvg * 0.75 + aAvg * 0.25;
+    else if (cAvg != null) note20 = cAvg;
+    else if (aAvg != null) note20 = aAvg;
+
+    lines.push({
+      subject_id: b?.subject_id || coefEntry.subject_id || null,
+      subject_name: subjName,
+      controls_avg: cAvg != null ? round2(cAvg) : null,
+      activities_avg: aAvg != null ? round2(aAvg) : null,
+      note_20: note20 != null ? round2(note20) : null,
+      coefficient: coefEntry.coefficient,
+      weighted_note: note20 != null ? round2(note20 * coefEntry.coefficient) : null,
+      display_order: coefEntry.display_order
+    });
+  }
+
+  // 8b. Matières avec notes mais hors référentiel (coef par défaut = 1)
   for (const key of Object.keys(buckets)) {
+    if (seenSubjects.has(key)) continue;
     const b = buckets[key];
     const cAvg = b.controls.length ? b.controls.reduce((s, n) => s + n, 0) / b.controls.length : null;
     const aAvg = b.activities.length ? b.activities.reduce((s, n) => s + n, 0) / b.activities.length : null;
 
-    let note20;
+    let note20 = null;
     if (cAvg != null && aAvg != null) note20 = cAvg * 0.75 + aAvg * 0.25;
     else if (cAvg != null) note20 = cAvg;
     else if (aAvg != null) note20 = aAvg;
-    else continue; // pas de note → on saute
 
-    const coefEntry = coefs.get(key) || { coefficient: 1, display_order: 999 };
     lines.push({
       subject_id: b.subject_id,
       subject_name: key,
       controls_avg: cAvg != null ? round2(cAvg) : null,
       activities_avg: aAvg != null ? round2(aAvg) : null,
-      note_20: round2(note20),
-      coefficient: coefEntry.coefficient,
-      weighted_note: round2(note20 * coefEntry.coefficient),
-      display_order: coefEntry.display_order
+      note_20: note20 != null ? round2(note20) : null,
+      coefficient: 1,
+      weighted_note: note20 != null ? round2(note20) : null,
+      display_order: 999
     });
   }
 
   lines.sort((a, b) => a.display_order - b.display_order);
 
-  const totalCoef = lines.reduce((s, l) => s + l.coefficient, 0);
-  const totalWeighted = lines.reduce((s, l) => s + l.weighted_note, 0);
+  // Moyenne générale : uniquement sur les matières AVEC note
+  const withNote = lines.filter(l => l.note_20 != null);
+  const totalCoef = withNote.reduce((s, l) => s + l.coefficient, 0);
+  const totalWeighted = withNote.reduce((s, l) => s + l.weighted_note, 0);
   const generalAverage = totalCoef > 0 ? round2(totalWeighted / totalCoef) : null;
 
   return {
