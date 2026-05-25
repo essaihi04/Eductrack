@@ -19,7 +19,7 @@ import { sendText } from '../index.js';
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
-import { answerWithAI, detectSpecialCommand, menuFooterForText } from './ai.js';
+import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester } from './ai.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
@@ -29,6 +29,50 @@ import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Envoie les PDFs des bulletins publiés d'un élève via WhatsApp.
+ * Appelé soit depuis le menu (option 7), soit depuis l'IA si la question
+ * contient "bulletin", "كشف النقط", etc.
+ *
+ * @param {string} schoolId
+ * @param {string} phone
+ * @param {object} student
+ * @param {number|null} semester  - si fourni, n'envoie que les bulletins de ce semestre
+ * @returns {Promise<number>} nombre de PDFs envoyés
+ */
+async function sendBulletinPdfs(schoolId, phone, student, semester = null) {
+  try {
+    let q = supabaseAdmin
+      .from('bulletins')
+      .select('id, semester, academic_year')
+      .eq('student_id', student.id)
+      .in('status', ['published', 'sent'])
+      .order('academic_year', { ascending: false })
+      .order('semester', { ascending: false });
+    if (semester === 1 || semester === 2) q = q.eq('semester', semester);
+    const { data: pubBulletins } = await q.limit(2);
+    if (!pubBulletins || pubBulletins.length === 0) return 0;
+
+    let count = 0;
+    for (const b of pubBulletins) {
+      const pdf = await generateBulletinPdfById(b.id);
+      if (pdf?.buffer) {
+        await sendMediaBuffer(schoolId, phone, pdf.buffer, {
+          type: 'document',
+          fileName: pdf.fileName,
+          mimetype: 'application/pdf',
+          caption: `📄 Bulletin ${b.academic_year} — Semestre ${b.semester}`,
+        }, { urgent: true });
+        count++;
+      }
+    }
+    return count;
+  } catch (e) {
+    console.error('[chatbot] sendBulletinPdfs error:', e.message);
+    return 0;
+  }
+}
 
 function normalizePhone(phone) {
   let p = String(phone || '').replace('@s.whatsapp.net', '').replace('@c.us', '').replace(/\s+/g, '');
@@ -286,32 +330,9 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       const reply = await option.action(student, parentInfo);
       await sendText(schoolId, phone, reply, { urgent: true });
 
-      // Cas spécial : pour les "Bulletins scolaires" on envoie aussi les PDFs
-      // (jusqu'à 2 derniers bulletins publiés) en pièces jointes.
+      // Cas spécial : pour les "Bulletins scolaires" on envoie aussi les PDFs.
       if (option.action === A.getBulletinSummary) {
-        try {
-          const { data: pubBulletins } = await supabaseAdmin
-            .from('bulletins')
-            .select('id, semester, academic_year')
-            .eq('student_id', student.id)
-            .in('status', ['published', 'sent'])
-            .order('academic_year', { ascending: false })
-            .order('semester', { ascending: false })
-            .limit(2);
-          for (const b of pubBulletins || []) {
-            const pdf = await generateBulletinPdfById(b.id);
-            if (pdf?.buffer) {
-              await sendMediaBuffer(schoolId, phone, pdf.buffer, {
-                type: 'document',
-                fileName: pdf.fileName,
-                mimetype: 'application/pdf',
-                caption: `📄 Bulletin ${b.academic_year} — Semestre ${b.semester}`,
-              }, { urgent: true });
-            }
-          }
-        } catch (pdfErr) {
-          console.error('[chatbot] Erreur génération/envoi PDF bulletin:', pdfErr);
-        }
+        await sendBulletinPdfs(schoolId, phone, student);
       }
 
       // Cas spécial : pour la "Dernière facture" on envoie aussi le PDF
@@ -488,6 +509,9 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
           const student = children[0];
           const reply = await answerWithAI({ messageText: text, student, parentInfo });
           await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+          if (isBulletinQuery(text)) {
+            await sendBulletinPdfs(parentInfo.school_id, phone, student, detectSemester(text));
+          }
           await supabaseAdmin
             .from('whatsapp_incoming_messages')
             .update({ ai_response_sent: true, ai_response_text: reply })
@@ -572,6 +596,9 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
   if (state.state === 'AI') {
     const reply = await answerWithAI({ messageText: text, student, parentInfo });
     await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+    if (isBulletinQuery(text)) {
+      await sendBulletinPdfs(parentInfo.school_id, phone, student, detectSemester(text));
+    }
     await supabaseAdmin
       .from('whatsapp_incoming_messages')
       .update({ ai_response_sent: true, ai_response_text: reply })
@@ -603,6 +630,9 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       console.log(`[chatbot] MENU → IA fallback (texte libre): "${trimmed.substring(0, 40)}"`);
       const reply = await answerWithAI({ messageText: text, student, parentInfo });
       await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+      if (isBulletinQuery(text)) {
+        await sendBulletinPdfs(parentInfo.school_id, phone, student, detectSemester(text));
+      }
       await supabaseAdmin
         .from('whatsapp_incoming_messages')
         .update({ ai_response_sent: true, ai_response_text: reply })

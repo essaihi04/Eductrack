@@ -75,11 +75,27 @@ function isFinanceQuery(text) {
   return FINANCE_KEYWORDS_RE.test(text || '');
 }
 
+// Mots-clés "bulletin" : déclenche aussi l'envoi des PDFs en pièce jointe.
+const BULLETIN_KEYWORDS_RE = new RegExp(
+  [
+    'bulletin', 'bulletins', 'releve de note', 'relevé de note', 'relevé de notes',
+    'relve', 'releve',
+    // Arabe
+    'بوليتان', 'كشف النقط', 'كشف الدرجات', 'كشف نقط', 'كشف العلامات', 'النتائج', 'التقرير',
+    // Darija
+    'lboultan', 'l9rt', 'natija', 'natijati', 'kachf', 'kashf',
+  ].join('|'),
+  'i',
+);
+export function isBulletinQuery(text) {
+  return BULLETIN_KEYWORDS_RE.test(text || '');
+}
+
 /**
  * Détecte si la question vise un semestre précis.
  * Retourne 1, 2 ou null.
  */
-function detectSemester(text) {
+export function detectSemester(text) {
   const t = (text || '').toLowerCase();
   // Semestre 2 (à tester avant car peut contenir "semestre 1" en sous-chaîne après accent)
   if (/\b(s2|sem(estre)?\s*2|deuxi[eè]me\s*semestre|2[eè]me\s*sem(estre)?)\b/i.test(t)) return 2;
@@ -94,7 +110,7 @@ function detectSemester(text) {
  * Construit un mini-contexte factuel sur l'élève à passer à DeepSeek.
  * Limité aux données strictement nécessaires (compact).
  */
-async function buildStudentContext(student, parentInfo, { includeFinance = false } = {}) {
+async function buildStudentContext(student, parentInfo, { includeFinance = false, includeBulletins = false } = {}) {
   const ctx = {
     student: {
       name: `${student.first_name} ${student.last_name}`,
@@ -301,6 +317,27 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     };
   }
 
+  // ───── Bulletins publiés — UNIQUEMENT si la question concerne le bulletin ─────
+  if (includeBulletins) {
+    const { data: bulletins } = await supabaseAdmin
+      .from('bulletins')
+      .select('academic_year, semester, general_average, general_rank, total_students_in_class, mention, status')
+      .eq('student_id', student.id)
+      .in('status', ['published', 'sent'])
+      .order('academic_year', { ascending: false })
+      .order('semester', { ascending: false })
+      .limit(4);
+    ctx.published_bulletins = (bulletins || []).map(b => ({
+      academic_year: b.academic_year,
+      semester: b.semester,
+      general_average: b.general_average,
+      mention: b.mention,
+      rank: b.general_rank
+        ? `${b.general_rank}/${b.total_students_in_class || '?'}`
+        : null,
+    }));
+  }
+
   // Solde finance (résumé) — UNIQUEMENT si la question concerne la finance.
   // Sinon on ne l'inclut PAS dans le contexte, pour éviter que l'IA ne
   // mentionne les impayés dans des réponses purement pédagogiques.
@@ -330,9 +367,16 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
   }
 
   try {
-    const wantsFinance = isFinanceQuery(messageText);
+    // Si la question concerne le bulletin, on FORCE l'exclusion du contexte finance,
+    // même si d'autres mots-clés finance sont présents (ex: "donne-moi le bulletin
+    // et la facture" → traité comme bulletin uniquement, l'autre demande sera gérée séparément).
+    const wantsBulletin = isBulletinQuery(messageText);
+    const wantsFinance = !wantsBulletin && isFinanceQuery(messageText);
     const isArabic = isArabicText(messageText);
-    const studentContext = await buildStudentContext(student, parentInfo, { includeFinance: wantsFinance });
+    const studentContext = await buildStudentContext(student, parentInfo, {
+      includeFinance: wantsFinance,
+      includeBulletins: wantsBulletin,
+    });
 
     // Directive de langue forte, en plus du système — DeepSeek mélange souvent
     // les langues si on ne le martèle pas explicitement avant la question.
@@ -340,7 +384,14 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
       ? 'IMPORTANT: السؤال بالعربية. أجب حصراً بالعربية الفصحى، بدون أي كلمة بالفرنسية أو الإنجليزية، ولا حتى "menu" أو "école".'
       : 'IMPORTANT : la question est en français/darija latine. Réponds dans la MÊME langue, sans aucun mot arabe.';
 
-    const topicDirective = wantsFinance
+    const topicDirective = wantsBulletin
+      ? `TOPIC: Le parent demande le BULLETIN scolaire.\n` +
+        `→ Donne UNIQUEMENT un résumé du/des bulletin(s) (moyenne générale, mention, rang).\n` +
+        `→ INTERDIT : ne mentionne AUCUNE info financière (factures, paiements, impayés, montants), même brièvement.\n` +
+        `→ INTERDIT : ne donne PAS de notes détaillées par contrôle ; le PDF complet est envoyé séparément en pièce jointe.\n` +
+        `→ Termine par : "📎 Le bulletin PDF arrive juste après ce message." (adapté à la langue du parent).\n` +
+        `→ Si le contexte ne contient AUCUN bulletin publié, dis "Aucun bulletin n'a encore été publié pour ${student.first_name}."`
+      : wantsFinance
       ? 'TOPIC: La question concerne la finance. Ne parle QUE de finance, ignore les données pédagogiques.'
       : 'TOPIC: La question concerne la pédagogie. Ne mentionne AUCUNE information financière (montants, factures, impayés), même brièvement.';
 
