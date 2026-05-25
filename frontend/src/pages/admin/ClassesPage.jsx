@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, FolderOpen, X, Check, Calendar, FileSpreadsheet } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -8,6 +8,18 @@ import { useAuth } from '../../contexts/AuthContext';
 
 // Moroccan education system hierarchy
 const SCHOOL_HIERARCHY = {
+  primaire: {
+    label: 'École Primaire',
+    icon: BookOpen,
+    levels: {
+      '1AP': { label: '1ère Année Primaire', filieres: [] },
+      '2AP': { label: '2ème Année Primaire', filieres: [] },
+      '3AP': { label: '3ème Année Primaire', filieres: [] },
+      '4AP': { label: '4ème Année Primaire', filieres: [] },
+      '5AP': { label: '5ème Année Primaire', filieres: [] },
+      '6AP': { label: '6ème Année Primaire', filieres: [] }
+    }
+  },
   college: {
     label: 'Collège',
     icon: School,
@@ -79,6 +91,7 @@ const normalizeSchoolType = (schoolType) => {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
+  if (normalized === 'primaire' || normalized === 'ecole primaire' || normalized === 'ecole') return 'primaire';
   if (normalized === 'college') return 'college';
   if (normalized === 'lycee' || normalized === 'lycee') return 'lycee';
   return normalized;

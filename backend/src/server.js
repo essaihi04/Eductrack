@@ -28,6 +28,7 @@ import transportManagersRoutes from './routes/transportManagers.routes.js';
 import driversRoutes from './routes/drivers.routes.js';
 import pushRoutes from './routes/push.routes.js';
 import parentRoutes from './routes/parent.routes.js';
+import bulletinsRoutes from './routes/bulletins.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 import { bootstrapAllSessions } from './services/whatsapp/index.js';
 import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
@@ -87,6 +88,7 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/transport', transportRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/parent', parentRoutes);
+app.use('/api/bulletins', bulletinsRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {

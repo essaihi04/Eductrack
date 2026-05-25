@@ -2,7 +2,7 @@ import { supabase, supabaseAdmin } from '../config/supabase.js';
 
 export const authenticate = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const token = req.headers.authorization?.replace('Bearer ', '') || req.query?.token;
     
     if (!token) {
       return res.status(401).json({ error: 'Token manquant' });

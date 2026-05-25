@@ -18,6 +18,9 @@ const ControlsPage = () => {
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">{control.name}</h3>
+              {control.kind === 'activity' && (
+                <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 flex-shrink-0">Activité</span>
+              )}
               <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${getStatusColor(control.status)}`}>
                 {getStatusLabel(control.status)}
               </span>
@@ -247,7 +250,8 @@ const ControlsPage = () => {
     date: '',
     start_time: '',
     end_time: '',
-    description: ''
+    description: '',
+    kind: 'control'
   });
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -1431,7 +1435,8 @@ const ControlsPage = () => {
       date: control.date,
       start_time: control.start_time || '',
       end_time: control.end_time || '',
-      description: control.description || ''
+      description: control.description || '',
+      kind: control.kind || 'control'
     });
     setShowCreateModal(true);
   };
@@ -1489,7 +1494,8 @@ const ControlsPage = () => {
           date: '',
           start_time: '',
           end_time: '',
-          description: ''
+          description: '',
+          kind: 'control'
         });
         fetchData();
       } else {
@@ -1530,7 +1536,8 @@ const ControlsPage = () => {
               date: '',
               start_time: '',
               end_time: '',
-              description: ''
+              description: '',
+              kind: 'control'
             });
             setShowCreateModal(true);
           }}
@@ -2482,6 +2489,20 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   rows={3}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setFormData({ ...formData, kind: 'control' })}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      formData.kind !== 'activity' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}>Contrôle</button>
+                  <button type="button" onClick={() => setFormData({ ...formData, kind: 'activity' })}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      formData.kind === 'activity' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}>Activité intégrée</button>
+                </div>
               </div>
 
               <div className="flex gap-3 pt-4">

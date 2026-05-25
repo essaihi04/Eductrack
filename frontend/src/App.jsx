@@ -64,6 +64,12 @@ import ParentChildPage from './pages/parent/ParentChildPage';
 import ParentNotificationsPage from './pages/parent/ParentNotificationsPage';
 import DriverDashboard from './pages/driver/DriverDashboard';
 import ActiveTripPage from './pages/driver/ActiveTripPage';
+import SchoolYearConfigPage from './pages/admin/SchoolYearConfigPage';
+import CoefficientsPage from './pages/admin/CoefficientsPage';
+import BulletinsPage from './pages/admin/BulletinsPage';
+import AppreciationsPage from './pages/teacher/AppreciationsPage';
+import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
+import StudentBulletins from './pages/student/StudentBulletins';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -124,6 +130,9 @@ function App() {
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />
+            <Route path="admin/school-year-config" element={<SchoolYearConfigPage />} />
+            <Route path="admin/coefficients" element={<CoefficientsPage />} />
+            <Route path="admin/bulletins" element={<BulletinsPage />} />
             <Route path="transport" element={<TransportDashboard />} />
             <Route path="transport/buses" element={<BusesPage />} />
             <Route path="transport/buses/:id" element={<BusDetailPage />} />
@@ -136,6 +145,7 @@ function App() {
             <Route path="parent/children/:childId" element={<ParentChildPage />} />
             <Route path="parent/notifications" element={<ParentNotificationsPage />} />
             <Route path="parent/transport" element={<ParentTransportPage />} />
+            <Route path="parent/bulletins" element={<ParentBulletinsPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />
@@ -154,6 +164,7 @@ function App() {
             <Route path="teacher/controls" element={<ControlsPage />} />
             <Route path="teacher/calendrier-classe" element={<CalendrierClasse />} />
             <Route path="teacher/documents" element={<DocumentsPage />} />
+            <Route path="teacher/appreciations" element={<AppreciationsPage />} />
             <Route path="teacher/cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="student/timetable" element={<StudentTimetable />} />
             <Route path="student/documents" element={<StudentDocuments />} />
@@ -161,6 +172,7 @@ function App() {
             <Route path="my-grades" element={<StudentGrades />} />
             <Route path="student/level" element={<StudentLevel />} />
             <Route path="student/badges" element={<StudentBadges />} />
+            <Route path="student/bulletins" element={<StudentBulletins />} />
             <Route path="profile" element={<StudentProfilePage />} />
             <Route path="superadmin/schools" element={<SchoolsListPage />} />
             <Route path="superadmin/schools/:schoolId" element={<SchoolDetailPage />} />

@@ -460,3 +460,33 @@ export async function getSchoolPaymentInfo(student, parentInfo) {
 
   return `${header('Contact & Paiement', '📞')}\n\n${body}${footer(school.name)}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// BULLETINS
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Résumé des bulletins publiés de l'élève */
+export async function getBulletinSummary(student, parentInfo) {
+  const { data: bulletins } = await supabaseAdmin
+    .from('bulletins')
+    .select('academic_year, semester, general_average, general_rank, total_students_in_class, mention, status')
+    .eq('student_id', student.id)
+    .in('status', ['published', 'sent'])
+    .order('academic_year', { ascending: false })
+    .order('semester', { ascending: false })
+    .limit(4);
+
+  if (!bulletins || bulletins.length === 0) {
+    return `${header('Bulletins scolaires', '📄')}\n\nAucun bulletin publié pour le moment.${footer(parentInfo.school_name)}`;
+  }
+
+  const lines = bulletins.map(b => {
+    const avg = b.general_average != null ? Number(b.general_average).toFixed(2) : '—';
+    const rank = b.general_rank ? `${b.general_rank}/${b.total_students_in_class || '?'}` : '—';
+    const emoji = b.general_average >= 14 ? '🟢' : b.general_average >= 10 ? '🟡' : '🔴';
+    const mention = b.mention ? ` (${b.mention})` : '';
+    return `${emoji} *${b.academic_year} — S${b.semester}*\n   📊 Moyenne : *${avg}/20*${mention}\n   🏅 Rang : *${rank}*`;
+  });
+
+  return `${header('Bulletins scolaires', '📄')}\n\n${lines.join('\n\n')}\n\n💡 _Pour télécharger le PDF, connectez-vous à l'application parent._${footer(parentInfo.school_name)}`;
+}

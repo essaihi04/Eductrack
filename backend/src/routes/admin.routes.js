@@ -1950,7 +1950,8 @@ router.post('/classes/import', async (req, res) => {
                   role: 'student',
                   class_id: newClass.id,
                   school_id: schoolId,
-                  date_of_birth: birthDate || null
+                  date_of_birth: birthDate || null,
+                  massar_code: massarCode || null
                 })
                 .select()
                 .single();
@@ -2902,7 +2903,7 @@ router.post('/students/import', async (req, res) => {
     const errors = [];
 
     for (const student of students) {
-      const { email, password, firstName, lastName } = student;
+      const { email, password, firstName, lastName, massarCode } = student;
       const [emailLocalPart, emailDomainPart] = String(email || '').split('@');
 
       // Vérifier si l'élève existe déjà
@@ -2934,7 +2935,7 @@ router.post('/students/import', async (req, res) => {
           email: finalEmail,
           password,
           email_confirm: true,
-          user_metadata: { first_name: firstName, last_name: lastName, role: 'student' }
+          user_metadata: { first_name: firstName, last_name: lastName, role: 'student', massar_code: massarCode || null }
         });
 
         authData = result.data;
@@ -2975,7 +2976,8 @@ router.post('/students/import', async (req, res) => {
           last_name: lastName,
           role: 'student',
           class_id: classId || null,
-          school_id: getSchoolId(req)
+          school_id: getSchoolId(req),
+          massar_code: massarCode || null
         })
         .select()
         .single();

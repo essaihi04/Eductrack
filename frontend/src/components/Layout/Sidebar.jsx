@@ -60,6 +60,7 @@ const Sidebar = () => {
         { icon: Upload, label: 'Documents pédagogiques', path: '/teacher/documents' },
         { icon: FileText, label: 'Devoirs', path: '/teacher/devoirs' },
         { icon: FileText, label: 'Cahier de texte', path: '/teacher/cahier-de-texte' },
+        { icon: Edit, label: 'Appréciations', path: '/teacher/appreciations' },
       ];
     }
 
@@ -80,6 +81,10 @@ const Sidebar = () => {
         { icon: BookOpen, label: 'Matières', path: '/subjects' },
         { icon: FileText, label: 'Cahier de texte', path: '/cahier-de-texte' },
         { icon: Users2, label: 'Parents', path: '/parents' },
+        { section: 'Bulletins', isSection: true },
+        { icon: FileText, label: 'Bulletins', path: '/admin/bulletins' },
+        { icon: BookOpen, label: 'Coefficients', path: '/admin/coefficients' },
+        { icon: Calendar, label: 'Config. année', path: '/admin/school-year-config' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
         // Section Finance — masquée pour le directeur pédagogique
         ...(isPedagogical ? [] : [
@@ -133,6 +138,7 @@ const Sidebar = () => {
       return [
         { icon: Users2, label: 'Mes enfants', path: '/parent' },
         { icon: Bell, label: 'Notifications', path: '/parent/notifications' },
+        { icon: FileText, label: 'Bulletins', path: '/parent/bulletins' },
         { icon: Bus, label: 'Transport', path: '/parent/transport' },
         { icon: Edit, label: 'Profil', path: '/profile' },
       ];
@@ -159,6 +165,7 @@ const Sidebar = () => {
       { icon: BarChart3, label: '📝 Mes notes', path: '/my-grades' },
       { icon: FileText, label: '📂 Documents', path: '/student/documents' },
       { icon: Award, label: '🧠 Badges', path: '/student/badges' },
+      { icon: FileText, label: '📄 Bulletins', path: '/student/bulletins' },
       { icon: Edit, label: '👤 Profil', path: '/profile' },
     ];
   };

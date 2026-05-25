@@ -54,7 +54,7 @@ const authenticateUser = async (req, res, next) => {
 // Créer un contrôle planifié
 router.post('/controls-plan', authenticateUser, async (req, res) => {
   try {
-    const { class_id, name, date, start_time, end_time, description } = req.body;
+    const { class_id, name, date, start_time, end_time, description, kind } = req.body;
     const teacher_id = req.user.id;
 
     if (!class_id || !name || !date) {
@@ -70,7 +70,8 @@ router.post('/controls-plan', authenticateUser, async (req, res) => {
         date,
         start_time,
         end_time,
-        description
+        description,
+        kind: kind || 'control'
       })
       .select()
       .single();
@@ -334,7 +335,7 @@ router.get('/controls-plan/:id', authenticateUser, async (req, res) => {
 router.put('/controls-plan/:id', authenticateUser, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, date, start_time, end_time, description, status } = req.body;
+    const { name, date, start_time, end_time, description, status, kind } = req.body;
     const teacher_id = req.user.id;
 
     const { data, error } = await supabase
@@ -345,7 +346,8 @@ router.put('/controls-plan/:id', authenticateUser, async (req, res) => {
         start_time: start_time !== undefined ? start_time : undefined,
         end_time: end_time !== undefined ? end_time : undefined,
         description: description !== undefined ? description : undefined,
-        status: status !== undefined ? status : undefined
+        status: status !== undefined ? status : undefined,
+        kind: kind !== undefined ? kind : undefined
       })
       .eq('id', id)
       .eq('teacher_id', teacher_id)
