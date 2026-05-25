@@ -9,6 +9,7 @@
 import OpenAI from 'openai';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import * as A from './answers.js';
+import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/schoolCalendar.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -33,9 +34,17 @@ RÈGLES STRICTES :
    - Pour les notes : si la question concerne les notes/résultats, utilise le champ "grades_by_subject" et présente TOUTES les matières (moyenne par matière, meilleure note, nombre de contrôles). N'affiche PAS uniquement la dernière note.
    - Pour les devoirs : utilise "pending_homework" (à rendre), "overdue_homework" (en retard) et "homework_stats". Mentionne explicitement les compteurs.
    - Maximum ~10 lignes, sois exhaustif quand le parent demande "les notes" ou "les devoirs".
-6. Pour toute question hors-sujet (politique, médical, opinions, autre élève, etc.), redirige poliment dans la langue du parent.
-7. Tu ne divulgues jamais d'informations bancaires ni d'informations sur d'autres élèves. Si on te demande login/mot de passe/identifiants, NE RÉPONDS PAS à la question : un module dédié s'en occupe automatiquement.
-8. NE TERMINE PAS par "Tapez menu..." — un message automatique sera ajouté par le système.
+6. ⚠️ ASSIDUITÉ — RÈGLES IMPÉRATIVES :
+   - Un *retard* (late) = élève PRÉSENT, juste en retard. NE LE COMPTE JAMAIS comme une absence.
+   - Le "taux de présence" = (présent + retard) / total. Donc 100% si l'élève n'a jamais été absent, même avec des retards.
+   - Si un retard apparaît, mentionne-le séparément (ex: "Aucune absence — mais 3 retards").
+7. ⚠️ FILTRAGE PAR SEMESTRE — RÈGLE IMPÉRATIVE :
+   - Si la question mentionne "semestre 1", "S1", "الأول", "الدورة الأولى" → utilise UNIQUEMENT les champs ".s1" du contexte (attendance_stats.s1, etc.), JAMAIS le total.
+   - Si la question mentionne "semestre 2", "S2", "الثاني", "الدورة الثانية" → utilise UNIQUEMENT les champs ".s2".
+   - Sinon, utilise le total. NE MÉLANGE JAMAIS S1 et S2 quand le parent demande explicitement un semestre.
+8. Pour toute question hors-sujet (politique, médical, opinions, autre élève, etc.), redirige poliment dans la langue du parent.
+9. Tu ne divulgues jamais d'informations bancaires ni d'informations sur d'autres élèves. Si on te demande login/mot de passe/identifiants, NE RÉPONDS PAS à la question : un module dédié s'en occupe automatiquement.
+10. NE TERMINE PAS par "Tapez menu..." — un message automatique sera ajouté par le système.
 `;
 
 // Détecte l'écriture arabe (≥ 30 % de caractères arabes dans le texte non-vide)
@@ -64,6 +73,21 @@ const FINANCE_KEYWORDS_RE = new RegExp(
 );
 function isFinanceQuery(text) {
   return FINANCE_KEYWORDS_RE.test(text || '');
+}
+
+/**
+ * Détecte si la question vise un semestre précis.
+ * Retourne 1, 2 ou null.
+ */
+function detectSemester(text) {
+  const t = (text || '').toLowerCase();
+  // Semestre 2 (à tester avant car peut contenir "semestre 1" en sous-chaîne après accent)
+  if (/\b(s2|sem(estre)?\s*2|deuxi[eè]me\s*semestre|2[eè]me\s*sem(estre)?)\b/i.test(t)) return 2;
+  if (/الدورة\s*الثانية|الفصل\s*الثاني|السداسي\s*الثاني|الثانية/.test(t)) return 2;
+  // Semestre 1
+  if (/\b(s1|sem(estre)?\s*1|premier\s*semestre|1er\s*sem(estre)?|1[eè]re?\s*sem(estre)?)\b/i.test(t)) return 1;
+  if (/الدورة\s*الأولى|الفصل\s*الأول|السداسي\s*الأول|الأولى/.test(t)) return 1;
+  return null;
 }
 
 /**
@@ -100,23 +124,52 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
       teacher_comment: t.comment ? String(t.comment).slice(0, 150) : null,
     }));
 
-  // Stats globales de présence (sur les 200 dernières séances)
+  // Stats de présence avec ventilation par semestre (S1 / S2 / total)
+  // Important : un RETARD (late) compte comme PRÉSENT pour le taux d'assiduité.
   const { data: allTracking } = await supabaseAdmin
     .from('session_tracking')
-    .select('presence')
+    .select('presence, session:sessions(date)')
     .eq('student_id', student.id)
-    .limit(200);
+    .limit(500);
+
   if (allTracking?.length) {
-    const total = allTracking.length;
-    const present = allTracking.filter((t) => t.presence === 'present').length;
-    const absent = allTracking.filter((t) => t.presence === 'absent').length;
-    const late = allTracking.filter((t) => t.presence === 'late').length;
+    // Bornes des semestres pour l'année en cours
+    const academicYear = getCurrentAcademicYear();
+    const bounds = getDefaultYearBounds(academicYear);
+
+    const computeStats = (rows) => {
+      const total = rows.length;
+      if (total === 0) return null;
+      const absent  = rows.filter((t) => t.presence === 'absent').length;
+      const late    = rows.filter((t) => t.presence === 'late').length;
+      const present = rows.filter((t) => t.presence === 'present').length;
+      const excused = rows.filter((t) => t.presence === 'excused').length;
+      // Taux de présence : retards inclus comme présents (élève présent, juste en retard)
+      const attended = present + late;
+      return {
+        total_sessions: total,
+        present,
+        absent,
+        late,
+        excused,
+        attendance_rate: Math.round((attended / total) * 100) + '%',
+        explanation: 'Le retard (late) est compté comme présent pour le taux d\'assiduité.',
+      };
+    };
+
+    const inRange = (date, start, end) => date && date >= start && date <= end;
+    const s1Rows = allTracking.filter((t) => inRange(t.session?.date, bounds.s1_start, bounds.s1_end));
+    const s2Rows = allTracking.filter((t) => inRange(t.session?.date, bounds.s2_start, bounds.s2_end));
+
     ctx.attendance_stats = {
-      total_sessions: total,
-      present,
-      absent,
-      late,
-      presence_rate: Math.round((present / total) * 100) + '%',
+      academic_year: academicYear,
+      total: computeStats(allTracking),
+      s1: computeStats(s1Rows),
+      s2: computeStats(s2Rows),
+      semester_dates: {
+        s1: { start: bounds.s1_start, end: bounds.s1_end },
+        s2: { start: bounds.s2_start, end: bounds.s2_end },
+      },
     };
   }
 
@@ -291,12 +344,23 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
       ? 'TOPIC: La question concerne la finance. Ne parle QUE de finance, ignore les données pédagogiques.'
       : 'TOPIC: La question concerne la pédagogie. Ne mentionne AUCUNE information financière (montants, factures, impayés), même brièvement.';
 
+    const askedSemester = detectSemester(messageText);
+    const semesterDirective = askedSemester
+      ? `SEMESTRE DEMANDÉ : ${askedSemester}.\n` +
+        `Le parent a explicitement demandé le SEMESTRE ${askedSemester}.\n` +
+        `→ Pour les statistiques d'assiduité, utilise UNIQUEMENT \`attendance_stats.s${askedSemester}\`, JAMAIS \`attendance_stats.total\`.\n` +
+        `→ Indique clairement "Semestre ${askedSemester}" dans ta réponse.\n` +
+        `→ Si attendance_stats.s${askedSemester} est null, dis qu'il n'y a pas encore de données pour ce semestre.\n` +
+        `→ Ne mentionne PAS les données de l'autre semestre, sauf si le parent compare explicitement.`
+      : 'Aucun semestre spécifique demandé. Utilise les statistiques globales (attendance_stats.total) ou indique "année en cours".';
+
     const completion = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'system', content: langDirective },
         { role: 'system', content: topicDirective },
+        { role: 'system', content: semesterDirective },
         {
           role: 'system',
           content: `DONNÉES DE L'ÉLÈVE (utilise UNIQUEMENT ces données) :\n${JSON.stringify(studentContext, null, 2)}`,
