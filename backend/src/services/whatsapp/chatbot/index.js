@@ -24,6 +24,7 @@ import { detectCredentialRequest, handleCredentialRequest } from './credentials.
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
 import { sendMediaBuffer } from '../index.js';
+import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -284,6 +285,34 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     try {
       const reply = await option.action(student, parentInfo);
       await sendText(schoolId, phone, reply, { urgent: true });
+
+      // Cas spécial : pour les "Bulletins scolaires" on envoie aussi les PDFs
+      // (jusqu'à 2 derniers bulletins publiés) en pièces jointes.
+      if (option.action === A.getBulletinSummary) {
+        try {
+          const { data: pubBulletins } = await supabaseAdmin
+            .from('bulletins')
+            .select('id, semester, academic_year')
+            .eq('student_id', student.id)
+            .in('status', ['published', 'sent'])
+            .order('academic_year', { ascending: false })
+            .order('semester', { ascending: false })
+            .limit(2);
+          for (const b of pubBulletins || []) {
+            const pdf = await generateBulletinPdfById(b.id);
+            if (pdf?.buffer) {
+              await sendMediaBuffer(schoolId, phone, pdf.buffer, {
+                type: 'document',
+                fileName: pdf.fileName,
+                mimetype: 'application/pdf',
+                caption: `📄 Bulletin ${b.academic_year} — Semestre ${b.semester}`,
+              }, { urgent: true });
+            }
+          }
+        } catch (pdfErr) {
+          console.error('[chatbot] Erreur génération/envoi PDF bulletin:', pdfErr);
+        }
+      }
 
       // Cas spécial : pour la "Dernière facture" on envoie aussi le PDF
       // en pièce jointe juste après le récap texte.

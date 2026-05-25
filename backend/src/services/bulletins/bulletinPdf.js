@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { computeMention } from './calculator.js';
+import { supabaseAdmin } from '../../config/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -320,4 +321,75 @@ export async function generateBulletinPdf({
       reject(err);
     }
   });
+}
+
+/**
+ * Helper réutilisable : génère le PDF d'un bulletin à partir de son ID.
+ * Récupère toutes les données nécessaires (lignes, école, config, classe...)
+ * et retourne `{ buffer, fileName }` prêt à être envoyé.
+ *
+ * Utilisé par : route GET /pdf/:id, envoi WhatsApp, chatbot.
+ *
+ * @param {string} bulletinId
+ * @returns {Promise<{ buffer: Buffer, fileName: string, bulletin: object } | null>}
+ */
+export async function generateBulletinPdfById(bulletinId) {
+  const { data: bulletin, error } = await supabaseAdmin
+    .from('bulletins')
+    .select(`
+      *,
+      profiles!bulletins_student_id_fkey(id, first_name, last_name, massar_code),
+      bulletin_lines(*),
+      classes!bulletins_class_id_fkey(id, name, level, filiere, school_id)
+    `)
+    .eq('id', bulletinId)
+    .single();
+  if (error || !bulletin) return null;
+
+  const [{ data: config }, { data: school }, { data: allBulletins }] = await Promise.all([
+    supabaseAdmin
+      .from('school_year_config').select('*')
+      .eq('school_id', bulletin.school_id)
+      .eq('academic_year', bulletin.academic_year)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('schools').select('id, name, address, phone')
+      .eq('id', bulletin.school_id).single(),
+    supabaseAdmin
+      .from('bulletins').select('general_average')
+      .eq('class_id', bulletin.class_id)
+      .eq('academic_year', bulletin.academic_year)
+      .eq('semester', bulletin.semester),
+  ]);
+
+  const validAvgs = (allBulletins || [])
+    .filter(b => b.general_average != null)
+    .map(b => Number(b.general_average));
+  const classAverage = validAvgs.length
+    ? validAvgs.reduce((a, b) => a + b, 0) / validAvgs.length
+    : null;
+
+  const lines = (bulletin.bulletin_lines || [])
+    .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
+
+  const buffer = await generateBulletinPdf({
+    student: bulletin.profiles || {},
+    cls: bulletin.classes || {},
+    lines,
+    generalAverage: bulletin.general_average,
+    generalRank: bulletin.general_rank,
+    totalStudents: bulletin.total_students_in_class,
+    classAverage: classAverage != null ? Math.round(classAverage * 100) / 100 : null,
+    config: config || {},
+    school: school || {},
+    academicYear: bulletin.academic_year,
+    semester: bulletin.semester,
+    notes: bulletin.notes,
+  });
+
+  const rawName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');
+  const asciiName = rawName.replace(/[^\x20-\x7E]/g, '').replace(/[^a-zA-Z0-9_\-]/g, '') || 'eleve';
+  const fileName = `bulletin_${asciiName}_${bulletin.academic_year.replace('/', '-')}_S${bulletin.semester}.pdf`;
+
+  return { buffer, fileName, bulletin };
 }

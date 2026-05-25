@@ -488,5 +488,5 @@ export async function getBulletinSummary(student, parentInfo) {
     return `${emoji} *${b.academic_year} — S${b.semester}*\n   📊 Moyenne : *${avg}/20*${mention}\n   🏅 Rang : *${rank}*`;
   });
 
-  return `${header('Bulletins scolaires', '📄')}\n\n${lines.join('\n\n')}\n\n💡 _Pour télécharger le PDF, connectez-vous à l'application parent._${footer(parentInfo.school_name)}`;
+  return `${header('Bulletins scolaires', '📄')}\n\n${lines.join('\n\n')}\n\n� _Le(s) bulletin(s) PDF arrivent juste après ce message._${footer(parentInfo.school_name)}`;
 }
