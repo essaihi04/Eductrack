@@ -248,8 +248,8 @@ export async function generateBulletinPdf({
       y += 2;
       doc.rect(tableX, y, CONTENT_W, rowH + 2).fill(C.headerBg).strokeColor(C.tableBorder).stroke();
       doc.font('Helvetica-Bold').fontSize(9).fillColor(C.primary);
-      const totalCoef = lines.reduce((s, l) => s + l.coefficient, 0);
-      const totalWeighted = lines.reduce((s, l) => s + l.weighted_note, 0);
+      const totalCoef = lines.reduce((s, l) => s + Number(l.coefficient || 0), 0);
+      const totalWeighted = lines.reduce((s, l) => s + (l.weighted_note != null ? Number(l.weighted_note) : 0), 0);
       doc.text('TOTAL', tableX + 5, y + 4, { width: 130 });
       doc.text(String(totalCoef), tableX + 130 + 55 + 55 + 55 + 3, y + 4, { width: 40, align: 'center' });
       doc.text(fmtNum(totalWeighted), tableX + 130 + 55 + 55 + 55 + 40 + 3, y + 4, { width: 60, align: 'center' });

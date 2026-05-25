@@ -127,15 +127,19 @@ CREATE TABLE IF NOT EXISTS bulletin_lines (
   subject_name TEXT NOT NULL,
   controls_avg NUMERIC(5,2),
   activities_avg NUMERIC(5,2),
-  note_20 NUMERIC(5,2) NOT NULL,               -- = controls_avg*0.75 + activities_avg*0.25
+  note_20 NUMERIC(5,2),                        -- = controls_avg*0.75 + activities_avg*0.25 (null si pas de notes)
   coefficient NUMERIC(4,2) NOT NULL,
-  weighted_note NUMERIC(7,2) NOT NULL,
+  weighted_note NUMERIC(7,2),
   rank_in_class INT,
   appreciation TEXT,                           -- override admin (priorité)
   appreciation_by_teacher TEXT,                -- saisie prof (fallback)
   display_order INT DEFAULT 100
 );
 CREATE INDEX IF NOT EXISTS idx_bulletin_lines_bulletin ON bulletin_lines(bulletin_id);
+
+-- Si la table existait déjà avec note_20/weighted_note NOT NULL → on relâche
+ALTER TABLE bulletin_lines ALTER COLUMN note_20 DROP NOT NULL;
+ALTER TABLE bulletin_lines ALTER COLUMN weighted_note DROP NOT NULL;
 
 -- ─── 6. Appréciations indépendantes (saisie prof avant génération) ─────
 -- Permet aux profs de saisir leurs appréciations indépendamment des bulletins

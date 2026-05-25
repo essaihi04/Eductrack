@@ -601,9 +601,13 @@ router.get('/pdf/:bulletinId', async (req, res) => {
       notes: bulletin.notes
     });
 
-    const studentName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');
+    const rawName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');
+    // ASCII-safe pour filename (header HTTP ne supporte que ASCII), nom complet en filename*
+    const asciiName = rawName.replace(/[^\x20-\x7E]/g, '').replace(/[^a-zA-Z0-9_\-]/g, '') || 'eleve';
+    const fullName = encodeURIComponent(rawName);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="bulletin_${studentName}_S${bulletin.semester}.pdf"`);
+    res.setHeader('Content-Disposition',
+      `inline; filename="bulletin_${asciiName}_S${bulletin.semester}.pdf"; filename*=UTF-8''bulletin_${fullName}_S${bulletin.semester}.pdf`);
     res.send(pdfBuffer);
   } catch (e) {
     console.error('[Bulletins] pdf error:', e.message);
