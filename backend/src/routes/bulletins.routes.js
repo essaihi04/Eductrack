@@ -25,6 +25,7 @@ import {
   computeMention
 } from '../services/bulletins/calculator.js';
 import { generateBulletinPdf } from '../services/bulletins/bulletinPdf.js';
+import { getDefaultYearBounds, getCurrentSemester, getCurrentAcademicYear } from '../services/bulletins/schoolCalendar.js';
 
 const router = Router();
 
@@ -37,7 +38,7 @@ router.use(authenticate);
 // 1. CONFIGURATION ANNÉE SCOLAIRE (admin / direction_pedagogique)
 // ═══════════════════════════════════════════════════════════════════════════
 
-// GET /config/:academicYear
+// GET /config/:academicYear  → retourne la config OU les défauts MEN officiels
 router.get('/config/:academicYear', requireSchoolAdmin, async (req, res) => {
   try {
     const schoolId = req.user.school_id;
@@ -49,9 +50,67 @@ router.get('/config/:academicYear', requireSchoolAdmin, async (req, res) => {
       .eq('academic_year', academicYear)
       .maybeSingle();
     if (error) throw error;
-    res.json(data || {});
+
+    const def = getDefaultYearBounds(academicYear);
+    // Si rien en base → renvoie les défauts officiels MEN (pas encore persistés)
+    if (!data) {
+      return res.json({
+        academic_year:   academicYear,
+        year_start:      def.year_start,
+        year_end:        def.year_end,
+        semester_1_start: def.s1_start,
+        semester_1_end:   def.s1_end,
+        semester_2_start: def.s2_start,
+        semester_2_end:   def.s2_end,
+        is_default: true
+      });
+    }
+    // Si des champs manquent → on complète avec les défauts officiels
+    res.json({
+      ...data,
+      semester_1_start: data.semester_1_start || def.s1_start,
+      semester_1_end:   data.semester_1_end   || def.s1_end,
+      semester_2_start: data.semester_2_start || def.s2_start,
+      semester_2_end:   data.semester_2_end   || def.s2_end,
+      year_start:       data.year_start       || def.year_start,
+      year_end:         data.year_end         || def.year_end,
+      is_default: false
+    });
   } catch (e) {
     console.error('[Bulletins] config GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /current-semester  → semestre en cours d'après la date du jour
+router.get('/current-semester', async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const result = await getCurrentSemester(schoolId);
+    res.json(result);
+  } catch (e) {
+    console.error('[Bulletins] current-semester error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /years  → liste de toutes les années académiques (configs + bulletins existants)
+//               + l'année courante calculée. Sert à alimenter le sélecteur d'année.
+router.get('/years', async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const [bull, cfg] = await Promise.all([
+      supabaseAdmin.from('bulletins').select('academic_year').eq('school_id', schoolId),
+      supabaseAdmin.from('school_year_config').select('academic_year').eq('school_id', schoolId),
+    ]);
+    const set = new Set();
+    (bull.data || []).forEach(r => r.academic_year && set.add(r.academic_year));
+    (cfg.data || []).forEach(r => r.academic_year && set.add(r.academic_year));
+    set.add(getCurrentAcademicYear());
+    const years = [...set].sort().reverse(); // plus récent en premier
+    res.json({ years, current: getCurrentAcademicYear() });
+  } catch (e) {
+    console.error('[Bulletins] years error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -8,6 +8,8 @@ const BulletinsPage = () => {
   const [academicYear, setAcademicYear] = useState('');
   const [semester, setSemester] = useState(1);
   const [bulletins, setBulletins] = useState([]);
+  const [years, setYears] = useState([]);
+  const [currentYear, setCurrentYear] = useState('');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -30,7 +32,39 @@ const BulletinsPage = () => {
   useEffect(() => {
     setAcademicYear(defaultYear());
     fetchClasses();
+    fetchCurrentSemester();
+    fetchYears();
   }, []);
+
+  // Liste des années (archives + en cours)
+  const fetchYears = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${apiUrl}/api/bulletins/years`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setYears(data.years || []);
+        setCurrentYear(data.current || '');
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  // Récupère le semestre en cours selon les dates officielles MEN / config école
+  const fetchCurrentSemester = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${apiUrl}/api/bulletins/current-semester`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.academicYear) setAcademicYear(data.academicYear);
+        if (data?.semester) setSemester(data.semester);
+      }
+    } catch (e) { console.error(e); }
+  };
 
   const fetchClasses = async () => {
     try {
@@ -165,8 +199,18 @@ const BulletinsPage = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Année scolaire</label>
-              <input type="text" value={academicYear} onChange={e => setAcademicYear(e.target.value)}
-                className="border rounded-lg px-3 py-2 text-sm w-32" />
+              <select value={academicYear} onChange={e => setAcademicYear(e.target.value)}
+                className="border rounded-lg px-3 py-2 text-sm w-40 bg-white">
+                {/* Toujours inclure l'année courante en tête, puis archives */}
+                {!years.includes(academicYear) && academicYear && (
+                  <option value={academicYear}>{academicYear} (en cours)</option>
+                )}
+                {years.map(y => (
+                  <option key={y} value={y}>
+                    {y}{y === currentYear ? ' (en cours)' : ''}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Semestre</label>

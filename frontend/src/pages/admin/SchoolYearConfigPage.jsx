@@ -18,6 +18,7 @@ const SchoolYearConfigPage = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [isDefault, setIsDefault] = useState(false);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const getToken = async () => {
@@ -47,10 +48,12 @@ const SchoolYearConfigPage = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.id) {
+        if (data) {
+          setIsDefault(!!data.is_default);
           setConfig(prev => ({
             ...prev,
             ...data,
+            academic_year: data.academic_year || year,
             semester_1_start: data.semester_1_start || '',
             semester_1_end: data.semester_1_end || '',
             semester_2_start: data.semester_2_start || '',
@@ -78,6 +81,7 @@ const SchoolYearConfigPage = () => {
       });
       if (!res.ok) throw new Error((await res.json()).error);
       setMsg('✅ Configuration sauvegardée');
+      setIsDefault(false);
     } catch (e) {
       setMsg(`❌ ${e.message}`);
     } finally {
@@ -89,10 +93,15 @@ const SchoolYearConfigPage = () => {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Calendar className="w-6 h-6 text-blue-600" /> Configuration Année Scolaire
         </h1>
+        {isDefault && (
+          <span className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+            ℹ️ Dates officielles MEN pré-remplies — pensez à sauvegarder
+          </span>
+        )}
       </div>
 
       {loading ? (

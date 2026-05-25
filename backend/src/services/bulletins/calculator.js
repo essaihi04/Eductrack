@@ -15,6 +15,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from '../../config/supabase.js';
+import { getDefaultYearBounds } from './schoolCalendar.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -52,20 +53,12 @@ export const getSemesterBounds = async (schoolId, academicYear, semester) => {
     }
   }
 
-  // Défauts. academic_year = "2025/2026" → year = 2025
-  const startYear = parseInt(String(academicYear).split('/')[0], 10) || new Date().getFullYear();
+  // Défauts officiels MEN
+  const def = getDefaultYearBounds(academicYear);
   if (semester === 1) {
-    return {
-      start: `${startYear}-09-01`,
-      end:   `${startYear + 1}-01-31`,
-      config: cfg
-    };
+    return { start: def.s1_start, end: def.s1_end, config: cfg };
   }
-  return {
-    start: `${startYear + 1}-02-01`,
-    end:   `${startYear + 1}-06-30`,
-    config: cfg
-  };
+  return { start: def.s2_start, end: def.s2_end, config: cfg };
 };
 
 /**
