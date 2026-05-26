@@ -2187,10 +2187,14 @@ const WhatsAppPage = () => {
                       </h3>
                       <div className="flex items-center gap-3">
                         <input type="time" value={reportSettings.send_time || '18:00'}
+                          min="07:00" max="22:59"
                           onChange={(e) => updateSetting('send_time', e.target.value)}
                           className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
                         <span className="text-sm text-gray-500">(Fuseau horaire: Africa/Casablanca)</span>
                       </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        ⚠️ Créneau autorisé&nbsp;: <strong>07:00 → 22:59</strong>. L'anti-ban WhatsApp bloque tout envoi en dehors de cette plage.
+                      </p>
                     </div>
 
                     {/* Language */}

@@ -1212,6 +1212,21 @@ router.post('/daily-reports/settings', async (req, res) => {
 
     const { enabled, send_time, language, include_recommendations, include_chapter_info, include_homework_status, include_behavior, include_grades } = req.body;
 
+    // Validation horaire : anti-ban WhatsApp interdit l'envoi hors 07:00 → 22:59 (Africa/Casablanca).
+    // Refuser dès la configuration évite des échecs silencieux quotidiens.
+    if (send_time) {
+      if (!/^\d{2}:\d{2}(:\d{2})?$/.test(String(send_time))) {
+        return res.status(400).json({ error: '"send_time" doit être au format HH:MM' });
+      }
+      const [hh, mm] = String(send_time).split(':').map((n) => parseInt(n, 10));
+      const minutes = hh * 60 + mm;
+      if (minutes < 7 * 60 || minutes > 22 * 60 + 59) {
+        return res.status(400).json({
+          error: "L'heure d'envoi doit être comprise entre 07:00 et 22:59 (heure du Maroc). Les envois WhatsApp sont bloqués par l'anti-ban en dehors de ce créneau.",
+        });
+      }
+    }
+
     const { data: existing } = await supabaseAdmin
       .from('daily_report_settings')
       .select('id')
