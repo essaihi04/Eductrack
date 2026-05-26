@@ -904,192 +904,80 @@ const WhatsAppPage = () => {
     finally { setReportPreviewLoading(false); }
   };
 
+  // Envoie le rapport sous forme de PDF moderne aux parents via WhatsApp.
+  // Le backend regénère les données + le PDF avec graphes/charts/IA et l'envoie
+  // en pièce jointe (sendMediaBuffer Baileys), pas en texte tronqué.
   const sendReportWhatsApp = async () => {
-    console.log('[SendWhatsApp] reportPreview:', reportPreview);
-    console.log('[SendWhatsApp] reportSelectedStudent:', reportSelectedStudent);
-    if (!reportPreview?.report || !reportSelectedStudent) { alert('Aucun rapport à envoyer. Générez d\'abord un aperçu.'); return; }
+    if (!reportSelectedStudent) { alert('Sélectionnez un élève d\'abord.'); return; }
+    if (!reportPeriodData) { alert('Générez d\'abord un aperçu pour fixer la période.'); return; }
     setReportSending(true);
     try {
       const token = await getAuthToken();
-      const rpt = reportPreview.report;
-      let text = '';
-      if (typeof rpt === 'string') { text = rpt; }
-      else {
-        if (rpt.fr) text += rpt.fr;
-        if (rpt.fr && rpt.ar) text += '\n\n━━━━━━━━━━━━━━━\n\n';
-        if (rpt.ar) text += rpt.ar;
-      }
-      console.log('[SendWhatsApp] text length:', text.length);
-      if (!text.trim()) { alert('Le rapport est vide.'); setReportSending(false); return; }
-      console.log('[SendWhatsApp] Sending to:', `${apiUrl}/api/admin/whatsapp/daily-reports/send-report`);
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/send-report`, {
+      const { startDate, endDate } = reportPeriodData.period;
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/send-pdf-report`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: reportSelectedStudent, reportText: text })
+        body: JSON.stringify({ studentId: reportSelectedStudent, startDate, endDate }),
       });
-      console.log('[SendWhatsApp] Response status:', res.status);
       const data = await res.json();
-      console.log('[SendWhatsApp] Response data:', data);
-      if (data.success) alert(`Rapport envoyé ! ${data.sent} message(s) envoyé(s), ${data.failed} échoué(s).`);
-      else alert(data.error || 'Erreur envoi');
-    } catch (error) { console.error('Erreur send:', error); alert('Erreur de connexion: ' + error.message); }
-    finally { setReportSending(false); }
-  };
-
-  const downloadReportPDF = async () => {
-    if (!reportPreview?.report || !reportPeriodData) { alert('Aucun rapport à télécharger. Générez d\'abord un aperçu.'); return; }
-    try {
-    let jsPDF, autoTable;
-    try {
-      const jsPDFModule = await import('jspdf');
-      const autoTableModule = await import('jspdf-autotable');
-      jsPDF = jsPDFModule.default;
-      autoTable = autoTableModule.default;
+      if (data.success) {
+        alert(`📎 PDF envoyé ! ${data.sent} parent(s) destinataire(s)${data.failed ? `, ${data.failed} échec(s)` : ''}.`);
+      } else {
+        alert(data.error || 'Échec de l\'envoi WhatsApp');
+      }
     } catch (error) {
-      console.error('Erreur lors du chargement de jsPDF:', error);
-      alert('Impossible de générer le PDF. Veuillez réessayer.');
-      return;
+      console.error('Erreur send PDF:', error);
+      alert('Erreur de connexion: ' + error.message);
+    } finally {
+      setReportSending(false);
     }
-    const doc = new jsPDF();
-    const st = reportPeriodData.student;
-    const os = reportPeriodData.overallStats;
-    const margin = 14;
-    let y = 20;
-    // Helper unifié pour récupérer la position Y finale après autoTable
-    // (autoTable mute `doc.lastAutoTable`, l'API recommandée ; `previousAutoTable` n'existe plus).
-    const afterTableY = () => (doc.lastAutoTable?.finalY ?? y) + 10;
-
-    // jsPDF + police par défaut (Helvetica) ne gèrent que Latin1.
-    // On retire :
-    //   - les caractères arabes (qui apparaîtraient comme '????')
-    //   - tous les emojis et symboles hors BMP-Latin1 (sinon → 'Ø=ÜË' garbage)
-    //   - on convertit aussi quelques emojis fréquents en équivalents texte.
-    const EMOJI_REPLACEMENTS = [
-      [/[🎓📚📖]/gu, ''], [/[📊📈📉]/gu, ''], [/✅/gu, '[OK]'], [/❌/gu, '[X]'],
-      [/⚠️|⚠/gu, '!'], [/⏰|🕐/gu, ''], [/[👍👏🙌]/gu, ''], [/[👥👤👨‍👩‍👧]/gu, ''],
-      [/[🎯⭐💯]/gu, ''], [/[📝📋📓]/gu, ''], [/[🏫🎒]/gu, ''], [/[💡🔍]/gu, ''],
-      [/[🟩⬜🟧🟥]/gu, ''], [/━+/gu, '---'], [/[│┃║]/gu, '|'],
-    ];
-    const sanitize = (str) => {
-      if (!str) return '';
-      let s = String(str);
-      for (const [re, rep] of EMOJI_REPLACEMENTS) s = s.replace(re, rep);
-      // Retire arabe
-      s = s.replace(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '');
-      // Retire tout caractère hors Latin1 (gère emojis restants, symboles, etc.)
-      s = s.replace(/[^\x00-\xFF]/g, '');
-      // Markdown WhatsApp (*gras*) — on retire les * pour éviter le parasitage
-      s = s.replace(/\*+/g, '');
-      return s.replace(/\s{2,}/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
-    };
-
-    // School name header
-    const schoolName = sanitize(st.schoolName || '') || 'Établissement Scolaire';
-    doc.setFontSize(14);
-    doc.setTextColor(34, 139, 34);
-    doc.text(schoolName, 105, y, { align: 'center' });
-    y += 8;
-
-    doc.setFontSize(16);
-    doc.setTextColor(34, 139, 34);
-    doc.text('Rapport Scolaire', margin, y);
-    y += 10;
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, margin, y);
-    y += 10;
-
-    const studentName = sanitize(`${st.firstName} ${st.lastName}`) || 'Eleve';
-
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-    doc.text(`Élève: ${studentName}`, margin, y); y += 6;
-    doc.text(`Classe: ${st.className} (${st.level})`, margin, y); y += 6;
-    doc.text(`Période: ${reportPeriodData.period.startDate} - ${reportPeriodData.period.endDate}`, margin, y); y += 10;
-
-    // Overall stats table
-    autoTable(doc, {
-      startY: y,
-      head: [['Indicateur', 'Valeur']],
-      body: [
-        ['Séances totales', `${os.totalSessions}`],
-        ['Jours', `${os.totalDays}`],
-        ['Taux de présence', `${os.presenceRate ?? '-'}%`],
-        ['Participation moy.', `${os.avgParticipation ?? '-'}/5`],
-        ['Discipline moy.', `${os.avgDiscipline ?? '-'}/5`],
-        ['Mini-éval moy.', `${os.avgMiniEval ?? '-'}/10`],
-        ['Devoirs faits', `${os.homeworkRate ?? '-'}%`],
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: [34, 139, 34] },
-      margin: { left: margin },
-      styles: { fontSize: 9 }
-    });
-    y = afterTableY();
-
-    // Subject stats table
-    if (Object.keys(reportPeriodData.subjectStats).length > 0) {
-      const subjRows = Object.entries(reportPeriodData.subjectStats).map(([name, s]) => [
-        name,
-        `${s.totalSessions}`,
-        `${s.presence.present}/${s.totalTracked}`,
-        `${s.avgParticipation ?? '-'}`,
-        `${s.avgMiniEval ?? '-'}`,
-        s.grades.map(g => `${g.note}/${g.max}`).join(', ') || '-',
-        s.topics.join(', ').substring(0, 40) || '-'
-      ]);
-      autoTable(doc, {
-        startY: y,
-        head: [['Matière', 'Séances', 'Présence', 'Particip.', 'Mini-éval', 'Notes', 'Chapitres']],
-        body: subjRows.map(r => r.map(c => sanitize(String(c)))),
-        theme: 'grid',
-        headStyles: { fillColor: [34, 139, 34] },
-        margin: { left: margin },
-        styles: { fontSize: 7 },
-        columnStyles: { 6: { cellWidth: 40 } }
-      });
-      y = afterTableY();
-    }
-
-    // Grades table
-    if (os.grades?.length > 0) {
-      autoTable(doc, {
-        startY: y,
-        head: [['Matière', 'Chapitre', 'Note', 'Date']],
-        body: os.grades.map(g => [sanitize(g.subject), sanitize(g.topic), `${g.note}/${g.max}`, g.date]),
-        theme: 'grid',
-        headStyles: { fillColor: [34, 139, 34] },
-        margin: { left: margin },
-        styles: { fontSize: 8 }
-      });
-      y = afterTableY();
-    }
-
-    // AI Report text (French only — jsPDF cannot render Arabic ni les emojis)
-    if (y > 250) { doc.addPage(); y = 20; }
-    doc.setFontSize(12);
-    doc.setTextColor(34, 139, 34);
-    doc.text('Rapport (Version française)', margin, y); y += 8;
-    doc.setFontSize(9);
-    doc.setTextColor(0);
-    const rptObj = reportPreview.report;
-    let reportText = typeof rptObj === 'string' ? rptObj : (rptObj.fr || '');
-    if (!reportText && rptObj.ar) {
-      reportText = '(Le rapport est disponible uniquement en arabe. Consultez la version WhatsApp pour le texte complet.)';
-    }
-    // Sanitize complet : retire emojis + arabe + caractères non-Latin1 (sinon jsPDF affiche 'Ø=ÜË').
-    reportText = sanitize(reportText);
-    const lines = doc.splitTextToSize(reportText, 180);
-    for (const line of lines) {
-      if (y > 280) { doc.addPage(); y = 20; }
-      doc.text(line, margin, y);
-      y += 5;
-    }
-
-    const safeName = sanitize(`${st.lastName}_${st.firstName}`) || 'eleve';
-    doc.save(`rapport_${safeName}_${reportPeriodData.period.startDate}.pdf`);
-    } catch (error) { console.error('Erreur PDF:', error); alert('Erreur lors de la génération du PDF: ' + error.message); }
   };
+
+  // Télécharge le PDF moderne généré côté serveur (PDFKit + charts natifs).
+  // L'ancienne génération jsPDF cliente a été supprimée :
+  //   - police Helvetica Latin1 incapable de rendre emojis/arabe → garbage "Ø=ÜË"
+  //   - pas de charts natifs
+  //   - layout fragile (autoTable y-pos, multi-page)
+  // Le backend renvoie le PDF en blob, on déclenche le download via Object URL.
+  const downloadReportPDF = async () => {
+    if (!reportSelectedStudent) { alert('Sélectionnez un élève d\'abord.'); return; }
+    if (!reportPeriodData) { alert('Générez d\'abord un aperçu pour fixer la période.'); return; }
+    try {
+      const token = await getAuthToken();
+      const { startDate, endDate } = reportPeriodData.period;
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/pdf`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: reportSelectedStudent, startDate, endDate }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || `Erreur ${res.status}`);
+        return;
+      }
+      // Récupère le filename depuis le header (RFC 5987 ou ASCII fallback)
+      const cd = res.headers.get('content-disposition') || '';
+      const matchUtf = cd.match(/filename\*=UTF-8''([^;]+)/i);
+      const matchAscii = cd.match(/filename="?([^";]+)"?/i);
+      const fileName = matchUtf ? decodeURIComponent(matchUtf[1])
+        : matchAscii ? matchAscii[1]
+        : `rapport_${startDate}_${endDate}.pdf`;
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Erreur PDF:', error);
+      alert('Erreur lors du téléchargement: ' + error.message);
+    }
+  };
+
 
   const retryReport = async (reportId) => {
     setReportRetrying(reportId);

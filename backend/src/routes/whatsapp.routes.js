@@ -4,10 +4,11 @@ import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.j
 import { processDailyReports, generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 import { resolveCategoryForSending, allowedCategoriesForRole, canSeePedagogicalReports } from '../utils/whatsappCategory.js';
 import {
-  sendText, sendImage, sendDocument,
+  sendText, sendImage, sendDocument, sendMediaBuffer,
   startSession, logoutSession, getStatus, getQrDataUrl,
   getStats as getAntiBanStats,
 } from '../services/whatsapp/index.js';
+import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 
 const router = express.Router();
@@ -1325,6 +1326,157 @@ router.post('/daily-reports/comprehensive-preview', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers PDF rapport élève
+// ─────────────────────────────────────────────────────────────────────────
+
+async function buildStudentReportPdf({ schoolId, studentId, startDate, endDate }) {
+  const result = await generateComprehensivePreview(studentId, schoolId, startDate, endDate);
+  if (result?.error) return { error: result.error };
+  if (!result?.periodData) return { error: 'Données indisponibles' };
+  const pdfBuffer = await generateStudentReportPdf({
+    periodData: result.periodData,
+    aiReport: result.report,
+  });
+  const st = result.periodData.student;
+  const safeName = `${st.lastName || 'eleve'}_${st.firstName || ''}`
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 60) || 'eleve';
+  const fileName = `rapport_${safeName}_${startDate}_${endDate}.pdf`;
+  return { pdfBuffer, fileName, periodData: result.periodData, report: result.report };
+}
+
+// POST /daily-reports/pdf — télécharger le PDF moderne (charts, KPIs, IA)
+router.post('/daily-reports/pdf', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { studentId, startDate, endDate } = req.body;
+    if (!studentId || !startDate || !endDate) {
+      return res.status(400).json({ error: 'studentId, startDate, endDate requis' });
+    }
+    const out = await buildStudentReportPdf({ schoolId, studentId, startDate, endDate });
+    if (out.error) return res.status(400).json({ error: out.error });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    // RFC 5987 pour gérer les noms Unicode (ex : Bénjelloun)
+    const encodedName = encodeURIComponent(out.fileName);
+    res.setHeader('Content-Disposition', `attachment; filename="report.pdf"; filename*=UTF-8''${encodedName}`);
+    res.setHeader('Content-Length', out.pdfBuffer.length);
+    res.send(out.pdfBuffer);
+  } catch (e) {
+    console.error('[ReportPdf] erreur:', e);
+    res.status(500).json({ error: e.message || 'Erreur PDF' });
+  }
+});
+
+// POST /daily-reports/send-pdf-report — envoie le PDF aux parents via WhatsApp (doc)
+router.post('/daily-reports/send-pdf-report', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { studentId, startDate, endDate } = req.body;
+    if (!studentId || !startDate || !endDate) {
+      return res.status(400).json({ error: 'studentId, startDate, endDate requis' });
+    }
+
+    // 1. Génère le PDF
+    const out = await buildStudentReportPdf({ schoolId, studentId, startDate, endDate });
+    if (out.error) return res.status(400).json({ error: out.error });
+
+    // 2. Récupère les parents + téléphones WhatsApp
+    const { data: links } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id')
+      .eq('student_id', studentId);
+    if (!links?.length) return res.json({ success: false, error: 'Aucun parent lié à cet élève.' });
+
+    const parentIds = links.map(l => l.parent_id);
+    const { data: contacts } = await supabaseAdmin
+      .from('parent_contacts')
+      .select('parent_id, phone_e164, is_primary')
+      .in('parent_id', parentIds)
+      .eq('channel', 'whatsapp')
+      .order('is_primary', { ascending: false });
+    if (!contacts?.length) return res.json({ success: false, error: 'Aucun numéro WhatsApp trouvé pour les parents.' });
+
+    // 3. Vérifie la session WhatsApp
+    const status = await getStatus(schoolId);
+    if (!status?.connected) {
+      return res.json({ success: false, error: 'Session WhatsApp non connectée pour cette école. Connectez-la dans l\'onglet Sessions.' });
+    }
+
+    // 4. Caption courte (les détails sont dans le PDF)
+    const st = out.periodData.student;
+    const fmtDate = (iso) => { const [y, m, d] = String(iso).split('-'); return `${d}/${m}/${y}`; };
+    const caption = `📊 *Rapport pédagogique*\n` +
+      `👤 ${st.firstName} ${st.lastName}\n` +
+      `🎓 ${st.className || ''}\n` +
+      `🗓️ Période : ${fmtDate(startDate)} → ${fmtDate(endDate)}\n\n` +
+      `📎 Veuillez consulter le PDF ci-joint pour le détail complet.`;
+
+    // 5. Log message
+    const studentName = `${st.firstName} ${st.lastName}`;
+    const { data: msgLog } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .insert({
+        school_id: schoolId,
+        sent_by: req.user.id,
+        message_type: 'document',
+        content: caption,
+        file_name: out.fileName,
+        recipient_filter: { type: 'comprehensive_report_pdf', student_id: studentId, student_name: studentName },
+        total_recipients: contacts.length,
+        status: 'sending',
+        category: 'pedagogical',
+      })
+      .select()
+      .single();
+
+    if (msgLog) {
+      await supabaseAdmin.from('whatsapp_message_recipients').insert(
+        contacts.map(c => ({ message_id: msgLog.id, parent_id: c.parent_id, phone_e164: c.phone_e164, status: 'pending' }))
+      );
+    }
+
+    // 6. Envoi via Baileys (PDF buffer)
+    let sent = 0, failed = 0;
+    const errors = new Set();
+    for (const contact of contacts) {
+      const result = await sendMediaBuffer(schoolId, contact.phone_e164, out.pdfBuffer, {
+        type: 'document', fileName: out.fileName, mimetype: 'application/pdf', caption,
+      });
+      const ok = result?.success;
+      if (!ok && result?.message) errors.add(result.reason || result.message);
+
+      if (msgLog) {
+        await supabaseAdmin.from('whatsapp_message_recipients').update({
+          status: ok ? 'sent' : 'failed',
+          sent_at: ok ? new Date().toISOString() : null,
+          error_message: ok ? null : (result?.message || 'Échec envoi PDF'),
+        }).eq('message_id', msgLog.id).eq('phone_e164', contact.phone_e164);
+      }
+      if (ok) sent++; else failed++;
+    }
+
+    if (msgLog) {
+      await supabaseAdmin.from('whatsapp_messages').update({
+        status: failed === contacts.length ? 'failed' : 'completed',
+        sent_count: sent,
+        failed_count: failed,
+        updated_at: new Date().toISOString(),
+      }).eq('id', msgLog.id);
+    }
+
+    res.json({
+      success: sent > 0,
+      sent, failed, total: contacts.length,
+      error: failed > 0 && sent === 0 ? [...errors].join(' · ') : undefined,
+    });
+  } catch (e) {
+    console.error('[SendPdfReport] erreur:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // POST /daily-reports/send-report — send a generated report via WhatsApp to parent
 router.post('/daily-reports/send-report', async (req, res) => {
   try {
@@ -1421,15 +1573,29 @@ router.post('/daily-reports/send-report', async (req, res) => {
     console.log(`[SendReport] Text split into ${textChunks.length} chunk(s): ${textChunks.map(c => c.length).join(', ')} chars`);
 
     let sent = 0, failed = 0;
+    const errorMessages = new Set();
     for (const contact of contacts) {
       let contactSuccess = true;
+      let lastErr = null;
       for (let i = 0; i < textChunks.length; i++) {
         try {
           const chunkLabel = textChunks.length > 1 ? ` (${i + 1}/${textChunks.length})` : '';
           console.log(`[SendReport] Sending to ${contact.phone_e164}${chunkLabel}, chunkLen=${textChunks[i].length}`);
           const sendData = await sendText(schoolId, contact.phone_e164, textChunks[i]);
-          if (!sendData.success) { console.log(`[SendReport] Send failed:`, sendData); contactSuccess = false; break; }
-        } catch (err) { console.error(`[SendReport] Send exception:`, err.message); contactSuccess = false; break; }
+          if (!sendData.success) {
+            console.log(`[SendReport] Send failed:`, sendData);
+            lastErr = sendData.message || sendData.reason || 'Échec envoi';
+            errorMessages.add(lastErr);
+            contactSuccess = false;
+            break;
+          }
+        } catch (err) {
+          console.error(`[SendReport] Send exception:`, err.message);
+          lastErr = err.message;
+          errorMessages.add(lastErr);
+          contactSuccess = false;
+          break;
+        }
       }
 
       // Update recipient status in DB
@@ -1437,7 +1603,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
         await supabaseAdmin.from('whatsapp_message_recipients').update({
           status: contactSuccess ? 'sent' : 'failed',
           sent_at: contactSuccess ? new Date().toISOString() : null,
-          error_message: contactSuccess ? null : 'Échec envoi rapport complet'
+          error_message: contactSuccess ? null : (lastErr || 'Échec envoi rapport complet')
         }).eq('message_id', msgLog.id).eq('phone_e164', contact.phone_e164);
       }
 
@@ -1454,7 +1620,12 @@ router.post('/daily-reports/send-report', async (req, res) => {
       }).eq('id', msgLog.id);
     }
 
-    res.json({ success: true, sent, failed, total: contacts.length });
+    // Surface la vraie cause d'échec (anti-ban hors créneau, session déconnectée, etc.)
+    res.json({
+      success: sent > 0,
+      sent, failed, total: contacts.length,
+      error: failed > 0 && sent === 0 ? [...errorMessages].join(' · ') : undefined,
+    });
   } catch (error) {
     console.error('Erreur send report:', error);
     res.status(500).json({ error: 'Erreur serveur' });
