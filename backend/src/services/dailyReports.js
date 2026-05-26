@@ -686,7 +686,11 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
         tasks.push(
           queue.add(async () => {
             const result = await sendReportWhatsApp(settings.school_id, phone, finalMessage);
-            
+
+            if (!result.success) {
+              console.warn(`[DailyReports] ❌ Échec envoi à ${phone} (school=${settings.school_id}) — raison: ${result.error || `Failed after ${result.attempt} attempts`}`);
+            }
+
             // Log to database
             await supabaseAdmin.from('daily_reports').insert({
               school_id: settings.school_id,
@@ -698,7 +702,7 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
               report_content_ar: report.ar || null,
               tracking_data: studentData,
               status: result.success ? 'sent' : 'failed',
-              error_message: result.success ? null : `Failed after ${result.attempt} attempts`,
+              error_message: result.success ? null : (result.error || `Failed after ${result.attempt} attempts`),
               sent_at: result.success ? new Date().toISOString() : null
             });
 
