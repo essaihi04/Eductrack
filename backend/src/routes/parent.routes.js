@@ -557,4 +557,103 @@ router.get('/notifications', async (req, res) => {
   }
 });
 
+// ============================================================
+// GET /api/parent/notification-preferences
+// Renvoie les préférences WhatsApp du parent (rapports IA).
+// Si aucune ligne en BDD → renvoie les valeurs par défaut.
+// ============================================================
+router.get('/notification-preferences', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    const { data, error } = await supabaseAdmin
+      .from('parent_report_preferences')
+      .select('*')
+      .eq('parent_id', parentId)
+      .maybeSingle();
+    if (error) throw error;
+
+    // Heure par défaut = celle configurée par l'école (ou 18:00)
+    let defaultTime = '18:00';
+    try {
+      const { data: links } = await supabaseAdmin
+        .from('parent_students')
+        .select('student:profiles!parent_students_student_id_fkey(school_id)')
+        .eq('parent_id', parentId)
+        .limit(1);
+      const schoolId = links?.[0]?.student?.school_id;
+      if (schoolId) {
+        const { data: schoolSettings } = await supabaseAdmin
+          .from('daily_report_settings')
+          .select('send_time')
+          .eq('school_id', schoolId)
+          .maybeSingle();
+        if (schoolSettings?.send_time) {
+          defaultTime = String(schoolSettings.send_time).substring(0, 5);
+        }
+      }
+    } catch (_) { /* ignore — fallback à 18:00 */ }
+
+    res.json({
+      preferences: data || null,
+      defaults: {
+        enabled: true,
+        frequency: 'daily',
+        weekly_day: 1, // lundi
+        preferred_time: defaultTime,
+      },
+    });
+  } catch (e) {
+    console.error('[parent] get prefs error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// PUT /api/parent/notification-preferences
+// Crée ou met à jour les préférences WhatsApp du parent.
+// Body : { enabled, frequency, weekly_day, preferred_time }
+// ============================================================
+router.put('/notification-preferences', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    const { enabled, frequency, weekly_day, preferred_time } = req.body;
+
+    // Validations
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: '"enabled" doit être un booléen' });
+    }
+    if (!['daily', 'weekly'].includes(frequency)) {
+      return res.status(400).json({ error: '"frequency" doit être daily ou weekly' });
+    }
+    if (frequency === 'weekly') {
+      if (!Number.isInteger(weekly_day) || weekly_day < 0 || weekly_day > 6) {
+        return res.status(400).json({ error: '"weekly_day" doit être un entier entre 0 (dim) et 6 (sam)' });
+      }
+    }
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(String(preferred_time || ''))) {
+      return res.status(400).json({ error: '"preferred_time" doit être au format HH:MM' });
+    }
+
+    const payload = {
+      parent_id: parentId,
+      enabled,
+      frequency,
+      weekly_day: frequency === 'weekly' ? weekly_day : null,
+      preferred_time: String(preferred_time).substring(0, 5),
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('parent_report_preferences')
+      .upsert(payload, { onConflict: 'parent_id' })
+      .select()
+      .single();
+    if (error) throw error;
+
+    res.json({ success: true, preferences: data });
+  } catch (e) {
+    console.error('[parent] put prefs error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

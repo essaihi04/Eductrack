@@ -30,6 +30,7 @@ import pushRoutes from './routes/push.routes.js';
 import parentRoutes from './routes/parent.routes.js';
 import bulletinsRoutes from './routes/bulletins.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
+import { startParentReportScheduler } from './services/parentReportScheduler.js';
 import { bootstrapAllSessions } from './services/whatsapp/index.js';
 import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
 
@@ -109,6 +110,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   startDailyReportScheduler();
+  startParentReportScheduler();
 
   // Reconnecte automatiquement toutes les sessions WhatsApp Baileys
   // pour les écoles déjà appairées (auth state présent sur disque).

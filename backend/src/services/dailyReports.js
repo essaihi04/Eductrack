@@ -17,7 +17,7 @@ const isSessionReady = (schoolId) => {
 
 // ==================== COLLECT DAILY DATA ====================
 
-async function collectStudentDailyData(studentId, date, schoolId) {
+export async function collectStudentDailyData(studentId, date, schoolId) {
   // Get student profile
   const { data: student } = await supabaseAdmin
     .from('profiles')
@@ -146,7 +146,7 @@ async function collectStudentDailyData(studentId, date, schoolId) {
 
 // ==================== CALCULATE DAILY STATS ====================
 
-function calculateDailyStats(studentData) {
+export function calculateDailyStats(studentData) {
   const sessions = studentData.sessions.filter(s => s.tracking);
   
   if (sessions.length === 0) {
@@ -219,7 +219,7 @@ function calculateDailyStats(studentData) {
 
 // ==================== AI REPORT GENERATION ====================
 
-async function generateReport(studentData, language, settings) {
+export async function generateReport(studentData, language, settings) {
   if (!studentData || !studentData.sessions.length) return null;
 
   // Calculer les statistiques pour les barres de progression
@@ -496,7 +496,7 @@ Continuez ainsi ! 💪`;
 
 // L'anti-ban (délai humain, quota, presence) est intégré dans sendText.
 // Le retry est conservé pour les erreurs réseau ponctuelles.
-async function sendReportWhatsApp(schoolId, phone, reportText, retries = 2) {
+export async function sendReportWhatsApp(schoolId, phone, reportText, retries = 2) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const result = await sendText(schoolId, phone, reportText);
@@ -595,6 +595,17 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
 
     const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
 
+    // ─── Exclure les parents qui ont défini des préférences personnelles ─────
+    // Ceux-ci sont gérés par le scheduler parent dédié (parentReportScheduler.js).
+    const { data: explicitPrefs } = await supabaseAdmin
+      .from('parent_report_preferences')
+      .select('parent_id')
+      .in('parent_id', parentIds);
+    const parentsWithExplicitPrefs = new Set((explicitPrefs || []).map(p => p.parent_id));
+    if (parentsWithExplicitPrefs.size > 0) {
+      console.log(`[DailyReports] ⏭️  ${parentsWithExplicitPrefs.size} parent(s) avec préférences personnelles → ignorés ici (gérés par parentReportScheduler)`);
+    }
+
     // Get parent WhatsApp contacts
     const { data: contacts } = await supabaseAdmin
       .from('parent_contacts')
@@ -667,6 +678,8 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
 
       // Create tasks for each parent (queued)
       for (const parentId of parents) {
+        // Skip parents who have explicit preferences (handled by parentReportScheduler)
+        if (parentsWithExplicitPrefs.has(parentId)) continue;
         const phone = parentPhoneMap[parentId];
         if (!phone) continue;
 
