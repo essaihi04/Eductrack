@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
@@ -141,6 +141,31 @@ const WhatsAppPage = () => {
   const [reportCustomEnd, setReportCustomEnd] = useState('');
   const [reportClassFilter, setReportClassFilter] = useState('');
   const [reportStudentSearch, setReportStudentSearch] = useState('');
+
+  // Recherche élève robuste :
+  //  - insensible aux accents (NFD)
+  //  - insensible à la casse
+  //  - multi-tokens (chaque mot doit matcher quelque part dans prénom/nom/classe)
+  //  - ordre des mots libre ("reda benjelloun" matche "Benjelloun Reda")
+  const normalizeSearch = (s) => (s || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const filteredReportStudents = useMemo(() => {
+    const tokens = normalizeSearch(reportStudentSearch).split(' ').filter(Boolean);
+    return reportStudents
+      .filter(s => !reportClassFilter || s.classes?.name === reportClassFilter)
+      .filter(s => {
+        if (tokens.length === 0) return true;
+        const hay = normalizeSearch(`${s.first_name} ${s.last_name} ${s.classes?.name || ''}`);
+        return tokens.every(t => hay.includes(t));
+      });
+  }, [reportStudents, reportClassFilter, reportStudentSearch]);
   const [reportSending, setReportSending] = useState(false);
   const [reportPeriodData, setReportPeriodData] = useState(null);
   const [reportTriggering, setReportTriggering] = useState(false);
@@ -930,9 +955,33 @@ const WhatsAppPage = () => {
     const os = reportPeriodData.overallStats;
     const margin = 14;
     let y = 20;
+    // Helper unifié pour récupérer la position Y finale après autoTable
+    // (autoTable mute `doc.lastAutoTable`, l'API recommandée ; `previousAutoTable` n'existe plus).
+    const afterTableY = () => (doc.lastAutoTable?.finalY ?? y) + 10;
 
-    // Helper: remove Arabic/non-Latin chars that jsPDF can't render
-    const sanitize = (str) => str ? str.replace(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '').replace(/\s{2,}/g, ' ').trim() : '';
+    // jsPDF + police par défaut (Helvetica) ne gèrent que Latin1.
+    // On retire :
+    //   - les caractères arabes (qui apparaîtraient comme '????')
+    //   - tous les emojis et symboles hors BMP-Latin1 (sinon → 'Ø=ÜË' garbage)
+    //   - on convertit aussi quelques emojis fréquents en équivalents texte.
+    const EMOJI_REPLACEMENTS = [
+      [/[🎓📚📖]/gu, ''], [/[📊📈📉]/gu, ''], [/✅/gu, '[OK]'], [/❌/gu, '[X]'],
+      [/⚠️|⚠/gu, '!'], [/⏰|🕐/gu, ''], [/[👍👏🙌]/gu, ''], [/[👥👤👨‍👩‍👧]/gu, ''],
+      [/[🎯⭐💯]/gu, ''], [/[📝📋📓]/gu, ''], [/[🏫🎒]/gu, ''], [/[💡🔍]/gu, ''],
+      [/[🟩⬜🟧🟥]/gu, ''], [/━+/gu, '---'], [/[│┃║]/gu, '|'],
+    ];
+    const sanitize = (str) => {
+      if (!str) return '';
+      let s = String(str);
+      for (const [re, rep] of EMOJI_REPLACEMENTS) s = s.replace(re, rep);
+      // Retire arabe
+      s = s.replace(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '');
+      // Retire tout caractère hors Latin1 (gère emojis restants, symboles, etc.)
+      s = s.replace(/[^\x00-\xFF]/g, '');
+      // Markdown WhatsApp (*gras*) — on retire les * pour éviter le parasitage
+      s = s.replace(/\*+/g, '');
+      return s.replace(/\s{2,}/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
+    };
 
     // School name header
     const schoolName = sanitize(st.schoolName || '') || 'Établissement Scolaire';
@@ -959,7 +1008,7 @@ const WhatsAppPage = () => {
     doc.text(`Période: ${reportPeriodData.period.startDate} - ${reportPeriodData.period.endDate}`, margin, y); y += 10;
 
     // Overall stats table
-    let tbl = autoTable(doc, {
+    autoTable(doc, {
       startY: y,
       head: [['Indicateur', 'Valeur']],
       body: [
@@ -976,7 +1025,7 @@ const WhatsAppPage = () => {
       margin: { left: margin },
       styles: { fontSize: 9 }
     });
-    y = (tbl?.finalY ?? doc.previousAutoTable?.finalY ?? y) + 10;
+    y = afterTableY();
 
     // Subject stats table
     if (Object.keys(reportPeriodData.subjectStats).length > 0) {
@@ -989,34 +1038,34 @@ const WhatsAppPage = () => {
         s.grades.map(g => `${g.note}/${g.max}`).join(', ') || '-',
         s.topics.join(', ').substring(0, 40) || '-'
       ]);
-      tbl = autoTable(doc, {
+      autoTable(doc, {
         startY: y,
         head: [['Matière', 'Séances', 'Présence', 'Particip.', 'Mini-éval', 'Notes', 'Chapitres']],
-        body: subjRows,
+        body: subjRows.map(r => r.map(c => sanitize(String(c)))),
         theme: 'grid',
         headStyles: { fillColor: [34, 139, 34] },
         margin: { left: margin },
         styles: { fontSize: 7 },
         columnStyles: { 6: { cellWidth: 40 } }
       });
-      y = (tbl?.finalY ?? doc.previousAutoTable?.finalY ?? y) + 10;
+      y = afterTableY();
     }
 
     // Grades table
     if (os.grades?.length > 0) {
-      tbl = autoTable(doc, {
+      autoTable(doc, {
         startY: y,
         head: [['Matière', 'Chapitre', 'Note', 'Date']],
-        body: os.grades.map(g => [g.subject, g.topic, `${g.note}/${g.max}`, g.date]),
+        body: os.grades.map(g => [sanitize(g.subject), sanitize(g.topic), `${g.note}/${g.max}`, g.date]),
         theme: 'grid',
         headStyles: { fillColor: [34, 139, 34] },
         margin: { left: margin },
         styles: { fontSize: 8 }
       });
-      y = (tbl?.finalY ?? doc.previousAutoTable?.finalY ?? y) + 10;
+      y = afterTableY();
     }
 
-    // AI Report text (French only — jsPDF cannot render Arabic)
+    // AI Report text (French only — jsPDF cannot render Arabic ni les emojis)
     if (y > 250) { doc.addPage(); y = 20; }
     doc.setFontSize(12);
     doc.setTextColor(34, 139, 34);
@@ -1028,8 +1077,8 @@ const WhatsAppPage = () => {
     if (!reportText && rptObj.ar) {
       reportText = '(Le rapport est disponible uniquement en arabe. Consultez la version WhatsApp pour le texte complet.)';
     }
-    // Sanitize: remove Arabic chars that would render as garbage
-    reportText = reportText.replace(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '').replace(/\s{2,}/g, ' ').trim();
+    // Sanitize complet : retire emojis + arabe + caractères non-Latin1 (sinon jsPDF affiche 'Ø=ÜË').
+    reportText = sanitize(reportText);
     const lines = doc.splitTextToSize(reportText, 180);
     for (const line of lines) {
       if (y > 280) { doc.addPage(); y = 20; }
@@ -2326,21 +2375,36 @@ const WhatsAppPage = () => {
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-700 block mb-1 flex items-center gap-1"><Search className="w-3.5 h-3.5" /> Rechercher</label>
-                      <input type="text" value={reportStudentSearch} onChange={(e) => setReportStudentSearch(e.target.value)}
-                        placeholder="Nom ou prénom..."
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                      <div className="relative">
+                        <input type="text" value={reportStudentSearch} onChange={(e) => setReportStudentSearch(e.target.value)}
+                          placeholder="Nom, prénom, classe…"
+                          className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-8 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                        {reportStudentSearch && (
+                          <button type="button" onClick={() => setReportStudentSearch('')}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        {filteredReportStudents.length} / {reportStudents.length} élève(s)
+                        {reportStudentSearch && ' — accents et ordre des mots ignorés'}
+                      </p>
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-gray-700 block mb-1 flex items-center gap-1"><Users className="w-3.5 h-3.5" /> Élève</label>
                       <select value={reportSelectedStudent} onChange={(e) => setReportSelectedStudent(e.target.value)}
                         className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500">
-                        <option value="">-- Sélectionner --</option>
-                        {reportStudents
-                          .filter(s => !reportClassFilter || s.classes?.name === reportClassFilter)
-                          .filter(s => !reportStudentSearch || `${s.last_name} ${s.first_name}`.toLowerCase().includes(reportStudentSearch.toLowerCase()))
-                          .map(s => (
-                            <option key={s.id} value={s.id}>{s.last_name} {s.first_name} {s.classes?.name ? `(${s.classes.name})` : ''}</option>
-                          ))}
+                        <option value="">
+                          {filteredReportStudents.length === 0
+                            ? '-- Aucun élève trouvé --'
+                            : `-- Sélectionner (${filteredReportStudents.length}) --`}
+                        </option>
+                        {filteredReportStudents.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.last_name} {s.first_name}{s.classes?.name ? ` (${s.classes.name})` : ''}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
