@@ -399,10 +399,14 @@ const PreferencesPanel = () => {
                 <input
                   type="time"
                   value={preferredTime}
+                  min="07:00"
+                  max="22:59"
                   onChange={(e) => setPreferredTime(e.target.value)}
                   className="px-3 py-2 rounded-lg border border-gray-200 focus:border-emerald-500 focus:outline-none text-sm"
                 />
-                <p className="text-xs text-gray-500 mt-1">Heure du Maroc (Africa/Casablanca)</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Heure du Maroc (Africa/Casablanca) — créneau autorisé&nbsp;: <strong>07:00 → 22:59</strong>
+                </p>
               </div>
             </>
           )}

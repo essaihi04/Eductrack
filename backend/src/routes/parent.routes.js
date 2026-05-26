@@ -633,6 +633,17 @@ router.put('/notification-preferences', async (req, res) => {
     if (!/^\d{2}:\d{2}(:\d{2})?$/.test(String(preferred_time || ''))) {
       return res.status(400).json({ error: '"preferred_time" doit être au format HH:MM' });
     }
+    // Plage horaire imposée par l'anti-ban WhatsApp (07:00 → 22:59).
+    // Tout envoi en dehors serait bloqué silencieusement par sendText.
+    {
+      const [hh, mm] = String(preferred_time).split(':').map((n) => parseInt(n, 10));
+      const minutes = hh * 60 + mm;
+      if (minutes < 7 * 60 || minutes > 22 * 60 + 59) {
+        return res.status(400).json({
+          error: "L'heure de réception doit être comprise entre 07:00 et 22:59 (heure du Maroc). Les envois WhatsApp sont bloqués en dehors de ce créneau.",
+        });
+      }
+    }
 
     const payload = {
       parent_id: parentId,
