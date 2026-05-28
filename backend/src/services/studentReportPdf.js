@@ -607,23 +607,54 @@ function drawDocument(doc, periodData, aiReport) {
   }
 
   // ═══════════════ ANALYSE PÉDAGOGIQUE (IA) ═══════════════
-  const aiText = pickAiText(aiReport);
-  if (aiText) {
+  // Rendu multi-bloc : on parse les sections (*Titre*) pour faire un titre gras
+  // + paragraphes. Chaque ligne passe par smartText pour gérer l'arabe (nom de
+  // l'enfant / école) sans mojibake.
+  const aiBlocks = parseAiBlocks(aiReport);
+  if (aiBlocks.length > 0) {
     if (y + 80 > PAGE_H - 60) { doc.addPage(); y = MARGIN; }
     doc.font('Helvetica-Bold').fontSize(11).fillColor(C.ink);
     doc.text('Analyse pédagogique', MARGIN, y);
     y += 14;
 
-    // Bandeau encadré
-    const lines = doc.font('Helvetica').fontSize(9.5).heightOfString(aiText, { width: CONTENT_W - 24 });
-    const boxH = lines + 18;
-    card(doc, MARGIN, y, CONTENT_W, boxH, { fill: C.bg, stroke: C.line });
+    // Encadré global avec barre latérale
+    const blockX = MARGIN + 14;
+    const blockW = CONTENT_W - 24;
+    // Pré-calcul hauteur pour dessiner la card en une fois
+    let measuredH = 12;
+    for (const b of aiBlocks) {
+      if (b.type === 'h2') {
+        measuredH += 18;
+      } else {
+        const h = doc.font('Helvetica').fontSize(9.5).heightOfString(b.text, { width: blockW });
+        measuredH += h + 4;
+      }
+    }
+    if (y + measuredH > PAGE_H - 50) { doc.addPage(); y = MARGIN; }
+
+    card(doc, MARGIN, y, CONTENT_W, measuredH + 8, { fill: C.bg, stroke: C.line });
     doc.save();
-    doc.rect(MARGIN, y, 3, boxH).fill(C.primary);
+    doc.rect(MARGIN, y, 3, measuredH + 8).fill(C.primary);
     doc.restore();
-    doc.font('Helvetica').fontSize(9.5).fillColor(C.inkLt);
-    doc.text(aiText, MARGIN + 14, y + 9, { width: CONTENT_W - 24, align: 'left' });
-    y += boxH + 8;
+
+    let ay = y + 10;
+    for (const b of aiBlocks) {
+      if (ay > PAGE_H - 50) {
+        doc.addPage();
+        ay = MARGIN;
+      }
+      if (b.type === 'h2') {
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(C.primary);
+        smartText(doc, b.text, blockX, ay, { width: blockW });
+        ay += 16;
+      } else {
+        doc.font('Helvetica').fontSize(9.5).fillColor(C.inkLt);
+        smartText(doc, b.text, blockX, ay, { width: blockW, align: 'left' });
+        const h = doc.heightOfString(b.text, { width: blockW });
+        ay += h + 4;
+      }
+    }
+    y += measuredH + 16;
   }
 
   // ═══════════════ AXES DE PROGRÈS (si difficultés) ═══════════════
@@ -659,21 +690,89 @@ function drawFooters(doc, periodData) {
   }
 }
 
-/** Choisit le texte IA à inclure, sanitize emoji/markdown WhatsApp. */
-function pickAiText(aiReport) {
-  if (!aiReport) return '';
-  let txt = '';
-  if (typeof aiReport === 'string') txt = aiReport;
-  else txt = aiReport.fr || aiReport.ar || '';
-  if (!txt) return '';
-  // On vire emojis (PDFKit Helvetica = Latin1)
-  txt = txt
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F100}-\u{1F1FF}]/gu, '')
-    .replace(/[━─]+/g, '—')
-    .replace(/\*+/g, '')
-    .replace(/[\u200B-\u200F\u202A-\u202E]/g, '')
-    // Compact les retours à la ligne triples
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return txt;
+/**
+ * Parse le texte IA (FR uniquement pour le PDF Latin) en blocs structurés
+ * `{ type: 'h2'|'p', text }`. Une ligne de la forme `*Titre*` (markdown WhatsApp)
+ * devient un titre h2. Les listes sont préservées mais rendues comme paragraphes.
+ *
+ * Règles de nettoyage :
+ *  - Emojis WhatsApp courants → puces ASCII (•) ou symboles latins (✓ ✗ !)
+ *  - Lignes de séparation `━━━` ignorées
+ *  - On NE strip PAS l'arabe : smartText gère le rendu plus tard.
+ */
+function parseAiBlocks(aiReport) {
+  if (!aiReport) return [];
+  let raw = '';
+  if (typeof aiReport === 'string') raw = aiReport;
+  else raw = aiReport.fr || aiReport.ar || '';
+  if (!raw) return [];
+
+  // Coupe la partie arabe si présente (séparateur ━━━) — le PDF rend la version FR
+  // (l'arabe complet apparaîtrait en pavé RTL difficile à intégrer dans la mise
+  // en page actuelle ; le nom arabe dans une ligne FR reste géré par smartText).
+  raw = raw.split(/━{3,}|─{3,}/)[0];
+
+  // Remplacements emoji → texte/symboles Latin1-compatibles.
+  // On garde la STRUCTURE (puces) mais on retire les pictogrammes décoratifs.
+  const EMOJI_MAP = [
+    [/✅/gu, '✓ '], [/❌/gu, '✗ '], [/⚠️|⚠/gu, '! '],
+    [/💪|🎉|👏|🌟|⭐/gu, ''],          // valorisation
+    [/📌|💡|🎯/gu, '→ '],              // conseil/objectif
+    [/📊|📈|📉|📚|📖|📝|📋|📓/gu, ''],
+    [/🏫|🎒|🎓|👤|👥/gu, ''],
+    [/📅|🗓️|🗓|⏰|🕐/gu, ''],
+    [/🙋|✍️|🧪|📞|😴/gu, ''],
+    [/▸|►|❯/gu, '• '],
+  ];
+  let txt = String(raw);
+  for (const [re, rep] of EMOJI_MAP) txt = txt.replace(re, rep);
+  // Vire le RESTE des emojis pictographiques que PDFKit Latin1 ne peut pas rendre,
+  // tout en PRÉSERVANT l'arabe (\u0600-\u06FF) et la ponctuation latine.
+  txt = txt.replace(
+    /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F100}-\u{1F1FF}\u{1F900}-\u{1F9FF}\u{2700}-\u{27BF}]/gu,
+    ''
+  );
+  // Caractères de contrôle bidi
+  txt = txt.replace(/[\u200B-\u200F\u202A-\u202E]/g, '');
+  // Lignes de séparation graphique ASCII restantes
+  txt = txt.replace(/^[\s—\-–=•·]{4,}$/gm, '');
+
+  // Découpe en blocs
+  const lines = txt.split('\n').map(l => l.trimEnd());
+  const blocks = [];
+  let buffer = [];
+  const flushParagraph = () => {
+    if (buffer.length === 0) return;
+    const t = buffer.join(' ').replace(/\s+/g, ' ').trim();
+    if (t) blocks.push({ type: 'p', text: t });
+    buffer = [];
+  };
+
+  for (const line of lines) {
+    const l = line.trim();
+    if (!l) {
+      flushParagraph();
+      continue;
+    }
+    // Titre style "*Synthèse*" ou "**Synthèse**"
+    const titleMatch = l.match(/^\*+\s*([^*]+?)\s*\*+\s*:?\s*$/);
+    if (titleMatch) {
+      flushParagraph();
+      blocks.push({ type: 'h2', text: titleMatch[1].trim() });
+      continue;
+    }
+    // Bullet "- xxx" ou "1. xxx" → on garde la ligne en tant que paragraphe propre
+    if (/^[-•·]\s+/.test(l) || /^\d+[\.\)]\s+/.test(l)) {
+      flushParagraph();
+      // Normalise les puces variées en •
+      const clean = l.replace(/^[-•·]\s+/, '• ').replace(/^(\d+)[\.\)]\s+/, '$1. ');
+      blocks.push({ type: 'p', text: clean });
+      continue;
+    }
+    // Sinon : continuation paragraphe — on supprime le markdown gras restant
+    buffer.push(l.replace(/\*+/g, ''));
+  }
+  flushParagraph();
+
+  return blocks;
 }

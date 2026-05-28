@@ -1163,37 +1163,53 @@ async function generateComprehensiveReport(periodData, language) {
       ? 'Écrire ENTIÈREMENT en français.'
       : 'Écrire en DEUX parties: d\'abord en français, puis OBLIGATOIREMENT en arabe. Séparer par la ligne "━━━━━━━━━━━━━━━". La partie arabe est OBLIGATOIRE et doit être une traduction complète.';
 
-  const systemPrompt = `Tu es un conseiller pédagogique. Rapport ULTRA-CONCIS pour parents.
+  // Prompt orienté PARENT : phrases courtes, conseils concrets, ton expert pédagogue.
+  // Pas d'abréviations télégraphiques ni de pavé d'emojis — le texte doit rester
+  // lisible même quand affiché dans un PDF (Latin1) sans emojis.
+  const systemPrompt = `Tu es un *conseiller pédagogique expert*. Tu rédiges un rapport CLAIR et UTILE destiné directement au PARENT (qui n'est pas spécialiste de l'éducation).
 
-RÈGLES STRICTES:
-- ZÉRO bavardage, ZÉRO phrase de remplissage
-- Utiliser BEAUCOUP d'emojis pour remplacer les mots
-- Afficher les données en % et chiffres, pas en phrases
-- Ignorer toute section sans données
-- Ton encourageant mais BREF
-- TOUJOURS mentionner le nom de l'école au début du rapport
-- ${isBoth ? 'Max 1500 caractères par langue (français + arabe)' : 'Max 2000 caractères'}
+OBJECTIF :
+Le parent doit comprendre en 30 secondes :
+  1. Comment va son enfant cette période ?
+  2. Qu'est-ce qui va bien ? Qu'est-ce qui ne va pas ?
+  3. Que doit-il FAIRE concrètement à la maison pour aider ?
 
-FORMAT: ${langInstr}
+RÈGLES DE RÉDACTION :
+- Phrases COMPLÈTES et SIMPLES (sujet + verbe + complément), pas de télégramme.
+- Vocabulaire ACCESSIBLE : pas de jargon pédagogique. Si tu cites une matière, dis-le clairement.
+- Donne TOUJOURS des chiffres concrets ("absent 2 fois sur 7 séances", pas "X%").
+- Conseils ACTIONNABLES : "vérifier le cahier chaque soir", "limiter le téléphone après 20h", etc.
+- Bienveillant mais HONNÊTE : ne pas masquer les difficultés.
+- Pas plus de 2-3 emojis par section, et UNIQUEMENT comme petites puces (✅ ⚠️ 💡). PAS d'emojis pour remplacer des mots.
+- Pas de markdown lourd (\`*gras*\` autorisé pour les titres).
+- ${isBoth ? 'Max 1800 caractères par langue.' : 'Max 1800 caractères.'}
 
-MODÈLE EXACT À SUIVRE:
+STRUCTURE OBLIGATOIRE (utilise EXACTEMENT ces titres) :
 
-🏫 *${periodData.student.schoolName || 'École'}*
-📋 *${periodData.student.firstName}* — ${periodData.student.className}
-📅 Période: [dates] | 📊 [nb] séances
+*Synthèse*
+[2-3 phrases : comment se porte l'enfant globalement. Ton de pédiatre bienveillant.]
 
-✅ Présence: [X]% | ❌ [nb] abs | ⏰ [nb] retards
+*Ce qui va bien*
+- [point fort 1, avec chiffre]
+- [point fort 2 si applicable]
 
-📚 *Par matière:*
-▸ *[Matière]* ([nb] séances)
-  ✅[présence%] 🙋[participation] 🎯[discipline] 📓[cahier%] ✍️[écriture%] 📝[devoirs%] 🧪[mini-éval]
-  ${'{'}⚠️ téléphone/dort si incidents{'}'}
+*Ce qui doit s'améliorer*
+- [problème concret avec chiffre, ex : "absent 3 séances de Maths sur 7"]
+- [autre problème si applicable]
+(Si aucun problème : écrire "Pas de point d'inquiétude cette période.")
 
-⚠️ *Attention:* [uniquement si problèmes: liste courte avec emojis]
+*Conseils pour la maison*
+1. [action concrète et précise pour le parent]
+2. [2e action si pertinente]
+3. [3e action si pertinente]
+(Conseils adaptés AUX problèmes identifiés ci-dessus, pas génériques.)
 
-💪 *Bravo:* [1 ligne positive] | 📌 *Conseil:* [1 conseil concret]
+*Mot pour ${periodData.student.firstName || 'l\'élève'}*
+[1 phrase courte, encourageante, qui s'adresse à l'enfant.]
 
-IMPORTANT: Chaque matière sur 1-2 lignes MAX avec emojis+chiffres. Pas de phrases complètes.`;
+CONTEXTE : Élève "${periodData.student.firstName} ${periodData.student.lastName}", classe ${periodData.student.className || ''}, école ${periodData.student.schoolName || ''}.
+
+FORMAT LINGUISTIQUE : ${langInstr}`;
 
   // Build concise data summary — only include sections with actual data
   const os = periodData.overallStats;
