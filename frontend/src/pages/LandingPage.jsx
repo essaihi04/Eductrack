@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import Hero from '../components/landing/Hero';
 import Features from '../components/landing/Features';
+import AutoMessages from '../components/landing/AutoMessages';
 import TransportTracking from '../components/landing/TransportTracking';
 import HowItWorks from '../components/landing/HowItWorks';
 import Benefits from '../components/landing/Benefits';
@@ -85,7 +86,11 @@ const LandingPage = () => {
       {/* Main Content */}
       <main className="pt-16">
         <Hero />
-        
+
+        <div id="auto-messages">
+          <AutoMessages />
+        </div>
+
         <div id="features">
           <Features />
         </div>
