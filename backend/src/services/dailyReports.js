@@ -1183,7 +1183,8 @@ RÈGLES DE RÉDACTION :
 - Pas plus de 2-3 emojis par section, et UNIQUEMENT comme petites puces (✅ ⚠️ 💡). PAS d'emojis pour remplacer des mots.
 - Pas de markdown lourd (\`*gras*\` autorisé pour les titres).
 - ${isBoth ? 'Max 1800 caractères par langue.' : 'Max 1800 caractères.'}
-- *INTERDICTION ABSOLUE* dans la section française : aucun caractère arabe, aucun mot arabe, aucun nom translittéré en arabe. Le prénom de l'élève doit apparaître EXACTEMENT comme indiqué ci-dessous (en alphabet latin). De même, dans la section arabe : aucun mot français.
+- *INTERDICTION ABSOLUE* dans la section française : aucun caractère arabe, aucun mot arabe. De même, dans la section arabe : aucun mot français.
+- *NE JAMAIS écrire le nom ou le prénom de l'élève dans le corps du texte*. Le PDF affiche déjà le nom dans son en-tête. Utilisez à la place : "votre enfant", "il" ou "elle" en français ; "ابنك", "هو" ou "هي" en arabe.
 
 STRUCTURE OBLIGATOIRE (utilise EXACTEMENT ces titres) :
 
@@ -1205,10 +1206,10 @@ STRUCTURE OBLIGATOIRE (utilise EXACTEMENT ces titres) :
 3. [3e action si pertinente]
 (Conseils adaptés AUX problèmes identifiés ci-dessus, pas génériques.)
 
-*Mot pour ${periodData.student.firstName || 'l\'élève'}*
-[1 phrase courte, encourageante, qui s'adresse à l'enfant.]
+*Mot pour votre enfant*
+[1 phrase courte, encourageante, qui s'adresse directement à l'enfant en le tutoyant ("Tu es..."). Sans citer son prénom.]
 
-CONTEXTE : Élève "${periodData.student.firstName} ${periodData.student.lastName}", classe ${periodData.student.className || ''}, école ${periodData.student.schoolName || ''}.
+CONTEXTE (à NE PAS recopier dans le rapport) : Classe ${periodData.student.className || ''}, école ${periodData.student.schoolName || ''}.
 
 FORMAT LINGUISTIQUE : ${langInstr}`;
 

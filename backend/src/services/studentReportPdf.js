@@ -753,16 +753,22 @@ function parseAiBlocks(aiReport) {
   // complète reste disponible côté WhatsApp.
   let txt = String(raw).replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '');
 
-  // Remplacements emoji → texte/symboles Latin1-compatibles.
+  // Remplacements emoji → ASCII pur Latin1.
+  // /!\ ÉVITER ABSOLUMENT les unicodes décoratifs (→ U+2192, ►, ❯, etc.) :
+  // PDFKit avec Helvetica encode en WinAnsi qui ne les contient pas et les
+  // substitue par des glyphes random (sur le PDF utilisateur "→" apparaissait
+  // comme "l'"). On reste sur des caractères ASCII pur.
   const EMOJI_MAP = [
-    [/✅/gu, '✓ '], [/❌/gu, '✗ '], [/⚠️|⚠/gu, '! '],
+    [/✅/gu, '[OK] '], [/❌/gu, '[X] '], [/⚠️|⚠/gu, '! '],
     [/💪|🎉|👏|🌟|⭐|🥇|🏆/gu, ''],
-    [/📌|💡|🎯|🏠|🔔/gu, '→ '],
+    [/📌|💡|🎯|🏠|🔔/gu, ''],
     [/📊|📈|📉|📚|📖|📝|📋|📓|✏️|✒️/gu, ''],
     [/🏫|🎒|🎓|👤|👥|👨|👩|🧒|👶/gu, ''],
     [/📅|🗓️|🗓|⏰|🕐|⏱️|⏲️/gu, ''],
     [/🙋|✍️|🧪|📞|😴|💤|📱|📵/gu, ''],
-    [/▸|►|❯|➤|➡️|⮕/gu, '• '],
+    [/▸|►|❯|➤|➡️|⮕|→/gu, '- '],
+    // Ponctuation décorative non-Latin1 fréquente
+    [/✓/gu, 'OK '], [/✗/gu, 'X '],
   ];
   for (const [re, rep] of EMOJI_MAP) txt = txt.replace(re, rep);
   // Vire TOUS les emojis pictographiques + symboles non-Latin1 résiduels
