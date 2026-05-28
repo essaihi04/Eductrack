@@ -743,33 +743,38 @@ function parseAiBlocks(aiReport) {
   else raw = aiReport.fr || aiReport.ar || '';
   if (!raw) return [];
 
-  // Coupe la partie arabe si présente (séparateur ━━━) — le PDF rend la version FR
-  // (l'arabe complet apparaîtrait en pavé RTL difficile à intégrer dans la mise
-  // en page actuelle ; le nom arabe dans une ligne FR reste géré par smartText).
+  // Coupe la partie arabe si présente (séparateur ━━━) — le PDF rend la version FR.
   raw = raw.split(/━{3,}|─{3,}/)[0];
 
+  // STRIP arabe dans la section FR : malgré l'instruction du prompt, l'IA glisse
+  // parfois des phrases entières en arabe au sein du français (Synthèse, prénom
+  // de l'enfant, etc.). PDFKit ne sait pas faire du shaping bidi mixte
+  // proprement → on supprime les caractères arabes ici. La version arabe
+  // complète reste disponible côté WhatsApp.
+  let txt = String(raw).replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+/g, '');
+
   // Remplacements emoji → texte/symboles Latin1-compatibles.
-  // On garde la STRUCTURE (puces) mais on retire les pictogrammes décoratifs.
   const EMOJI_MAP = [
     [/✅/gu, '✓ '], [/❌/gu, '✗ '], [/⚠️|⚠/gu, '! '],
-    [/💪|🎉|👏|🌟|⭐/gu, ''],          // valorisation
-    [/📌|💡|🎯/gu, '→ '],              // conseil/objectif
-    [/📊|📈|📉|📚|📖|📝|📋|📓/gu, ''],
-    [/🏫|🎒|🎓|👤|👥/gu, ''],
-    [/📅|🗓️|🗓|⏰|🕐/gu, ''],
-    [/🙋|✍️|🧪|📞|😴/gu, ''],
-    [/▸|►|❯/gu, '• '],
+    [/💪|🎉|👏|🌟|⭐|🥇|🏆/gu, ''],
+    [/📌|💡|🎯|🏠|🔔/gu, '→ '],
+    [/📊|📈|📉|📚|📖|📝|📋|📓|✏️|✒️/gu, ''],
+    [/🏫|🎒|🎓|👤|👥|👨|👩|🧒|👶/gu, ''],
+    [/📅|🗓️|🗓|⏰|🕐|⏱️|⏲️/gu, ''],
+    [/🙋|✍️|🧪|📞|😴|💤|📱|📵/gu, ''],
+    [/▸|►|❯|➤|➡️|⮕/gu, '• '],
   ];
-  let txt = String(raw);
   for (const [re, rep] of EMOJI_MAP) txt = txt.replace(re, rep);
-  // Vire le RESTE des emojis pictographiques que PDFKit Latin1 ne peut pas rendre,
-  // tout en PRÉSERVANT l'arabe (\u0600-\u06FF) et la ponctuation latine.
+  // Vire TOUS les emojis pictographiques + symboles non-Latin1 résiduels
   txt = txt.replace(
-    /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F100}-\u{1F1FF}\u{1F900}-\u{1F9FF}\u{2700}-\u{27BF}]/gu,
+    /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2900}-\u{297F}]/gu,
     ''
   );
   // Caractères de contrôle bidi
   txt = txt.replace(/[\u200B-\u200F\u202A-\u202E]/g, '');
+  // Markdown gras `**...**` ou simple `*...*` (titres déjà extraits avant) — on
+  // strippe les paires d'astérisques sans toucher aux titres de section qui sont
+  // sur leur propre ligne et matchés par la regex `^\*+...\*+$` plus bas.
   // Lignes de séparation graphique ASCII restantes
   txt = txt.replace(/^[\s—\-–=•·]{4,}$/gm, '');
 
@@ -800,8 +805,11 @@ function parseAiBlocks(aiReport) {
     // Bullet "- xxx" ou "1. xxx" → on garde la ligne en tant que paragraphe propre
     if (/^[-•·]\s+/.test(l) || /^\d+[\.\)]\s+/.test(l)) {
       flushParagraph();
-      // Normalise les puces variées en •
-      const clean = l.replace(/^[-•·]\s+/, '• ').replace(/^(\d+)[\.\)]\s+/, '$1. ');
+      // Normalise les puces variées en • et strippe le markdown gras résiduel
+      const clean = l
+        .replace(/^[-•·]\s+/, '• ')
+        .replace(/^(\d+)[\.\)]\s+/, '$1. ')
+        .replace(/\*+/g, '');
       blocks.push({ type: 'p', text: clean });
       continue;
     }
