@@ -91,12 +91,12 @@ const LandingPage = () => {
           <AutoMessages />
         </div>
 
-        <div id="features">
-          <Features />
-        </div>
-
         <div id="transport">
           <TransportTracking />
+        </div>
+
+        <div id="features">
+          <Features />
         </div>
 
         <div id="how-it-works">
