@@ -35,14 +35,50 @@ const ARABIC_FEATURES = ['rtla', 'rclt'];
 
 function hasArabic(text) { return ARABIC_RE.test(String(text || '')); }
 
+/** Compte les caractères arabes vs latins (lettres uniquement). */
+function scriptRatio(text) {
+  const s = String(text || '');
+  let ar = 0, latin = 0;
+  for (const ch of s) {
+    if (ARABIC_RE.test(ch)) ar++;
+    else if (/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(ch)) latin++;
+  }
+  return { ar, latin };
+}
+
+/**
+ * Rendu d'un texte qui peut contenir des caractères arabes ou non.
+ *
+ * 3 cas :
+ *   1. Pas d'arabe        → Helvetica, pas de features (rendu normal latin)
+ *   2. Texte majoritairement arabe → NotoNaskh + features RTL (shaping correct)
+ *   3. Mixte (latin majoritaire avec quelques mots arabes) →
+ *      NotoNaskh SANS features RTL : les glyphes latins restent en LTR
+ *      lisibles, les caractères arabes apparaissent (peut-être moins beaux
+ *      sans le shaping joint) mais la ligne n'est plus détruite.
+ *      Sans ce cas, smartText appliquait `rtla` à toute la ligne et le
+ *      texte français devenait illisible (glyphes désordonnés).
+ */
 function smartText(doc, text, x, y, opts = {}) {
   const t = String(text == null ? '' : text);
-  const useAr = hasArabic(t);
+  const { ar, latin } = scriptRatio(t);
   const prev = doc._font?.name || 'Helvetica';
-  if (useAr) doc.font(ARABIC_FONT_NAME);
-  const finalOpts = useAr ? { ...opts, features: [...(opts.features || []), ...ARABIC_FEATURES] } : opts;
+
+  if (ar === 0) {
+    // Pas d'arabe : rendu standard
+    doc.text(t, x, y, opts);
+    return;
+  }
+
+  // Police arabe nécessaire pour rendre les glyphes arabes
+  doc.font(ARABIC_FONT_NAME);
+  const isArabicDominant = ar >= latin;
+  const features = isArabicDominant
+    ? [...(opts.features || []), ...ARABIC_FEATURES]
+    : opts.features;
+  const finalOpts = features ? { ...opts, features } : opts;
   doc.text(t, x, y, finalOpts);
-  if (useAr) doc.font(prev);
+  doc.font(prev);
 }
 
 // ──── Charte graphique ──────────────────────────────────────────────────────

@@ -1183,6 +1183,7 @@ RÈGLES DE RÉDACTION :
 - Pas plus de 2-3 emojis par section, et UNIQUEMENT comme petites puces (✅ ⚠️ 💡). PAS d'emojis pour remplacer des mots.
 - Pas de markdown lourd (\`*gras*\` autorisé pour les titres).
 - ${isBoth ? 'Max 1800 caractères par langue.' : 'Max 1800 caractères.'}
+- *INTERDICTION ABSOLUE* dans la section française : aucun caractère arabe, aucun mot arabe, aucun nom translittéré en arabe. Le prénom de l'élève doit apparaître EXACTEMENT comme indiqué ci-dessous (en alphabet latin). De même, dans la section arabe : aucun mot français.
 
 STRUCTURE OBLIGATOIRE (utilise EXACTEMENT ces titres) :
 
