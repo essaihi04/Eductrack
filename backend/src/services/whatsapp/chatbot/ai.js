@@ -75,6 +75,24 @@ function isFinanceQuery(text) {
   return FINANCE_KEYWORDS_RE.test(text || '');
 }
 
+// Mots-clés emploi du temps
+const TIMETABLE_KEYWORDS_RE = new RegExp(
+  [
+    'emploi du temps', 'emploi de temps', 'edt', 'planning', 'programme', 'horaire', 'cours de demain',
+    'cours aujourd', "cours d'aujourd", 'cours ce matin', 'cours cet aprem', 'cours demain',
+    'séance', 'seance', 'matière demain', 'matiere demain', 'quels cours',
+    // Arabe
+    'التوقيت', 'الجدول', 'جدول الدروس', 'جدول الحصص', 'الحصص', 'الدروس غدا', 'الدروس اليوم',
+    'برنامج', 'جدول زمني',
+    // Darija
+    'lwaqt', 'jadwal', 'hissa', 'ghda lkours', 'cours dyal ghda',
+  ].join('|'),
+  'i',
+);
+export function isTimetableQuery(text) {
+  return TIMETABLE_KEYWORDS_RE.test(text || '');
+}
+
 // Mots-clés "bulletin" : déclenche aussi l'envoi des PDFs en pièce jointe.
 const BULLETIN_KEYWORDS_RE = new RegExp(
   [
@@ -110,7 +128,7 @@ export function detectSemester(text) {
  * Construit un mini-contexte factuel sur l'élève à passer à DeepSeek.
  * Limité aux données strictement nécessaires (compact).
  */
-async function buildStudentContext(student, parentInfo, { includeFinance = false, includeBulletins = false } = {}) {
+async function buildStudentContext(student, parentInfo, { includeFinance = false, includeBulletins = false, includeTimetable = false } = {}) {
   const ctx = {
     student: {
       name: `${student.first_name} ${student.last_name}`,
@@ -317,6 +335,45 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     };
   }
 
+  // ───── Emploi du temps — UNIQUEMENT si la question concerne le planning ─────
+  if (includeTimetable) {
+    const { data: slots } = await supabaseAdmin
+      .from('class_timetable')
+      .select('day_of_week, slot_order, start_time, end_time, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
+      .eq('class_id', student.class_id)
+      .order('slot_order', { ascending: true });
+
+    const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const DAY_FR = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi' };
+
+    const byDay = {};
+    (slots || []).forEach((s) => {
+      const day = s.day_of_week;
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push({
+        slot: s.slot_order,
+        start: s.start_time?.slice(0, 5) || '',
+        end: s.end_time?.slice(0, 5) || '',
+        subject: s.subject?.name || null,
+        teacher: s.teacher ? `${s.teacher.first_name} ${s.teacher.last_name}`.trim() : null,
+        room: s.room || null,
+      });
+    });
+
+    ctx.timetable = DAY_ORDER
+      .filter((d) => byDay[d])
+      .map((d) => ({ day: DAY_FR[d], day_key: d, slots: byDay[d] }));
+
+    // Contexte temporel : aujourd'hui et demain (utile pour "cours de demain")
+    const now = new Date();
+    const jsDay = now.getDay(); // 0=dim, 1=lun …
+    const JS_TO_KEY = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const todayKey = JS_TO_KEY[jsDay];
+    const tomorrowKey = JS_TO_KEY[(jsDay + 1) % 7];
+    ctx.today = { day_key: todayKey, day_fr: DAY_FR[todayKey] || 'Dimanche', date: now.toISOString().slice(0, 10) };
+    ctx.tomorrow = { day_key: tomorrowKey, day_fr: DAY_FR[tomorrowKey] || 'Dimanche' };
+  }
+
   // ───── Bulletins publiés — UNIQUEMENT si la question concerne le bulletin ─────
   if (includeBulletins) {
     const { data: bulletins } = await supabaseAdmin
@@ -371,11 +428,13 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
     // même si d'autres mots-clés finance sont présents (ex: "donne-moi le bulletin
     // et la facture" → traité comme bulletin uniquement, l'autre demande sera gérée séparément).
     const wantsBulletin = isBulletinQuery(messageText);
-    const wantsFinance = !wantsBulletin && isFinanceQuery(messageText);
+    const wantsTimetable = !wantsBulletin && isTimetableQuery(messageText);
+    const wantsFinance = !wantsBulletin && !wantsTimetable && isFinanceQuery(messageText);
     const isArabic = isArabicText(messageText);
     const studentContext = await buildStudentContext(student, parentInfo, {
       includeFinance: wantsFinance,
       includeBulletins: wantsBulletin,
+      includeTimetable: wantsTimetable,
     });
 
     // Directive de langue forte, en plus du système — DeepSeek mélange souvent
@@ -391,6 +450,14 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
         `→ INTERDIT : ne donne PAS de notes détaillées par contrôle ; le PDF complet est envoyé séparément en pièce jointe.\n` +
         `→ Termine par : "📎 Le bulletin PDF arrive juste après ce message." (adapté à la langue du parent).\n` +
         `→ Si le contexte ne contient AUCUN bulletin publié, dis "Aucun bulletin n'a encore été publié pour ${student.first_name}."`
+      : wantsTimetable
+      ? `TOPIC: Le parent demande l'EMPLOI DU TEMPS.\n` +
+        `→ Utilise le champ "timetable" du contexte qui contient les créneaux par jour.\n` +
+        `→ Aujourd'hui : ctx.today.day_fr (${studentContext.today?.day_fr || '?'}). Demain : ctx.tomorrow.day_fr (${studentContext.tomorrow?.day_fr || '?'}).\n` +
+        `→ Si le parent demande "demain", affiche les cours du jour ctx.tomorrow.day_key.\n` +
+        `→ Si aucun cours pour ce jour, dis-le clairement (week-end ou jour sans cours).\n` +
+        `→ Affiche : Heure de début - fin, Matière, Professeur, Salle si disponible.\n` +
+        `→ Si timetable est vide, indique que l'emploi du temps n'a pas encore été configuré.`
       : wantsFinance
       ? 'TOPIC: La question concerne la finance. Ne parle QUE de finance, ignore les données pédagogiques.'
       : 'TOPIC: La question concerne la pédagogie. Ne mentionne AUCUNE information financière (montants, factures, impayés), même brièvement.';
