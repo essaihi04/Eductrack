@@ -214,7 +214,7 @@ export async function getPendingHomework(student, parentInfo) {
     .select(`
       id, title, description, due_date, target_type, created_at,
       homework_students(student_id),
-      homework_submissions(student_id, submitted_at, status)
+      homework_submissions(student_id, submission_date, status)
     `)
     .eq('class_id', student.class_id)
     .gte('due_date', thirtyDaysAgo)
@@ -226,10 +226,10 @@ export async function getPendingHomework(student, parentInfo) {
     if (h.target_type === 'all') return true;
     return (h.homework_students || []).some((hs) => hs.student_id === student.id);
   }).filter((h) => {
-    // Pas encore rendu par cet élève (vérifie submitted_at ET status)
+    // Pas encore rendu par cet élève (soumis = status submitted/graded)
     return !(h.homework_submissions || []).some((s) =>
       s.student_id === student.id &&
-      (s.submitted_at || ['submitted', 'graded'].includes(s.status))
+      ['submitted', 'graded'].includes(s.status)
     );
   });
 
