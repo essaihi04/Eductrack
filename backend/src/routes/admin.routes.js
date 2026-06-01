@@ -3051,6 +3051,228 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// ==================== TABLEAU DE BORD SUIVI DES PROFS ====================
+
+// Suivi de l'activité des professeurs sur une période
+// Query: ?start=YYYY-MM-DD&end=YYYY-MM-DD
+router.get('/teachers/tracking-dashboard', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const today = new Date().toISOString().split('T')[0];
+    const start = req.query.start || today;
+    const end = req.query.end || today;
+
+    // Sécurité : limiter l'amplitude à 1 an
+    const startDate = new Date(start + 'T00:00:00');
+    const endDate = new Date(end + 'T00:00:00');
+    if (isNaN(startDate) || isNaN(endDate) || endDate < startDate) {
+      return res.status(400).json({ error: 'Période invalide' });
+    }
+    const MS_DAY = 86400000;
+    if ((endDate - startDate) / MS_DAY > 366) {
+      return res.status(400).json({ error: 'Période trop large (max 1 an)' });
+    }
+
+    const DOW_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
+    const durationHours = (s, e) => {
+      const a = hhmm(s), b = hhmm(e);
+      if (!a || !b) return 0;
+      const [ah, am] = a.split(':').map(Number);
+      const [bh, bm] = b.split(':').map(Number);
+      const mins = (bh * 60 + bm) - (ah * 60 + am);
+      return mins > 0 ? mins / 60 : 0;
+    };
+
+    // 1. Professeurs de l'école
+    let teachersQ = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, email')
+      .eq('role', 'teacher');
+    teachersQ = applySchoolFilter(teachersQ, req);
+    const { data: teachersRaw, error: teachersErr } = await teachersQ;
+    if (teachersErr) throw teachersErr;
+    let teachers = teachersRaw || [];
+
+    // Filtre de scope (pedagogical_manager) : profs enseignant dans les classes assignées
+    const scopedIds = await getScopedClassIds(req);
+    let scopedClassSet = null;
+    if (scopedIds !== null) {
+      scopedClassSet = new Set(scopedIds);
+      if (scopedIds.length === 0) {
+        return res.json({ period: { start, end }, teachers: [] });
+      }
+      const { data: ct } = await supabaseAdmin
+        .from('class_teachers')
+        .select('teacher_id')
+        .in('class_id', scopedIds);
+      const allowed = new Set((ct || []).map(r => r.teacher_id));
+      teachers = teachers.filter(t => allowed.has(t.id));
+    }
+
+    if (teachers.length === 0) {
+      return res.json({ period: { start, end }, teachers: [] });
+    }
+    const teacherIds = teachers.map(t => t.id);
+
+    // 2. Classes de l'école (pour libellés)
+    let classesQ = supabaseAdmin.from('classes').select('id, name');
+    classesQ = applySchoolFilter(classesQ, req);
+    const { data: classesRaw } = await classesQ;
+    const classMap = {};
+    (classesRaw || []).forEach(c => { classMap[c.id] = c.name; });
+    const schoolClassIds = new Set((classesRaw || []).map(c => c.id));
+
+    // 3. Créneaux emploi du temps des profs
+    const { data: slotsRaw } = await supabaseAdmin
+      .from('class_timetable')
+      .select('id, class_id, teacher_id, day_of_week, start_time, end_time, subject:subjects(name)')
+      .in('teacher_id', teacherIds);
+    const slots = (slotsRaw || []).filter(s =>
+      schoolClassIds.size === 0 || schoolClassIds.has(s.class_id)
+    ).filter(s => !scopedClassSet || scopedClassSet.has(s.class_id));
+
+    // 4. Séances réalisées sur la période
+    const { data: sessionsRaw } = await supabaseAdmin
+      .from('sessions')
+      .select('id, teacher_id, class_id, date, start_time, end_time, type')
+      .in('teacher_id', teacherIds)
+      .gte('date', start)
+      .lte('date', end);
+    const sessions = sessionsRaw || [];
+    const sessionIds = sessions.map(s => s.id);
+
+    // 5. Séances ayant au moins un suivi élève
+    const trackedSessionIds = new Set();
+    for (let i = 0; i < sessionIds.length; i += 100) {
+      const chunk = sessionIds.slice(i, i + 100);
+      if (chunk.length === 0) break;
+      const { data } = await supabaseAdmin
+        .from('session_tracking')
+        .select('session_id')
+        .in('session_id', chunk);
+      (data || []).forEach(r => trackedSessionIds.add(r.session_id));
+    }
+
+    // 6. Devoirs créés sur la période
+    const { data: homeworkRaw } = await supabaseAdmin
+      .from('homework')
+      .select('id, created_by, created_at, class_id')
+      .in('created_by', teacherIds)
+      .gte('created_at', `${start}T00:00:00`)
+      .lte('created_at', `${end}T23:59:59`);
+    const homework = homeworkRaw || [];
+
+    // 7. Contrôles planifiés sur la période
+    const { data: controlsRaw } = await supabaseAdmin
+      .from('controls_plan')
+      .select('id, teacher_id, class_id, date, status')
+      .in('teacher_id', teacherIds)
+      .gte('date', start)
+      .lte('date', end);
+    const controls = controlsRaw || [];
+
+    // ===== Pré-indexation =====
+    // Créneaux par prof groupés par jour de semaine
+    const slotsByTeacher = {};
+    teacherIds.forEach(id => { slotsByTeacher[id] = []; });
+    slots.forEach(s => { (slotsByTeacher[s.teacher_id] ||= []).push(s); });
+
+    // Séances indexées par clé prof|date|HH:MM (réalisation des créneaux)
+    const sessionKeySet = new Set();
+    sessions.forEach(s => {
+      sessionKeySet.add(`${s.teacher_id}|${s.date}|${hhmm(s.start_time)}`);
+    });
+
+    // Liste des dates de la période
+    const dates = [];
+    for (let d = new Date(startDate); d <= endDate; d = new Date(d.getTime() + MS_DAY)) {
+      dates.push({
+        iso: d.toISOString().split('T')[0],
+        dow: DOW_NAMES[d.getDay()]
+      });
+    }
+
+    // ===== Calcul par prof =====
+    const result = teachers.map(t => {
+      const tSlots = slotsByTeacher[t.id] || [];
+      const tSessions = sessions.filter(s => s.teacher_id === t.id);
+      const tHomework = homework.filter(h => h.created_by === t.id);
+      const tControls = controls.filter(c => c.teacher_id === t.id);
+
+      // Créneaux attendus / réalisés + créneaux manqués
+      let expected = 0;
+      let realized = 0;
+      const missed = [];
+      const byClass = {};
+
+      dates.forEach(({ iso, dow }) => {
+        tSlots.filter(s => s.day_of_week === dow).forEach(s => {
+          expected += 1;
+          const key = `${t.id}|${iso}|${hhmm(s.start_time)}`;
+          const done = sessionKeySet.has(key);
+          if (done) realized += 1;
+          else missed.push({
+            date: iso,
+            day: dow,
+            start_time: hhmm(s.start_time),
+            end_time: hhmm(s.end_time),
+            class_name: classMap[s.class_id] || '—',
+            subject: s.subject?.name || '—'
+          });
+          const cid = s.class_id;
+          byClass[cid] ||= { class_id: cid, class_name: classMap[cid] || '—', expected: 0, realized: 0, hours: 0 };
+          byClass[cid].expected += 1;
+          if (done) byClass[cid].realized += 1;
+        });
+      });
+
+      // Heures enseignées (toutes les séances de la période)
+      let hours = 0;
+      tSessions.forEach(s => {
+        const h = durationHours(s.start_time, s.end_time);
+        hours += h;
+        const cid = s.class_id;
+        if (byClass[cid]) byClass[cid].hours += h;
+      });
+
+      const sessionsWithTracking = tSessions.filter(s => trackedSessionIds.has(s.id)).length;
+      const controlsCompleted = tControls.filter(c => c.status === 'completed').length;
+
+      const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
+
+      return {
+        id: t.id,
+        first_name: t.first_name,
+        last_name: t.last_name,
+        email: t.email,
+        expected_slots: expected,
+        realized_slots: realized,
+        slots_rate: pct(realized, expected),
+        hours_taught: Math.round(hours * 10) / 10,
+        sessions_count: tSessions.length,
+        sessions_with_tracking: sessionsWithTracking,
+        tracking_rate: pct(sessionsWithTracking, tSessions.length),
+        homework_count: tHomework.length,
+        controls_planned: tControls.length,
+        controls_completed: controlsCompleted,
+        controls_rate: pct(controlsCompleted, tControls.length),
+        by_class: Object.values(byClass).map(c => ({
+          ...c,
+          hours: Math.round(c.hours * 10) / 10,
+          rate: pct(c.realized, c.expected)
+        })),
+        missed_slots: missed
+      };
+    });
+
+    res.json({ period: { start, end }, teachers: result });
+  } catch (error) {
+    console.error('Erreur tracking-dashboard:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ==================== TABLEAU DE BORD COMPORTEMENT ====================
 
 // Récupérer les métriques comportementales du jour

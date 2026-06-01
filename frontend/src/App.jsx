@@ -65,6 +65,7 @@ import ParentNotificationsPage from './pages/parent/ParentNotificationsPage';
 import DriverDashboard from './pages/driver/DriverDashboard';
 import ActiveTripPage from './pages/driver/ActiveTripPage';
 import SchoolYearConfigPage from './pages/admin/SchoolYearConfigPage';
+import TeacherTrackingDashboard from './pages/admin/TeacherTrackingDashboard';
 import CoefficientsPage from './pages/admin/CoefficientsPage';
 import BulletinsPage from './pages/admin/BulletinsPage';
 import AppreciationsPage from './pages/teacher/AppreciationsPage';
@@ -118,6 +119,7 @@ function App() {
             <Route path="subjects" element={<SubjectsPage />} />
             <Route path="parents" element={<ParentsPage />} />
             <Route path="stats" element={<StatsPage />} />
+            <Route path="teacher-tracking" element={<TeacherTrackingDashboard />} />
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
             <Route path="finance" element={<FinanceDashboard />} />

@@ -20,7 +20,8 @@ import {
   Bus,
   MapPin,
   UserCog,
-  Wallet
+  Wallet,
+  TrendingUp
 } from 'lucide-react';
 
 const MobileNav = () => {
@@ -73,6 +74,7 @@ const MobileNav = () => {
         { icon: LayoutDashboard, label: 'Accueil', path: '/dashboard' },
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: GraduationCap, label: 'Classes', path: '/classes' },
+        { icon: TrendingUp, label: 'Suivi profs', path: '/teacher-tracking' },
         { icon: BarChart3, label: 'Stats', path: '/behavior' },
         { icon: BookOpen, label: 'Matières', path: '/subjects' },
       ];
