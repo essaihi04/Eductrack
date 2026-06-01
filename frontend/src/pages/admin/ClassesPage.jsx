@@ -1148,6 +1148,13 @@ const ClassesPage = () => {
               {cls.filiere && ` · ${getFiliereLabel(cls.filiere)}`}
               {cls.academic_year && ` · ${cls.academic_year}`}
             </p>
+            {classTeachers[cls.id]?.length > 0 && (
+              <p className="text-xs text-green-700 dark:text-green-400 mt-0.5 truncate">
+                {classTeachers[cls.id].map(ct =>
+                  ct.profiles ? `${ct.profiles.first_name} ${ct.profiles.last_name}` : ''
+                ).filter(Boolean).join(' · ')}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
             <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
@@ -1233,7 +1240,9 @@ const ClassesPage = () => {
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {teachers.map(teacher => {
-                    const isAssigned = classTeachers[cls.id]?.some(ct => ct.teacher_id === teacher.id);
+                    const isAssigned = classTeachers[cls.id]?.some(
+                      ct => ct.teacher_id === teacher.id || ct.profiles?.id === teacher.id
+                    );
                     return (
                       <button
                         key={teacher.id}
