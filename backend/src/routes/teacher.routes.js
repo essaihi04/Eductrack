@@ -155,7 +155,7 @@ router.get('/classes/:classId/timetable', async (req, res) => {
 
     let query = supabaseAdmin
       .from('class_timetable')
-      .select('id, class_id, day_of_week, slot_order, start_time, end_time, room, subject:subjects(id, name, code), teacher:profiles!class_timetable_teacher_id_fkey(id, first_name, last_name)')
+      .select('id, class_id, teacher_id, day_of_week, slot_order, start_time, end_time, room, subject:subjects(id, name, code), teacher:profiles!class_timetable_teacher_id_fkey(id, first_name, last_name)')
       .eq('class_id', classId)
       .order('slot_order', { ascending: true });
 

@@ -258,7 +258,7 @@ const SuiviRapide = () => {
       );
       const data = await res.json();
       // Filtrer pour n'afficher que les créneaux du professeur connecté
-      const mySlots = (Array.isArray(data) ? data : []).filter(slot => slot.teacher_id === profile?.id);
+      const mySlots = (Array.isArray(data) ? data : []).filter(slot => (slot.teacher_id || slot.teacher?.id) === profile?.id);
       setTimetableSlots(mySlots);
     } catch (error) {
       console.error('Erreur chargement emploi du temps:', error);
