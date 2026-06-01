@@ -207,24 +207,29 @@ export async function getWeeklyAttendance(student, parentInfo) {
 /** P4 — Devoirs à faire (homework non rendus) */
 export async function getPendingHomework(student, parentInfo) {
   const today = new Date().toISOString().slice(0, 10);
+  // Inclut les devoirs en retard (30 derniers jours) + à venir
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   const { data: hw } = await supabaseAdmin
     .from('homework')
     .select(`
       id, title, description, due_date, target_type, created_at,
       homework_students!left(student_id),
-      homework_submissions!left(student_id, submitted_at)
+      homework_submissions!left(student_id, submitted_at, status)
     `)
     .eq('class_id', student.class_id)
-    .gte('due_date', today)
+    .gte('due_date', thirtyDaysAgo)
     .order('due_date', { ascending: true })
-    .limit(10);
+    .limit(20);
 
   const filtered = (hw || []).filter((h) => {
     if (h.target_type === 'all') return true;
     return (h.homework_students || []).some((hs) => hs.student_id === student.id);
   }).filter((h) => {
-    // Pas encore rendu par cet élève
-    return !(h.homework_submissions || []).some((s) => s.student_id === student.id && s.submitted_at);
+    // Pas encore rendu par cet élève (vérifie submitted_at ET status)
+    return !(h.homework_submissions || []).some((s) =>
+      s.student_id === student.id &&
+      (s.submitted_at || ['submitted', 'graded'].includes(s.status))
+    );
   });
 
   if (filtered.length === 0) {
@@ -233,8 +238,10 @@ export async function getPendingHomework(student, parentInfo) {
 
   const lines = filtered.map((h) => {
     const due = fmtDate(h.due_date);
+    const isOverdue = h.due_date < today;
     const desc = h.description ? `\n   _${h.description.substring(0, 100)}${h.description.length > 100 ? '…' : ''}_` : '';
-    return `📌 *${h.title}*\n   ⏰ À rendre : *${due}*${desc}`;
+    const overdueTag = isOverdue ? '\n   ⚠️ *EN RETARD*' : '';
+    return `📌 *${h.title}*\n   ⏰ ${isOverdue ? 'Était dû' : 'À rendre'} : *${due}*${overdueTag}${desc}`;
   });
 
   return `${header(`Devoirs — ${student.first_name}`, '✍️')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
@@ -250,15 +257,35 @@ export async function getTodaySchedule(student, parentInfo) {
     .eq('date', today)
     .order('start_time', { ascending: true });
 
-  if (!sessions || sessions.length === 0) {
+  if (sessions && sessions.length > 0) {
+    const lines = sessions.map((s) => {
+      const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
+      const typeIcon = s.type === 'control' ? '📝' : s.type === 'exam' ? '📋' : '📚';
+      const topic = s.topic ? `\n   _${s.topic}_` : '';
+      return `${typeIcon} *${time}* — ${s.subjects?.name || 'Séance'}${topic}`;
+    });
+    return `${header(`Programme du ${fmtDate(today)}`, '📆')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  }
+
+  // Fallback : emploi du temps hebdomadaire (class_timetable) si pas de sessions ponctuelles
+  const JS_TO_KEY = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const todayKey = JS_TO_KEY[new Date().getDay()];
+  const { data: slots } = await supabaseAdmin
+    .from('class_timetable')
+    .select('start_time, end_time, slot_order, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
+    .eq('class_id', student.class_id)
+    .eq('day_of_week', todayKey)
+    .order('slot_order', { ascending: true });
+
+  if (!slots || slots.length === 0) {
     return `${header('Programme du jour', '📆')}\n\nAucune séance programmée aujourd'hui.${footer(parentInfo.school_name)}`;
   }
 
-  const lines = sessions.map((s) => {
+  const lines = slots.map((s) => {
     const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
-    const typeIcon = s.type === 'control' ? '📝' : s.type === 'exam' ? '📋' : '📚';
-    const topic = s.topic ? `\n   _${s.topic}_` : '';
-    return `${typeIcon} *${time}* — ${s.subjects?.name || 'Séance'}${topic}`;
+    const teacherName = s.teacher ? ` — _${`${s.teacher.first_name} ${s.teacher.last_name}`.trim()}_` : '';
+    const room = s.room ? ` _(${s.room})_` : '';
+    return `📚 *${time}* — ${s.subject?.name || 'Cours'}${teacherName}${room}`;
   });
 
   return `${header(`Programme du ${fmtDate(today)}`, '📆')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
