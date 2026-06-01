@@ -19,16 +19,43 @@ import { sendText } from '../index.js';
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
-import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester } from './ai.js';
+import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery } from './ai.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
 import { sendMediaBuffer } from '../index.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
+import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Génère et envoie le PDF paysage de l'emploi du temps hebdomadaire.
+ * Retourne true si envoyé, false si emploi du temps vide ou erreur.
+ */
+async function sendTimetablePdf(schoolId, phone, student) {
+  try {
+    const pdf = await generateTimetablePdfForStudent(student.id);
+    if (!pdf?.buffer) {
+      await sendText(schoolId, phone,
+        `📅 L'emploi du temps de *${student.first_name}* n'a pas encore été configuré.\n_Contactez l'administration de l'école._`,
+        { urgent: true });
+      return false;
+    }
+    await sendMediaBuffer(schoolId, phone, pdf.buffer, {
+      type: 'document',
+      fileName: pdf.fileName,
+      mimetype: 'application/pdf',
+      caption: `📅 Emploi du temps hebdomadaire de *${student.first_name} ${student.last_name}*`,
+    }, { urgent: true });
+    return true;
+  } catch (e) {
+    console.error('[chatbot] sendTimetablePdf error:', e.message);
+    return false;
+  }
+}
 
 /**
  * Envoie les PDFs des bulletins publiés d'un élève via WhatsApp.
@@ -594,6 +621,12 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
 
   // Mode AI : forward DeepSeek (l'utilisateur a explicitement choisi cette option)
   if (state.state === 'AI') {
+    if (isFullWeekTimetableQuery(text)) {
+      await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
+      await sendTimetablePdf(parentInfo.school_id, phone, student);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
     const reply = await answerWithAI({ messageText: text, student, parentInfo });
     await sendText(parentInfo.school_id, phone, reply, { urgent: true });
     if (isBulletinQuery(text)) {
@@ -628,6 +661,12 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
 
     if (looksLikeQuestion) {
       console.log(`[chatbot] MENU → IA fallback (texte libre): "${trimmed.substring(0, 40)}"`);
+      if (isFullWeekTimetableQuery(text)) {
+        await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
+        await sendTimetablePdf(parentInfo.school_id, phone, student);
+        await markProcessed(incomingMsg?.id);
+        return;
+      }
       const reply = await answerWithAI({ messageText: text, student, parentInfo });
       await sendText(parentInfo.school_id, phone, reply, { urgent: true });
       if (isBulletinQuery(text)) {

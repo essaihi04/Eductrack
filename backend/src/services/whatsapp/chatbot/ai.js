@@ -93,6 +93,16 @@ export function isTimetableQuery(text) {
   return TIMETABLE_KEYWORDS_RE.test(text || '');
 }
 
+// Détecte si un jour précis est mentionné (demain, lundi, aujourd'hui…)
+const SPECIFIC_DAY_RE = /demain|aujourd|ce (matin|soir|midi|aprem)|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|monday|tuesday|wednesday|thursday|friday|saturday|sunday|اليوم|غدا|الاثنين|الثلاثاء|الأربعاء|الخميس|الجمعة|السبت|الأحد/i;
+export function isSpecificDayTimetableQuery(text) {
+  return SPECIFIC_DAY_RE.test(text || '');
+}
+// Semaine entière = requête emploi du temps SANS jour spécifique → génère le PDF
+export function isFullWeekTimetableQuery(text) {
+  return isTimetableQuery(text) && !isSpecificDayTimetableQuery(text);
+}
+
 // Mots-clés "bulletin" : déclenche aussi l'envoi des PDFs en pièce jointe.
 const BULLETIN_KEYWORDS_RE = new RegExp(
   [
