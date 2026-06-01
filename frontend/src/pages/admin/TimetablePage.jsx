@@ -70,7 +70,7 @@ const TimetablePage = () => {
       const [classRes, subjectsRes, teachersRes, timetableRes] = await Promise.all([
         fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/subjects`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${apiUrl}/api/admin/classes/${classId}/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${apiUrl}/api/admin/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/classes/${classId}/timetable`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
 
@@ -78,13 +78,11 @@ const TimetablePage = () => {
       const cls = (Array.isArray(classesData) ? classesData : []).find(c => c.id === classId);
       setClassName(cls?.name || 'Classe');
 
-      setSubjects(Array.isArray(await subjectsRes.json().then(d => d)) ? [] : []);
-      // Re-fetch subjects properly
-      const subjectsData = await (await fetch(`${apiUrl}/api/admin/subjects`, { headers: { Authorization: `Bearer ${token}` } })).json();
+      const subjectsData = await subjectsRes.json();
       setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
 
       const teachersData = await teachersRes.json();
-      setTeachers(Array.isArray(teachersData) ? teachersData.map(t => t.profiles || t) : []);
+      setTeachers(Array.isArray(teachersData) ? teachersData : []);
 
       const timetableData = await timetableRes.json();
 
