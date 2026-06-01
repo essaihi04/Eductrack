@@ -209,17 +209,18 @@ export async function getPendingHomework(student, parentInfo) {
   const today = new Date().toISOString().slice(0, 10);
   // Inclut les devoirs en retard (90 derniers jours) + à venir (aligné avec le contexte IA)
   const thirtyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-  const { data: hw } = await supabaseAdmin
+  const { data: hw, error: hwErr } = await supabaseAdmin
     .from('homework')
     .select(`
       id, title, description, due_date, target_type, created_at,
-      homework_students!left(student_id),
-      homework_submissions!left(student_id, submitted_at, status)
+      homework_students(student_id),
+      homework_submissions(student_id, submitted_at, status)
     `)
     .eq('class_id', student.class_id)
     .gte('due_date', thirtyDaysAgo)
     .order('due_date', { ascending: true })
     .limit(20);
+  if (hwErr) console.error('[chatbot] getPendingHomework error:', hwErr.message);
 
   const filtered = (hw || []).filter((h) => {
     if (h.target_type === 'all') return true;
