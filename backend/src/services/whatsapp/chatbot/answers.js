@@ -248,48 +248,102 @@ export async function getPendingHomework(student, parentInfo) {
   return `${header(`Devoirs — ${student.first_name}`, '✍️')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
-/** P5 — Programme du jour */
+/** P5 — Programme de demain (cours + devoirs à rendre + contrôles) */
 export async function getTodaySchedule(student, parentInfo) {
-  const today = new Date().toISOString().slice(0, 10);
+  const JS_TO_KEY = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const DAY_FR = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
+  const tomorrow = new Date(Date.now() + 86400000);
+  const tomorrowISO = tomorrow.toISOString().slice(0, 10);
+  const tomorrowKey = JS_TO_KEY[tomorrow.getDay()];
+  const tomorrowFR = DAY_FR[tomorrowKey] || fmtDate(tomorrowISO);
+
+  const parts = [];
+
+  // ── 1. Cours de demain (sessions ponctuelles ou emploi du temps hebdo) ──
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
     .select('id, topic, type, start_time, end_time, subjects(name)')
     .eq('class_id', student.class_id)
-    .eq('date', today)
+    .eq('date', tomorrowISO)
     .order('start_time', { ascending: true });
 
+  let coursLines = [];
   if (sessions && sessions.length > 0) {
-    const lines = sessions.map((s) => {
+    coursLines = sessions.map((s) => {
       const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
       const typeIcon = s.type === 'control' ? '📝' : s.type === 'exam' ? '📋' : '📚';
-      const topic = s.topic ? `\n   _${s.topic}_` : '';
-      return `${typeIcon} *${time}* — ${s.subjects?.name || 'Séance'}${topic}`;
+      const topic = s.topic ? ` — _${s.topic}_` : '';
+      return `${typeIcon} *${time}* — ${s.subjects?.name || 'Cours'}${topic}`;
     });
-    return `${header(`Programme du ${fmtDate(today)}`, '📆')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  } else {
+    // Fallback emploi du temps hebdomadaire
+    const { data: slots } = await supabaseAdmin
+      .from('class_timetable')
+      .select('start_time, end_time, slot_order, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
+      .eq('class_id', student.class_id)
+      .eq('day_of_week', tomorrowKey)
+      .order('slot_order', { ascending: true });
+    if (slots && slots.length > 0) {
+      coursLines = slots.map((s) => {
+        const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
+        const teacherName = s.teacher ? ` — _${`${s.teacher.first_name} ${s.teacher.last_name}`.trim()}_` : '';
+        const room = s.room ? ` _(${s.room})_` : '';
+        return `📚 *${time}* — ${s.subject?.name || 'Cours'}${teacherName}${room}`;
+      });
+    }
   }
 
-  // Fallback : emploi du temps hebdomadaire (class_timetable) si pas de sessions ponctuelles
-  const JS_TO_KEY = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const todayKey = JS_TO_KEY[new Date().getDay()];
-  const { data: slots } = await supabaseAdmin
-    .from('class_timetable')
-    .select('start_time, end_time, slot_order, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
+  if (coursLines.length > 0) {
+    parts.push(`📅 *Cours du ${tomorrowFR} :*\n${coursLines.join('\n')}`);
+  } else {
+    parts.push(`📅 *Cours :* Aucune séance prévue ${tomorrowFR === 'Dimanche' || tomorrowFR === 'Samedi' ? '(week-end)' : 'demain'}.`);
+  }
+
+  // ── 2. Devoirs à rendre demain ──
+  const { data: hwDue } = await supabaseAdmin
+    .from('homework')
+    .select('id, title, description, target_type, homework_students(student_id), homework_submissions(student_id, status)')
     .eq('class_id', student.class_id)
-    .eq('day_of_week', todayKey)
-    .order('slot_order', { ascending: true });
+    .eq('due_date', tomorrowISO)
+    .order('created_at', { ascending: true });
 
-  if (!slots || slots.length === 0) {
-    return `${header('Programme du jour', '📆')}\n\nAucune séance programmée aujourd'hui.${footer(parentInfo.school_name)}`;
-  }
-
-  const lines = slots.map((s) => {
-    const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
-    const teacherName = s.teacher ? ` — _${`${s.teacher.first_name} ${s.teacher.last_name}`.trim()}_` : '';
-    const room = s.room ? ` _(${s.room})_` : '';
-    return `📚 *${time}* — ${s.subject?.name || 'Cours'}${teacherName}${room}`;
+  const hwFiltered = (hwDue || []).filter((h) => {
+    if (h.target_type === 'all') return true;
+    return (h.homework_students || []).some((hs) => hs.student_id === student.id);
+  }).filter((h) => {
+    return !(h.homework_submissions || []).some((s) =>
+      s.student_id === student.id && ['submitted', 'graded'].includes(s.status)
+    );
   });
 
-  return `${header(`Programme du ${fmtDate(today)}`, '📆')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  if (hwFiltered.length > 0) {
+    const hwLines = hwFiltered.map((h) => {
+      const desc = h.description ? ` — _${h.description.substring(0, 80)}_` : '';
+      return `   📌 *${h.title}*${desc}`;
+    });
+    parts.push(`✍️ *Devoirs à rendre demain :*\n${hwLines.join('\n')}`);
+  } else {
+    parts.push(`✍️ *Devoirs à rendre demain :* ✅ Aucun`);
+  }
+
+  // ── 3. Contrôles prévus demain ──
+  const { data: controls } = await supabaseAdmin
+    .from('controls_plan')
+    .select('name, date, type, subjects(name)')
+    .eq('class_id', student.class_id)
+    .eq('date', tomorrowISO)
+    .order('created_at', { ascending: true });
+
+  if (controls && controls.length > 0) {
+    const ctrlLines = controls.map((c) => {
+      const subj = c.subjects?.name || c.name || 'Contrôle';
+      const type = c.type ? ` _(${c.type})_` : '';
+      return `   📝 *${subj}*${type}`;
+    });
+    parts.push(`⚠️ *Contrôles demain :*\n${ctrlLines.join('\n')}`);
+  }
+
+  return `${header(`Programme — ${tomorrowFR} ${fmtDate(tomorrowISO)}`, '📆')}\n\n${parts.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
 /** P6 — Documents partagés par les profs */

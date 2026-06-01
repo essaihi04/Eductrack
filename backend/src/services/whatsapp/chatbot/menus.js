@@ -41,7 +41,7 @@ export const PEDAGOGY_MENU = {
     { id: '2', emoji: '📊', label: 'Bilan par matière',               action: A.getAverageBySubject },
     { id: '3', emoji: '📅', label: 'Présence cette semaine',          action: A.getWeeklyAttendance },
     { id: '4', emoji: '✍️', label: 'Devoirs à faire',                action: A.getPendingHomework },
-    { id: '5', emoji: '📆', label: 'Programme du jour',              action: A.getTodaySchedule },
+    { id: '5', emoji: '📆', label: 'Programme de demain',            action: A.getTodaySchedule },
     { id: '6', emoji: '📎', label: 'Documents partagés',             action: A.getRecentDocuments },
     { id: '7', emoji: '📄', label: 'Bulletins scolaires',            action: A.getBulletinSummary },
     { id: '0', emoji: '🔙', label: 'Retour au menu principal',       action: 'goto:main' },
