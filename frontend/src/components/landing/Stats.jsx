@@ -78,7 +78,7 @@ const AnimatedCounter = ({ value, suffix, duration = 2000 }) => {
 
 const Stats = () => {
   return (
-    <section className="py-20 bg-gradient-to-br from-blue-600 to-indigo-700 dark:from-blue-900 dark:to-indigo-950">
+    <section className="py-20 bg-gradient-to-br from-green-600 to-emerald-700 dark:from-green-900 dark:to-emerald-950">
       <div className="container mx-auto px-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -90,7 +90,7 @@ const Stats = () => {
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
             Une plateforme complète
           </h2>
-          <p className="text-xl text-blue-100 max-w-2xl mx-auto">
+          <p className="text-xl text-green-100 max-w-2xl mx-auto">
             Conçue pour couvrir toute la chaîne de la vie scolaire
           </p>
         </motion.div>
@@ -120,7 +120,7 @@ const Stats = () => {
                     {stat.label}
                   </h3>
                   
-                  <p className="text-blue-100 text-sm">
+                  <p className="text-green-100 text-sm">
                     {stat.description}
                   </p>
                 </div>

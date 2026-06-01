@@ -156,11 +156,11 @@ const TransportTracking = () => {
   })();
 
   return (
-    <section className="relative py-24 bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-indigo-950 dark:to-gray-900 overflow-hidden">
+    <section className="relative py-24 bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 dark:from-gray-900 dark:via-emerald-950 dark:to-gray-900 overflow-hidden">
       {/* Background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-400/25 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-400/25 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-green-400/25 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-teal-400/25 rounded-full blur-3xl" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
@@ -172,13 +172,13 @@ const TransportTracking = () => {
           transition={{ duration: 0.6 }}
           className="text-center mb-16 max-w-3xl mx-auto"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-sm font-semibold mb-4">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-sm font-semibold mb-4">
             <Navigation className="w-4 h-4" />
             Suivi GPS temps réel
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
             Le bus de votre enfant,{' '}
-            <span className="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-green-600 via-emerald-500 to-teal-600 bg-clip-text text-transparent">
               suivi en direct
             </span>
           </h2>
@@ -209,7 +209,7 @@ const TransportTracking = () => {
                 transform: 'rotateY(6deg) rotateX(3deg)',
                 transformStyle: 'preserve-3d',
                 boxShadow:
-                  '0 50px 100px -20px rgba(59, 130, 246, 0.4), 0 30px 60px -30px rgba(0,0,0,0.4)',
+                  '0 50px 100px -20px rgba(37, 211, 102, 0.4), 0 30px 60px -30px rgba(0,0,0,0.4)',
               }}
             >
               {/* Map background */}
@@ -223,9 +223,9 @@ const TransportTracking = () => {
               >
                 <defs>
                   <linearGradient id="routeGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="50%" stopColor="#8b5cf6" />
-                    <stop offset="100%" stopColor="#ec4899" />
+                    <stop offset="0%" stopColor="#22c55e" />
+                    <stop offset="50%" stopColor="#10b981" />
+                    <stop offset="100%" stopColor="#14b8a6" />
                   </linearGradient>
                   <filter id="busGlow">
                     <feGaussianBlur stdDeviation="3" result="blur" />
@@ -262,15 +262,15 @@ const TransportTracking = () => {
 
                 {/* Maison (départ) */}
                 <g transform="translate(60, 320)">
-                  <circle r="22" fill="white" stroke="#3b82f6" strokeWidth="3" />
+                  <circle r="22" fill="white" stroke="#22c55e" strokeWidth="3" />
                   <foreignObject x="-10" y="-10" width="20" height="20">
-                    <Home className="w-5 h-5 text-blue-600" />
+                    <Home className="w-5 h-5 text-green-600" />
                   </foreignObject>
                 </g>
 
                 {/* École (arrivée) */}
                 <g transform="translate(540, 60)">
-                  <circle r="24" fill="white" stroke="#ec4899" strokeWidth="3" />
+                  <circle r="24" fill="white" stroke="#14b8a6" strokeWidth="3" />
                   <foreignObject x="-11" y="-11" width="22" height="22">
                     <School className="w-5 h-5 text-pink-600" />
                   </foreignObject>
@@ -287,7 +287,7 @@ const TransportTracking = () => {
 
               {/* HUD overlay : info top-left */}
               <div className="absolute top-4 left-4 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-xl shadow-lg px-3 py-2 flex items-center gap-2">
-                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center">
                   <Bus className="w-5 h-5 text-white" />
                 </div>
                 <div>
@@ -301,7 +301,7 @@ const TransportTracking = () => {
               {/* HUD overlay : ETA top-right */}
               <div className="absolute top-4 right-4 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-xl shadow-lg px-3 py-2">
                 <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight">Arrivée prévue</p>
-                <p className="text-sm font-bold text-blue-600 dark:text-blue-400 leading-tight">07:58</p>
+                <p className="text-sm font-bold text-green-600 dark:text-green-400 leading-tight">07:58</p>
               </div>
 
               {/* HUD overlay : étape courante bottom-left */}
@@ -312,7 +312,7 @@ const TransportTracking = () => {
                       <span
                         key={i}
                         className={`h-1.5 rounded-full transition-all ${
-                          i <= activeStepIdx ? 'w-6 bg-blue-500' : 'w-1.5 bg-gray-300 dark:bg-gray-600'
+                          i <= activeStepIdx ? 'w-6 bg-green-500' : 'w-1.5 bg-gray-300 dark:bg-gray-600'
                         }`}
                       />
                     ))}
@@ -342,7 +342,7 @@ const TransportTracking = () => {
             {/* Reflet */}
             <div
               aria-hidden
-              className="absolute left-8 right-8 -bottom-4 h-8 rounded-full bg-blue-500/30 blur-2xl"
+              className="absolute left-8 right-8 -bottom-4 h-8 rounded-full bg-green-500/30 blur-2xl"
             />
           </motion.div>
 
@@ -366,7 +366,7 @@ const TransportTracking = () => {
                 className="relative w-[320px] h-[620px] bg-gray-900 rounded-[44px] p-3 shadow-2xl"
                 style={{
                   boxShadow:
-                    '0 60px 120px -30px rgba(0,0,0,0.5), 0 40px 70px -30px rgba(59, 130, 246, 0.4), inset 0 0 0 2px rgba(255,255,255,0.1)',
+                    '0 60px 120px -30px rgba(0,0,0,0.5), 0 40px 70px -30px rgba(37, 211, 102, 0.4), inset 0 0 0 2px rgba(255,255,255,0.1)',
                 }}
               >
                 <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-7 bg-gray-900 rounded-b-2xl z-10" />
@@ -389,7 +389,7 @@ const TransportTracking = () => {
                       <path d="M15.41 16.59L10.83 12l4.58-4.59L14 6l-6 6 6 6z" />
                     </svg>
                     <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center ring-2 ring-white/20">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center ring-2 ring-white/20">
                         <Bus className="w-5 h-5" />
                       </div>
                       <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-[#075E54]" />
@@ -440,7 +440,7 @@ const TransportTracking = () => {
 
               <div
                 aria-hidden
-                className="absolute left-8 right-8 -bottom-4 h-8 rounded-full bg-blue-500/40 blur-2xl"
+                className="absolute left-8 right-8 -bottom-4 h-8 rounded-full bg-green-500/40 blur-2xl"
               />
             </div>
           </motion.div>
@@ -463,7 +463,7 @@ const TransportTracking = () => {
               key={i}
               className="bg-white/70 dark:bg-gray-800/60 backdrop-blur rounded-2xl p-5 text-center border border-gray-100 dark:border-gray-700 shadow"
             >
-              <div className="text-3xl font-bold bg-gradient-to-br from-blue-600 to-indigo-500 bg-clip-text text-transparent">
+              <div className="text-3xl font-bold bg-gradient-to-br from-green-600 to-emerald-500 bg-clip-text text-transparent">
                 {item.kpi}
               </div>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{item.label}</p>
@@ -537,7 +537,7 @@ const PointOnPath = ({ at, active, step }) => {
     <g transform={`translate(${pos.x}, ${pos.y})`}>
       <motion.circle
         r="8"
-        fill={active ? '#3b82f6' : '#cbd5e1'}
+        fill={active ? '#22c55e' : '#cbd5e1'}
         stroke="white"
         strokeWidth="3"
         animate={active ? { scale: [1, 1.3, 1] } : {}}
