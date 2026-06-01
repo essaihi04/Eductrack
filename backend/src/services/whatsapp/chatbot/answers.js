@@ -207,8 +207,8 @@ export async function getWeeklyAttendance(student, parentInfo) {
 /** P4 — Devoirs à faire (homework non rendus) */
 export async function getPendingHomework(student, parentInfo) {
   const today = new Date().toISOString().slice(0, 10);
-  // Inclut les devoirs en retard (30 derniers jours) + à venir
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  // Inclut les devoirs en retard (90 derniers jours) + à venir (aligné avec le contexte IA)
+  const thirtyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const { data: hw } = await supabaseAdmin
     .from('homework')
     .select(`
