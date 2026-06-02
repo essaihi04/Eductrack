@@ -26,9 +26,23 @@ export const MAIN_MENU = {
   options: [
     { id: '1', emoji: '📚', label: 'Suivi pédagogique', action: 'goto:pedagogy' },
     { id: '2', emoji: '💰', label: 'Finance / Paiements', action: 'goto:finance' },
-    { id: '3', emoji: '💬', label: 'Poser une question libre', action: 'goto:ai' },
-    { id: '4', emoji: '�', label: 'Mes identifiants (login & mot de passe)', action: 'goto:credentials' },
-    { id: '5', emoji: '�👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
+    { id: '3', emoji: '🎒', label: 'Vie scolaire', action: 'goto:schoollife' },
+    { id: '4', emoji: '💬', label: 'Poser une question libre', action: 'goto:ai' },
+    { id: '5', emoji: '🔑', label: 'Mes identifiants (login & mot de passe)', action: 'goto:credentials' },
+    { id: '6', emoji: '👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
+  ],
+};
+
+export const SCHOOL_LIFE_MENU = {
+  id: 'schoollife',
+  title: 'Vie scolaire 🎒',
+  description: 'Activités, photos, objets perdus et sondages',
+  options: [
+    { id: '1', emoji: '✨', label: 'Activités parascolaires',        action: A.getExtracurricular },
+    { id: '2', emoji: '📸', label: 'Cahier de vie (photos)',         action: A.getClassroomFeed },
+    { id: '3', emoji: '🔍', label: 'Objets perdus',                  action: A.getLostItems },
+    { id: '4', emoji: '🗳️', label: 'Sondages en cours',             action: A.getActivePolls },
+    { id: '0', emoji: '🔙', label: 'Retour au menu principal',       action: 'goto:main' },
   ],
 };
 
@@ -66,6 +80,7 @@ export const MENUS = {
   main: MAIN_MENU,
   pedagogy: PEDAGOGY_MENU,
   finance: FINANCE_MENU,
+  schoollife: SCHOOL_LIFE_MENU,
 };
 
 // ─────────────────────────────────────────────────────────────────────────

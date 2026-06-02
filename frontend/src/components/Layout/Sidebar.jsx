@@ -33,6 +33,11 @@ import {
   Bus,
   MapPin,
   Bell,
+  Sparkles,
+  Image as ImageIcon,
+  Search,
+  BarChart2,
+  AlertTriangle,
   Home as HomeIcon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -62,6 +67,11 @@ const Sidebar = () => {
         { icon: FileText, label: 'Devoirs', path: '/teacher/devoirs' },
         { icon: FileText, label: 'Cahier de texte', path: '/teacher/cahier-de-texte' },
         { icon: Edit, label: 'Appréciations', path: '/teacher/appreciations' },
+        { section: 'Vie scolaire', isSection: true },
+        { icon: ImageIcon, label: 'Cahier de vie', path: '/school-life/cahier-de-vie' },
+        { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
+        { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
+        { icon: AlertTriangle, label: 'Signalements', path: '/school-life/signalements' },
       ];
     }
 
@@ -113,6 +123,13 @@ const Sidebar = () => {
             { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
           ]),
         ]),
+        // Section Vie scolaire
+        { section: 'Vie scolaire', isSection: true },
+        { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
+        { icon: ImageIcon, label: 'Cahier de vie', path: '/school-life/cahier-de-vie' },
+        { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
+        { icon: BarChart2, label: 'Sondages', path: '/school-life/sondages' },
+        { icon: AlertTriangle, label: 'Signalements', path: '/school-life/signalements' },
         // Section Transport — masquée pour le pedagogical_manager
         ...(isManager ? [] : [
           { section: 'Transport', isSection: true },
@@ -142,6 +159,11 @@ const Sidebar = () => {
         { icon: Bell, label: 'Notifications', path: '/parent/notifications' },
         { icon: FileText, label: 'Bulletins', path: '/parent/bulletins' },
         { icon: Bus, label: 'Transport', path: '/parent/transport' },
+        { section: 'Vie scolaire', isSection: true },
+        { icon: ImageIcon, label: 'Cahier de vie', path: '/school-life/cahier-de-vie' },
+        { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
+        { icon: BarChart2, label: 'Sondages', path: '/school-life/sondages' },
+        { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
         { icon: Edit, label: 'Profil', path: '/profile' },
       ];
     }

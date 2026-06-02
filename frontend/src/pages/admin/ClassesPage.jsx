@@ -8,6 +8,16 @@ import { useAuth } from '../../contexts/AuthContext';
 
 // Moroccan education system hierarchy
 const SCHOOL_HIERARCHY = {
+  maternelle: {
+    label: 'Maternelle',
+    icon: BookOpen,
+    levels: {
+      'TPS': { label: 'Très Petite Section', filieres: [] },
+      'PS': { label: 'Petite Section', filieres: [] },
+      'MS': { label: 'Moyenne Section', filieres: [] },
+      'GS': { label: 'Grande Section', filieres: [] }
+    }
+  },
   primaire: {
     label: 'École Primaire',
     icon: BookOpen,
@@ -91,6 +101,7 @@ const normalizeSchoolType = (schoolType) => {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
+  if (normalized === 'maternelle' || normalized === 'ecole maternelle' || normalized === 'prescolaire' || normalized === 'prescolaire') return 'maternelle';
   if (normalized === 'primaire' || normalized === 'ecole primaire' || normalized === 'ecole') return 'primaire';
   if (normalized === 'college') return 'college';
   if (normalized === 'lycee' || normalized === 'lycee') return 'lycee';

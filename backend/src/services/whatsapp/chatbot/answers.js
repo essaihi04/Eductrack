@@ -572,3 +572,110 @@ export async function getBulletinSummary(student, parentInfo) {
 
   return `${header('Bulletins scolaires', '📄')}\n\n${lines.join('\n\n')}\n\n� _Le(s) bulletin(s) PDF arrivent juste après ce message._${footer(parentInfo.school_name)}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// VIE SCOLAIRE (parascolaire, cahier de vie, objets perdus, sondages)
+// ─────────────────────────────────────────────────────────────────────────
+
+const catLabelActivity = (c) => ({
+  club: '🎯 Club', sortie: '🚌 Sortie', evenement: '🎉 Événement',
+  atelier: '🎨 Atelier', activite: '✨ Activité',
+}[c] || '✨ Activité');
+
+/** V1 — Activités parascolaires à venir (école + classe de l'élève) */
+export async function getExtracurricular(student, parentInfo) {
+  const todayIso = new Date().toISOString();
+  const safeClass = student.class_id || '00000000-0000-0000-0000-000000000000';
+  const { data } = await supabaseAdmin
+    .from('extracurricular_activities')
+    .select('title, description, category, location, start_date, class_id')
+    .eq('school_id', parentInfo.school_id)
+    .eq('is_published', true)
+    .or(`class_id.is.null,class_id.eq.${safeClass}`)
+    .order('start_date', { ascending: true })
+    .limit(8);
+
+  const upcoming = (data || []).filter((a) => !a.start_date || a.start_date >= todayIso);
+  if (upcoming.length === 0) {
+    return `${header('Vie parascolaire', '✨')}\n\nAucune activité prévue pour le moment.${footer(parentInfo.school_name)}`;
+  }
+  const lines = upcoming.map((a) => {
+    let b = `${catLabelActivity(a.category)} — *${a.title}*`;
+    if (a.start_date) b += `\n   🗓️ ${fmtDate(a.start_date)}`;
+    if (a.location) b += `\n   📍 ${a.location}`;
+    if (a.description) b += `\n   💬 _${String(a.description).slice(0, 100)}_`;
+    return b;
+  });
+  return `${header('Vie parascolaire', '✨')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+}
+
+/** V2 — Cahier de vie (dernières activités de classe + photos) */
+export async function getClassroomFeed(student, parentInfo) {
+  const { data } = await supabaseAdmin
+    .from('classroom_feed_posts')
+    .select('title, content, media_urls, activity_date, created_at')
+    .eq('class_id', student.class_id)
+    .eq('is_published', true)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  if (!data || data.length === 0) {
+    return `${header('Cahier de vie', '📸')}\n\nAucune activité partagée pour le moment.${footer(parentInfo.school_name)}`;
+  }
+  const lines = data.map((p) => {
+    const nb = Array.isArray(p.media_urls) ? p.media_urls.length : 0;
+    let b = `*${p.title || 'Activité de classe'}* — _${fmtDate(p.activity_date || p.created_at)}_`;
+    if (p.content) b += `\n   ${String(p.content).slice(0, 120)}`;
+    if (nb) b += `\n   📷 ${nb} photo(s)`;
+    return b;
+  });
+  return `${header('Cahier de vie', '📸')}\n\n${lines.join('\n\n')}\n\n_Ouvrez l'application pour voir les photos._${footer(parentInfo.school_name)}`;
+}
+
+/** V3 — Objets perdus (non encore rendus) */
+export async function getLostItems(student, parentInfo) {
+  const { data } = await supabaseAdmin
+    .from('lost_items')
+    .select('title, description, location_found, found_date, status')
+    .eq('school_id', parentInfo.school_id)
+    .neq('status', 'rendu')
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (!data || data.length === 0) {
+    return `${header('Objets perdus', '🔍')}\n\nAucun objet signalé pour le moment.${footer(parentInfo.school_name)}`;
+  }
+  const lines = data.map((it) => {
+    let b = `🧷 *${it.title}*`;
+    if (it.location_found) b += `\n   📍 ${it.location_found}`;
+    if (it.found_date) b += `\n   📅 ${fmtDate(it.found_date)}`;
+    return b;
+  });
+  return `${header('Objets perdus', '🔍')}\n\n${lines.join('\n\n')}\n\n_Contactez l'école pour réclamer un objet._${footer(parentInfo.school_name)}`;
+}
+
+/** V4 — Sondages actifs */
+export async function getActivePolls(student, parentInfo) {
+  const nowIso = new Date().toISOString();
+  const safeClass = student.class_id || '00000000-0000-0000-0000-000000000000';
+  const { data } = await supabaseAdmin
+    .from('polls')
+    .select('question, description, options, closes_at, class_id')
+    .eq('school_id', parentInfo.school_id)
+    .eq('is_active', true)
+    .or(`class_id.is.null,class_id.eq.${safeClass}`)
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  const active = (data || []).filter((p) => !p.closes_at || p.closes_at >= nowIso);
+  if (active.length === 0) {
+    return `${header('Sondages', '🗳️')}\n\nAucun sondage en cours.${footer(parentInfo.school_name)}`;
+  }
+  const lines = active.map((p) => {
+    const opts = (p.options || []).map((o, i) => `   ${i + 1}. ${o.label}`).join('\n');
+    let b = `*${p.question}*\n${opts}`;
+    if (p.closes_at) b += `\n   ⏳ Clôture : ${fmtDate(p.closes_at)}`;
+    return b;
+  });
+  return `${header('Sondages', '🗳️')}\n\n${lines.join('\n\n')}\n\n_Répondez via l'application Eductrack._${footer(parentInfo.school_name)}`;
+}

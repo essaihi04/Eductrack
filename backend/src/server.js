@@ -29,6 +29,7 @@ import driversRoutes from './routes/drivers.routes.js';
 import pushRoutes from './routes/push.routes.js';
 import parentRoutes from './routes/parent.routes.js';
 import bulletinsRoutes from './routes/bulletins.routes.js';
+import schoolLifeRoutes from './routes/schoolLife.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 import { startParentReportScheduler } from './services/parentReportScheduler.js';
 import { bootstrapAllSessions } from './services/whatsapp/index.js';
@@ -90,6 +91,7 @@ app.use('/api/transport', transportRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/parent', parentRoutes);
 app.use('/api/bulletins', bulletinsRoutes);
+app.use('/api/school-life', schoolLifeRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {

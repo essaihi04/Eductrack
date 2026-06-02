@@ -71,6 +71,11 @@ import BulletinsPage from './pages/admin/BulletinsPage';
 import AppreciationsPage from './pages/teacher/AppreciationsPage';
 import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
 import StudentBulletins from './pages/student/StudentBulletins';
+import ParascolairePage from './pages/school-life/ParascolairePage';
+import CahierDeViePage from './pages/school-life/CahierDeViePage';
+import ObjetsPerdusPage from './pages/school-life/ObjetsPerdusPage';
+import SondagesPage from './pages/school-life/SondagesPage';
+import SignalementsPage from './pages/school-life/SignalementsPage';
 
 const ProtectedRoute = ({ children }) => {
   const { user, profile, loading } = useAuth();
@@ -143,6 +148,11 @@ function App() {
             <Route path="transport/drivers" element={<DriversPage />} />
             <Route path="transport/stats" element={<TransportStatsPage />} />
             <Route path="transport/history" element={<TransportStatsPage />} />
+            <Route path="school-life/parascolaire" element={<ParascolairePage />} />
+            <Route path="school-life/cahier-de-vie" element={<CahierDeViePage />} />
+            <Route path="school-life/objets-perdus" element={<ObjetsPerdusPage />} />
+            <Route path="school-life/sondages" element={<SondagesPage />} />
+            <Route path="school-life/signalements" element={<SignalementsPage />} />
             <Route path="parent" element={<ParentDashboard />} />
             <Route path="parent/children/:childId" element={<ParentChildPage />} />
             <Route path="parent/notifications" element={<ParentNotificationsPage />} />

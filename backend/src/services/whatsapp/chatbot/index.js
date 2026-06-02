@@ -323,7 +323,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     if (target === 'main') {
       return sendMainMenu(schoolId, phone, student, parentInfo);
     }
-    if (target === 'pedagogy' || target === 'finance') {
+    if (target === 'pedagogy' || target === 'finance' || target === 'schoollife') {
       return sendSubMenu(schoolId, phone, target, student, parentInfo);
     }
     if (target === 'ai') {
