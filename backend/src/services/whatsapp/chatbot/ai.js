@@ -225,7 +225,7 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   const threeMonthsAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const { data: hwAll } = await supabaseAdmin
     .from('homework')
-    .select('id, title, due_date, target_type, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
+    .select('id, title, due_date, target_type, created_by, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
     .eq('class_id', student.class_id)
     .gte('due_date', threeMonthsAgo)
     .order('due_date', { ascending: false })
@@ -235,13 +235,40 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     h.target_type === 'all' ||
     (h.homework_students || []).some((hs) => hs.student_id === student.id);
 
-  const myHw = (hwAll || []).filter(isAssignedToStudent).map((h) => {
+  // Le formulaire devoir ne demande PAS la matière (homework.subject_id est
+  // souvent NULL). On infère donc la matière via le professeur qui a créé le
+  // devoir (teacher_subjects), comme le fait la notification WhatsApp.
+  const assignedHw = (hwAll || []).filter(isAssignedToStudent);
+  const teacherIdsForHw = [
+    ...new Set(assignedHw.filter((h) => !h.subjects?.name && h.created_by).map((h) => h.created_by)),
+  ];
+  const hwTeacherSubjectMap = {};
+  if (teacherIdsForHw.length > 0) {
+    const { data: tSubs } = await supabaseAdmin
+      .from('teacher_subjects')
+      .select('teacher_id, subjects(name)')
+      .in('teacher_id', teacherIdsForHw);
+    (tSubs || []).forEach((ts) => {
+      const name = ts.subjects?.name;
+      if (!name) return;
+      if (!hwTeacherSubjectMap[ts.teacher_id]) hwTeacherSubjectMap[ts.teacher_id] = [];
+      if (!hwTeacherSubjectMap[ts.teacher_id].includes(name)) hwTeacherSubjectMap[ts.teacher_id].push(name);
+    });
+  }
+
+  const myHw = assignedHw.map((h) => {
     const mySub = (h.homework_submissions || []).find((s) => s.student_id === student.id);
     const submitted = mySub && (mySub.status === 'submitted' || mySub.status === 'graded');
+    // Matière : valeur directe sinon inférée via le prof (1 seule matière enseignée)
+    let subject = h.subjects?.name || null;
+    if (!subject && h.created_by) {
+      const subs = hwTeacherSubjectMap[h.created_by];
+      if (subs && subs.length === 1) subject = subs[0];
+    }
     return {
       id: h.id,
       title: h.title,
-      subject: h.subjects?.name || null,
+      subject,
       due: h.due_date,
       overdue: h.due_date < today && !submitted,
       submitted: !!submitted,

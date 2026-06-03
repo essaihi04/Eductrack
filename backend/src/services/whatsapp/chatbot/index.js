@@ -534,6 +534,14 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       if (looksLikeQuestion) {
         try {
           const student = children[0];
+          // Emploi du temps de la semaine → envoyer le PDF (comme dans les
+          // états MENU/AI) au lieu d'une réponse texte de l'IA.
+          if (isFullWeekTimetableQuery(text)) {
+            await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
+            await sendTimetablePdf(parentInfo.school_id, phone, student);
+            await markProcessed(incomingMsg?.id);
+            return;
+          }
           const reply = await answerWithAI({ messageText: text, student, parentInfo });
           await sendText(parentInfo.school_id, phone, reply, { urgent: true });
           if (isBulletinQuery(text)) {
