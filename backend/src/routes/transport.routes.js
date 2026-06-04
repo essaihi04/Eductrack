@@ -445,6 +445,22 @@ router.post('/trips/:id/students/:sid/event', async (req, res) => {
     if (!trip) return res.status(404).json({ error: 'Trajet introuvable' });
     if (req.user.role === 'driver' && trip.driver_id !== req.user.id) return res.status(403).json({ error: 'Accès refusé' });
 
+    // Idempotence : si le même événement a déjà été enregistré très récemment
+    // (double tap, retry réseau de l'app chauffeur), on ne ré-insère pas et on
+    // ne renotifie pas les parents — évite les messages WhatsApp en double.
+    const { data: dup } = await supabaseAdmin
+      .from('trip_student_events')
+      .select('id')
+      .eq('trip_id', id)
+      .eq('student_id', sid)
+      .eq('event_type', event_type)
+      .gte('recorded_at', new Date(Date.now() - 60_000).toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (dup) {
+      return res.status(200).json({ ...dup, duplicate: true });
+    }
+
     const { data: ev, error } = await supabaseAdmin.from('trip_student_events').insert({
       trip_id: id, student_id: sid, event_type,
       lat: lat ?? null, lng: lng ?? null, recorded_by: req.user.id, note
