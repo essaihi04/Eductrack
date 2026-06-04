@@ -360,6 +360,20 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
   // Action = fonction (réponse prédéfinie)
   if (typeof option.action === 'function') {
     try {
+      // Cas spécial sondages : on bascule directement en mode vote, sans
+      // afficher la liste générique en double. Seul le prompt de vote est
+      // envoyé (options numérotées + instruction).
+      if (option.action === A.getActivePolls) {
+        const polls = await A.getActivePollsData(student, parentInfo);
+        if (polls.length === 0) {
+          await sendText(schoolId, phone, await A.getActivePolls(student, parentInfo), { urgent: true });
+        } else {
+          State.setPollVoting(phone, polls);
+          await sendText(schoolId, phone, A.formatPollPrompt(polls[0], 1, polls.length), { urgent: true });
+        }
+        return;
+      }
+
       const reply = await option.action(student, parentInfo);
       await sendText(schoolId, phone, reply, { urgent: true });
 
@@ -396,21 +410,6 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
           console.log(`[chatbot] objets perdus: ${okCount}/${items.length} photo(s) envoyée(s)`);
         } catch (photoErr) {
           console.error('[chatbot] Erreur envoi photos objets perdus:', photoErr);
-        }
-      }
-
-      // Cas spécial : pour les "Sondages", on passe en mode vote : le parent
-      // répond avec le numéro de l'option et son vote est enregistré.
-      if (option.action === A.getActivePolls) {
-        try {
-          const polls = await A.getActivePollsData(student, parentInfo);
-          if (polls.length > 0) {
-            State.setPollVoting(phone, polls);
-            await sendText(schoolId, phone, A.formatPollPrompt(polls[0], 1, polls.length), { urgent: true });
-            return; // on reste en mode vote, pas de rappel de menu
-          }
-        } catch (pollErr) {
-          console.error('[chatbot] Erreur préparation vote sondage:', pollErr);
         }
       }
 
@@ -727,9 +726,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       await sendText(parentInfo.school_id, phone, A.formatPollPrompt(queue[idx + 1], idx + 2, queue.length), { urgent: true });
     } else {
       State.setMenu(phone, 'schoollife');
-      setTimeout(() => {
-        sendText(parentInfo.school_id, phone, `Merci ! 🙏 Tapez *menu* pour d'autres options.`, { urgent: true });
-      }, 1200);
+      await sendText(parentInfo.school_id, phone, `Merci ! 🙏 Tapez *menu* pour d'autres options.`, { urgent: true });
     }
     await markProcessed(incomingMsg?.id);
     return;
