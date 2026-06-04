@@ -760,13 +760,33 @@ export async function recordPollVote(poll, optionIndex, parentInfo) {
   const choice = options[optionIndex];
   if (!choice) return { ok: false, message: 'Option invalide.' };
 
-  const { error } = await supabaseAdmin
+  // Vote(s) existant(s) de ce parent pour ce sondage. On ne dépend pas de la
+  // contrainte UNIQUE en base : on déduplique nous-mêmes (1 vote / parent).
+  const { data: existing } = await supabaseAdmin
     .from('poll_votes')
-    .upsert(
-      { poll_id: poll.id, user_id: parentInfo.parent_id, option_id: choice.id },
-      { onConflict: 'poll_id,user_id' }
-    );
-  if (error) return { ok: false, message: error.message };
+    .select('id, option_id')
+    .eq('poll_id', poll.id)
+    .eq('user_id', parentInfo.parent_id);
+
+  let action; // 'inserted' | 'updated' | 'unchanged'
+  if (existing && existing.length === 1 && existing[0].option_id === choice.id) {
+    // Déjà voté pour cette même option → rien à changer
+    action = 'unchanged';
+  } else {
+    // Supprime tout vote précédent (et nettoie d'éventuels doublons) puis insère
+    if (existing && existing.length > 0) {
+      await supabaseAdmin
+        .from('poll_votes')
+        .delete()
+        .eq('poll_id', poll.id)
+        .eq('user_id', parentInfo.parent_id);
+    }
+    const { error } = await supabaseAdmin
+      .from('poll_votes')
+      .insert({ poll_id: poll.id, user_id: parentInfo.parent_id, option_id: choice.id });
+    if (error) return { ok: false, message: error.message };
+    action = existing && existing.length > 0 ? 'updated' : 'inserted';
+  }
 
   // Décompte des votes par option pour afficher les résultats
   const { data: votes } = await supabaseAdmin
@@ -784,8 +804,12 @@ export async function recordPollVote(poll, optionIndex, parentInfo) {
     })
     .join('\n');
 
-  return {
-    ok: true,
-    message: `✅ Vote enregistré : *${choice.label}*\n\n📊 Résultats :\n${results}`,
-  };
+  const head =
+    action === 'unchanged'
+      ? `ℹ️ Vous avez déjà voté : *${choice.label}*`
+      : action === 'updated'
+        ? `🔄 Vote modifié : *${choice.label}*`
+        : `✅ Vote enregistré : *${choice.label}*`;
+
+  return { ok: true, message: `${head}\n\n📊 Résultats :\n${results}` };
 }
