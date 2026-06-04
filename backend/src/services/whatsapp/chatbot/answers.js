@@ -654,6 +654,19 @@ export async function getLostItems(student, parentInfo) {
   return `${header('Objets perdus', '🔍')}\n\n${lines.join('\n\n')}\n\n_Contactez l'école pour réclamer un objet._${footer(parentInfo.school_name)}`;
 }
 
+/** Objets perdus possédant une photo (pour envoi en pièce jointe WhatsApp). */
+export async function getLostItemsWithPhotos(parentInfo) {
+  const { data } = await supabaseAdmin
+    .from('lost_items')
+    .select('title, location_found, photo_url')
+    .eq('school_id', parentInfo.school_id)
+    .neq('status', 'rendu')
+    .not('photo_url', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  return data || [];
+}
+
 /** V4 — Sondages actifs */
 export async function getActivePolls(student, parentInfo) {
   const nowIso = new Date().toISOString();

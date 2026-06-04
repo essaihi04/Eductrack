@@ -23,7 +23,7 @@ import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery,
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
-import { sendMediaBuffer } from '../index.js';
+import { sendMediaBuffer, sendImage } from '../index.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
 
@@ -360,6 +360,24 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       // Cas spécial : pour les "Bulletins scolaires" on envoie aussi les PDFs.
       if (option.action === A.getBulletinSummary) {
         await sendBulletinPdfs(schoolId, phone, student);
+      }
+
+      // Cas spécial : pour les "Objets perdus" on envoie aussi les photos
+      // disponibles, juste après la liste texte.
+      if (option.action === A.getLostItems) {
+        try {
+          const items = await A.getLostItemsWithPhotos(parentInfo);
+          const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
+          for (const it of items) {
+            if (!it.photo_url) continue;
+            const url = it.photo_url.startsWith('http') ? it.photo_url : `${base}${it.photo_url}`;
+            let caption = `🧷 ${it.title}`;
+            if (it.location_found) caption += `\n📍 ${it.location_found}`;
+            await sendImage(schoolId, phone, url, caption, { urgent: true });
+          }
+        } catch (photoErr) {
+          console.error('[chatbot] Erreur envoi photos objets perdus:', photoErr);
+        }
       }
 
       // Cas spécial : pour la "Dernière facture" on envoie aussi le PDF
