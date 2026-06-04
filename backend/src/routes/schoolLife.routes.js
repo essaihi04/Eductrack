@@ -38,8 +38,10 @@ const upload = multer({
 const UPLOAD_WEB_PATH = 'uploads/school-life';
 const publicUrl = (relPath) => `/${relPath.replace(/\\/g, '/')}`;
 const absoluteUrl = (relUrl) => {
-  const base = process.env.PUBLIC_BASE_URL || process.env.API_URL || '';
-  return base ? `${base}${relUrl}` : null;
+  if (!relUrl) return null;
+  if (/^https?:\/\//i.test(relUrl)) return relUrl;
+  const base = process.env.PUBLIC_BASE_URL || process.env.API_URL || 'https://etrack.ma';
+  return `${base}${relUrl}`;
 };
 
 router.use(authenticate);
@@ -343,7 +345,7 @@ router.get('/lost-items', async (req, res) => {
 
 router.post('/lost-items', authorize('admin', 'school_admin', 'teacher'), upload.single('photo'), async (req, res) => {
   try {
-    const { title, description, location_found, found_date } = req.body;
+    const { title, description, location_found, found_date, notify } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
     const photo_url = req.file ? publicUrl(`${UPLOAD_WEB_PATH}/${req.file.filename}`) : null;
     const { data, error } = await supabaseAdmin
@@ -360,6 +362,14 @@ router.post('/lost-items', authorize('admin', 'school_admin', 'teacher'), upload
       .select()
       .single();
     if (error) throw error;
+
+    if (notify === 'true' || notify === true) {
+      const studentIds = await getStudentIds(req.user.school_id, null);
+      const parents = await getParentPhonesForStudents(studentIds);
+      const text = `🔍 *Objet perdu trouvé*\n\n🧷 *${title}*${description ? `\n${description}` : ''}${location_found ? `\n📍 ${location_found}` : ''}\n\n_Si cet objet est à votre enfant, contactez l'école._`;
+      await notifyUsers(parents.parentIds, { title: `Objet perdu : ${title}`, message: description || location_found || '', type: 'message' });
+      broadcastWhatsApp(req.user.school_id, parents.phones, text, photo_url).catch(() => {});
+    }
     res.status(201).json(data);
   } catch (e) {
     console.error('POST /lost-items', e);

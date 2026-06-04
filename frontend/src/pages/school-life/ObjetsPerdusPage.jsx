@@ -21,6 +21,7 @@ const ObjetsPerdusPage = () => {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', location_found: '', found_date: '' });
   const [photo, setPhoto] = useState(null);
+  const [notify, setNotify] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -33,9 +34,9 @@ const ObjetsPerdusPage = () => {
     e.preventDefault();
     setSaving(true);
     try {
-      await schoolLifeApi.createLostItem({ fields: form, photo });
+      await schoolLifeApi.createLostItem({ fields: { ...form, notify }, photo });
       setForm({ title: '', description: '', location_found: '', found_date: '' });
-      setPhoto(null); setShowForm(false); await load();
+      setPhoto(null); setNotify(false); setShowForm(false); await load();
     } catch (e) { alert(e.message); }
     setSaving(false);
   };
@@ -79,6 +80,10 @@ const ObjetsPerdusPage = () => {
             <input type="date" value={form.found_date} onChange={(e) => setForm({ ...form, found_date: e.target.value })} className="border border-border rounded-lg px-3 py-2 bg-background" />
           </div>
           <input type="file" accept="image/*" onChange={(e) => setPhoto(e.target.files[0])} />
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} className="w-4 h-4" />
+            <Send className="w-4 h-4 text-primary" /> Prévenir les parents par WhatsApp
+          </label>
           <button disabled={saving} className="bg-primary text-primary-foreground px-4 py-2 rounded-lg w-full">{saving ? '...' : 'Ajouter'}</button>
         </form>
       )}
