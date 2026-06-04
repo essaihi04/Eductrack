@@ -709,6 +709,41 @@ export async function getActivePollsData(student, parentInfo) {
   return (data || []).filter((p) => !p.closes_at || p.closes_at >= nowIso);
 }
 
+/** Normalise un texte pour comparaison : minuscules, sans accents ni ponctuation. */
+function normalizeForMatch(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')            // accents latins combinés
+    .replace(/[ؗ-ًؚ-ْـ]/g, '') // diacritiques/tatweel arabes
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')           // ponctuation -> espace
+    .trim();
+}
+
+/**
+ * Détermine l'option choisie à partir d'une saisie libre : numéro (1, 2, chiffres
+ * arabes) OU texte de l'option (ex. "Oui", "non"). Renvoie l'index 0-based ou -1.
+ */
+export function matchPollOption(poll, text) {
+  const options = poll.options || [];
+  // 1) Par numéro (chiffres latins ou arabes-indiens ٠-٩)
+  const digits = String(text).replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x0660).trim();
+  if (/^\d+$/.test(digits)) {
+    const n = parseInt(digits, 10);
+    return n >= 1 && n <= options.length ? n - 1 : -1;
+  }
+  // 2) Par texte de l'option (égalité stricte, puis inclusion)
+  const input = normalizeForMatch(text);
+  if (!input) return -1;
+  let idx = options.findIndex((o) => normalizeForMatch(o.label) === input);
+  if (idx >= 0) return idx;
+  idx = options.findIndex((o) => {
+    const lab = normalizeForMatch(o.label);
+    return lab && (lab.includes(input) || input.includes(lab));
+  });
+  return idx;
+}
+
 /** Texte de prompt de vote pour un sondage (options numérotées). */
 export function formatPollPrompt(poll, position, total) {
   const opts = (poll.options || []).map((o, i) => `${i + 1}. ${o.label}`).join('\n');

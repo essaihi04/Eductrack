@@ -711,15 +711,14 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       await markProcessed(incomingMsg?.id);
       return;
     }
-    // Convertit chiffres arabes-indiens éventuels puis parse
-    const normalized = String(text).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).trim();
-    const n = parseInt(normalized, 10);
-    if (!Number.isInteger(n) || n < 1 || n > (poll.options || []).length) {
+    // Accepte un numéro (1, 2, ٢…) OU le texte de l'option ("Oui", "non"…)
+    const optIdx = A.matchPollOption(poll, text);
+    if (optIdx < 0) {
       await sendText(parentInfo.school_id, phone, `🤔 Choix non reconnu. ${A.formatPollPrompt(poll, idx + 1, queue.length)}`, { urgent: true });
       await markProcessed(incomingMsg?.id);
       return;
     }
-    const result = await A.recordPollVote(poll, n - 1, parentInfo);
+    const result = await A.recordPollVote(poll, optIdx, parentInfo);
     await sendText(parentInfo.school_id, phone, result.ok ? result.message : `⚠️ ${result.message}`, { urgent: true });
 
     // Passe au sondage suivant s'il en reste, sinon retour au menu Vie scolaire
