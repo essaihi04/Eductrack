@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Users, Search, RefreshCw, AlertCircle, CheckCircle2, XCircle, FileText, Plus, X, Save } from 'lucide-react';
-import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
+import { Users, Search, RefreshCw, AlertCircle, CheckCircle2, XCircle, FileText, Plus, X, Save, CreditCard, Wallet } from 'lucide-react';
+import { financeApi, formatMAD, formatDate, CATEGORY_LABELS, RECURRENCE_LABELS, METHOD_LABELS } from '../../lib/financeApi';
 import { supabase } from '../../lib/supabase';
 
 export default function FinanceStudentsPage() {
@@ -10,6 +10,7 @@ export default function FinanceStudentsPage() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ class_id: '', search: '' });
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [payStudent, setPayStudent] = useState(null);
 
   useEffect(() => {
     loadClasses();
@@ -90,7 +91,11 @@ export default function FinanceStudentsPage() {
               {filtered.length === 0 && <tr><td colSpan="8" className="px-4 py-8 text-center text-gray-400">Aucun élève</td></tr>}
               {filtered.map(s => (
                 <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{s.first_name} {s.last_name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <button onClick={() => setPayStudent(s)} className="text-left hover:text-blue-600 hover:underline">
+                      {s.first_name} {s.last_name}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{s.classes?.name || '—'}</td>
                   <td className="px-4 py-3 text-center">
                     {s.has_plan
@@ -110,10 +115,16 @@ export default function FinanceStudentsPage() {
                     ) : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => setSelectedStudent(s)}
-                      className="px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
-                      Plan de frais
-                    </button>
+                    <div className="flex justify-end gap-1.5">
+                      <button onClick={() => setPayStudent(s)}
+                        className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-green-50 text-green-700 rounded-lg hover:bg-green-100">
+                        <Wallet className="w-3.5 h-3.5" /> Paiements
+                      </button>
+                      <button onClick={() => setSelectedStudent(s)}
+                        className="px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
+                        Plan de frais
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -130,6 +141,225 @@ export default function FinanceStudentsPage() {
           onSaved={() => { setSelectedStudent(null); load(); }}
         />
       )}
+
+      {payStudent && (
+        <MonthlyPaymentsModal
+          student={payStudent}
+          onClose={() => setPayStudent(null)}
+          onPaid={() => load()}
+        />
+      )}
+    </div>
+  );
+}
+
+function getCurrentAcademicYear() {
+  const y = new Date().getFullYear();
+  const m = new Date().getMonth();
+  return m >= 7 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+}
+
+const MONTH_STATUS_META = {
+  paid: { label: 'Payé', cls: 'bg-green-100 text-green-700' },
+  partial: { label: 'Partiel', cls: 'bg-yellow-100 text-yellow-700' },
+  overdue: { label: 'En retard', cls: 'bg-red-100 text-red-700' },
+  unpaid: { label: 'Impayé', cls: 'bg-orange-100 text-orange-700' },
+  pending: { label: 'Non facturé', cls: 'bg-gray-100 text-gray-600' }
+};
+
+function MonthlyPaymentsModal({ student, onClose, onPaid }) {
+  const [academicYear, setAcademicYear] = useState(getCurrentAcademicYear());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState([]); // months cochés
+  const [method, setMethod] = useState('cash');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reference, setReference] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { load(); }, [academicYear]);
+
+  const load = async () => {
+    setLoading(true);
+    setSelected([]);
+    try {
+      const res = await financeApi.getMonthlyStatus(student.id, academicYear);
+      setData(res);
+    } catch (e) { console.error(e); setData(null); }
+    finally { setLoading(false); }
+  };
+
+  const payableMonths = (data?.months || []).filter(m => m.remaining > 0);
+
+  const toggle = (month) => {
+    setSelected(prev => prev.includes(month) ? prev.filter(x => x !== month) : [...prev, month]);
+  };
+
+  const toggleAll = () => {
+    if (selected.length === payableMonths.length) setSelected([]);
+    else setSelected(payableMonths.map(m => m.month));
+  };
+
+  const selectedTotal = (data?.months || [])
+    .filter(m => selected.includes(m.month))
+    .reduce((s, m) => s + Number(m.remaining), 0);
+
+  const submit = async () => {
+    if (selected.length === 0) return;
+    if (!confirm(`Encaisser ${selected.length} mois pour un total de ${formatMAD(selectedTotal)} ?`)) return;
+    setSaving(true);
+    try {
+      const res = await financeApi.payMonths(student.id, {
+        academic_year: academicYear,
+        months: selected,
+        payment_date: paymentDate,
+        method,
+        reference: reference || undefined
+      });
+      alert(`${res.paid_count} mois encaissé(s) · ${formatMAD(res.total_paid)}`);
+      await load();
+      onPaid?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const summary = data?.summary;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <CreditCard className="w-5 h-5" /> Paiements mensuels
+            </h2>
+            <p className="text-sm text-gray-500">{student.first_name} {student.last_name} · {student.classes?.name || '—'}</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-gray-700">Année scolaire</label>
+            <input type="text" value={academicYear} onChange={e => setAcademicYear(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-32" />
+          </div>
+
+          {loading ? (
+            <p className="text-gray-500 py-8 text-center">Chargement...</p>
+          ) : !data?.plan_exists ? (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm">
+              Aucun plan de frais actif pour cet élève sur {academicYear}. Définissez d'abord un « Plan de frais ».
+            </div>
+          ) : (
+            <>
+              {/* Bandeau récapitulatif */}
+              {summary && (
+                <div className={`rounded-lg p-4 flex items-center justify-between ${summary.all_paid ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'}`}>
+                  {summary.all_paid ? (
+                    <span className="flex items-center gap-2 text-green-700 font-semibold">
+                      <CheckCircle2 className="w-5 h-5" /> Tout payé ✓ ({summary.paid_months}/{summary.total_months} mois)
+                    </span>
+                  ) : (
+                    <div className="text-sm">
+                      <span className="text-gray-600">Reste à payer : </span>
+                      <span className="font-bold text-orange-600">{formatMAD(summary.remaining_total)}</span>
+                      <span className="text-gray-400"> · Payé {formatMAD(summary.paid_total)} / {formatMAD(summary.expected_total)}</span>
+                    </div>
+                  )}
+                  <span className="text-xs text-gray-500">{summary.paid_months}/{summary.total_months} mois payés</span>
+                </div>
+              )}
+
+              {/* Grille des mois */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
+                    <tr>
+                      <th className="px-3 py-2 text-center w-10">
+                        <input type="checkbox" checked={payableMonths.length > 0 && selected.length === payableMonths.length}
+                          onChange={toggleAll} disabled={payableMonths.length === 0} />
+                      </th>
+                      <th className="px-3 py-2 text-left">Mois</th>
+                      <th className="px-3 py-2 text-right">Montant</th>
+                      <th className="px-3 py-2 text-right">Payé</th>
+                      <th className="px-3 py-2 text-right">Reste</th>
+                      <th className="px-3 py-2 text-center">Statut</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(data.months || []).map(m => {
+                      const meta = MONTH_STATUS_META[m.status] || MONTH_STATUS_META.pending;
+                      const payable = m.remaining > 0;
+                      return (
+                        <tr key={m.month} className={selected.includes(m.month) ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                          <td className="px-3 py-2 text-center">
+                            {payable ? (
+                              <input type="checkbox" checked={selected.includes(m.month)} onChange={() => toggle(m.month)} />
+                            ) : <CheckCircle2 className="w-4 h-4 text-green-500 inline" />}
+                          </td>
+                          <td className="px-3 py-2 font-medium text-gray-800">{m.label}</td>
+                          <td className="px-3 py-2 text-right text-gray-700">{formatMAD(m.total)}</td>
+                          <td className="px-3 py-2 text-right text-green-600">{formatMAD(m.paid)}</td>
+                          <td className={`px-3 py-2 text-right font-medium ${m.remaining > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                            {formatMAD(m.remaining)}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${meta.cls}`}>{meta.label}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {(data.months || []).length === 0 && (
+                      <tr><td colSpan="6" className="px-3 py-6 text-center text-gray-400">Aucune échéance dans ce plan</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Zone d'encaissement */}
+              {selected.length > 0 && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Mode de paiement</label>
+                      <select value={method} onChange={e => setMethod(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                        {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+                      <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Référence (optionnel)</label>
+                    <input type="text" value={reference} onChange={e => setReference(e.target.value)}
+                      placeholder="N° chèque, virement..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-2">
+          <div className="text-sm">
+            {selected.length > 0 && (
+              <span className="text-gray-600">{selected.length} mois sélectionné(s) · <span className="font-bold text-green-700">{formatMAD(selectedTotal)}</span></span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Fermer</button>
+            <button onClick={submit} disabled={selected.length === 0 || saving}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+              <Wallet className="w-4 h-4" /> {saving ? 'Encaissement...' : 'Encaisser'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
