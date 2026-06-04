@@ -629,7 +629,26 @@ export async function getClassroomFeed(student, parentInfo) {
     if (nb) b += `\n   📷 ${nb} photo(s)`;
     return b;
   });
-  return `${header('Cahier de vie', '📸')}\n\n${lines.join('\n\n')}\n\n_Ouvrez l'application pour voir les photos._${footer(parentInfo.school_name)}`;
+  return `${header('Cahier de vie', '📸')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+}
+
+/** Médias du cahier de vie à envoyer en pièce jointe WhatsApp (posts récents). */
+export async function getClassroomFeedMedia(student, parentInfo) {
+  const { data } = await supabaseAdmin
+    .from('classroom_feed_posts')
+    .select('title, media_urls, activity_date, created_at')
+    .eq('class_id', student.class_id)
+    .eq('is_published', true)
+    .order('created_at', { ascending: false })
+    .limit(3); // on n'envoie les photos que des 3 posts les plus récents
+  const items = [];
+  for (const p of data || []) {
+    const urls = Array.isArray(p.media_urls) ? p.media_urls : [];
+    for (const url of urls) {
+      if (url) items.push({ title: p.title || 'Activité de classe', url });
+    }
+  }
+  return items.slice(0, 10); // plafond de sécurité
 }
 
 /** V3 — Objets perdus (non encore rendus) */

@@ -38,6 +38,23 @@ import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js'
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
+ * Envoie une photo sur WhatsApp en lisant le fichier sur le disque local en
+ * priorité (pas d'aller-retour réseau), avec repli sur l'URL absolue.
+ * `photoUrl` est soit un chemin relatif (/uploads/...) soit une URL http(s).
+ */
+async function sendPhotoLocalFirst(schoolId, phone, photoUrl, caption) {
+  if (!photoUrl) return { success: false, message: 'no_url' };
+  const localPath = join(__dirname, '../../../..', photoUrl);
+  if (!photoUrl.startsWith('http') && fs.existsSync(localPath)) {
+    const buf = fs.readFileSync(localPath);
+    return sendMediaBuffer(schoolId, phone, buf, { type: 'image', caption }, { urgent: true });
+  }
+  const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
+  const url = photoUrl.startsWith('http') ? photoUrl : `${base}${photoUrl}`;
+  return sendImage(schoolId, phone, url, caption, { urgent: true });
+}
+
+/**
  * Génère et envoie le PDF paysage de l'emploi du temps hebdomadaire.
  * Retourne true si envoyé, false si emploi du temps vide ou erreur.
  */
@@ -410,6 +427,23 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
           console.log(`[chatbot] objets perdus: ${okCount}/${items.length} photo(s) envoyée(s)`);
         } catch (photoErr) {
           console.error('[chatbot] Erreur envoi photos objets perdus:', photoErr);
+        }
+      }
+
+      // Cas spécial : pour le "Cahier de vie" on envoie aussi les photos des
+      // posts récents juste après le récap texte.
+      if (option.action === A.getClassroomFeed) {
+        try {
+          const media = await A.getClassroomFeedMedia(student, parentInfo);
+          let okCount = 0;
+          for (const m of media) {
+            const res = await sendPhotoLocalFirst(schoolId, phone, m.url, `📸 ${m.title}`);
+            if (res?.success) okCount += 1;
+            else console.warn('[chatbot] photo cahier de vie NON envoyée:', m.title, res?.message || res?.reason || '');
+          }
+          console.log(`[chatbot] cahier de vie: ${okCount}/${media.length} photo(s) envoyée(s)`);
+        } catch (feedErr) {
+          console.error('[chatbot] Erreur envoi photos cahier de vie:', feedErr);
         }
       }
 
