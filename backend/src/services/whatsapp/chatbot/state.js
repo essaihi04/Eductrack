@@ -53,6 +53,11 @@ export function setAIMode(phone) {
   return setState(phone, { state: 'AI' });
 }
 
+/** Mode vote sondage : file d'attente de sondages à présenter un par un. */
+export function setPollVoting(phone, pollQueue) {
+  return setState(phone, { state: 'POLL', pollQueue, pollIndex: 0 });
+}
+
 export function selectStudent(phone, studentId) {
   return setState(phone, { studentId, state: 'MENU', currentMenu: 'main' });
 }

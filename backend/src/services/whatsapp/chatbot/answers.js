@@ -690,5 +690,67 @@ export async function getActivePolls(student, parentInfo) {
     if (p.closes_at) b += `\n   ⏳ Clôture : ${fmtDate(p.closes_at)}`;
     return b;
   });
-  return `${header('Sondages', '🗳️')}\n\n${lines.join('\n\n')}\n\n_Répondez via l'application Eductrack._${footer(parentInfo.school_name)}`;
+  return `${header('Sondages', '🗳️')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+}
+
+/** Sondages actifs ouverts aux parents (données brutes, pour le vote WhatsApp). */
+export async function getActivePollsData(student, parentInfo) {
+  const nowIso = new Date().toISOString();
+  const safeClass = student.class_id || '00000000-0000-0000-0000-000000000000';
+  const { data } = await supabaseAdmin
+    .from('polls')
+    .select('id, question, options, closes_at, class_id, target_audience')
+    .eq('school_id', parentInfo.school_id)
+    .eq('is_active', true)
+    .in('target_audience', ['parents', 'tous'])
+    .or(`class_id.is.null,class_id.eq.${safeClass}`)
+    .order('created_at', { ascending: false })
+    .limit(5);
+  return (data || []).filter((p) => !p.closes_at || p.closes_at >= nowIso);
+}
+
+/** Texte de prompt de vote pour un sondage (options numérotées). */
+export function formatPollPrompt(poll, position, total) {
+  const opts = (poll.options || []).map((o, i) => `${i + 1}. ${o.label}`).join('\n');
+  const pos = total > 1 ? `\n\n_(Sondage ${position}/${total})_` : '';
+  return `🗳️ *${poll.question}*\n\n${opts}\n\n_Répondez avec le numéro de votre choix pour voter._${pos}`;
+}
+
+/**
+ * Enregistre (ou met à jour) le vote d'un parent pour un sondage, puis renvoie
+ * un récap avec les résultats actuels.
+ */
+export async function recordPollVote(poll, optionIndex, parentInfo) {
+  const options = poll.options || [];
+  const choice = options[optionIndex];
+  if (!choice) return { ok: false, message: 'Option invalide.' };
+
+  const { error } = await supabaseAdmin
+    .from('poll_votes')
+    .upsert(
+      { poll_id: poll.id, user_id: parentInfo.parent_id, option_id: choice.id },
+      { onConflict: 'poll_id,user_id' }
+    );
+  if (error) return { ok: false, message: error.message };
+
+  // Décompte des votes par option pour afficher les résultats
+  const { data: votes } = await supabaseAdmin
+    .from('poll_votes')
+    .select('option_id')
+    .eq('poll_id', poll.id);
+  const counts = {};
+  for (const v of votes || []) counts[v.option_id] = (counts[v.option_id] || 0) + 1;
+  const total = (votes || []).length || 1;
+  const results = options
+    .map((o) => {
+      const n = counts[o.id] || 0;
+      const pct = Math.round((n / total) * 100);
+      return `   ${o.label} : ${n} (${pct}%)`;
+    })
+    .join('\n');
+
+  return {
+    ok: true,
+    message: `✅ Vote enregistré : *${choice.label}*\n\n📊 Résultats :\n${results}`,
+  };
 }

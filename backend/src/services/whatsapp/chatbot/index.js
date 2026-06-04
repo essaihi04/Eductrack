@@ -399,6 +399,21 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
         }
       }
 
+      // Cas spécial : pour les "Sondages", on passe en mode vote : le parent
+      // répond avec le numéro de l'option et son vote est enregistré.
+      if (option.action === A.getActivePolls) {
+        try {
+          const polls = await A.getActivePollsData(student, parentInfo);
+          if (polls.length > 0) {
+            State.setPollVoting(phone, polls);
+            await sendText(schoolId, phone, A.formatPollPrompt(polls[0], 1, polls.length), { urgent: true });
+            return; // on reste en mode vote, pas de rappel de menu
+          }
+        } catch (pollErr) {
+          console.error('[chatbot] Erreur préparation vote sondage:', pollErr);
+        }
+      }
+
       // Cas spécial : pour la "Dernière facture" on envoie aussi le PDF
       // en pièce jointe juste après le récap texte.
       if (option.action === A.getLastInvoice) {
@@ -681,6 +696,42 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       .from('whatsapp_incoming_messages')
       .update({ ai_response_sent: true, ai_response_text: reply })
       .eq('id', incomingMsg.id);
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+
+  // Mode POLL : le parent vote pour un sondage en répondant par un numéro
+  if (state.state === 'POLL') {
+    const queue = state.pollQueue || [];
+    const idx = state.pollIndex || 0;
+    const poll = queue[idx];
+    if (!poll) {
+      State.setMenu(phone, 'schoollife');
+      await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`, { urgent: true });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+    // Convertit chiffres arabes-indiens éventuels puis parse
+    const normalized = String(text).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).trim();
+    const n = parseInt(normalized, 10);
+    if (!Number.isInteger(n) || n < 1 || n > (poll.options || []).length) {
+      await sendText(parentInfo.school_id, phone, `🤔 Choix non reconnu. ${A.formatPollPrompt(poll, idx + 1, queue.length)}`, { urgent: true });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+    const result = await A.recordPollVote(poll, n - 1, parentInfo);
+    await sendText(parentInfo.school_id, phone, result.ok ? result.message : `⚠️ ${result.message}`, { urgent: true });
+
+    // Passe au sondage suivant s'il en reste, sinon retour au menu Vie scolaire
+    if (idx + 1 < queue.length) {
+      State.setState(phone, { pollIndex: idx + 1 });
+      await sendText(parentInfo.school_id, phone, A.formatPollPrompt(queue[idx + 1], idx + 2, queue.length), { urgent: true });
+    } else {
+      State.setMenu(phone, 'schoollife');
+      setTimeout(() => {
+        sendText(parentInfo.school_id, phone, `Merci ! 🙏 Tapez *menu* pour d'autres options.`, { urgent: true });
+      }, 1200);
+    }
     await markProcessed(incomingMsg?.id);
     return;
   }
