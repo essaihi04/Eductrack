@@ -14,8 +14,14 @@
  * explicitement "💬 Question libre" dans le menu principal.
  */
 
+import fs from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
@@ -363,18 +369,31 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       }
 
       // Cas spécial : pour les "Objets perdus" on envoie aussi les photos
-      // disponibles, juste après la liste texte.
+      // disponibles, juste après la liste texte. On lit le fichier depuis le
+      // disque local en priorité (pas d'aller-retour réseau) et on retombe
+      // sur l'URL absolue si le fichier n'est pas trouvé localement.
       if (option.action === A.getLostItems) {
         try {
           const items = await A.getLostItemsWithPhotos(parentInfo);
-          const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
+          let okCount = 0;
           for (const it of items) {
             if (!it.photo_url) continue;
-            const url = it.photo_url.startsWith('http') ? it.photo_url : `${base}${it.photo_url}`;
             let caption = `🧷 ${it.title}`;
             if (it.location_found) caption += `\n📍 ${it.location_found}`;
-            await sendImage(schoolId, phone, url, caption, { urgent: true });
+            let res;
+            const localPath = join(__dirname, '../../../..', it.photo_url);
+            if (!it.photo_url.startsWith('http') && fs.existsSync(localPath)) {
+              const buf = fs.readFileSync(localPath);
+              res = await sendMediaBuffer(schoolId, phone, buf, { type: 'image', caption }, { urgent: true });
+            } else {
+              const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
+              const url = it.photo_url.startsWith('http') ? it.photo_url : `${base}${it.photo_url}`;
+              res = await sendImage(schoolId, phone, url, caption, { urgent: true });
+            }
+            if (res?.success) okCount += 1;
+            else console.warn('[chatbot] photo objet perdu NON envoyée:', it.title, res?.message || res?.reason || '');
           }
+          console.log(`[chatbot] objets perdus: ${okCount}/${items.length} photo(s) envoyée(s)`);
         } catch (photoErr) {
           console.error('[chatbot] Erreur envoi photos objets perdus:', photoErr);
         }
