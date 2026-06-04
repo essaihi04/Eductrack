@@ -1,8 +1,12 @@
 import express from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
-import path from 'path';
+import path, { dirname, join } from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireSuperAdmin } from '../middleware/auth.js';
 
@@ -11,7 +15,7 @@ const router = express.Router();
 // Configuration multer pour upload de logos
 const logoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = 'uploads/logos';
+    const uploadDir = join(__dirname, '../../uploads/logos');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }

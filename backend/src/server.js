@@ -3,6 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
@@ -37,6 +39,9 @@ import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -57,7 +62,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Servir les fichiers statiques (logos, documents uploadés)
-app.use('/uploads', express.static('uploads'));
+app.use('/uploads', express.static(join(__dirname, '../uploads')));
 
 // Routes
 // Webhooks (sans authentification JWT - doit être avant les autres routes)

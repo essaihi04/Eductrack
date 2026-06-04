@@ -1,7 +1,8 @@
 import express from 'express';
 import multer from 'multer';
-import path from 'path';
+import path, { dirname, join } from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { sendText, sendImage, getStatus } from '../services/whatsapp/index.js';
@@ -11,7 +12,9 @@ const router = express.Router();
 // ─────────────────────────────────────────────────────────────────────────
 // Upload (photos des activités / cahier de vie / objets perdus)
 // ─────────────────────────────────────────────────────────────────────────
-const UPLOAD_DIR = 'uploads/school-life';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const UPLOAD_DIR = join(__dirname, '../../uploads/school-life');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -32,6 +35,7 @@ const upload = multer({
     cb(ok ? null : new Error('Seules les images sont autorisées'), ok);
   },
 });
+const UPLOAD_WEB_PATH = 'uploads/school-life';
 const publicUrl = (relPath) => `/${relPath.replace(/\\/g, '/')}`;
 const absoluteUrl = (relUrl) => {
   const base = process.env.PUBLIC_BASE_URL || process.env.API_URL || '';
@@ -128,7 +132,7 @@ router.post('/activities', authorize('admin', 'school_admin', 'teacher'), upload
   try {
     const { title, description, category, location, start_date, end_date, target_level, class_id, capacity, notify } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
-    const photo_url = req.file ? publicUrl(`${UPLOAD_DIR}/${req.file.filename}`) : null;
+    const photo_url = req.file ? publicUrl(`${UPLOAD_WEB_PATH}/${req.file.filename}`) : null;
     const { data, error } = await supabaseAdmin
       .from('extracurricular_activities')
       .insert({
@@ -281,7 +285,7 @@ router.post('/feed', authorize('admin', 'school_admin', 'teacher'), upload.array
   try {
     const { title, content, class_id, activity_date, notify } = req.body;
     if (!class_id) return res.status(400).json({ error: 'class_id requis' });
-    const media_urls = (req.files || []).map((f) => publicUrl(`${UPLOAD_DIR}/${f.filename}`));
+    const media_urls = (req.files || []).map((f) => publicUrl(`${UPLOAD_WEB_PATH}/${f.filename}`));
     const { data, error } = await supabaseAdmin
       .from('classroom_feed_posts')
       .insert({
@@ -341,7 +345,7 @@ router.post('/lost-items', authorize('admin', 'school_admin', 'teacher'), upload
   try {
     const { title, description, location_found, found_date } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
-    const photo_url = req.file ? publicUrl(`${UPLOAD_DIR}/${req.file.filename}`) : null;
+    const photo_url = req.file ? publicUrl(`${UPLOAD_WEB_PATH}/${req.file.filename}`) : null;
     const { data, error } = await supabaseAdmin
       .from('lost_items')
       .insert({

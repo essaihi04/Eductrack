@@ -2,8 +2,12 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import multer from 'multer';
-import path from 'path';
+import path, { dirname, join } from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { v4 as uuidv4 } from 'uuid';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
 import { getStatus as getWhatsAppStatus } from '../services/whatsapp/index.js';
@@ -13,7 +17,7 @@ const router = express.Router();
 // Configuration de multer pour l'upload de fichiers
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = 'uploads/documents';
+    const uploadDir = join(__dirname, '../../uploads/documents');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
