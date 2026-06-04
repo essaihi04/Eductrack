@@ -124,7 +124,7 @@ router.get('/activities', async (req, res) => {
   }
 });
 
-router.post('/activities', authorize('admin', 'teacher'), upload.single('photo'), async (req, res) => {
+router.post('/activities', authorize('admin', 'school_admin', 'teacher'), upload.single('photo'), async (req, res) => {
   try {
     const { title, description, category, location, start_date, end_date, target_level, class_id, capacity, notify } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
@@ -164,7 +164,7 @@ router.post('/activities', authorize('admin', 'teacher'), upload.single('photo')
   }
 });
 
-router.put('/activities/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.put('/activities/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const fields = (({ title, description, category, location, start_date, end_date, target_level, class_id, capacity, is_published }) =>
       ({ title, description, category, location, start_date, end_date, target_level, class_id, capacity, is_published }))(req.body);
@@ -184,7 +184,7 @@ router.put('/activities/:id', authorize('admin', 'teacher'), async (req, res) =>
   }
 });
 
-router.delete('/activities/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.delete('/activities/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { error } = await supabaseAdmin.from('extracurricular_activities').delete().eq('id', req.params.id);
     if (error) throw error;
@@ -207,7 +207,7 @@ router.get('/activities/:id/registrations', async (req, res) => {
   }
 });
 
-router.post('/activities/:id/register', async (req, res) => {
+router.post('/activities/:id/register', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { student_id, note } = req.body;
     if (!student_id) return res.status(400).json({ error: 'student_id requis' });
@@ -224,7 +224,7 @@ router.post('/activities/:id/register', async (req, res) => {
   }
 });
 
-router.delete('/activities/:id/register/:studentId', async (req, res) => {
+router.delete('/activities/:id/register/:studentId', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { error } = await supabaseAdmin
       .from('activity_registrations')
@@ -277,7 +277,7 @@ router.get('/feed', async (req, res) => {
   }
 });
 
-router.post('/feed', authorize('admin', 'teacher'), upload.array('photos', 10), async (req, res) => {
+router.post('/feed', authorize('admin', 'school_admin', 'teacher'), upload.array('photos', 10), async (req, res) => {
   try {
     const { title, content, class_id, activity_date, notify } = req.body;
     if (!class_id) return res.status(400).json({ error: 'class_id requis' });
@@ -311,7 +311,7 @@ router.post('/feed', authorize('admin', 'teacher'), upload.array('photos', 10), 
   }
 });
 
-router.delete('/feed/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.delete('/feed/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { error } = await supabaseAdmin.from('classroom_feed_posts').delete().eq('id', req.params.id);
     if (error) throw error;
@@ -337,7 +337,7 @@ router.get('/lost-items', async (req, res) => {
   }
 });
 
-router.post('/lost-items', authorize('admin', 'teacher'), upload.single('photo'), async (req, res) => {
+router.post('/lost-items', authorize('admin', 'school_admin', 'teacher'), upload.single('photo'), async (req, res) => {
   try {
     const { title, description, location_found, found_date } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
@@ -363,7 +363,7 @@ router.post('/lost-items', authorize('admin', 'teacher'), upload.single('photo')
   }
 });
 
-router.put('/lost-items/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.put('/lost-items/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { status, claimed_by } = req.body;
     const fields = { updated_at: new Date().toISOString() };
@@ -377,7 +377,7 @@ router.put('/lost-items/:id', authorize('admin', 'teacher'), async (req, res) =>
   }
 });
 
-router.delete('/lost-items/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.delete('/lost-items/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { error } = await supabaseAdmin.from('lost_items').delete().eq('id', req.params.id);
     if (error) throw error;
@@ -418,7 +418,7 @@ router.get('/polls', async (req, res) => {
   }
 });
 
-router.post('/polls', authorize('admin', 'teacher'), async (req, res) => {
+router.post('/polls', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { question, description, options, target_audience, class_id, is_anonymous, closes_at, notify } = req.body;
     if (!question || !Array.isArray(options) || options.length < 2) {
@@ -477,7 +477,7 @@ router.post('/polls/:id/vote', async (req, res) => {
   }
 });
 
-router.put('/polls/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.put('/polls/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { is_active } = req.body;
     const { data, error } = await supabaseAdmin.from('polls').update({ is_active }).eq('id', req.params.id).select().single();
@@ -488,7 +488,7 @@ router.put('/polls/:id', authorize('admin', 'teacher'), async (req, res) => {
   }
 });
 
-router.delete('/polls/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.delete('/polls/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { error } = await supabaseAdmin.from('polls').delete().eq('id', req.params.id);
     if (error) throw error;
@@ -501,7 +501,7 @@ router.delete('/polls/:id', authorize('admin', 'teacher'), async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 5) SIGNALEMENTS — issue_reports
 // ═══════════════════════════════════════════════════════════════════════════
-router.get('/issues', authorize('admin', 'teacher'), async (req, res) => {
+router.get('/issues', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     let q = supabaseAdmin
       .from('issue_reports')
@@ -518,7 +518,7 @@ router.get('/issues', authorize('admin', 'teacher'), async (req, res) => {
   }
 });
 
-router.post('/issues', authorize('admin', 'teacher'), async (req, res) => {
+router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { category, title, description, priority, class_id, related_student } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
@@ -544,7 +544,7 @@ router.post('/issues', authorize('admin', 'teacher'), async (req, res) => {
   }
 });
 
-router.put('/issues/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.put('/issues/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { status, resolution_note, assigned_to, priority } = req.body;
     const fields = {};
@@ -563,7 +563,7 @@ router.put('/issues/:id', authorize('admin', 'teacher'), async (req, res) => {
   }
 });
 
-router.delete('/issues/:id', authorize('admin', 'teacher'), async (req, res) => {
+router.delete('/issues/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
     const { error } = await supabaseAdmin.from('issue_reports').delete().eq('id', req.params.id);
     if (error) throw error;
