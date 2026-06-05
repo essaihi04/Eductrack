@@ -396,18 +396,24 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
         // ses frais comme items personnalisés et on détache le modèle, pour
         // permettre de modifier/supprimer chaque frais par élève.
         const existingItems = existing.custom_items || [];
+        const keyOf = (it) => `${it.category}|${(it.name || '').trim().toLowerCase()}|${it.recurrence}|${Number(it.amount) || 0}`;
+        const existingKeys = new Set(existingItems.map(keyOf));
+        // Import des frais du modèle encore attaché, en évitant les doublons
+        // avec les frais déjà personnalisés.
         const tplItems = existing.template_id
-          ? (existing.template?.fee_template_items || []).map(it => ({
-              category: it.category,
-              name: it.name,
-              amount: Number(it.amount) || 0,
-              recurrence: it.recurrence || 'one_time',
-              due_month: it.due_month ?? null,
-              start_month: it.start_month ?? 9,
-              end_month: it.end_month ?? 6,
-              is_optional: !!it.is_optional,
-              enabled: it.enabled !== false,
-            }))
+          ? (existing.template?.fee_template_items || [])
+              .map(it => ({
+                category: it.category,
+                name: it.name,
+                amount: Number(it.amount) || 0,
+                recurrence: it.recurrence || 'one_time',
+                due_month: it.due_month ?? null,
+                start_month: it.start_month ?? 9,
+                end_month: it.end_month ?? 6,
+                is_optional: !!it.is_optional,
+                enabled: it.enabled !== false,
+              }))
+              .filter(it => !existingKeys.has(keyOf(it)))
           : [];
         setForm({
           academic_year: existing.academic_year,

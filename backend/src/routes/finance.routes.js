@@ -336,6 +336,8 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
     const { template_id, academic_year, sibling_discount_percent, sibling_discount_type, sibling_discount_amount, scholarship_amount, custom_notes, custom_items } = req.body;
     if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
     const discountType = sibling_discount_type === 'amount' ? 'amount' : 'percent';
+    // Colonne UUID : une chaîne vide doit devenir NULL (sinon erreur / non détaché)
+    const templateIdValue = template_id ? template_id : null;
 
     // Upsert
     const { data: existing } = await supabaseAdmin
@@ -351,7 +353,7 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
       await supabaseAdmin
         .from('student_fee_plans')
         .update({
-          template_id, sibling_discount_percent: sibling_discount_percent || 0,
+          template_id: templateIdValue, sibling_discount_percent: sibling_discount_percent || 0,
           sibling_discount_type: discountType,
           sibling_discount_amount: sibling_discount_amount || 0,
           scholarship_amount: scholarship_amount || 0,
@@ -364,7 +366,7 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
         .insert({
           school_id: schoolId,
           student_id: studentId,
-          template_id,
+          template_id: templateIdValue,
           academic_year,
           sibling_discount_percent: sibling_discount_percent || 0,
           sibling_discount_type: discountType,
