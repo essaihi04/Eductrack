@@ -484,15 +484,48 @@ router.get('/children/:childId/timetable', loadChild, async (req, res) => {
     if (!profile?.class_id) return res.json([]);
 
     const { data, error } = await supabaseAdmin
-      .from('timetable_slots')
-      .select('*, subjects(name), profiles!timetable_slots_teacher_id_fkey(first_name, last_name)')
+      .from('class_timetable')
+      .select('id, class_id, teacher_id, day_of_week, slot_order, start_time, end_time, room, subject:subjects(id, name, code), teacher:profiles!class_timetable_teacher_id_fkey(id, first_name, last_name)')
       .eq('class_id', profile.class_id)
-      .order('day_of_week', { ascending: true })
-      .order('start_time', { ascending: true });
+      .order('slot_order', { ascending: true });
     if (error) throw error;
     res.json(data || []);
   } catch (e) {
     console.error('[parent] timetable error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// GET /api/parent/children/:childId/invoices
+// Factures / situation financière de l'enfant (lecture seule)
+// ============================================================
+router.get('/children/:childId/invoices', loadChild, async (req, res) => {
+  try {
+    const studentId = req.childId;
+    const { data, error } = await supabaseAdmin
+      .from('invoices')
+      .select('id, invoice_number, period_label, issue_date, due_date, status, total, amount_paid, currency, lines:invoice_lines(*), payments:payments(id, amount, payment_date, method)')
+      .eq('student_id', studentId)
+      .order('issue_date', { ascending: false });
+    if (error) throw error;
+
+    const invoices = (data || []).map((inv) => ({
+      ...inv,
+      remaining: Number(inv.total || 0) - Number(inv.amount_paid || 0),
+    }));
+    const summary = invoices.reduce(
+      (acc, inv) => {
+        acc.total += Number(inv.total || 0);
+        acc.paid += Number(inv.amount_paid || 0);
+        acc.remaining += inv.remaining;
+        return acc;
+      },
+      { total: 0, paid: 0, remaining: 0, count: invoices.length }
+    );
+    res.json({ invoices, summary });
+  } catch (e) {
+    console.error('[parent] invoices error', e);
     res.status(500).json({ error: e.message });
   }
 });

@@ -4,7 +4,7 @@ import {
   ArrowLeft, BookOpen, FileText, Activity, Bus, GraduationCap,
   CheckCircle2, XCircle, Clock, AlertCircle, Calendar, Award,
   Eye, Download, BookOpen as BookOpenIcon, Edit3, Home as HomeIcon, RotateCcw, Star, FileImage,
-  ChevronDown, ChevronUp, TrendingUp, AlertTriangle,
+  ChevronDown, ChevronUp, TrendingUp, AlertTriangle, Wallet,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
@@ -21,6 +21,7 @@ const TABS = [
   { key: 'tracking', label: 'Suivi', icon: GraduationCap },
   { key: 'documents', label: 'Documents', icon: FileText },
   { key: 'timetable', label: 'Emploi du temps', icon: Calendar },
+  { key: 'finance', label: 'Finance', icon: Wallet },
 ];
 
 const fetchJson = async (path) => {
@@ -82,6 +83,7 @@ const ParentChildPage = () => {
   const [documents, setDocuments] = useState([]);
   const [grades, setGrades] = useState([]);
   const [timetable, setTimetable] = useState([]);
+  const [finance, setFinance] = useState({ invoices: [], summary: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -91,7 +93,7 @@ const ParentChildPage = () => {
     try {
       setLoading(true);
       setError('');
-      const [p, s, h, hw, doc, g, tt] = await Promise.all([
+      const [p, s, h, hw, doc, g, tt, fin] = await Promise.all([
         fetchJson(`/api/parent/children/${childId}/profile`),
         fetchJson(`/api/parent/children/${childId}/tracking-stats`),
         fetchJson(`/api/parent/children/${childId}/tracking-history?limit=30`),
@@ -99,6 +101,7 @@ const ParentChildPage = () => {
         fetchJson(`/api/parent/children/${childId}/documents`).catch(() => []),
         fetchJson(`/api/parent/children/${childId}/control-grades`).catch(() => []),
         fetchJson(`/api/parent/children/${childId}/timetable`).catch(() => []),
+        fetchJson(`/api/parent/children/${childId}/invoices`).catch(() => ({ invoices: [], summary: null })),
       ]);
       setProfile(p);
       setStats(s);
@@ -107,6 +110,7 @@ const ParentChildPage = () => {
       setDocuments(Array.isArray(doc) ? doc : []);
       setGrades(Array.isArray(g) ? g : []);
       setTimetable(Array.isArray(tt) ? tt : []);
+      setFinance(fin && Array.isArray(fin.invoices) ? fin : { invoices: [], summary: null });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -289,23 +293,81 @@ const ParentChildPage = () => {
                   <th className="py-2 px-2">Jour</th>
                   <th className="py-2 px-2">Heure</th>
                   <th className="py-2 px-2">Matière</th>
+                  <th className="py-2 px-2">Salle</th>
                   <th className="py-2 px-2">Enseignant</th>
                 </tr>
               </thead>
               <tbody>
-                {timetable.map(slot => (
-                  <tr key={slot.id} className="border-b border-gray-100">
-                    <td className="py-2 px-2">{dayName(slot.day_of_week)}</td>
-                    <td className="py-2 px-2">{slot.start_time?.slice(0,5)} – {slot.end_time?.slice(0,5)}</td>
-                    <td className="py-2 px-2">{slot.subjects?.name || '—'}</td>
-                    <td className="py-2 px-2">{slot.profiles ? `${slot.profiles.first_name} ${slot.profiles.last_name}` : '—'}</td>
-                  </tr>
-                ))}
+                {[...timetable]
+                  .sort((a, b) => (dayIndex(a.day_of_week) - dayIndex(b.day_of_week)) || String(a.start_time).localeCompare(String(b.start_time)))
+                  .map(slot => (
+                    <tr key={slot.id} className="border-b border-gray-100">
+                      <td className="py-2 px-2 capitalize">{dayName(slot.day_of_week)}</td>
+                      <td className="py-2 px-2">{slot.start_time?.slice(0,5)} – {slot.end_time?.slice(0,5)}</td>
+                      <td className="py-2 px-2">{slot.subject?.name || '—'}</td>
+                      <td className="py-2 px-2">{slot.room || '—'}</td>
+                      <td className="py-2 px-2">{slot.teacher ? `${slot.teacher.first_name} ${slot.teacher.last_name}` : '—'}</td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           )}
         </div>
       )}
+
+      {tab === 'finance' && <FinanceTab finance={finance} />}
+    </div>
+  );
+};
+
+// ---------- Onglet Finance ----------
+const FINANCE_STATUS = {
+  paid: { label: 'Payée', cls: 'bg-green-100 text-green-700' },
+  partial: { label: 'Partielle', cls: 'bg-orange-100 text-orange-700' },
+  issued: { label: 'À payer', cls: 'bg-blue-100 text-blue-700' },
+  pending: { label: 'À payer', cls: 'bg-blue-100 text-blue-700' },
+  overdue: { label: 'En retard', cls: 'bg-red-100 text-red-700' },
+  cancelled: { label: 'Annulée', cls: 'bg-gray-100 text-gray-500' },
+};
+const fmtMoney = (n, cur = 'MAD') => `${Number(n || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
+
+const FinanceTab = ({ finance }) => {
+  const { invoices = [], summary } = finance || {};
+  const cur = invoices[0]?.currency || 'MAD';
+  if (invoices.length === 0) return <Empty>Aucune facture pour le moment.</Empty>;
+  return (
+    <div className="space-y-4">
+      {summary && (
+        <div className="grid grid-cols-3 gap-3">
+          <Stat title="Total facturé" value={fmtMoney(summary.total, cur)} color="bg-blue-50 text-blue-700" />
+          <Stat title="Payé" value={fmtMoney(summary.paid, cur)} color="bg-green-50 text-green-700" />
+          <Stat title="Reste à payer" value={fmtMoney(summary.remaining, cur)} color={summary.remaining > 0 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'} />
+        </div>
+      )}
+      <div className="space-y-3">
+        {invoices.map((inv) => {
+          const st = FINANCE_STATUS[inv.status] || { label: inv.status, cls: 'bg-gray-100 text-gray-600' };
+          return (
+            <div key={inv.id} className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-gray-900">{inv.period_label || inv.invoice_number || 'Facture'}</p>
+                  <p className="text-xs text-gray-500">
+                    {inv.invoice_number ? `N° ${inv.invoice_number}` : ''}
+                    {inv.due_date ? ` • Échéance ${new Date(inv.due_date).toLocaleDateString('fr-FR')}` : ''}
+                  </p>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${st.cls}`}>{st.label}</span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                <div><span className="text-gray-500 text-xs block">Total</span>{fmtMoney(inv.total, inv.currency || cur)}</div>
+                <div><span className="text-gray-500 text-xs block">Payé</span><span className="text-green-700">{fmtMoney(inv.amount_paid, inv.currency || cur)}</span></div>
+                <div><span className="text-gray-500 text-xs block">Reste</span><span className={inv.remaining > 0 ? 'text-red-600 font-semibold' : 'text-green-700'}>{fmtMoney(inv.remaining, inv.currency || cur)}</span></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -358,7 +420,14 @@ const Tag = ({ value, kind }) => {
   return <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${cls}`}>{value}</span>;
 };
 
-const dayName = (d) => ({ 1: 'Lundi', 2: 'Mardi', 3: 'Mercredi', 4: 'Jeudi', 5: 'Vendredi', 6: 'Samedi', 7: 'Dimanche', 0: 'Dimanche' }[d] || d);
+const DAY_NAMES_FR = {
+  monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi',
+  friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche',
+  1: 'Lundi', 2: 'Mardi', 3: 'Mercredi', 4: 'Jeudi', 5: 'Vendredi', 6: 'Samedi', 7: 'Dimanche', 0: 'Dimanche',
+};
+const DAY_ORDER = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7 };
+const dayName = (d) => DAY_NAMES_FR[d] || d;
+const dayIndex = (d) => DAY_ORDER[d] ?? (typeof d === 'number' ? d : 99);
 
 // ---------- Suivi détaillé (tous les paramètres trackés par le prof) ----------
 
