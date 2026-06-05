@@ -140,12 +140,26 @@ const ChildCard = ({ child, onOpen }) => {
             />
           </div>
 
-          {s.absent_count > 0 && (
-            <div className="mt-3 flex items-center gap-1 text-xs text-orange-600">
-              <AlertCircle className="w-3.5 h-3.5" />
-              {s.absent_count} absence{s.absent_count > 1 ? 's' : ''} enregistrée{s.absent_count > 1 ? 's' : ''}
-            </div>
-          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {s.overdue_homework > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                <AlertCircle className="w-3.5 h-3.5" />
+                {s.overdue_homework} devoir{s.overdue_homework > 1 ? 's' : ''} en retard
+              </span>
+            )}
+            {s.upcoming_homework > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                <BookOpen className="w-3.5 h-3.5" />
+                {s.upcoming_homework} à venir
+              </span>
+            )}
+            {s.absent_count > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
+                <AlertCircle className="w-3.5 h-3.5" />
+                {s.absent_count} absence{s.absent_count > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </button>

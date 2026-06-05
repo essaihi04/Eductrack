@@ -91,10 +91,13 @@ router.get('/children', async (req, res) => {
         if (hw.target_type === 'group') return (hw.homework_students || []).some(hs => hs.student_id === child.id);
         return false;
       });
-      const pendingCount = filteredHw.filter(hw => {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const unsubmitted = filteredHw.filter(hw => {
         const sub = (hw.homework_submissions || []).find(s => s.student_id === child.id);
         return !sub || sub.status !== 'submitted';
-      }).length;
+      });
+      const overdueCount = unsubmitted.filter(hw => hw.due_date && String(hw.due_date).slice(0, 10) < todayStr).length;
+      const upcomingCount = unsubmitted.length - overdueCount;
 
       return {
         ...child,
@@ -103,7 +106,9 @@ router.get('/children', async (req, res) => {
           present_count: present,
           absent_count: absent,
           presence_rate: presenceRate,
-          pending_homework: pendingCount,
+          pending_homework: unsubmitted.length,
+          overdue_homework: overdueCount,
+          upcoming_homework: upcomingCount,
         }
       };
     }));
