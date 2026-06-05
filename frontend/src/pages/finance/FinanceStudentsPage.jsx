@@ -371,6 +371,8 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
     academic_year: getCurrentYear(),
     template_id: '',
     sibling_discount_percent: 0,
+    sibling_discount_type: 'percent',
+    sibling_discount_amount: 0,
     scholarship_amount: 0,
     custom_notes: '',
     custom_items: []
@@ -394,6 +396,8 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
           academic_year: existing.academic_year,
           template_id: existing.template_id || '',
           sibling_discount_percent: existing.sibling_discount_percent || 0,
+          sibling_discount_type: existing.sibling_discount_type || 'percent',
+          sibling_discount_amount: existing.sibling_discount_amount || 0,
           scholarship_amount: existing.scholarship_amount || 0,
           custom_notes: existing.custom_notes || '',
           custom_items: existing.custom_items || []
@@ -425,6 +429,30 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
 
   const removeItem = (idx) => setForm({ ...form, custom_items: form.custom_items.filter((_, i) => i !== idx) });
 
+  // Récupère tous les frais du modèle sélectionné comme items personnalisés
+  // (détache le modèle pour permettre de supprimer/modifier chaque frais par élève)
+  const importTemplateItems = () => {
+    const tpl = templates.find(t => t.id === form.template_id);
+    const tplItems = tpl?.fee_template_items || [];
+    if (tplItems.length === 0) {
+      alert('Ce modèle ne contient aucun frais à récupérer.');
+      return;
+    }
+    if (!confirm("Récupérer tous les frais du modèle comme frais personnalisés ?\n\nLe modèle sera détaché de cet élève : vous pourrez alors supprimer ou modifier chaque frais individuellement, sans affecter les autres élèves.")) return;
+    const imported = tplItems.map(it => ({
+      category: it.category,
+      name: it.name,
+      amount: Number(it.amount) || 0,
+      recurrence: it.recurrence || 'one_time',
+      due_month: it.due_month ?? null,
+      start_month: it.start_month ?? 9,
+      end_month: it.end_month ?? 6,
+      is_optional: !!it.is_optional,
+      enabled: it.enabled !== false,
+    }));
+    setForm({ ...form, template_id: '', custom_items: [...form.custom_items, ...imported] });
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
@@ -455,10 +483,27 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Réduction fratrie (%)</label>
-                <input type="number" step="0.1" min="0" max="100" value={form.sibling_discount_percent}
-                  onChange={e => setForm({ ...form, sibling_discount_percent: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Réduction fratrie</label>
+                <div className="flex gap-2">
+                  {form.sibling_discount_type === 'amount' ? (
+                    <input type="number" step="0.01" min="0" value={form.sibling_discount_amount}
+                      onChange={e => setForm({ ...form, sibling_discount_amount: Number(e.target.value) })}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" placeholder="Montant" />
+                  ) : (
+                    <input type="number" step="0.1" min="0" max="100" value={form.sibling_discount_percent}
+                      onChange={e => setForm({ ...form, sibling_discount_percent: Number(e.target.value) })}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" placeholder="Pourcentage" />
+                  )}
+                  <select value={form.sibling_discount_type}
+                    onChange={e => setForm({ ...form, sibling_discount_type: e.target.value })}
+                    className="px-2 py-2 border border-gray-300 rounded-lg bg-white">
+                    <option value="percent">%</option>
+                    <option value="amount">DH</option>
+                  </select>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {form.sibling_discount_type === 'amount' ? 'Montant fixe déduit chaque mois' : 'Pourcentage du total mensuel'}
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Bourse / année (MAD)</label>
@@ -478,9 +523,16 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
             <div className="border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-gray-800">Frais personnalisés (en plus du modèle)</h3>
-                <button onClick={addItem} className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg">
-                  <Plus className="w-3 h-3" /> Ajouter
-                </button>
+                <div className="flex items-center gap-2">
+                  {form.template_id && (
+                    <button onClick={importTemplateItems} className="flex items-center gap-1 px-3 py-1 text-xs bg-emerald-50 text-emerald-700 rounded-lg">
+                      <Plus className="w-3 h-3" /> Récupérer les frais du modèle
+                    </button>
+                  )}
+                  <button onClick={addItem} className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg">
+                    <Plus className="w-3 h-3" /> Ajouter
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 {form.custom_items.map((it, idx) => (

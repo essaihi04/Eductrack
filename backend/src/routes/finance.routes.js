@@ -333,8 +333,9 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
   try {
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
-    const { template_id, academic_year, sibling_discount_percent, scholarship_amount, custom_notes, custom_items } = req.body;
+    const { template_id, academic_year, sibling_discount_percent, sibling_discount_type, sibling_discount_amount, scholarship_amount, custom_notes, custom_items } = req.body;
     if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+    const discountType = sibling_discount_type === 'amount' ? 'amount' : 'percent';
 
     // Upsert
     const { data: existing } = await supabaseAdmin
@@ -351,6 +352,8 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
         .from('student_fee_plans')
         .update({
           template_id, sibling_discount_percent: sibling_discount_percent || 0,
+          sibling_discount_type: discountType,
+          sibling_discount_amount: sibling_discount_amount || 0,
           scholarship_amount: scholarship_amount || 0,
           custom_notes, updated_at: new Date().toISOString()
         })
@@ -364,6 +367,8 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
           template_id,
           academic_year,
           sibling_discount_percent: sibling_discount_percent || 0,
+          sibling_discount_type: discountType,
+          sibling_discount_amount: sibling_discount_amount || 0,
           scholarship_amount: scholarship_amount || 0,
           custom_notes,
           created_by: req.user.id
@@ -1295,7 +1300,11 @@ function computeMonthForPlan(plan, month) {
     }
   }
   const subtotal = lines.reduce((s, l) => s + l.amount, 0);
-  const siblingDiscount = subtotal * (Number(plan.sibling_discount_percent || 0) / 100);
+  // Réduction fratrie : soit un pourcentage du sous-total, soit un montant fixe
+  // (DH) déduit chaque mois facturé.
+  const siblingDiscount = plan.sibling_discount_type === 'amount'
+    ? Math.min(subtotal, Number(plan.sibling_discount_amount || 0))
+    : subtotal * (Number(plan.sibling_discount_percent || 0) / 100);
   const scholarship = Number(plan.scholarship_amount || 0);
   const monthlyScholarship = scholarship > 0 ? scholarship / 10 : 0; // réparti sur 10 mensualités
   const discount = siblingDiscount + monthlyScholarship;
