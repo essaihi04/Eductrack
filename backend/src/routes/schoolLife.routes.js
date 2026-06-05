@@ -111,6 +111,29 @@ async function broadcastWhatsApp(schoolId, phones, text, imageRelUrl = null) {
 
 const schoolFilter = (req) => req.user.school_id;
 
+/**
+ * Autorise la suppression : les admins/direction peuvent tout supprimer ; un
+ * professeur ne peut supprimer que les éléments qu'il a lui-même créés.
+ * Répond directement (403/404) et renvoie false si non autorisé.
+ */
+async function ensureCanDelete(req, res, table, ownerCol) {
+  if (adminRoles.includes(req.user.role)) return true;
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select(`id, ${ownerCol}`)
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (error || !data) {
+    res.status(404).json({ error: 'Élément introuvable' });
+    return false;
+  }
+  if (data[ownerCol] !== req.user.id) {
+    res.status(403).json({ error: 'Vous ne pouvez supprimer que les éléments que vous avez créés.' });
+    return false;
+  }
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 1) PARASCOLAIRE — extracurricular_activities
 // ═══════════════════════════════════════════════════════════════════════════
@@ -192,6 +215,7 @@ router.put('/activities/:id', authorize('admin', 'school_admin', 'teacher'), asy
 
 router.delete('/activities/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
+    if (!(await ensureCanDelete(req, res, 'extracurricular_activities', 'created_by'))) return;
     const { error } = await supabaseAdmin.from('extracurricular_activities').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
@@ -319,6 +343,7 @@ router.post('/feed', authorize('admin', 'school_admin', 'teacher'), upload.array
 
 router.delete('/feed/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
+    if (!(await ensureCanDelete(req, res, 'classroom_feed_posts', 'author_id'))) return;
     const { error } = await supabaseAdmin.from('classroom_feed_posts').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
@@ -393,6 +418,7 @@ router.put('/lost-items/:id', authorize('admin', 'school_admin', 'teacher'), asy
 
 router.delete('/lost-items/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
+    if (!(await ensureCanDelete(req, res, 'lost_items', 'reported_by'))) return;
     const { error } = await supabaseAdmin.from('lost_items').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
@@ -504,6 +530,7 @@ router.put('/polls/:id', authorize('admin', 'school_admin', 'teacher'), async (r
 
 router.delete('/polls/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
+    if (!(await ensureCanDelete(req, res, 'polls', 'created_by'))) return;
     const { error } = await supabaseAdmin.from('polls').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
@@ -579,6 +606,7 @@ router.put('/issues/:id', authorize('admin', 'school_admin', 'teacher'), async (
 
 router.delete('/issues/:id', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
+    if (!(await ensureCanDelete(req, res, 'issue_reports', 'reported_by'))) return;
     const { error } = await supabaseAdmin.from('issue_reports').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
