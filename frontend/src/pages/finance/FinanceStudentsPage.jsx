@@ -392,15 +392,32 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
       const existing = data.plans?.[0];
       if (existing) {
         setPlan(existing);
+        // Récupération automatique : si un modèle est encore attaché, on importe
+        // ses frais comme items personnalisés et on détache le modèle, pour
+        // permettre de modifier/supprimer chaque frais par élève.
+        const existingItems = existing.custom_items || [];
+        const tplItems = existing.template_id
+          ? (existing.template?.fee_template_items || []).map(it => ({
+              category: it.category,
+              name: it.name,
+              amount: Number(it.amount) || 0,
+              recurrence: it.recurrence || 'one_time',
+              due_month: it.due_month ?? null,
+              start_month: it.start_month ?? 9,
+              end_month: it.end_month ?? 6,
+              is_optional: !!it.is_optional,
+              enabled: it.enabled !== false,
+            }))
+          : [];
         setForm({
           academic_year: existing.academic_year,
-          template_id: existing.template_id || '',
+          template_id: '',
           sibling_discount_percent: existing.sibling_discount_percent || 0,
           sibling_discount_type: existing.sibling_discount_type || 'percent',
           sibling_discount_amount: existing.sibling_discount_amount || 0,
           scholarship_amount: existing.scholarship_amount || 0,
           custom_notes: existing.custom_notes || '',
-          custom_items: existing.custom_items || []
+          custom_items: [...tplItems, ...existingItems]
         });
       }
     } catch (e) { console.error(e); }
@@ -429,17 +446,10 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
 
   const removeItem = (idx) => setForm({ ...form, custom_items: form.custom_items.filter((_, i) => i !== idx) });
 
-  // Récupère tous les frais du modèle sélectionné comme items personnalisés
-  // (détache le modèle pour permettre de supprimer/modifier chaque frais par élève)
-  const importTemplateItems = () => {
-    const tpl = templates.find(t => t.id === form.template_id);
-    const tplItems = tpl?.fee_template_items || [];
-    if (tplItems.length === 0) {
-      alert('Ce modèle ne contient aucun frais à récupérer.');
-      return;
-    }
-    if (!confirm("Récupérer tous les frais du modèle comme frais personnalisés ?\n\nLe modèle sera détaché de cet élève : vous pourrez alors supprimer ou modifier chaque frais individuellement, sans affecter les autres élèves.")) return;
-    const imported = tplItems.map(it => ({
+  // Convertit les frais d'un modèle en items personnalisés (modifiables/supprimables par élève)
+  const templateItemsToCustom = (templateId) => {
+    const tpl = templates.find(t => t.id === templateId);
+    return (tpl?.fee_template_items || []).map(it => ({
       category: it.category,
       name: it.name,
       amount: Number(it.amount) || 0,
@@ -450,7 +460,13 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
       is_optional: !!it.is_optional,
       enabled: it.enabled !== false,
     }));
-    setForm({ ...form, template_id: '', custom_items: [...form.custom_items, ...imported] });
+  };
+
+  // Sélection d'un modèle : ses frais sont récupérés automatiquement comme
+  // items personnalisés et le modèle est détaché (contrôle total par élève).
+  const onSelectTemplate = (templateId) => {
+    if (!templateId) { setForm({ ...form, template_id: '' }); return; }
+    setForm({ ...form, template_id: '', custom_items: [...form.custom_items, ...templateItemsToCustom(templateId)] });
   };
 
   return (
@@ -473,14 +489,15 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Modèle de frais</label>
-                <select value={form.template_id} onChange={e => setForm({ ...form, template_id: e.target.value })}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Importer un modèle de frais</label>
+                <select value="" onChange={e => onSelectTemplate(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                  <option value="">Aucun (items personnalisés uniquement)</option>
+                  <option value="">Choisir un modèle à importer…</option>
                   {templates.filter(t => t.academic_year === form.academic_year).map(t => (
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>
+                <p className="text-xs text-gray-500 mt-1">Les frais du modèle sont ajoutés ci-dessous, modifiables par élève.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Réduction fratrie</label>
@@ -522,17 +539,10 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
 
             <div className="border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-gray-800">Frais personnalisés (en plus du modèle)</h3>
-                <div className="flex items-center gap-2">
-                  {form.template_id && (
-                    <button onClick={importTemplateItems} className="flex items-center gap-1 px-3 py-1 text-xs bg-emerald-50 text-emerald-700 rounded-lg">
-                      <Plus className="w-3 h-3" /> Récupérer les frais du modèle
-                    </button>
-                  )}
-                  <button onClick={addItem} className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg">
-                    <Plus className="w-3 h-3" /> Ajouter
-                  </button>
-                </div>
+                <h3 className="font-semibold text-gray-800">Frais de l'élève</h3>
+                <button onClick={addItem} className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg">
+                  <Plus className="w-3 h-3" /> Ajouter
+                </button>
               </div>
               <div className="space-y-2">
                 {form.custom_items.map((it, idx) => (
