@@ -90,15 +90,26 @@ export const schoolLifeApi = {
   deleteIssue: (id) => request(`/api/school-life/issues/${id}`, { method: 'DELETE' }),
 };
 
-// Liste des classes (pour les formulaires) — accessible aux rôles admin.
+// Liste des classes (pour les formulaires).
+// Admin -> toutes les classes de l'école ; prof -> ses classes assignées.
 export const fetchClasses = async () => {
+  const auth = { headers: { Authorization: `Bearer ${await token()}` } };
+  // 1) Essai endpoint admin (toutes les classes)
   try {
-    const res = await fetch(`${API_URL}/api/admin/classes`, {
-      headers: { Authorization: `Bearer ${await token()}` },
-    });
-    if (!res.ok) return [];
-    return await res.json();
+    const res = await fetch(`${API_URL}/api/admin/classes`, auth);
+    if (res.ok) return await res.json();
   } catch {
-    return [];
+    /* on tente le repli ci-dessous */
   }
+  // 2) Repli prof : classes assignées au professeur
+  try {
+    const res = await fetch(`${API_URL}/api/teacher/my-classes`, auth);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.classes || []);
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
 };
