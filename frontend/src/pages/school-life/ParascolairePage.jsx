@@ -16,6 +16,8 @@ const catLabel = (v) => CATEGORIES.find((c) => c.value === v)?.label || v;
 const ParascolairePage = () => {
   const { profile } = useAuth();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
+  const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+  const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
 
   const [items, setItems] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -102,7 +104,7 @@ const ParascolairePage = () => {
               <div className="p-4">
                 <div className="flex items-start justify-between">
                   <h3 className="font-semibold">{a.title}</h3>
-                  {canManage && <button onClick={() => remove(a.id)} className="text-destructive p-1"><Trash2 className="w-4 h-4" /></button>}
+                  {canDelete(a.created_by) && <button onClick={() => remove(a.id)} className="text-destructive p-1"><Trash2 className="w-4 h-4" /></button>}
                 </div>
                 <span className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full mt-1"><Tag className="w-3 h-3" /> {catLabel(a.category)}</span>
                 {a.description && <p className="text-sm mt-2">{a.description}</p>}

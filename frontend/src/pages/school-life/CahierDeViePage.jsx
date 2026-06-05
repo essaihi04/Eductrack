@@ -7,6 +7,8 @@ import { schoolLifeApi, fetchClasses, mediaUrl } from '../../lib/schoolLifeApi';
 const CahierDeViePage = () => {
   const { profile } = useAuth();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
+  const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+  const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
 
   const [posts, setPosts] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -105,7 +107,7 @@ const CahierDeViePage = () => {
                       {p.classes?.name} {p.activity_date && <><Calendar className="w-3 h-3" /> {new Date(p.activity_date).toLocaleDateString('fr-FR')}</>}
                     </p>
                   </div>
-                  {canManage && <button onClick={() => remove(p.id)} className="text-destructive p-1"><Trash2 className="w-4 h-4" /></button>}
+                  {canDelete(p.author_id) && <button onClick={() => remove(p.id)} className="text-destructive p-1"><Trash2 className="w-4 h-4" /></button>}
                 </div>
                 {p.content && <p className="text-sm mt-2 whitespace-pre-wrap">{p.content}</p>}
               </div>

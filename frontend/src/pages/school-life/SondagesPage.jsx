@@ -7,6 +7,8 @@ import { schoolLifeApi, fetchClasses } from '../../lib/schoolLifeApi';
 const SondagesPage = () => {
   const { profile } = useAuth();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
+  const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+  const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
 
   const [polls, setPolls] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -104,7 +106,7 @@ const SondagesPage = () => {
                   {canManage && (
                     <div className="flex gap-2">
                       <button onClick={() => toggle(poll)} title={poll.is_active ? 'Clôturer' : 'Rouvrir'} className="text-muted-foreground"><Lock className="w-4 h-4" /></button>
-                      <button onClick={() => remove(poll.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>
+                      {canDelete(poll.created_by) && <button onClick={() => remove(poll.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>}
                     </div>
                   )}
                 </div>

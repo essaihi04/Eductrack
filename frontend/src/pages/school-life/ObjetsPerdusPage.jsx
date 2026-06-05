@@ -13,6 +13,8 @@ const STATUS = {
 const ObjetsPerdusPage = () => {
   const { profile } = useAuth();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
+  const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+  const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +102,7 @@ const ObjetsPerdusPage = () => {
               <div className="p-3">
                 <div className="flex items-center justify-between">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS[it.status]?.cls}`}>{STATUS[it.status]?.label}</span>
-                  {canManage && <button onClick={() => remove(it.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>}
+                  {canDelete(it.reported_by) && <button onClick={() => remove(it.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>}
                 </div>
                 <h3 className="font-semibold text-sm mt-1">{it.title}</h3>
                 {it.description && <p className="text-xs text-muted-foreground">{it.description}</p>}

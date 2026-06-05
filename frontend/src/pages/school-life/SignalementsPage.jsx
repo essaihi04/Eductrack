@@ -28,6 +28,8 @@ const lbl = (arr, v) => arr.find((x) => x.value === v) || {};
 
 const SignalementsPage = () => {
   const { profile } = useAuth();
+  const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+  const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
   const [items, setItems] = useState([]);
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -114,7 +116,7 @@ const SignalementsPage = () => {
                     <span className="text-xs px-2 py-0.5 rounded-full bg-muted">{lbl(CATEGORIES, it.category).label}</span>
                   </div>
                 </div>
-                <button onClick={() => remove(it.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>
+                {canDelete(it.reported_by) && <button onClick={() => remove(it.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>}
               </div>
               {it.description && <p className="text-sm mt-2">{it.description}</p>}
               <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
