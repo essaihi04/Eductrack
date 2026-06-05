@@ -156,6 +156,7 @@ const Sidebar = () => {
     if (profile?.role === 'parent') {
       return [
         { icon: Users2, label: 'Mes enfants', path: '/parent' },
+        { icon: Wallet, label: 'Finance', path: '/parent/finance' },
         { icon: Bell, label: 'Notifications', path: '/parent/notifications' },
         { icon: FileText, label: 'Bulletins', path: '/parent/bulletins' },
         { icon: Bus, label: 'Transport', path: '/parent/transport' },

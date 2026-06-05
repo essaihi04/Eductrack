@@ -70,6 +70,7 @@ import CoefficientsPage from './pages/admin/CoefficientsPage';
 import BulletinsPage from './pages/admin/BulletinsPage';
 import AppreciationsPage from './pages/teacher/AppreciationsPage';
 import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
+import ParentFinancePage from './pages/parent/ParentFinancePage';
 import StudentBulletins from './pages/student/StudentBulletins';
 import ParascolairePage from './pages/school-life/ParascolairePage';
 import CahierDeViePage from './pages/school-life/CahierDeViePage';
@@ -158,6 +159,7 @@ function App() {
             <Route path="parent/notifications" element={<ParentNotificationsPage />} />
             <Route path="parent/transport" element={<ParentTransportPage />} />
             <Route path="parent/bulletins" element={<ParentBulletinsPage />} />
+            <Route path="parent/finance" element={<ParentFinancePage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />
