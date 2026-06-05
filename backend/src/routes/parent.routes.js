@@ -79,7 +79,6 @@ router.get('/children', async (req, res) => {
           .from('homework')
           .select('id, due_date, target_type, homework_students(student_id), homework_submissions(student_id, status)')
           .eq('class_id', child.class?.id || '00000000-0000-0000-0000-000000000000')
-          .gte('due_date', new Date().toISOString().slice(0, 10))
       ]);
 
       const total = (tracking || []).length;
