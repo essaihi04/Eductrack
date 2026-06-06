@@ -10,7 +10,7 @@ import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { computeMention } from './calculator.js';
+import { computeMention, computeCertification } from './calculator.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -78,9 +78,16 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
  * @param {string} [params.notes]       commentaire global
  * @returns {Promise<Buffer>}
  */
+const EXAM_TYPE_LABELS = {
+  local:    { fr: 'Examen local',    ar: 'الامتحان المحلي' },
+  regional: { fr: 'Examen régional', ar: 'الامتحان الجهوي' },
+  national: { fr: 'Examen national', ar: 'الامتحان الوطني' },
+};
+
 export async function generateBulletinPdf({
   student, cls, lines, generalAverage, generalRank, totalStudents,
-  classAverage, config = {}, school = {}, academicYear, semester, notes
+  classAverage, config = {}, school = {}, academicYear, semester, notes,
+  certification = null
 }) {
   return new Promise((resolve, reject) => {
     try {
@@ -289,6 +296,113 @@ export async function generateBulletinPdf({
 
       y += 75;
 
+      // ═══════════════════════════════════════════════════════════════
+      // CERTIFICATION (années إشهادية : 6AP / 3AC / 1BAC / 2BAC)
+      // ═══════════════════════════════════════════════════════════════
+      if (certification && certification.certification_average != null) {
+        const examTypes = ['local', 'regional', 'national']
+          .filter(et => certification[et] && certification[et].breakdown && certification[et].breakdown.length);
+
+        // Place : nouvelle page si nécessaire
+        const estH = 70 + (Math.max(...examTypes.map(et => certification[et].breakdown.length), 0) + 2) * 16;
+        if (y + estH > PAGE_H - 70) { doc.addPage(); y = MARGIN; }
+
+        const modeLabel = certification.mode === 'simili' ? 'Mode SIMULÉ (examen blanc)' : 'Mode RÉEL';
+        doc.font('Helvetica-Bold').fontSize(12).fillColor(C.primary);
+        doc.text(`EXAMEN DE CERTIFICATION — ${modeLabel}`, MARGIN, y, { width: CONTENT_W, align: 'center' });
+        y += 16;
+        smartText(doc, 'نتائج امتحان نيل الشهادة', MARGIN, y, { width: CONTENT_W, align: 'center' });
+        y += 18;
+
+        // Tableau détaillé par matière des notes d'examen
+        const ecols = [
+          { key: 'subject_name', label: 'Matière',  ar: 'المادة',          w: 175, align: 'left' },
+          { key: 'local',        label: 'Local',    ar: 'محلي',            w: 90,  align: 'center' },
+          { key: 'regional',     label: 'Régional', ar: 'جهوي',            w: 90,  align: 'center' },
+          { key: 'national',     label: 'National', ar: 'وطني',            w: 90,  align: 'center' },
+        ].filter(c => c.key === 'subject_name' || examTypes.includes(c.key));
+        const etW = (CONTENT_W) ; // recompute widths to fill content
+        const fixedW = ecols.reduce((s, c) => s + c.w, 0);
+        // Étirer proportionnellement pour remplir la largeur
+        ecols.forEach(c => { c.w = Math.round(c.w * (CONTENT_W / fixedW)); });
+
+        // Construire l'ensemble des matières (union des breakdowns)
+        const subjMap = new Map();
+        examTypes.forEach(et => {
+          certification[et].breakdown.forEach(r => {
+            const cur = subjMap.get(r.subject_name) || { subject_name: r.subject_name };
+            cur[et] = r.note;
+            subjMap.set(r.subject_name, cur);
+          });
+        });
+
+        // Header
+        const ehH = 26;
+        doc.rect(MARGIN, y, CONTENT_W, ehH).fill(C.tableHeaderBg);
+        let ecx = MARGIN;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(C.tableHeaderFg);
+        ecols.forEach(c => { doc.text(c.label, ecx + 3, y + 4, { width: c.w - 6, align: c.align }); ecx += c.w; });
+        ecx = MARGIN;
+        ecols.forEach(c => { smartText(doc, c.ar, ecx + 3, y + 14, { width: c.w - 6, align: c.align }); ecx += c.w; });
+        y += ehH;
+
+        // Lignes
+        let eidx = 0;
+        for (const row of subjMap.values()) {
+          if (y + 16 > PAGE_H - 80) { doc.addPage(); y = MARGIN; }
+          const bg = eidx % 2 === 0 ? '#ffffff' : C.tableAltRow;
+          doc.rect(MARGIN, y, CONTENT_W, 16).fillAndStroke(bg, C.tableBorder);
+          ecx = MARGIN;
+          doc.font('Helvetica').fontSize(8).fillColor('#333');
+          ecols.forEach(c => {
+            const v = c.key === 'subject_name' ? row.subject_name : fmtNum(row[c.key]);
+            smartText(doc, v, ecx + 3, y + 4, { width: c.w - 6, align: c.align });
+            ecx += c.w;
+          });
+          y += 16;
+          eidx++;
+        }
+        y += 8;
+
+        // Box récapitulatif des moyennes pondérées
+        const recapH = 78;
+        if (y + recapH > PAGE_H - 70) { doc.addPage(); y = MARGIN; }
+        doc.rect(MARGIN, y, CONTENT_W, recapH).fillAndStroke('#f0f9ff', C.accent);
+        let ry = y + 8;
+        doc.font('Helvetica').fontSize(9).fillColor('#333');
+        const parts = [];
+        if (certification.components?.cc)       parts.push(['Contrôle continu', certification.cc_average, certification.components.cc.weight]);
+        if (certification.components?.local)    parts.push(['Examen local',    certification.local?.average, certification.components.local.weight]);
+        if (certification.components?.regional) parts.push(['Examen régional', certification.regional?.average, certification.components.regional.weight]);
+        if (certification.components?.national) parts.push(['Examen national', certification.national?.average, certification.components.national.weight]);
+        parts.forEach(([label, val, w]) => {
+          doc.font('Helvetica').fontSize(9).fillColor('#444');
+          doc.text(`${label} (${Math.round(w * 100)}%) :`, MARGIN + 15, ry, { width: 220 });
+          doc.font('Helvetica-Bold').text(fmtNum(val), MARGIN + 240, ry, { width: 60, align: 'right' });
+          ry += 13;
+        });
+
+        const certMention = computeMention(certification.certification_average);
+        const certColor = certification.certification_average >= 16 ? C.mentionTB
+          : certification.certification_average >= 14 ? C.mentionB
+          : certification.certification_average >= 12 ? C.mentionAB
+          : certification.certification_average >= 10 ? C.mentionP : C.mentionF;
+        doc.font('Helvetica-Bold').fontSize(13).fillColor(certColor);
+        doc.text(`MOYENNE DE CERTIFICATION : ${fmtNum(certification.certification_average)} / 20`,
+          MARGIN + CONTENT_W / 2, y + 12, { width: CONTENT_W / 2 - 15, align: 'right' });
+        if (certMention) {
+          doc.fontSize(11);
+          doc.text(`${certMention.fr}`, MARGIN + CONTENT_W / 2, y + 34, { width: CONTENT_W / 2 - 15, align: 'right' });
+          smartText(doc, certMention.ar, MARGIN + CONTENT_W / 2, y + 50, { width: CONTENT_W / 2 - 15, align: 'right' });
+        }
+        if (!certification.complete) {
+          doc.font('Helvetica-Oblique').fontSize(7).fillColor('#b45309');
+          doc.text('⚠ Certaines composantes ne sont pas encore saisies (moyenne provisoire).',
+            MARGIN + 15, y + recapH - 12, { width: CONTENT_W / 2 });
+        }
+        y += recapH + 10;
+      }
+
       // Notes / commentaire
       if (notes) {
         doc.font('Helvetica').fontSize(8).fillColor('#555');
@@ -335,7 +449,7 @@ export async function generateBulletinPdf({
  * @param {string} bulletinId
  * @returns {Promise<{ buffer: Buffer, fileName: string, bulletin: object } | null>}
  */
-export async function generateBulletinPdfById(bulletinId) {
+export async function generateBulletinPdfById(bulletinId, { mode } = {}) {
   const { data: bulletin, error } = await supabaseAdmin
     .from('bulletins')
     .select(`
@@ -374,6 +488,19 @@ export async function generateBulletinPdfById(bulletinId) {
   const lines = (bulletin.bulletin_lines || [])
     .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
 
+  // Certification : recalculée en direct dans le mode demandé (real/simili)
+  // pour permettre de télécharger les deux bulletins (réel et simulé).
+  let certification = null;
+  if (bulletin.is_exam_level) {
+    const certMode = mode === 'simili' ? 'simili' : (mode === 'real' ? 'real' : (bulletin.certification_mode || 'real'));
+    try {
+      certification = await computeCertification({
+        studentId: bulletin.student_id, classId: bulletin.class_id,
+        schoolId: bulletin.school_id, academicYear: bulletin.academic_year, mode: certMode
+      });
+    } catch (_) {}
+  }
+
   const buffer = await generateBulletinPdf({
     student: bulletin.profiles || {},
     cls: bulletin.classes || {},
@@ -387,6 +514,7 @@ export async function generateBulletinPdfById(bulletinId) {
     academicYear: bulletin.academic_year,
     semester: bulletin.semester,
     notes: bulletin.notes,
+    certification,
   });
 
   const rawName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');

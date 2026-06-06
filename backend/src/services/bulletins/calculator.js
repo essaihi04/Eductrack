@@ -19,6 +19,21 @@ import { getDefaultYearBounds } from './schoolCalendar.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
+// ─── Niveaux « إشهادية » avec examen de certification ──────────────────────
+//   Pondérations officielles MEN (cf. MIGRATION_EXAMS.sql) :
+//     • 2BAC : 25% CC + 25% régional (passé en 1BAC) + 50% national
+//     • 1BAC : moyenne de l'examen régional (= 25% du Bac final)
+//     • 3AC  : 30% CC + 30% local + 40% régional
+//     • 6AP  : 50% CC + 25% local + 25% régional  [(CC×2 + local + régional)/4]
+export const CERTIFICATION_LEVELS = {
+  '2BAC': { exams: ['national', 'regional'], weights: { cc: 0.25, regional: 0.25, national: 0.50 } },
+  '1BAC': { exams: ['regional'],             weights: { cc: 0,    regional: 1.0 } },
+  '3AC':  { exams: ['regional', 'local'],    weights: { cc: 0.30, local: 0.30, regional: 0.40 } },
+  '6AP':  { exams: ['regional', 'local'],    weights: { cc: 0.50, local: 0.25, regional: 0.25 } },
+};
+
+export const isExamLevel = (level) => !!CERTIFICATION_LEVELS[level];
+
 const MENTIONS = [
   { min: 16, fr: 'Très Bien',     ar: 'حسن جدا' },
   { min: 14, fr: 'Bien',          ar: 'حسن' },
@@ -123,7 +138,7 @@ const getTeacherSubjectsMap = async (teacherIds) => {
  * Sans persistance — utilisable pour preview avant publication.
  */
 export const computeStudentBulletin = async ({
-  studentId, classId, schoolId, academicYear, semester
+  studentId, classId, schoolId, academicYear, semester, _bounds
 }) => {
   // 1. Classe + niveau/filière
   const { data: cls } = await supabaseAdmin
@@ -133,8 +148,8 @@ export const computeStudentBulletin = async ({
     .single();
   if (!cls) throw new Error('Classe introuvable');
 
-  // 2. Bornes du semestre
-  const { start, end } = await getSemesterBounds(schoolId, academicYear, semester);
+  // 2. Bornes de la période (semestre, ou bornes annuelles si _bounds fourni)
+  const { start, end } = _bounds || await getSemesterBounds(schoolId, academicYear, semester);
 
   // 3. Tous les controls_plan de la classe sur la période
   const { data: controls } = await supabaseAdmin
@@ -327,5 +342,178 @@ export const computeClassBulletins = async ({ classId, schoolId, academicYear, s
     classRanking,
     subjectRankings,
     totalStudents: students.length
+  };
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+//  EXAMENS DE CERTIFICATION (national / régional / local)
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Bornes de l'année scolaire complète (S1 début → S2 fin).
+ * Sert au calcul du contrôle continu ANNUEL (les deux semestres).
+ */
+export const getYearBounds = async (schoolId, academicYear) => {
+  const { data: cfg } = await supabaseAdmin
+    .from('school_year_config')
+    .select('semester_1_start, semester_2_end, year_start, year_end')
+    .eq('school_id', schoolId)
+    .eq('academic_year', academicYear)
+    .maybeSingle();
+
+  const def = getDefaultYearBounds(academicYear);
+  const start = cfg?.year_start || cfg?.semester_1_start || def.s1_start;
+  const end   = cfg?.year_end   || cfg?.semester_2_end   || def.s2_end;
+  return { start, end };
+};
+
+/**
+ * Coefficients d'examen (national/régional/local) pour un niveau/filière.
+ * Retourne Map<subject_name, { coefficient, display_order }>.
+ * Surcharges école > défauts globaux MEN.
+ */
+export const getExamCoefficients = async (schoolId, level, filiere, examType) => {
+  const base = supabaseAdmin
+    .from('exam_coefficients')
+    .select('subject_name, coefficient, display_order, school_id')
+    .eq('level', level)
+    .eq('exam_type', examType);
+
+  const q = filiere ? base.eq('filiere', filiere) : base.is('filiere', null);
+
+  const { data } = await q.or(`school_id.eq.${schoolId},school_id.is.null`);
+  const map = new Map();
+  // Globaux d'abord, puis surcharges école (qui écrasent)
+  (data || []).filter(c => !c.school_id).forEach(c =>
+    map.set(c.subject_name.trim(), { coefficient: Number(c.coefficient), display_order: c.display_order }));
+  (data || []).filter(c => c.school_id).forEach(c =>
+    map.set(c.subject_name.trim(), { coefficient: Number(c.coefficient), display_order: c.display_order }));
+  return map;
+};
+
+/**
+ * Résout les notes d'examen d'un élève pour une année, selon le mode.
+ *   - mode 'real'   : uniquement scénario 'real'
+ *   - mode 'simili' : 'real' si présent, sinon 'mock' (examen blanc)
+ * Retourne Map<examType, Map<subject_name, note>>.
+ */
+export const getResolvedExamNotes = async (studentId, academicYear, mode) => {
+  const { data } = await supabaseAdmin
+    .from('exam_notes')
+    .select('subject_name, exam_type, scenario, note')
+    .eq('student_id', studentId)
+    .eq('academic_year', academicYear);
+
+  const out = new Map(); // examType -> Map(subject -> { real, mock })
+  (data || []).forEach(r => {
+    if (r.note == null) return;
+    if (!out.has(r.exam_type)) out.set(r.exam_type, new Map());
+    const sub = out.get(r.exam_type);
+    const key = r.subject_name.trim();
+    const cur = sub.get(key) || {};
+    cur[r.scenario] = Number(r.note);
+    sub.set(key, cur);
+  });
+
+  // Résolution selon le mode
+  const resolved = new Map();
+  for (const [examType, sub] of out.entries()) {
+    const m = new Map();
+    for (const [subject, vals] of sub.entries()) {
+      const note = mode === 'simili'
+        ? (vals.real != null ? vals.real : vals.mock)
+        : vals.real;
+      if (note != null) m.set(subject, note);
+    }
+    if (m.size) resolved.set(examType, m);
+  }
+  return resolved;
+};
+
+/**
+ * Moyenne pondérée d'un examen = Σ(note×coef)/Σ(coef) sur les matières notées.
+ * Retourne { average, breakdown: [{ subject_name, note, coefficient }] }.
+ */
+const weightedExamAverage = (coefMap, noteMap) => {
+  const breakdown = [];
+  let totW = 0, totN = 0;
+  for (const [subject, { coefficient, display_order }] of coefMap.entries()) {
+    const note = noteMap.get(subject);
+    if (note == null) { breakdown.push({ subject_name: subject, note: null, coefficient, display_order }); continue; }
+    totW += coefficient;
+    totN += note * coefficient;
+    breakdown.push({ subject_name: subject, note: round2(note), coefficient, display_order });
+  }
+  breakdown.sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999));
+  return { average: totW > 0 ? round2(totN / totW) : null, breakdown };
+};
+
+/**
+ * Calcule la moyenne de certification annuelle d'un élève.
+ *
+ * @param {string} mode  'real' | 'simili'
+ * @returns {Promise<null | {
+ *   mode, level, filiere,
+ *   cc_average, local: {average,breakdown}, regional: {...}, national: {...},
+ *   certification_average, mention, components: {cc,local,regional,national},
+ *   complete: boolean
+ * }>}  (null si le niveau n'est pas une année de certification)
+ */
+export const computeCertification = async ({ studentId, classId, schoolId, academicYear, mode = 'real' }) => {
+  const { data: cls } = await supabaseAdmin
+    .from('classes')
+    .select('id, level, filiere')
+    .eq('id', classId)
+    .single();
+  if (!cls) throw new Error('Classe introuvable');
+
+  const conf = CERTIFICATION_LEVELS[cls.level];
+  if (!conf) return null; // pas une année de certification
+
+  // 1. Contrôle continu ANNUEL (les deux semestres)
+  const { start, end } = await getYearBounds(schoolId, academicYear);
+  const ccBulletin = await computeStudentBulletin({
+    studentId, classId, schoolId, academicYear, semester: null, _bounds: { start, end }
+  });
+  const ccAverage = ccBulletin.general_average; // déjà pondéré par coefficients du cursus
+
+  // 2. Moyennes des examens (selon le mode)
+  const resolvedNotes = await getResolvedExamNotes(studentId, academicYear, mode);
+  const examResults = {};
+  for (const examType of conf.exams) {
+    const coefMap = await getExamCoefficients(schoolId, cls.level, cls.filiere, examType);
+    const noteMap = resolvedNotes.get(examType) || new Map();
+    examResults[examType] = weightedExamAverage(coefMap, noteMap);
+  }
+
+  // 3. Combinaison pondérée (renormalisée sur les composantes disponibles)
+  const components = {
+    cc:       conf.weights.cc       ? { weight: conf.weights.cc,       value: ccAverage } : null,
+    local:    conf.weights.local    ? { weight: conf.weights.local,    value: examResults.local?.average ?? null } : null,
+    regional: conf.weights.regional ? { weight: conf.weights.regional, value: examResults.regional?.average ?? null } : null,
+    national: conf.weights.national ? { weight: conf.weights.national, value: examResults.national?.average ?? null } : null,
+  };
+
+  let sumW = 0, sumWN = 0, present = 0, expected = 0;
+  for (const c of Object.values(components)) {
+    if (!c) continue;
+    expected++;
+    if (c.value != null) { sumW += c.weight; sumWN += c.weight * c.value; present++; }
+  }
+  const certificationAverage = sumW > 0 ? round2(sumWN / sumW) : null;
+
+  return {
+    mode,
+    level: cls.level,
+    filiere: cls.filiere,
+    cc_average: ccAverage,
+    cc_lines: ccBulletin.lines,
+    local: examResults.local || null,
+    regional: examResults.regional || null,
+    national: examResults.national || null,
+    certification_average: certificationAverage,
+    mention: computeMention(certificationAverage),
+    components,
+    complete: present === expected && expected > 0,
   };
 };

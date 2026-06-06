@@ -62,6 +62,11 @@ const StudentBulletins = () => {
                       </strong></span>
                       <span>Rang : <strong>{b.general_rank || '—'}/{b.total_students_in_class || '—'}</strong></span>
                       {b.mention && <span>Mention : <strong className={mentionColor(b.general_average)}>{b.mention}</strong></span>}
+                      {b.is_exam_level && b.certification_average != null && (
+                        <span className="text-blue-700">Moy. certification : <strong className={mentionColor(b.certification_average)}>
+                          {Number(b.certification_average).toFixed(2)}/20
+                        </strong>{b.certification_mention ? ` (${b.certification_mention})` : ''}</span>
+                      )}
                     </div>
                   </div>
                   <button onClick={() => openPdf(b.id)}

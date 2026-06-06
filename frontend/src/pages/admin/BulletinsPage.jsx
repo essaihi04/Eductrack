@@ -8,6 +8,7 @@ const BulletinsPage = () => {
   const [academicYear, setAcademicYear] = useState('');
   const [semester, setSemester] = useState(1);
   const [bulletins, setBulletins] = useState([]);
+  const [mode, setMode] = useState('real'); // 'real' | 'simili' (années de certification)
   const [years, setYears] = useState([]);
   const [currentYear, setCurrentYear] = useState('');
   const [loading, setLoading] = useState(false);
@@ -102,7 +103,7 @@ const BulletinsPage = () => {
       const res = await fetch(`${apiUrl}/api/bulletins/generate`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: selectedClass, academic_year: academicYear, semester })
+        body: JSON.stringify({ class_id: selectedClass, academic_year: academicYear, semester, mode })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -162,8 +163,14 @@ const BulletinsPage = () => {
 
   const openPdf = async (bulletinId) => {
     const token = await getToken();
-    window.open(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}`, '_blank');
+    window.open(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}&mode=${mode}`, '_blank');
   };
+
+  // La classe sélectionnée est-elle une année de certification ?
+  const selectedClassObj = classes.find(c => c.id === selectedClass);
+  const EXAM_LEVELS = ['6AP', '3AC', '1BAC', '2BAC'];
+  const isExamClass = selectedClassObj && EXAM_LEVELS.includes(selectedClassObj.level);
+  const anyExamBulletin = bulletins.some(b => b.is_exam_level);
 
   const statusBadge = (status) => {
     const map = {
@@ -220,7 +227,26 @@ const BulletinsPage = () => {
                 <option value={2}>Semestre 2</option>
               </select>
             </div>
+            {isExamClass && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Mode examen <span className="text-blue-600">(certification)</span>
+                </label>
+                <select value={mode} onChange={e => setMode(e.target.value)}
+                  className="border rounded-lg px-3 py-2 text-sm bg-white min-w-[200px]">
+                  <option value="real">Réel (examens officiels)</option>
+                  <option value="simili">Simulé (examen blanc)</option>
+                </select>
+              </div>
+            )}
           </div>
+          {isExamClass && (
+            <p className="mt-3 text-xs text-gray-500">
+              ℹ️ Niveau de certification (<b>{selectedClassObj.level}</b>) : le bulletin inclut la moyenne d'examen
+              ({mode === 'simili' ? 'mode simulé — utilise les notes d\'examen blanc' : 'mode réel — utilise les notes officielles'}).
+              Saisissez les notes via <b>Notes d'examens</b>. Générez une fois par mode pour obtenir les deux bulletins.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -276,7 +302,10 @@ const BulletinsPage = () => {
                     <th className="px-3 py-2 font-medium text-gray-600">Rang</th>
                     <th className="px-3 py-2 font-medium text-gray-600">Élève</th>
                     <th className="px-3 py-2 font-medium text-gray-600">Massar</th>
-                    <th className="px-3 py-2 font-medium text-gray-600 text-center">Moyenne</th>
+                    <th className="px-3 py-2 font-medium text-gray-600 text-center">Moy. CC</th>
+                    {anyExamBulletin && (
+                      <th className="px-3 py-2 font-medium text-blue-700 text-center">Moy. Certif.</th>
+                    )}
                     <th className="px-3 py-2 font-medium text-gray-600 text-center">Mention</th>
                     <th className="px-3 py-2 font-medium text-gray-600 text-center">Statut</th>
                     <th className="px-3 py-2 font-medium text-gray-600 text-center">Actions</th>
@@ -293,6 +322,16 @@ const BulletinsPage = () => {
                       <td className="px-3 py-2 text-center font-semibold">
                         {b.general_average != null ? `${Number(b.general_average).toFixed(2)}/20` : '—'}
                       </td>
+                      {anyExamBulletin && (
+                        <td className="px-3 py-2 text-center font-bold text-blue-700">
+                          {b.certification_average != null ? `${Number(b.certification_average).toFixed(2)}/20` : '—'}
+                          {b.certification_mode && (
+                            <span className="block text-[10px] font-normal text-gray-400">
+                              {b.certification_mode === 'simili' ? 'simulé' : 'réel'}
+                            </span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-3 py-2 text-center">
                         <span className={`text-xs font-medium ${
                           b.general_average >= 16 ? 'text-green-600' :

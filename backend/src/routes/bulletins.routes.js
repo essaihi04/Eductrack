@@ -22,7 +22,11 @@ import {
   computeClassBulletins,
   getSemesterBounds,
   getCoefficients,
-  computeMention
+  computeMention,
+  computeCertification,
+  getExamCoefficients,
+  CERTIFICATION_LEVELS,
+  isExamLevel
 } from '../services/bulletins/calculator.js';
 import { generateBulletinPdf } from '../services/bulletins/bulletinPdf.js';
 import { getDefaultYearBounds, getCurrentSemester, getCurrentAcademicYear } from '../services/bulletins/schoolCalendar.js';
@@ -267,6 +271,162 @@ router.post('/coefficients/seed', requireSchoolAdmin, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 2bis. EXAMENS DE CERTIFICATION (national / régional / local)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /exam-levels — config des niveaux de certification (pondérations + examens)
+router.get('/exam-levels', async (req, res) => {
+  res.json(CERTIFICATION_LEVELS);
+});
+
+// GET /exam-coefficients?level=2BAC&filiere=svt&exam_type=national
+router.get('/exam-coefficients', async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const { level, filiere, exam_type } = req.query;
+    if (!level || !exam_type) return res.status(400).json({ error: 'level + exam_type requis' });
+    const map = await getExamCoefficients(schoolId, level, filiere || null, exam_type);
+    const rows = [...map.entries()].map(([subject_name, v]) => ({
+      subject_name, coefficient: v.coefficient, display_order: v.display_order
+    })).sort((a, b) => (a.display_order ?? 999) - (b.display_order ?? 999));
+    res.json(rows);
+  } catch (e) {
+    console.error('[Bulletins] exam-coefficients GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /exam-coefficients (bulk upsert pour une école)
+router.put('/exam-coefficients', requireSchoolAdmin, async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const { level, filiere, exam_type, coefficients } = req.body;
+    if (!level || !exam_type || !Array.isArray(coefficients)) {
+      return res.status(400).json({ error: 'level + exam_type + coefficients[] requis' });
+    }
+    const rows = coefficients.map((c, idx) => ({
+      school_id: schoolId,
+      level,
+      filiere: filiere || null,
+      exam_type,
+      subject_name: c.subject_name,
+      coefficient: Number(c.coefficient),
+      display_order: c.display_order ?? (idx + 1) * 10
+    }));
+    const { data, error } = await supabaseAdmin
+      .from('exam_coefficients')
+      .upsert(rows, { onConflict: 'school_id,level,filiere,exam_type,subject_name' })
+      .select();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('[Bulletins] exam-coefficients PUT error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /exam-notes?class_id=...&academic_year=...&scenario=real
+router.get('/exam-notes', requireSchoolAdmin, async (req, res) => {
+  try {
+    const { class_id, academic_year, scenario } = req.query;
+    if (!class_id || !academic_year) return res.status(400).json({ error: 'class_id + academic_year requis' });
+    let q = supabaseAdmin
+      .from('exam_notes')
+      .select('*')
+      .eq('class_id', class_id)
+      .eq('academic_year', academic_year)
+      .eq('school_id', req.user.school_id);
+    if (scenario) q = q.eq('scenario', scenario);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /exam-notes (bulk upsert — alimenté par l'import Excel parsé côté client)
+//   body : { class_id, academic_year, exam_type, scenario, notes: [{ student_id, subject_name, note }] }
+router.put('/exam-notes', requireSchoolAdmin, async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const { class_id, academic_year, exam_type, scenario, notes } = req.body;
+    if (!class_id || !academic_year || !exam_type || !scenario || !Array.isArray(notes)) {
+      return res.status(400).json({ error: 'class_id, academic_year, exam_type, scenario, notes[] requis' });
+    }
+    if (!['national', 'regional', 'local'].includes(exam_type)) {
+      return res.status(400).json({ error: 'exam_type invalide' });
+    }
+    if (!['real', 'mock'].includes(scenario)) {
+      return res.status(400).json({ error: 'scenario invalide' });
+    }
+
+    // Niveau / filière de la classe (pour traçabilité)
+    const { data: cls } = await supabaseAdmin
+      .from('classes').select('level, filiere').eq('id', class_id).single();
+
+    const rows = notes
+      .filter(n => n.student_id && n.subject_name && n.note != null && n.note !== '')
+      .map(n => ({
+        school_id: schoolId,
+        student_id: n.student_id,
+        class_id,
+        academic_year,
+        level: cls?.level || null,
+        filiere: cls?.filiere || null,
+        subject_name: String(n.subject_name).trim(),
+        exam_type,
+        scenario,
+        note: Number(n.note),
+        updated_at: new Date().toISOString()
+      }))
+      .filter(n => !Number.isNaN(n.note) && n.note >= 0 && n.note <= 20);
+
+    if (rows.length === 0) return res.json({ saved: 0, data: [] });
+
+    const { data, error } = await supabaseAdmin
+      .from('exam_notes')
+      .upsert(rows, { onConflict: 'student_id,academic_year,subject_name,exam_type,scenario' })
+      .select();
+    if (error) throw error;
+    res.json({ saved: data.length, data });
+  } catch (e) {
+    console.error('[Bulletins] exam-notes PUT error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /exam-notes/:id
+router.delete('/exam-notes/:id', requireSchoolAdmin, async (req, res) => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('exam_notes').delete()
+      .eq('id', req.params.id).eq('school_id', req.user.school_id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /certification/preview — calcule la certification d'un élève (sans persister)
+//   body : { student_id, class_id, academic_year, mode }
+router.post('/certification/preview', requireSchoolAdmin, async (req, res) => {
+  try {
+    const { student_id, class_id, academic_year, mode } = req.body;
+    const result = await computeCertification({
+      studentId: student_id, classId: class_id, schoolId: req.user.school_id,
+      academicYear: academic_year, mode: mode === 'simili' ? 'simili' : 'real'
+    });
+    if (!result) return res.status(400).json({ error: 'Ce niveau n\'est pas une année de certification' });
+    res.json(result);
+  } catch (e) {
+    console.error('[Bulletins] certification preview error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 3. APPRÉCIATIONS PROFESSEUR
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -434,19 +594,25 @@ router.post('/appreciations/auto-generate', authorize('teacher', 'admin', 'schoo
 // POST /generate — génère (ou régénère) les bulletins pour une classe entière
 router.post('/generate', requireSchoolAdmin, async (req, res) => {
   try {
-    const { class_id, academic_year, semester } = req.body;
+    const { class_id, academic_year, semester, mode } = req.body;
     if (!class_id || !academic_year || !semester) {
       return res.status(400).json({ error: 'class_id, academic_year, semester requis' });
     }
 
     const schoolId = req.user.school_id;
     const sem = Number(semester);
+    const certMode = mode === 'simili' ? 'simili' : 'real';
 
     // Scoping (pedagogical_manager ne peut générer que ses classes)
     const scopedIds = await getScopedClassIds(req);
     if (scopedIds !== null && !scopedIds.includes(class_id)) {
       return res.status(403).json({ error: 'Classe hors de votre périmètre' });
     }
+
+    // Niveau de la classe → détermine s'il s'agit d'une année de certification
+    const { data: genCls } = await supabaseAdmin
+      .from('classes').select('level, filiere').eq('id', class_id).single();
+    const examLevel = genCls && isExamLevel(genCls.level);
 
     // Calculer toute la classe
     const result = await computeClassBulletins({ classId: class_id, schoolId, academicYear: academic_year, semester: sem });
@@ -473,6 +639,17 @@ router.post('/generate', requireSchoolAdmin, async (req, res) => {
       const rank = result.classRanking.get(b.student.id);
       const mention = computeMention(b.general_average);
 
+      // Certification annuelle (niveaux إشهادية : 6AP/3AC/1BAC/2BAC)
+      let cert = null;
+      if (examLevel) {
+        try {
+          cert = await computeCertification({
+            studentId: b.student.id, classId: class_id, schoolId,
+            academicYear: academic_year, mode: certMode
+          });
+        } catch (e) { console.error('[Bulletins] certification error:', e.message); }
+      }
+
       // Upsert bulletin
       const { data: bulletin, error: bErr } = await supabaseAdmin
         .from('bulletins')
@@ -489,17 +666,38 @@ router.post('/generate', requireSchoolAdmin, async (req, res) => {
           generated_by: req.user.id,
           generated_at: new Date().toISOString(),
           status: 'draft',
+          is_exam_level: !!examLevel,
+          certification_mode: cert ? certMode : null,
+          cc_average: cert ? cert.cc_average : null,
+          local_average: cert ? (cert.local?.average ?? null) : null,
+          regional_average: cert ? (cert.regional?.average ?? null) : null,
+          national_average: cert ? (cert.national?.average ?? null) : null,
+          certification_average: cert ? cert.certification_average : null,
+          certification_mention: cert?.mention ? cert.mention.fr : null,
           updated_at: new Date().toISOString()
         }, { onConflict: 'student_id,academic_year,semester' })
         .select()
         .single();
       if (bErr) { console.error('[Bulletins] upsert bulletin error:', bErr.message); continue; }
 
+      // Map des notes d'examen par matière (pour figer dans bulletin_lines)
+      const examNoteBySubject = new Map();
+      if (cert) {
+        for (const et of ['local', 'regional', 'national']) {
+          (cert[et]?.breakdown || []).forEach(r => {
+            const cur = examNoteBySubject.get(r.subject_name) || {};
+            cur[et] = r.note;
+            examNoteBySubject.set(r.subject_name, cur);
+          });
+        }
+      }
+
       // Supprimer anciennes lignes puis insérer les nouvelles
       await supabaseAdmin.from('bulletin_lines').delete().eq('bulletin_id', bulletin.id);
 
       const lineRows = b.lines.map(l => {
         const subjRanks = result.subjectRankings.get(l.subject_name);
+        const ex = examNoteBySubject.get(l.subject_name) || {};
         return {
           bulletin_id: bulletin.id,
           subject_id: l.subject_id || null,
@@ -511,6 +709,9 @@ router.post('/generate', requireSchoolAdmin, async (req, res) => {
           weighted_note: l.weighted_note,
           rank_in_class: subjRanks ? (subjRanks.get(b.student.id) || null) : null,
           appreciation: apprMap.get(`${b.student.id}__${l.subject_name}`) || null,
+          local_note: ex.local ?? null,
+          regional_note: ex.regional ?? null,
+          national_note: ex.national ?? null,
           display_order: l.display_order
         };
       });
@@ -645,6 +846,19 @@ router.get('/pdf/:bulletinId', async (req, res) => {
 
     const lines = (bulletin.bulletin_lines || []).sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
 
+    // Certification recalculée en direct selon le mode demandé (?mode=real|simili)
+    let certification = null;
+    if (bulletin.is_exam_level) {
+      const certMode = req.query.mode === 'simili' ? 'simili'
+        : (req.query.mode === 'real' ? 'real' : (bulletin.certification_mode || 'real'));
+      try {
+        certification = await computeCertification({
+          studentId: bulletin.student_id, classId: bulletin.class_id,
+          schoolId: bulletin.school_id, academicYear: bulletin.academic_year, mode: certMode
+        });
+      } catch (_) {}
+    }
+
     const pdfBuffer = await generateBulletinPdf({
       student: bulletin.profiles || {},
       cls: bulletin.classes || {},
@@ -657,7 +871,8 @@ router.get('/pdf/:bulletinId', async (req, res) => {
       school: school || {},
       academicYear: bulletin.academic_year,
       semester: bulletin.semester,
-      notes: bulletin.notes
+      notes: bulletin.notes,
+      certification
     });
 
     const rawName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');
@@ -677,11 +892,20 @@ router.get('/pdf/:bulletinId', async (req, res) => {
 // POST /preview — preview PDF sans persister (pour un élève)
 router.post('/preview', requireSchoolAdmin, async (req, res) => {
   try {
-    const { student_id, class_id, academic_year, semester } = req.body;
+    const { student_id, class_id, academic_year, semester, mode } = req.body;
     const schoolId = req.user.school_id;
     const sem = Number(semester);
 
     const result = await computeStudentBulletin({ studentId: student_id, classId: class_id, schoolId, academicYear: academic_year, semester: sem });
+
+    // Certification (si niveau إشهادية)
+    let certification = null;
+    try {
+      certification = await computeCertification({
+        studentId: student_id, classId: class_id, schoolId,
+        academicYear: academic_year, mode: mode === 'simili' ? 'simili' : 'real'
+      });
+    } catch (_) {}
 
     const { data: student } = await supabaseAdmin
       .from('profiles')
@@ -713,7 +937,8 @@ router.post('/preview', requireSchoolAdmin, async (req, res) => {
       config: config || {},
       school: school || {},
       academicYear: academic_year,
-      semester: sem
+      semester: sem,
+      certification
     });
 
     res.setHeader('Content-Type', 'application/pdf');
