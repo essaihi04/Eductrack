@@ -922,6 +922,82 @@ router.post('/payments', async (req, res) => {
   }
 });
 
+// ============================================================
+// CAISSE — récap des encaissements (et dépenses) par période et mode
+// ============================================================
+router.get('/cash-register', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from et to requis' });
+
+    const METHODS = ['cash', 'check', 'transfer', 'card_pos', 'other'];
+    const emptyByMethod = () => METHODS.reduce((a, m) => ({ ...a, [m]: { total: 0, count: 0 } }), {});
+
+    // Encaissements (paiements confirmés)
+    let payQ = supabaseAdmin
+      .from('payments')
+      .select(`id, receipt_number, amount, payment_date, method, reference,
+        student:profiles!payments_student_id_fkey(first_name, last_name, classes!fk_profiles_class(name))`)
+      .eq('status', 'confirmed')
+      .gte('payment_date', from)
+      .lte('payment_date', to)
+      .order('payment_date', { ascending: false });
+    if (schoolId) payQ = payQ.eq('school_id', schoolId);
+    const { data: payments, error: payErr } = await payQ;
+    if (payErr) throw payErr;
+
+    const incomeByMethod = emptyByMethod();
+    let incomeTotal = 0;
+    const byDay = {};
+    for (const p of payments || []) {
+      const m = METHODS.includes(p.method) ? p.method : 'other';
+      const amt = Number(p.amount || 0);
+      incomeByMethod[m].total += amt;
+      incomeByMethod[m].count += 1;
+      incomeTotal += amt;
+      const d = String(p.payment_date).slice(0, 10);
+      if (!byDay[d]) byDay[d] = { date: d, income: 0, expense: 0 };
+      byDay[d].income += amt;
+    }
+
+    // Dépenses (caisse sortante) — uniquement pour les admins
+    const expenseByMethod = emptyByMethod();
+    let expenseTotal = 0;
+    if (isAdminRole(req)) {
+      let expQ = supabaseAdmin
+        .from('school_expenses')
+        .select('amount, expense_date, payment_method')
+        .gte('expense_date', from)
+        .lte('expense_date', to);
+      if (schoolId) expQ = expQ.eq('school_id', schoolId);
+      const { data: expenses } = await expQ;
+      for (const e of expenses || []) {
+        const m = METHODS.includes(e.payment_method) ? e.payment_method : 'other';
+        const amt = Number(e.amount || 0);
+        expenseByMethod[m].total += amt;
+        expenseByMethod[m].count += 1;
+        expenseTotal += amt;
+        const d = String(e.expense_date).slice(0, 10);
+        if (!byDay[d]) byDay[d] = { date: d, income: 0, expense: 0 };
+        byDay[d].expense += amt;
+      }
+    }
+
+    res.json({
+      period: { from, to },
+      income: { total: incomeTotal, count: (payments || []).length, by_method: incomeByMethod },
+      expense: { total: expenseTotal, by_method: expenseByMethod },
+      net: incomeTotal - expenseTotal,
+      by_day: Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date)),
+      payments: (payments || []).slice(0, 200),
+    });
+  } catch (error) {
+    console.error('Erreur cash-register:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
 router.get('/payments/:id', async (req, res) => {
   try {
     const { id } = req.params;

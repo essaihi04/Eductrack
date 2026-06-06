@@ -51,6 +51,7 @@ import PaymentsPage from './pages/finance/PaymentsPage';
 import OverduePage from './pages/finance/OverduePage';
 import FinanceStudentsPage from './pages/finance/FinanceStudentsPage';
 import ExpensesPage from './pages/finance/ExpensesPage';
+import CashRegisterPage from './pages/finance/CashRegisterPage';
 import TransportDashboard from './pages/transport/TransportDashboard';
 import BusesPage from './pages/transport/BusesPage';
 import BusDetailPage from './pages/transport/BusDetailPage';
@@ -135,6 +136,7 @@ function App() {
             <Route path="finance/overdue" element={<OverduePage />} />
             <Route path="finance/students" element={<FinanceStudentsPage />} />
             <Route path="finance/expenses" element={<ExpensesPage />} />
+            <Route path="finance/cash-register" element={<CashRegisterPage />} />
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />

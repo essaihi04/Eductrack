@@ -30,6 +30,7 @@ import {
   TrendingUp,
   UserCog,
   Wallet,
+  Banknote,
   Bus,
   MapPin,
   Bell,
@@ -102,6 +103,7 @@ const Sidebar = () => {
         ...(isPedagogical ? [] : [
           { section: 'Finance', isSection: true },
           { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+          { icon: Banknote, label: 'Caisse', path: '/finance/cash-register' },
           { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
           { icon: Users, label: 'Élèves (finance)', path: '/finance/students' },
           { icon: FileText, label: 'Factures', path: '/finance/invoices' },

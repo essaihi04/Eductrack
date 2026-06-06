@@ -67,6 +67,9 @@ export const financeApi = {
   createPayment: (data) => request('/api/finance/payments', { method: 'POST', body: data }),
   cancelPayment: (id, reason) => request(`/api/finance/payments/${id}/cancel`, { method: 'PUT', body: { reason } }),
 
+  // Caisse (encaissements/dépenses par période et mode)
+  getCashRegister: (from, to) => request('/api/finance/cash-register', { query: { from, to } }),
+
   // Dashboard
   getSummary: () => request('/api/finance/dashboard/summary'),
   getCashflow: (months = 6) => request('/api/finance/dashboard/cashflow', { query: { months } }),
