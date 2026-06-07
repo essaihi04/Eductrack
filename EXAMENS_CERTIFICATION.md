@@ -61,3 +61,24 @@ réel, l'examen à venir compte avec sa note blanche.
 
 API : `GET/PUT /api/bulletins/exam-coefficients?level=&filiere=&exam_type=`.
 (Les défauts globaux MEN sont écrasés par les surcharges école.)
+
+---
+
+## Compatibilité Massar (import / export des notes)
+
+### Format réel d'un fichier Massar
+Les fichiers de notes exportés par **Massar** ont ces caractéristiques :
+- **~6 à 10 lignes de métadonnées en haut** (الأكاديمية, المديرية, المؤسسة, القسم, المادة, الأستاذ, الدورة…) **avant** le tableau.
+- Des **en-têtes en arabe** : `رمز التلميذ` (code Massar), `النسب` (nom), `الاسم` (prénom), et la/les colonne(s) de note (`النقطة`, ou `الفرض 1/2/3` + `الأنشطة المندمجة` pour la MC).
+- **Un fichier par matière** (une seule colonne de note), la **clé d'appariement étant le code Massar (GRESA)**, pas le nom.
+- Décimales avec **virgule** (`12,5`).
+
+> ⚠️ Massar **réimporte uniquement son propre fichier exporté** (il contient des colonnes techniques/masquées + un appariement par code Massar). Pour réinjecter dans Massar : exporter depuis Massar → remplir les notes → réimporter le **même** fichier. Notre app facilite la préparation/relecture de ces notes ; elle n'écrit pas dans la base Massar.
+
+### Ce que gère la page « Notes d'examens »
+- **Import** : auto-détection de la ligne d'en-tête (saut des métadonnées), reconnaissance des en-têtes **arabes ou français** (alias), appariement **par code Massar** puis par nom, conversion virgule→point.
+  - Fichier multi-matières (notre modèle) **ou** fichier Massar **par matière** (1 colonne note) : dans ce dernier cas, choisir « Matière du fichier Massar… » avant d'importer.
+- **Export « Format Massar »** : génère un classeur avec **un onglet par matière**, en-têtes arabes (`رمز التلميذ / النسب / الاسم / النقطة`) et clé code Massar — prêt à recopier dans la grille Massar.
+
+### Pré-requis
+Les élèves doivent avoir leur **code Massar** renseigné (`profiles.massar_code`) pour un appariement fiable (déjà présent dans le système de bulletins).

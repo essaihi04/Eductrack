@@ -15,6 +15,52 @@ const SCENARIOS = {
   mock: { label: 'Examen blanc (simili)', desc: 'Notes de l\'examen blanc / simulation' },
 };
 
+// Normalisation : minuscules, sans accents/diacritiques arabes, sans espaces multiples
+const norm = (x) => String(x ?? '')
+  .trim().toLowerCase()
+  .normalize('NFD').replace(/[̀-ًͯ-ٰٟ]/g, '') // diacritiques latins + harakat arabes
+  .replace(/[أإآا]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+  .replace(/\s+/g, ' ').trim();
+
+// Alias de colonnes pour reconnaître les fichiers Massar (en-têtes arabes/français)
+const CODE_ALIASES   = ['code massar', 'رمز التلميذ', 'رمز مسار', 'رمز', 'code eleve', 'code élève', 'cne', 'gresa', 'الرمز', 'ر.ت'].map(norm);
+const LASTNAME_ALIASES  = ['nom', 'النسب', 'الاسم العائلي', 'اللقب'].map(norm);
+const FIRSTNAME_ALIASES = ['prénom', 'prenom', 'الاسم', 'الاسم الشخصي'].map(norm);
+const FULLNAME_ALIASES  = ['الاسم والنسب', 'النسب والاسم', 'الاسم الكامل', 'nom et prénom', 'nom complet', 'الاسم الكامل للتلميذ'].map(norm);
+const NOTE_ALIASES   = ['note', 'النقطة', 'النقط', 'المعدل', 'نقطة', 'الدرجة'].map(norm);
+
+// Alias des matières (Massar utilise les libellés arabes) → nom interne de l'app
+const SUBJECT_ALIASES = {
+  'Arabe': ['اللغة العربية', 'العربية', 'arabe', 'اللغة العربية وآدابها'],
+  'Français': ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français'],
+  'Anglais': ['اللغة الإنجليزية', 'الإنجليزية', 'english', 'anglais', 'اللغة الانجليزية'],
+  'Mathématiques': ['الرياضيات', 'maths', 'mathematiques', 'mathématiques'],
+  'PC': ['الفيزياء والكيمياء', 'الفيزياء', 'علوم فيزيائية', 'physique', 'physique-chimie', 'pc'],
+  'SVT': ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'],
+  'Sociales': ['الاجتماعيات', 'sociales', 'الاجتماعيات (تاريخ وجغرافيا)'],
+  'Histoire-Géographie': ['التاريخ والجغرافيا', 'histoire-géographie', 'histoire geographie', 'الاجتماعيات'],
+  'Éducation islamique': ['التربية الإسلامية', 'الإسلامية', 'education islamique', 'éducation islamique', 'التربية الاسلامية'],
+  'Philosophie': ['الفلسفة', 'philosophie'],
+  'Économie générale': ['الاقتصاد العام والإحصاء', 'الاقتصاد العام', 'economie generale', 'économie générale'],
+  'Comptabilité': ['المحاسبة', 'المحاسبة والرياضيات المالية', 'comptabilite', 'comptabilité'],
+  'Sciences de l\'ingénieur': ['علوم المهندس', 'sciences de l\'ingénieur'],
+  'Activité scientifique': ['النشاط العلمي', 'activité scientifique', 'activite scientifique'],
+  'Droit': ['القانون', 'droit'],
+  'Informatique de gestion': ['معلوميات التدبير', 'المعلوميات', 'informatique de gestion'],
+  'Économie et organisation administrative': ['الاقتصاد والتنظيم الإداري', 'economie et organisation administrative'],
+};
+
+// Trouve l'index de la ligne d'en-tête dans un fichier (Massar a ~10 lignes de métadonnées au-dessus)
+const findHeaderRow = (rows) => {
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const cells = (rows[i] || []).map(norm);
+    const hasCode = cells.some(c => CODE_ALIASES.includes(c) || c.includes('massar') || c.includes('رمز'));
+    const hasName = cells.some(c => [...LASTNAME_ALIASES, ...FULLNAME_ALIASES].includes(c) || c.includes('الاسم') || c.includes('نسب'));
+    if (hasCode || (hasName && cells.length >= 2)) return i;
+  }
+  return 0;
+};
+
 const defaultYear = () => {
   const now = new Date();
   const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
@@ -41,6 +87,7 @@ const ExamNotesPage = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [importSubject, setImportSubject] = useState(''); // matière cible pour un fichier Massar par matière
 
   const cls = useMemo(() => classes.find(c => c.id === selectedClass), [classes, selectedClass]);
   const availableExamTypes = useMemo(() => {
@@ -132,7 +179,34 @@ const ExamNotesPage = () => {
     XLSX.writeFile(wb, fname);
   };
 
-  // ─── Importer un Excel rempli ───
+  // ─── Exporter au format Massar : un onglet par matière (en-têtes arabes) ───
+  //   Reproduit la grille Massar « par matière » (رمز التلميذ / النسب / الاسم / النقطة).
+  const downloadMassar = () => {
+    if (!students.length || !subjects.length) return;
+    const wb = XLSX.utils.book_new();
+    subjects.forEach(sub => {
+      const meta = [
+        ['المؤسسة :', cls?.name || ''],
+        ['السنة الدراسية :', academicYear],
+        ['المادة :', sub.subject_name],
+        ['نوع الامتحان :', EXAM_TYPES[examType]?.ar || ''],
+        [],
+        ['رمز التلميذ', 'النسب', 'الاسم', 'النقطة'],
+      ];
+      const body = students.map(s => [
+        s.massar_code || '', s.last_name || '', s.first_name || '',
+        notes[`${s.id}__${sub.subject_name}`] ?? ''
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([...meta, ...body]);
+      ws['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 18 }, { wch: 10 }];
+      // Nom d'onglet ≤ 31 caractères, sans caractères interdits
+      const tab = sub.subject_name.replace(/[\\/?*[\]:]/g, '').slice(0, 28) || 'Matiere';
+      XLSX.utils.book_append_sheet(wb, ws, tab);
+    });
+    XLSX.writeFile(wb, `massar_${EXAM_TYPES[examType]?.label.replace(/\s/g, '_')}_${cls?.name || ''}_${scenario}.xlsx`);
+  };
+
+  // ─── Importer un Excel rempli (modèle app OU export Massar) ───
   const handleImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -144,44 +218,69 @@ const ExamNotesPage = () => {
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
         if (!rows.length) { setMsg('❌ Fichier vide'); return; }
 
-        const header = rows[0].map(h => String(h).trim());
-        // Index des colonnes matières (par nom exact ou insensible casse/espaces)
-        const norm = (x) => String(x).trim().toLowerCase();
+        // 1. Localiser la ligne d'en-tête (les fichiers Massar ont des métadonnées au-dessus)
+        const hIdx = findHeaderRow(rows);
+        const header = (rows[hIdx] || []).map(h => String(h).trim());
+        const hNorm = header.map(norm);
+
+        // 2. Colonne code Massar + nom/prénom
+        const massarIdx = hNorm.findIndex(h => CODE_ALIASES.includes(h) || h.includes('massar') || h.includes('رمز'));
+        const lastIdx   = hNorm.findIndex(h => LASTNAME_ALIASES.includes(h));
+        const firstIdx  = hNorm.findIndex(h => FIRSTNAME_ALIASES.includes(h));
+        const fullIdx   = hNorm.findIndex(h => FULLNAME_ALIASES.includes(h));
+
+        // 3. Colonnes de matières (alias arabes/français). Si une seule colonne « note »
+        //    générique → fichier Massar par matière, on l'affecte à la matière choisie.
         const subjCols = {};
         subjects.forEach(sub => {
-          const idx = header.findIndex(h => norm(h) === norm(sub.subject_name));
+          const aliases = [norm(sub.subject_name), ...(SUBJECT_ALIASES[sub.subject_name] || []).map(norm)];
+          const idx = hNorm.findIndex(h => h && aliases.includes(h));
           if (idx >= 0) subjCols[sub.subject_name] = idx;
         });
-        const massarIdx = header.findIndex(h => norm(h).includes('massar'));
+        const genericNoteIdx = hNorm.findIndex(h => NOTE_ALIASES.includes(h));
+        if (!Object.keys(subjCols).length && genericNoteIdx >= 0) {
+          if (!importSubject) {
+            setMsg('⚠️ Fichier Massar par matière détecté (colonne « note » unique). Choisissez d\'abord « Matière du fichier » puis réimportez.');
+            return;
+          }
+          subjCols[importSubject] = genericNoteIdx;
+        }
+        if (!Object.keys(subjCols).length) {
+          setMsg('❌ Aucune colonne de note reconnue. En-têtes attendus : Code Massar / رمز التلميذ + nom de matière ou « النقطة ».');
+          return;
+        }
 
-        // Index élève par massar et par nom complet
+        // 4. Index élèves : par code Massar (clé Massar) puis par nom
         const byMassar = new Map(students.filter(s => s.massar_code).map(s => [norm(s.massar_code), s]));
         const byName = new Map(students.map(s => [norm(`${s.last_name} ${s.first_name}`), s]));
         const byNameRev = new Map(students.map(s => [norm(`${s.first_name} ${s.last_name}`), s]));
 
-        const nameIdxL = header.findIndex(h => norm(h) === 'nom');
-        const nameIdxF = header.findIndex(h => norm(h).includes('prénom') || norm(h).includes('prenom'));
-
         const next = { ...notes };
         let matched = 0, unmatched = 0;
-        for (let r = 1; r < rows.length; r++) {
+        for (let r = hIdx + 1; r < rows.length; r++) {
           const row = rows[r];
           if (!row || row.every(c => c === '')) continue;
           let student = null;
           if (massarIdx >= 0 && row[massarIdx]) student = byMassar.get(norm(row[massarIdx]));
-          if (!student && nameIdxL >= 0 && nameIdxF >= 0) {
-            const full = norm(`${row[nameIdxL]} ${row[nameIdxF]}`);
-            student = byName.get(full) || byNameRev.get(norm(`${row[nameIdxF]} ${row[nameIdxL]}`));
+          if (!student && fullIdx >= 0 && row[fullIdx]) {
+            const f = norm(row[fullIdx]);
+            student = byName.get(f) || byNameRev.get(f);
+          }
+          if (!student && lastIdx >= 0 && firstIdx >= 0) {
+            student = byName.get(norm(`${row[lastIdx]} ${row[firstIdx]}`))
+              || byNameRev.get(norm(`${row[firstIdx]} ${row[lastIdx]}`));
           }
           if (!student) { unmatched++; continue; }
           matched++;
           for (const [subject, idx] of Object.entries(subjCols)) {
-            const v = row[idx];
-            if (v !== '' && v != null) next[`${student.id}__${subject}`] = v;
+            let v = row[idx];
+            if (typeof v === 'string') v = v.replace(',', '.').trim(); // Massar utilise la virgule décimale
+            if (v !== '' && v != null && !isNaN(Number(v))) next[`${student.id}__${subject}`] = Number(v);
           }
         }
         setNotes(next);
-        setMsg(`✅ Import : ${matched} élève(s) reconnus${unmatched ? `, ${unmatched} non reconnus` : ''}. Cliquez sur « Enregistrer » pour valider.`);
+        const cols = Object.keys(subjCols).join(', ');
+        setMsg(`✅ Import : ${matched} élève(s) reconnus${unmatched ? `, ${unmatched} non reconnus (code Massar absent ?)` : ''} — matière(s) : ${cols}. Cliquez sur « Enregistrer ».`);
       } catch (err) {
         setMsg(`❌ Erreur lecture fichier : ${err.message}`);
       }
@@ -282,13 +381,24 @@ const ExamNotesPage = () => {
           <CardHeader>
             <CardTitle className="text-base flex items-center justify-between flex-wrap gap-2">
               <span>{EXAM_TYPES[examType]?.label} — {SCENARIOS[scenario]?.label}</span>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap items-center">
+                <select value={importSubject} onChange={e => setImportSubject(e.target.value)}
+                  title="Matière cible si vous importez un fichier Massar par matière (1 seule colonne note)"
+                  className="border rounded-lg px-2 py-1.5 text-xs max-w-[160px]">
+                  <option value="">Matière du fichier Massar…</option>
+                  {subjects.map(sub => <option key={sub.subject_name} value={sub.subject_name}>{sub.subject_name}</option>)}
+                </select>
                 <button onClick={downloadTemplate} disabled={!students.length || !subjects.length}
                   className="flex items-center gap-1 text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-40">
-                  <Download className="w-4 h-4" /> Modèle Excel
+                  <Download className="w-4 h-4" /> Modèle
+                </button>
+                <button onClick={downloadMassar} disabled={!students.length || !subjects.length}
+                  title="Exporter un classeur au format Massar (un onglet par matière, en-têtes arabes)"
+                  className="flex items-center gap-1 text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-40">
+                  <Download className="w-4 h-4" /> Format Massar
                 </button>
                 <label className="flex items-center gap-1 text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 cursor-pointer">
-                  <Upload className="w-4 h-4" /> Importer Excel
+                  <Upload className="w-4 h-4" /> Importer (app/Massar)
                   <input type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
                 </label>
               </div>
