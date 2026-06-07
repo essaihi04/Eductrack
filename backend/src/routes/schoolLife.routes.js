@@ -546,7 +546,7 @@ router.get('/issues', authorize('admin', 'school_admin', 'teacher'), async (req,
   try {
     let q = supabaseAdmin
       .from('issue_reports')
-      .select('*, classes(name), reporter:reported_by(first_name, last_name, role)')
+      .select('*, classes(name), reporter:reported_by(first_name, last_name, role), related:related_student(first_name, last_name)')
       .order('created_at', { ascending: false });
     if (schoolFilter(req)) q = q.eq('school_id', schoolFilter(req));
     if (req.query.status) q = q.eq('status', req.query.status);
@@ -555,6 +555,25 @@ router.get('/issues', authorize('admin', 'school_admin', 'teacher'), async (req,
     res.json(data);
   } catch (e) {
     console.error('GET /issues', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Élèves d'une classe (pour cibler un signalement sur un élève précis)
+router.get('/classes/:classId/students', authorize('admin', 'school_admin', 'teacher', 'pedagogical_director', 'pedagogical_manager'), async (req, res) => {
+  try {
+    let q = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name')
+      .eq('role', 'student')
+      .eq('class_id', req.params.classId)
+      .order('last_name', { ascending: true });
+    if (schoolFilter(req)) q = q.eq('school_id', schoolFilter(req));
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (e) {
+    console.error('GET /classes/:classId/students', e);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

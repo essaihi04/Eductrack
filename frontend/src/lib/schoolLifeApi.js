@@ -88,6 +88,9 @@ export const schoolLifeApi = {
   createIssue: (body) => request('/api/school-life/issues', { method: 'POST', body }),
   updateIssue: (id, body) => request(`/api/school-life/issues/${id}`, { method: 'PUT', body }),
   deleteIssue: (id) => request(`/api/school-life/issues/${id}`, { method: 'DELETE' }),
+
+  // Élèves d'une classe (cible d'un signalement)
+  listClassStudents: (classId) => request(`/api/school-life/classes/${classId}/students`),
 };
 
 // Liste des classes (pour les formulaires).
