@@ -612,13 +612,14 @@ router.post('/session-tracking', async (req, res) => {
       attitude,
       comment,
       notes,
-      writing
+      writing,
+      skip_absence_notification
     } = req.body;
 
     // Vérifier si une entrée existe déjà
     const { data: existing, error: checkError } = await supabaseAdmin
       .from('session_tracking')
-      .select('id')
+      .select('id, absence_notified')
       .eq('session_id', session_id)
       .eq('student_id', student_id)
       .single();
@@ -685,8 +686,11 @@ router.post('/session-tracking', async (req, res) => {
     if (error) throw error;
     res.status(201).json(data);
 
-    // Notification WhatsApp automatique si l'élève est marqué absent
-    if (presence === 'absent') {
+    // Notification WhatsApp automatique si l'élève est marqué absent.
+    // Idempotent : on n'envoie qu'une seule fois par (séance, élève) et jamais
+    // si l'appelant demande explicitement de ne pas notifier (skip).
+    const alreadyNotified = existing?.absence_notified === true;
+    if (presence === 'absent' && !skip_absence_notification && !alreadyNotified) {
       try {
         // Récupérer les infos de la session (date, matière, leçon, horaire)
         const { data: sessionInfo } = await supabaseAdmin
@@ -741,6 +745,15 @@ router.post('/session-tracking', async (req, res) => {
               });
               console.log(`[Tracking] Notification absence envoyée au parent (${e164Phone}) pour l'élève ${studentName}`);
             }
+          }
+
+          // Marquer comme notifié pour ne jamais renvoyer le message (même
+          // parent) lors d'une modification ou d'un ré-enregistrement ultérieur.
+          if (data?.id) {
+            await supabaseAdmin
+              .from('session_tracking')
+              .update({ absence_notified: true })
+              .eq('id', data.id);
           }
         }
       } catch (notifError) {

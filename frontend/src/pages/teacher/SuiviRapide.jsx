@@ -28,6 +28,8 @@ const SuiviRapide = () => {
   const [tracking, setTracking] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingPresence, setSavingPresence] = useState(false);
+  const [presenceSaved, setPresenceSaved] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
   const [startTime, setStartTime] = useState('');
@@ -220,6 +222,7 @@ const SuiviRapide = () => {
     setSessionError('');
     setAutoSaveStatus('');
     setSessionSaved(false);
+    setPresenceSaved(false);
     setTracking({});
   };
 
@@ -241,6 +244,7 @@ const SuiviRapide = () => {
     // L'utilisateur doit cliquer sur une séance existante dans la liste ou créer une nouvelle
     clearStoredSession();
     setCurrentSession(null);
+    setPresenceSaved(false);
     fetchActiveHomework();
     fetchTimetableSlots();
   }, [selectedClass, sessionDate, urlParams]);
@@ -649,6 +653,61 @@ const SuiviRapide = () => {
     }
   };
 
+  // Enregistre uniquement la présence (au début de la séance) et déclenche
+  // l'envoi des notifications d'absence aux parents. Le backend est idempotent :
+  // aucune notification en double même si on modifie/ré-enregistre ensuite.
+  const savePresence = async () => {
+    if (!currentSession) {
+      setSessionError('Veuillez créer une séance avant de commencer le suivi.');
+      return;
+    }
+    const missing = students.filter((s) => !tracking[s.id]?.presence);
+    if (missing.length > 0) {
+      setSessionError(`Présence obligatoire pour tous les élèves. ${missing.length} élève(s) manquant(s).`);
+      return;
+    }
+    try {
+      setSavingPresence(true);
+      setSessionError('');
+      setAutoSaveStatus('Enregistrement de la présence...');
+      const token = await getAuthToken();
+      for (const student of students) {
+        const data = tracking[student.id] || {};
+        await fetch(`${apiUrl}/api/teacher/session-tracking`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: currentSession.id,
+            student_id: student.id,
+            presence: data.presence,
+            cahier_present: data.cahier_present ?? false,
+            sleeping: data.sleeping ?? false,
+            homework: data.homework || null,
+            participation: data.participation || null,
+            discipline: data.discipline || null,
+            phone_use: data.phone_use || false,
+            mini_eval: data.mini_eval || null,
+            cahier_lesson: data.cahier_lesson || null,
+            cahier_documents: data.cahier_documents || null,
+            cahier_readability: data.cahier_readability || null,
+            attitude: data.attitude || null,
+            comment: data.comment || null,
+            notes: data.notes || null,
+            writing: data.writing || false,
+          }),
+        });
+      }
+      setPresenceSaved(true);
+      setAutoSaveStatus('✓ Présence enregistrée — parents des absents notifiés');
+      setTimeout(() => setAutoSaveStatus(''), 3000);
+    } catch (e) {
+      console.error('Erreur enregistrement présence:', e);
+      setAutoSaveStatus('✗ Erreur présence');
+    } finally {
+      setSavingPresence(false);
+    }
+  };
+
   const saveTracking = async () => {
     if (!selectedClass) return;
     if (!currentSession) {
@@ -707,6 +766,7 @@ const SuiviRapide = () => {
               comment: data.comment || null,
               notes: data.notes || null,
               writing: data.writing || false,
+              skip_absence_notification: true,
             }),
           });
 
@@ -1283,7 +1343,8 @@ const SuiviRapide = () => {
                   return (
                     <button
                       onClick={() => setAllPresenceToggle('present')}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allPresent ? 'bg-green-600 text-white border-green-600' : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'}`}
+                      disabled={presenceSaved}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allPresent ? 'bg-green-600 text-white border-green-600' : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'} ${presenceSaved ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       ✔️ Tout présent
                     </button>
@@ -1294,7 +1355,8 @@ const SuiviRapide = () => {
                   return (
                     <button
                       onClick={() => setAllPresenceToggle('absent')}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allAbsent ? 'bg-red-600 text-white border-red-600' : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'}`}
+                      disabled={presenceSaved}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allAbsent ? 'bg-red-600 text-white border-red-600' : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'} ${presenceSaved ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       ✖️ Tout absent
                     </button>
@@ -1359,8 +1421,8 @@ const SuiviRapide = () => {
                       <p className="font-semibold text-sm text-gray-900">{student.first_name} {student.last_name}</p>
                       <div className="flex gap-1">
                         {[{value:'present',icon:'✔️'},{value:'absent',icon:'✖️'},{value:'late',icon:'⏱️'}].map(opt => (
-                          <button key={opt.value} onClick={() => updateTracking(student.id, 'presence', opt.value)}
-                            className={`w-8 h-8 rounded-lg text-sm ${t.presence === opt.value ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}>
+                          <button key={opt.value} disabled={presenceSaved} onClick={() => updateTracking(student.id, 'presence', opt.value)}
+                            className={`w-8 h-8 rounded-lg text-sm ${t.presence === opt.value ? 'bg-blue-600 text-white' : 'bg-gray-200'} ${presenceSaved ? 'opacity-60 cursor-not-allowed' : ''}`}>
                             {opt.icon}
                           </button>
                         ))}
@@ -1532,13 +1594,14 @@ const SuiviRapide = () => {
                           ].map(opt => (
                             <button
                               key={opt.value}
+                              disabled={presenceSaved}
                               onClick={() => updateTracking(student.id, 'presence', opt.value)}
                               className={`w-6 h-6 rounded text-xs ${
                                 tracking[student.id]?.presence === opt.value
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-gray-200 hover:bg-gray-300'
-                              }`}
-                              title={`Présence : ${opt.label}`}
+                              } ${presenceSaved ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              title={presenceSaved ? 'Présence verrouillée — cliquez sur Modifier la présence' : `Présence : ${opt.label}`}
                             >
                               {opt.icon}
                             </button>
@@ -1845,6 +1908,42 @@ const SuiviRapide = () => {
                 })}
               </tbody>
             </table>
+            </div>
+
+            {/* ── Enregistrement de la présence (au début de la séance) ── */}
+            <div className={`rounded-xl border p-3 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${presenceSaved ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+              <div className="text-sm">
+                {presenceSaved ? (
+                  <span className="text-green-800 font-medium flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4" /> Présence enregistrée — parents des absents notifiés. Colonnes verrouillées.
+                  </span>
+                ) : (
+                  <span className="text-amber-800 font-medium flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4" /> Enregistrez la présence en début de séance : les absents sont signalés aux parents immédiatement.
+                  </span>
+                )}
+              </div>
+              {presenceSaved ? (
+                <button
+                  onClick={() => { setPresenceSaved(false); setAutoSaveStatus(''); }}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg border border-amber-400 bg-white text-amber-700 text-sm font-semibold hover:bg-amber-50 transition whitespace-nowrap"
+                >
+                  <RefreshCw className="w-4 h-4" /> Modifier la présence
+                </button>
+              ) : (
+                <button
+                  onClick={savePresence}
+                  disabled={savingPresence || students.filter(s => tracking[s.id]?.presence).length < students.length}
+                  className={`inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition shadow-sm whitespace-nowrap ${
+                    students.length > 0 && students.filter(s => tracking[s.id]?.presence).length === students.length
+                      ? 'bg-amber-600 text-white hover:bg-amber-700'
+                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  {savingPresence ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-4 h-4" />}
+                  {savingPresence ? 'Enregistrement...' : 'Enregistrer la présence'}
+                </button>
+              )}
             </div>
           </div>
 
