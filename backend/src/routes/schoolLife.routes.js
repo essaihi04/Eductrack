@@ -546,7 +546,7 @@ router.get('/issues', authorize('admin', 'school_admin', 'teacher'), async (req,
   try {
     let q = supabaseAdmin
       .from('issue_reports')
-      .select('*, classes(name), reporter:reported_by(first_name, last_name, role), related:related_student(first_name, last_name)')
+      .select('*, classes(name), reporter:reported_by(first_name, last_name, role), related:related_student(first_name, last_name), students:issue_report_students(student:profiles(id, first_name, last_name))')
       .order('created_at', { ascending: false });
     if (schoolFilter(req)) q = q.eq('school_id', schoolFilter(req));
     if (req.query.status) q = q.eq('status', req.query.status);
@@ -580,8 +580,12 @@ router.get('/classes/:classId/students', authorize('admin', 'school_admin', 'tea
 
 router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
-    const { category, title, description, priority, class_id, related_student } = req.body;
+    const { category, title, description, priority, class_id, related_student, related_students } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
+    // Liste d'élèves ciblés (multi). Compat : related_student (single) accepté.
+    const studentIds = Array.isArray(related_students) && related_students.length > 0
+      ? related_students.filter(Boolean)
+      : (related_student ? [related_student] : []);
     const { data, error } = await supabaseAdmin
       .from('issue_reports')
       .insert({
@@ -592,11 +596,17 @@ router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req
         description: description || null,
         priority: priority || 'normale',
         class_id: class_id || null,
-        related_student: related_student || null,
+        related_student: studentIds[0] || null,
       })
       .select()
       .single();
     if (error) throw error;
+
+    if (studentIds.length > 0) {
+      await supabaseAdmin
+        .from('issue_report_students')
+        .insert(studentIds.map((sid) => ({ issue_id: data.id, student_id: sid })));
+    }
     res.status(201).json(data);
   } catch (e) {
     console.error('POST /issues', e);

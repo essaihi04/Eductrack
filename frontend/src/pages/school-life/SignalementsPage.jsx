@@ -37,7 +37,7 @@ const SignalementsPage = () => {
   const [filter, setFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ category: 'pedagogique', title: '', description: '', priority: 'normale', class_id: '', related_student: '' });
+  const [form, setForm] = useState({ category: 'pedagogique', title: '', description: '', priority: 'normale', class_id: '', related_students: [] });
 
   const load = async () => {
     setLoading(true);
@@ -47,11 +47,18 @@ const SignalementsPage = () => {
   useEffect(() => { load(); }, [filter]);
   useEffect(() => { fetchClasses().then(setClasses); }, []);
 
-  // Charge les élèves de la classe choisie (pour cibler un élève précis)
+  // Charge les élèves de la classe choisie (pour cibler des élèves précis)
   useEffect(() => {
     if (!form.class_id) { setStudents([]); return; }
     schoolLifeApi.listClassStudents(form.class_id).then(setStudents).catch(() => setStudents([]));
   }, [form.class_id]);
+
+  const toggleStudent = (id) => setForm((f) => ({
+    ...f,
+    related_students: f.related_students.includes(id)
+      ? f.related_students.filter((x) => x !== id)
+      : [...f.related_students, id],
+  }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -60,9 +67,9 @@ const SignalementsPage = () => {
       await schoolLifeApi.createIssue({
         ...form,
         class_id: form.class_id || null,
-        related_student: form.related_student || null,
+        related_students: form.related_students,
       });
-      setForm({ category: 'pedagogique', title: '', description: '', priority: 'normale', class_id: '', related_student: '' });
+      setForm({ category: 'pedagogique', title: '', description: '', priority: 'normale', class_id: '', related_students: [] });
       setShowForm(false); await load();
     } catch (e) { alert(e.message); }
     setSaving(false);
@@ -101,16 +108,39 @@ const SignalementsPage = () => {
             <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="border border-border rounded-lg px-3 py-2 bg-background">
               {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
-            <select value={form.class_id} onChange={(e) => setForm({ ...form, class_id: e.target.value, related_student: '' })} className="border border-border rounded-lg px-3 py-2 bg-background">
+            <select value={form.class_id} onChange={(e) => setForm({ ...form, class_id: e.target.value, related_students: [] })} className="border border-border rounded-lg px-3 py-2 bg-background">
               <option value="">Aucune classe</option>
               {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           {form.class_id && (
-            <select value={form.related_student} onChange={(e) => setForm({ ...form, related_student: e.target.value })} className="w-full border border-border rounded-lg px-3 py-2 bg-background">
-              <option value="">Toute la classe (aucun élève précis)</option>
-              {students.map((s) => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
-            </select>
+            <div className="border border-border rounded-lg p-3 bg-background">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">Élèves concernés <span className="text-muted-foreground font-normal">(aucun = toute la classe)</span></p>
+                {students.length > 0 && (
+                  <button type="button"
+                    onClick={() => setForm((f) => ({ ...f, related_students: f.related_students.length === students.length ? [] : students.map((s) => s.id) }))}
+                    className="text-xs text-primary">
+                    {form.related_students.length === students.length ? 'Tout décocher' : 'Tout cocher'}
+                  </button>
+                )}
+              </div>
+              {students.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Aucun élève dans cette classe.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-44 overflow-y-auto">
+                  {students.map((s) => (
+                    <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer px-2 py-1 rounded hover:bg-muted">
+                      <input type="checkbox" checked={form.related_students.includes(s.id)} onChange={() => toggleStudent(s.id)} className="w-4 h-4" />
+                      {s.first_name} {s.last_name}
+                    </label>
+                  ))}
+                </div>
+              )}
+              {form.related_students.length > 0 && (
+                <p className="text-xs text-primary mt-2">{form.related_students.length} élève(s) sélectionné(s)</p>
+              )}
+            </div>
           )}
           <button disabled={saving} className="bg-primary text-primary-foreground px-4 py-2 rounded-lg w-full">{saving ? '...' : 'Envoyer le signalement'}</button>
         </form>
@@ -131,7 +161,10 @@ const SignalementsPage = () => {
                     <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS[it.status]?.cls}`}>{STATUS[it.status]?.label}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${lbl(PRIORITIES, it.priority).cls}`}>{lbl(PRIORITIES, it.priority).label}</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-muted">{lbl(CATEGORIES, it.category).label}</span>
-                    {it.related && (
+                    {(it.students || []).map((rs) => rs.student && (
+                      <span key={rs.student.id} className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">👤 {rs.student.first_name} {rs.student.last_name}</span>
+                    ))}
+                    {(!it.students || it.students.length === 0) && it.related && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">👤 {it.related.first_name} {it.related.last_name}</span>
                     )}
                   </div>
