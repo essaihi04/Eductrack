@@ -535,6 +535,56 @@ router.get('/children/:childId/invoices', loadChild, async (req, res) => {
 });
 
 // ============================================================
+// GET /api/parent/issues
+// Signalements concernant les enfants du parent connecté
+// ============================================================
+router.get('/issues', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    // Enfants du parent
+    const { data: links } = await supabaseAdmin
+      .from('parent_students')
+      .select('student_id')
+      .eq('parent_id', parentId);
+    const childIds = [...new Set((links || []).map((l) => l.student_id))];
+    if (childIds.length === 0) return res.json([]);
+
+    // Liaisons signalement ↔ élève pour ces enfants
+    const { data: rels } = await supabaseAdmin
+      .from('issue_report_students')
+      .select('issue_id, student_id')
+      .in('student_id', childIds);
+    const issueIds = [...new Set((rels || []).map((r) => r.issue_id))];
+    if (issueIds.length === 0) return res.json([]);
+
+    const { data: issues } = await supabaseAdmin
+      .from('issue_reports')
+      .select('id, category, title, description, priority, status, created_at, classes(name)')
+      .in('id', issueIds)
+      .order('created_at', { ascending: false });
+
+    // Nom des enfants concernés par chaque signalement
+    const { data: childProfiles } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name')
+      .in('id', childIds);
+    const childById = Object.fromEntries((childProfiles || []).map((c) => [c.id, c]));
+    const studentsByIssue = {};
+    for (const r of rels || []) {
+      if (!studentsByIssue[r.issue_id]) studentsByIssue[r.issue_id] = [];
+      const c = childById[r.student_id];
+      if (c) studentsByIssue[r.issue_id].push(`${c.first_name} ${c.last_name}`);
+    }
+
+    const result = (issues || []).map((i) => ({ ...i, children: studentsByIssue[i.id] || [] }));
+    res.json(result);
+  } catch (e) {
+    console.error('[parent] issues error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
 // GET /api/parent/notifications
 // Historique des notifications WhatsApp envoyées au parent connecté
 // (toutes catégories : transport, pédagogique, financier, général)

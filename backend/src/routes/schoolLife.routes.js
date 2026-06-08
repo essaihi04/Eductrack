@@ -606,6 +606,21 @@ router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req
       await supabaseAdmin
         .from('issue_report_students')
         .insert(studentIds.map((sid) => ({ issue_id: data.id, student_id: sid })));
+
+      // Notifier les parents des élèves concernés (in-app + WhatsApp)
+      try {
+        const parents = await getParentPhonesForStudents(studentIds);
+        const text = `🚩 *Signalement*\n\n*${title}*${description ? `\n${description}` : ''}\n\n_Ce signalement concerne votre enfant. Contactez l'établissement pour plus d'informations._`;
+        await notifyUsers(parents.parentIds, {
+          title: `Signalement : ${title}`,
+          message: description || title,
+          type: 'message',
+          data: { kind: 'issue_report', issue_id: data.id },
+        });
+        broadcastWhatsApp(req.user.school_id, parents.phones, text).catch(() => {});
+      } catch (notifErr) {
+        console.error('[issues] notification parents:', notifErr.message);
+      }
     }
     res.status(201).json(data);
   } catch (e) {

@@ -168,6 +168,7 @@ const Sidebar = () => {
         { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
         { icon: BarChart2, label: 'Sondages', path: '/school-life/sondages' },
         { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
+        { icon: AlertTriangle, label: 'Signalements', path: '/parent/signalements' },
         { icon: Edit, label: 'Profil', path: '/profile' },
       ];
     }
