@@ -9,6 +9,99 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 const router = express.Router();
 
+/**
+ * Gère l'envoi des notifications WhatsApp de présence/absence aux parents,
+ * en couvrant toutes les transitions :
+ *  - absent (1re fois dans la séance) → message d'absence (matière + horaire)
+ *  - absent re-enregistré absent → rien (déjà notifié)
+ *  - absent → présent/retard (même séance) → message de présence (correction)
+ *  - absent dans une séance, présent dans une autre du même jour → message présence
+ *  - présent depuis le début (jamais signalé absent) → rien
+ *  - déjà notifié présent ce jour, encore présent → rien (pas de spam)
+ *  - absent séance 1 ET absent séance 2 → 2 messages d'absence (un par séance)
+ */
+async function handlePresenceNotification({ presence, existing, rowId, sessionId, studentId, senderId }) {
+  const { data: sessionInfo } = await supabaseAdmin
+    .from('sessions')
+    .select('date, topic, start_time, end_time, school_id, subjects(name)')
+    .eq('id', sessionId)
+    .single();
+  if (!sessionInfo) return;
+
+  const { data: studentProfile } = await supabaseAdmin
+    .from('profiles')
+    .select('first_name, last_name')
+    .eq('id', studentId)
+    .single();
+  const { data: parentLinks } = await supabaseAdmin
+    .from('parent_students')
+    .select('profiles!parent_id(first_name, phone)')
+    .eq('student_id', studentId);
+  if (!studentProfile || !parentLinks?.length) return;
+
+  const studentName = `${studentProfile.first_name} ${studentProfile.last_name}`.trim();
+  const dateLabel = new Date(sessionInfo.date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const subjectName = sessionInfo.subjects?.name || '';
+  const lessonTopic = sessionInfo.topic || '';
+  const timeSlot = sessionInfo.start_time && sessionInfo.end_time
+    ? `${sessionInfo.start_time.slice(0, 5)} - ${sessionInfo.end_time.slice(0, 5)}`
+    : (sessionInfo.start_time ? sessionInfo.start_time.slice(0, 5) : '');
+  const schoolId = sessionInfo.school_id;
+
+  const sendToParents = async (message, event) => {
+    for (const link of parentLinks) {
+      const parentPhone = link.profiles?.phone;
+      if (!parentPhone) continue;
+      const e164Phone = parentPhone.startsWith('+') ? parentPhone : `+${parentPhone}`;
+      await sendWhatsAppResponse(e164Phone, message, schoolId, {
+        category: 'pedagogical',
+        senderId,
+        recipientFilter: { event, student_id: studentId, student_name: studentName, session_id: sessionId, date: sessionInfo.date },
+      });
+      console.log(`[Tracking] ${event} → parent ${e164Phone} pour ${studentName}`);
+    }
+  };
+
+  if (presence === 'absent') {
+    if (existing?.absence_notified === true) return; // déjà notifié pour cette séance
+    let msg = `⚠️ *Absence signalée*\n\nBonjour,\n\nNous vous informons que *${studentName}* a été marqué(e) *absent(e)* lors de la séance du *${dateLabel}*`;
+    if (subjectName) msg += `\n📚 Matière: ${subjectName}`;
+    if (lessonTopic) msg += `\n📖 Leçon: ${lessonTopic}`;
+    if (timeSlot) msg += `\n🕐 Horaire: ${timeSlot}`;
+    msg += `\n\nPour toute question, n'hésitez pas à contacter l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+    await sendToParents(msg, 'absence_notification');
+    if (rowId) await supabaseAdmin.from('session_tracking').update({ absence_notified: true }).eq('id', rowId);
+    return;
+  }
+
+  // presence === 'present' || 'late'
+  if (existing?.presence_notified === true) return; // déjà notifié présent (cette séance)
+
+  // L'élève a-t-il été signalé absent (cette séance OU une séance plus tôt le
+  // même jour) ? Et un message de présence a-t-il déjà été envoyé aujourd'hui ?
+  let wasAbsentNotified = existing?.absence_notified === true;
+  let presenceAlreadySentToday = false;
+  const { data: todayRows } = await supabaseAdmin
+    .from('session_tracking')
+    .select('absence_notified, presence_notified, sessions!inner(date)')
+    .eq('student_id', studentId)
+    .eq('sessions.date', sessionInfo.date);
+  for (const r of todayRows || []) {
+    if (r.absence_notified) wasAbsentNotified = true;
+    if (r.presence_notified) presenceAlreadySentToday = true;
+  }
+
+  if (wasAbsentNotified && !presenceAlreadySentToday) {
+    const arrivalWord = presence === 'late' ? 'présent(e) (en retard)' : 'présent(e)';
+    let msg = `✅ *Présence confirmée*\n\nBonjour,\n\nBonne nouvelle : *${studentName}* est finalement *${arrivalWord}* le *${dateLabel}*`;
+    if (subjectName) msg += `\n📚 Matière: ${subjectName}`;
+    if (timeSlot) msg += `\n🕐 Horaire: ${timeSlot}`;
+    msg += `\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+    await sendToParents(msg, 'presence_notification');
+    if (rowId) await supabaseAdmin.from('session_tracking').update({ presence_notified: true }).eq('id', rowId);
+  }
+}
+
 // Middleware pour vérifier que c'est un professeur
 router.use(authenticate);
 router.use(authorize('teacher'));
@@ -686,78 +779,21 @@ router.post('/session-tracking', async (req, res) => {
     if (error) throw error;
     res.status(201).json(data);
 
-    // Notification WhatsApp automatique si l'élève est marqué absent.
-    // Idempotent : on n'envoie qu'une seule fois par (séance, élève) et jamais
-    // si l'appelant demande explicitement de ne pas notifier (skip).
-    const alreadyNotified = existing?.absence_notified === true;
-    if (presence === 'absent' && !skip_absence_notification && !alreadyNotified) {
+    // Notifications WhatsApp présence/absence (gère toutes les transitions).
+    // skip_absence_notification = enregistrement complet de séance : on ne
+    // (re)notifie jamais la présence depuis ce flux.
+    if (!skip_absence_notification && (presence === 'absent' || presence === 'present' || presence === 'late')) {
       try {
-        // Récupérer les infos de la session (date, matière, leçon, horaire)
-        const { data: sessionInfo } = await supabaseAdmin
-          .from('sessions')
-          .select('date, topic, start_time, end_time, school_id, subjects(name)')
-          .eq('id', session_id)
-          .single();
-
-        // Récupérer le(s) parent(s) de l'élève et leur numéro WhatsApp
-        const { data: parentLinks } = await supabaseAdmin
-          .from('parent_students')
-          .select('profiles!parent_id(first_name, phone)')
-          .eq('student_id', student_id);
-
-        // Récupérer le nom de l'élève
-        const { data: studentProfile } = await supabaseAdmin
-          .from('profiles')
-          .select('first_name, last_name')
-          .eq('id', student_id)
-          .single();
-
-        if (sessionInfo && studentProfile && parentLinks?.length > 0) {
-          const studentName = `${studentProfile.first_name} ${studentProfile.last_name}`.trim();
-          const sessionDate = new Date(sessionInfo.date + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-          const subjectName = sessionInfo.subjects?.name || '';
-          const lessonTopic = sessionInfo.topic || '';
-          const timeSlot = sessionInfo.start_time && sessionInfo.end_time 
-            ? `${sessionInfo.start_time.slice(0, 5)} - ${sessionInfo.end_time.slice(0, 5)}`
-            : '';
-          const schoolId = sessionInfo.school_id;
-
-          let message = `⚠️ *Absence signalée*\n\nBonjour,\n\nNous vous informons que *${studentName}* a été marqué(e) *absent(e)* lors de la séance du *${sessionDate}*`;
-          if (subjectName) message += `\n📚 Matière: ${subjectName}`;
-          if (lessonTopic) message += `\n📖 Leçon: ${lessonTopic}`;
-          if (timeSlot) message += `\n🕐 Horaire: ${timeSlot}`;
-          message += `\n\nPour toute question, n'hésitez pas à contacter l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
-
-          for (const link of parentLinks) {
-            const parentPhone = link.profiles?.phone;
-            if (parentPhone) {
-              const e164Phone = parentPhone.startsWith('+') ? parentPhone : `+${parentPhone}`;
-              await sendWhatsAppResponse(e164Phone, message, schoolId, {
-                category: 'pedagogical',
-                senderId: req.user.id,
-                recipientFilter: {
-                  event: 'absence_notification',
-                  student_id,
-                  student_name: studentName,
-                  session_id,
-                  date: sessionInfo.date,
-                },
-              });
-              console.log(`[Tracking] Notification absence envoyée au parent (${e164Phone}) pour l'élève ${studentName}`);
-            }
-          }
-
-          // Marquer comme notifié pour ne jamais renvoyer le message (même
-          // parent) lors d'une modification ou d'un ré-enregistrement ultérieur.
-          if (data?.id) {
-            await supabaseAdmin
-              .from('session_tracking')
-              .update({ absence_notified: true })
-              .eq('id', data.id);
-          }
-        }
+        await handlePresenceNotification({
+          presence,
+          existing,
+          rowId: data?.id,
+          sessionId: session_id,
+          studentId: student_id,
+          senderId: req.user.id,
+        });
       } catch (notifError) {
-        console.error('[Tracking] Erreur notification absence WhatsApp:', notifError);
+        console.error('[Tracking] Erreur notification présence/absence WhatsApp:', notifError);
       }
     }
 
