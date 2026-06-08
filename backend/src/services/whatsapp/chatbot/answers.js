@@ -658,6 +658,7 @@ export async function getLostItems(student, parentInfo) {
     .select('title, description, location_found, found_date, status')
     .eq('school_id', parentInfo.school_id)
     .neq('status', 'rendu')
+    .eq('is_published', true)
     .order('created_at', { ascending: false })
     .limit(10);
 
@@ -680,6 +681,7 @@ export async function getLostItemsWithPhotos(parentInfo) {
     .select('title, location_found, photo_url')
     .eq('school_id', parentInfo.school_id)
     .neq('status', 'rendu')
+    .eq('is_published', true)
     .not('photo_url', 'is', null)
     .order('created_at', { ascending: false })
     .limit(10);

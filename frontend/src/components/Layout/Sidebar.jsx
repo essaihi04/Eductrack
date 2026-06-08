@@ -31,6 +31,7 @@ import {
   UserCog,
   Wallet,
   Banknote,
+  ShieldCheck,
   Bus,
   MapPin,
   Bell,
@@ -86,6 +87,7 @@ const Sidebar = () => {
       return [
         ...commonItems,
         { section: 'Pédagogique', isSection: true },
+        { icon: ShieldCheck, label: 'Approbations', path: '/approvals' },
         { icon: BarChart3, label: 'Comportement', path: '/behavior' },
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: UserCircle, label: 'Professeurs', path: '/teachers' },

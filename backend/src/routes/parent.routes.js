@@ -561,6 +561,7 @@ router.get('/issues', async (req, res) => {
       .from('issue_reports')
       .select('id, category, title, description, priority, status, created_at, classes(name)')
       .in('id', issueIds)
+      .eq('is_published', true)
       .order('created_at', { ascending: false });
 
     // Nom des enfants concernés par chaque signalement

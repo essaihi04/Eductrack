@@ -74,6 +74,7 @@ import AppreciationsPage from './pages/teacher/AppreciationsPage';
 import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
 import ParentFinancePage from './pages/parent/ParentFinancePage';
 import ParentSignalementsPage from './pages/parent/ParentSignalementsPage';
+import ApprovalsPage from './pages/ApprovalsPage';
 import StudentBulletins from './pages/student/StudentBulletins';
 import ParascolairePage from './pages/school-life/ParascolairePage';
 import CahierDeViePage from './pages/school-life/CahierDeViePage';
@@ -129,6 +130,7 @@ function App() {
             <Route path="parents" element={<ParentsPage />} />
             <Route path="stats" element={<StatsPage />} />
             <Route path="teacher-tracking" element={<TeacherTrackingDashboard />} />
+            <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
             <Route path="finance" element={<FinanceDashboard />} />

@@ -6,6 +6,12 @@ import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { sendText, sendImage, getStatus } from '../services/whatsapp/index.js';
+import { requiresApproval, createApprovalRequest } from '../services/approvals.js';
+
+// Un prof crée-t-il un élément qui doit passer en validation ?
+const needsApproval = async (req, type) =>
+  req.user.role === 'teacher' && (await requiresApproval(req.user.school_id, type));
+const requesterName = (req) => `${req.user.first_name || ''} ${req.user.last_name || ''}`.trim();
 
 const router = express.Router();
 
@@ -158,6 +164,7 @@ router.post('/activities', authorize('admin', 'school_admin', 'teacher'), upload
     const { title, description, category, location, start_date, end_date, target_level, class_id, capacity, notify } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
     const photo_url = req.file ? publicUrl(`${UPLOAD_WEB_PATH}/${req.file.filename}`) : null;
+    const gated = await needsApproval(req, 'activity');
     const { data, error } = await supabaseAdmin
       .from('extracurricular_activities')
       .insert({
@@ -172,11 +179,17 @@ router.post('/activities', authorize('admin', 'school_admin', 'teacher'), upload
         class_id: class_id || null,
         capacity: capacity ? Number(capacity) : null,
         photo_url,
+        is_published: !gated,
         created_by: req.user.id,
       })
       .select()
       .single();
     if (error) throw error;
+
+    if (gated) {
+      await createApprovalRequest({ schoolId: req.user.school_id, elementType: 'activity', elementId: data.id, classId: class_id || null, title, requestedBy: req.user.id, requesterName: requesterName(req) });
+      return res.status(201).json({ ...data, pending_approval: true });
+    }
 
     if (notify === 'true' || notify === true) {
       const studentIds = await getStudentIds(req.user.school_id, class_id || null);
@@ -291,9 +304,9 @@ router.get('/feed', async (req, res) => {
         .select('class_id')
         .in('id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000']);
       const classIds = [...new Set((students || []).map((s) => s.class_id).filter(Boolean))];
-      q = q.in('class_id', classIds.length ? classIds : ['00000000-0000-0000-0000-000000000000']);
+      q = q.in('class_id', classIds.length ? classIds : ['00000000-0000-0000-0000-000000000000']).eq('is_published', true);
     } else if (req.user.role === 'student') {
-      q = q.eq('class_id', req.user.class_id || '00000000-0000-0000-0000-000000000000');
+      q = q.eq('class_id', req.user.class_id || '00000000-0000-0000-0000-000000000000').eq('is_published', true);
     } else {
       if (schoolFilter(req)) q = q.eq('school_id', schoolFilter(req));
       if (classId) q = q.eq('class_id', classId);
@@ -312,6 +325,7 @@ router.post('/feed', authorize('admin', 'school_admin', 'teacher'), upload.array
     const { title, content, class_id, activity_date, notify } = req.body;
     if (!class_id) return res.status(400).json({ error: 'class_id requis' });
     const media_urls = (req.files || []).map((f) => publicUrl(`${UPLOAD_WEB_PATH}/${f.filename}`));
+    const gated = await needsApproval(req, 'feed');
     const { data, error } = await supabaseAdmin
       .from('classroom_feed_posts')
       .insert({
@@ -321,11 +335,17 @@ router.post('/feed', authorize('admin', 'school_admin', 'teacher'), upload.array
         title: title || null,
         content: content || null,
         media_urls,
+        is_published: !gated,
         activity_date: activity_date || null,
       })
       .select()
       .single();
     if (error) throw error;
+
+    if (gated) {
+      await createApprovalRequest({ schoolId: req.user.school_id, elementType: 'feed', elementId: data.id, classId: class_id, title: title || 'Cahier de vie', requestedBy: req.user.id, requesterName: requesterName(req) });
+      return res.status(201).json({ ...data, pending_approval: true });
+    }
 
     if (notify === 'true' || notify === true) {
       const studentIds = await getStudentIds(req.user.school_id, class_id);
@@ -373,6 +393,7 @@ router.post('/lost-items', authorize('admin', 'school_admin', 'teacher'), upload
     const { title, description, location_found, found_date, notify } = req.body;
     if (!title) return res.status(400).json({ error: 'Titre requis' });
     const photo_url = req.file ? publicUrl(`${UPLOAD_WEB_PATH}/${req.file.filename}`) : null;
+    const gated = await needsApproval(req, 'lost_item');
     const { data, error } = await supabaseAdmin
       .from('lost_items')
       .insert({
@@ -382,11 +403,17 @@ router.post('/lost-items', authorize('admin', 'school_admin', 'teacher'), upload
         location_found: location_found || null,
         found_date: found_date || null,
         photo_url,
+        is_published: !gated,
         reported_by: req.user.id,
       })
       .select()
       .single();
     if (error) throw error;
+
+    if (gated) {
+      await createApprovalRequest({ schoolId: req.user.school_id, elementType: 'lost_item', elementId: data.id, classId: null, title, requestedBy: req.user.id, requesterName: requesterName(req) });
+      return res.status(201).json({ ...data, pending_approval: true });
+    }
 
     if (notify === 'true' || notify === true) {
       const studentIds = await getStudentIds(req.user.school_id, null);
@@ -586,6 +613,7 @@ router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req
     const studentIds = Array.isArray(related_students) && related_students.length > 0
       ? related_students.filter(Boolean)
       : (related_student ? [related_student] : []);
+    const gated = await needsApproval(req, 'signalement');
     const { data, error } = await supabaseAdmin
       .from('issue_reports')
       .insert({
@@ -597,6 +625,7 @@ router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req
         priority: priority || 'normale',
         class_id: class_id || null,
         related_student: studentIds[0] || null,
+        is_published: !gated,
       })
       .select()
       .single();
@@ -606,7 +635,14 @@ router.post('/issues', authorize('admin', 'school_admin', 'teacher'), async (req
       await supabaseAdmin
         .from('issue_report_students')
         .insert(studentIds.map((sid) => ({ issue_id: data.id, student_id: sid })));
+    }
 
+    if (gated) {
+      await createApprovalRequest({ schoolId: req.user.school_id, elementType: 'signalement', elementId: data.id, classId: class_id || null, title, requestedBy: req.user.id, requesterName: requesterName(req) });
+      return res.status(201).json({ ...data, pending_approval: true });
+    }
+
+    if (studentIds.length > 0) {
       // Notifier les parents des élèves concernés (in-app + WhatsApp)
       try {
         const parents = await getParentPhonesForStudents(studentIds);
