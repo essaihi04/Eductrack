@@ -611,6 +611,18 @@ const ClassesPage = () => {
           let academicYear = '';
           let schoolType = '';
           let filiere = '';
+          let academy = '';            // الأكاديمية
+          let provincialDirection = ''; // المديرية الإقليمية
+          let commune = '';            // الجماعة
+          let establishment = '';      // المؤسسة
+
+          // Helper : valeur d'une étiquette (cellule j+1, ou j+2 si vide)
+          const valAfter = (row, j) => {
+            let v = row[j + 1];
+            if (!v || (typeof v === 'string' && !v.trim())) v = row[j + 2];
+            return (v && typeof v === 'string' && v.trim()) ? v.trim()
+                 : (v != null && typeof v !== 'string') ? String(v).trim() : '';
+          };
 
           // Look for class name, level, and academic year in metadata rows (rows 0-9)
           for (let i = 0; i < Math.min(20, rawData.length); i++) {
@@ -652,6 +664,11 @@ const ClassesPage = () => {
                     academicYear = valueCell.trim();
                   }
                 }
+                // Académie / Direction / Commune / Établissement (fichier officiel Massar)
+                if (!academy && trimmed.includes('أكاديمية')) academy = valAfter(row, j);
+                if (!provincialDirection && trimmed.includes('المديرية')) provincialDirection = valAfter(row, j);
+                if (!commune && trimmed.includes('الجماعة')) commune = valAfter(row, j);
+                if (!establishment && (trimmed.includes('المؤسسة') || trimmed.includes('مؤسسة'))) establishment = valAfter(row, j);
               }
             }
           }
@@ -771,6 +788,8 @@ const ClassesPage = () => {
           let studentNameColIndex = -1;
           let lastNameColIndex = -1;
           let birthDateColIndex = -1;
+          let genderColIndex = -1;
+          let birthPlaceColIndex = -1;
 
           console.log(`[${file.name}] Searching for header in ${rawData.length} rows...`);
           
@@ -792,6 +811,8 @@ const ClassesPage = () => {
             let tempStudentNameCol = -1;
             let tempLastNameCol = -1;
             let tempBirthDateCol = -1;
+            let tempGenderCol = -1;
+            let tempBirthPlaceCol = -1;
 
             for (let j = 0; j < row.length; j++) {
               const cell = row[j];
@@ -831,6 +852,14 @@ const ClassesPage = () => {
                   tempBirthDateCol = j;
                   console.log(`[${file.name}] Found birth date at row ${i}, col ${j}`);
                 }
+                // Genre (النوع) — éviter de confondre avec un éventuel "نوع" hors contexte
+                if (trimmed === 'النوع' || trimmed === 'نوع' || trimmed === 'الجنس') {
+                  tempGenderCol = j;
+                }
+                // Lieu de naissance (مكان الازدياد)
+                if (trimmed.includes('مكان') && (trimmed.includes('الازدياد') || trimmed.includes('الإزدياد') || trimmed.includes('ازدياد'))) {
+                  tempBirthPlaceCol = j;
+                }
               }
             }
 
@@ -841,6 +870,8 @@ const ClassesPage = () => {
               studentNameColIndex = tempStudentNameCol;
               lastNameColIndex = tempLastNameCol;
               birthDateColIndex = tempBirthDateCol;
+              genderColIndex = tempGenderCol;
+              birthPlaceColIndex = tempBirthPlaceCol;
               console.log(`[${file.name}] ✓ Header found at row ${i}`);
               console.log(`[${file.name}] Columns: ID=${studentIdColIndex}, FirstName=${studentNameColIndex}, LastName=${lastNameColIndex}, BirthDate=${birthDateColIndex}`);
               break;
@@ -862,6 +893,8 @@ const ClassesPage = () => {
 
             const massarCode = row[studentIdColIndex];
             const birthDate = birthDateColIndex !== -1 ? row[birthDateColIndex] : null;
+            const gender = genderColIndex !== -1 ? row[genderColIndex] : null;
+            const birthPlace = birthPlaceColIndex !== -1 ? row[birthPlaceColIndex] : null;
 
             // Skip if no massar code or if it's a header row
             if (!massarCode || typeof massarCode !== 'string' || !massarCode.trim() ||
@@ -915,7 +948,9 @@ const ClassesPage = () => {
                 massarCode: massarCode.trim(),
                 firstName,
                 lastName,
-                birthDate: birthDate || null
+                birthDate: birthDate || null,
+                gender: (gender != null && String(gender).trim()) ? String(gender).trim() : null,
+                birthPlace: (birthPlace != null && String(birthPlace).trim()) ? String(birthPlace).trim() : null
               });
             }
           }
@@ -933,6 +968,10 @@ const ClassesPage = () => {
             schoolType,
             filiere,
             academicYear,
+            academy,
+            provincialDirection,
+            commune,
+            establishment,
             students,
             studentCount: students.length
           };
@@ -1008,6 +1047,10 @@ const ClassesPage = () => {
         school_type: pc.schoolType,
         filiere: pc.filiere || null,
         academic_year: pc.academicYear,
+        academy: pc.academy || null,
+        provincialDirection: pc.provincialDirection || null,
+        commune: pc.commune || null,
+        establishment: pc.establishment || null,
         students: pc.students
       }));
 

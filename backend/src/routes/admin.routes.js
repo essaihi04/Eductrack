@@ -1766,7 +1766,10 @@ router.post('/classes/import', async (req, res) => {
     let totalStudentsProcessed = 0;
 
     for (const classData of classesData) {
-      const { name, level, school_type, filiere, academic_year, students: studentsList } = classData;
+      const {
+        name, level, school_type, filiere, academic_year, students: studentsList,
+        academy, provincialDirection, commune, establishment
+      } = classData;
 
       if (!name || !level) {
         errors.push({ className: name || 'Inconnue', reason: 'Nom et niveau obligatoires' });
@@ -1774,34 +1777,104 @@ router.post('/classes/import', async (req, res) => {
       }
 
       try {
-        // 1. Créer la classe
-        const { data: newClass, error: classError } = await supabaseAdmin
-          .from('classes')
-          .insert({
-            name,
-            level,
-            school_type: school_type || null,
-            filiere: filiere || null,
-            academic_year: academic_year || null,
-            school_id: schoolId
-          })
-          .select()
-          .single();
+        // 1. Réutiliser la classe existante (même école + nom + année) ou la créer.
+        //    → Réimporter le même fichier met à jour la classe au lieu d'en dupliquer une.
+        let newClass = null;
+        let classError = null;
 
-        if (classError) {
-          errors.push({ className: name, reason: `Erreur création classe: ${classError.message}` });
+        let findQuery = supabaseAdmin
+          .from('classes')
+          .select('*')
+          .eq('name', name)
+          .eq('school_id', schoolId || null);
+        findQuery = academic_year
+          ? findQuery.eq('academic_year', academic_year)
+          : findQuery.is('academic_year', null);
+        // limit(1) + order : robuste même si des doublons existent déjà
+        const { data: foundClasses } = await findQuery.order('created_at', { ascending: true }).limit(1);
+        const existingClass = Array.isArray(foundClasses) && foundClasses.length ? foundClasses[0] : null;
+
+        if (existingClass) {
+          // Compléter les champs manquants sans écraser ce qui existe
+          const patch = {};
+          if (level && existingClass.level !== level) patch.level = level;
+          if (school_type && !existingClass.school_type) patch.school_type = school_type;
+          if (filiere && !existingClass.filiere) patch.filiere = filiere;
+          if (Object.keys(patch).length) {
+            const { data: upd } = await supabaseAdmin
+              .from('classes').update(patch).eq('id', existingClass.id).select().single();
+            newClass = upd || existingClass;
+          } else {
+            newClass = existingClass;
+          }
+        } else {
+          const { data: created, error: cErr } = await supabaseAdmin
+            .from('classes')
+            .insert({
+              name,
+              level,
+              school_type: school_type || null,
+              filiere: filiere || null,
+              academic_year: academic_year || null,
+              school_id: schoolId
+            })
+            .select()
+            .single();
+          newClass = created;
+          classError = cErr;
+        }
+
+        if (classError || !newClass) {
+          errors.push({ className: name, reason: `Erreur création classe: ${classError?.message || 'inconnue'}` });
           continue;
+        }
+
+        // 1.b Renseigner la config d'année scolaire (académie / direction / commune /
+        //     établissement) à partir du fichier officiel Massar — sans écraser les
+        //     valeurs déjà saisies par l'admin.
+        if (schoolId && academic_year && (academy || provincialDirection || commune || establishment)) {
+          try {
+            const { data: syc } = await supabaseAdmin
+              .from('school_year_config')
+              .select('*')
+              .eq('school_id', schoolId)
+              .eq('academic_year', academic_year)
+              .maybeSingle();
+            const sycPatch = {
+              school_id: schoolId,
+              academic_year,
+              academy: syc?.academy || academy || null,
+              provincial_direction: syc?.provincial_direction || provincialDirection || null,
+              region: syc?.region || commune || null,
+              establishment_label: syc?.establishment_label || establishment || null,
+              updated_at: new Date().toISOString()
+            };
+            await supabaseAdmin
+              .from('school_year_config')
+              .upsert(sycPatch, { onConflict: 'school_id,academic_year' });
+          } catch (e) {
+            console.warn('[Import Class] school_year_config non mis à jour:', e.message);
+          }
         }
 
         // 2. Créer les élèves de cette classe
         const classStudents = [];
         if (Array.isArray(studentsList) && studentsList.length > 0) {
           for (const student of studentsList) {
-            const { massarCode, firstName, lastName, birthDate, birthPlace, gender } = student;
+            const firstName = String(student.firstName || '').replace(/\s+/g, ' ').trim();
+            let lastName = String(student.lastName || '').replace(/\s+/g, ' ').trim();
+            const { birthDate, birthPlace, gender } = student;
+            const massarCode = student.massarCode ? String(student.massarCode).trim() : null;
 
-            if (!firstName || !lastName) {
-              continue; // Skip invalid students
+            if (!firstName && !lastName) {
+              continue; // Ligne réellement vide
             }
+            if (!lastName) lastName = firstName; // ne pas perdre un élève sans nom de famille
+
+            // Genre : Massar = 'ذكر' (M) / 'أنثى' (F)
+            const gStr = String(gender || '').trim();
+            const genderCode = /ذكر|^m|gar|masc/i.test(gStr) ? 'M'
+              : /أنثى|انثى|^f|fil|fem/i.test(gStr) ? 'F' : null;
 
             totalStudentsProcessed += 1;
 
@@ -1813,16 +1886,33 @@ router.post('/classes/import', async (req, res) => {
             let email = `${emailId}@${schoolDomain}`;
             // Mot de passe simplifié: Prénom + Année (ex: Ahmed2025)
             const cleanFirstName = firstName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z]/g, '');
-            const password = cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase() + new Date().getFullYear();
+            const baseName = cleanFirstName ? (cleanFirstName.charAt(0).toUpperCase() + cleanFirstName.slice(1).toLowerCase()) : 'Eleve';
+            const codeTail = (massarCode || emailId).replace(/[^a-zA-Z0-9]/g, '').slice(-4) || '0000';
+            const password = `${baseName}${new Date().getFullYear()}${codeTail}`;
 
             try {
-              // 2.a Vérifier profil existant avant création Auth
-              const { data: existingProfile, error: existingProfileError } = await supabaseAdmin
-                .from('profiles')
-                .select('id, email, first_name, last_name, school_id, class_id')
-                .eq('email', email)
-                .eq('role', 'student')
-                .maybeSingle();
+              // 2.a Chercher un profil existant : d'abord par CODE MASSAR (clé fiable),
+              //     sinon par email généré. Permet la mise à jour lors d'un réimport.
+              let existingProfile = null;
+              let existingProfileError = null;
+              if (massarCode) {
+                const r = await supabaseAdmin
+                  .from('profiles')
+                  .select('id, email, first_name, last_name, school_id, class_id, massar_code')
+                  .eq('massar_code', massarCode)
+                  .eq('role', 'student')
+                  .maybeSingle();
+                existingProfile = r.data; existingProfileError = r.error;
+              }
+              if (!existingProfile && !existingProfileError) {
+                const r = await supabaseAdmin
+                  .from('profiles')
+                  .select('id, email, first_name, last_name, school_id, class_id, massar_code')
+                  .eq('email', email)
+                  .eq('role', 'student')
+                  .maybeSingle();
+                existingProfile = r.data; existingProfileError = r.error;
+              }
 
               if (existingProfileError) {
                 errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur recherche profil: ${existingProfileError.message}` });
@@ -1844,22 +1934,42 @@ router.post('/classes/import', async (req, res) => {
                 let finalExistingProfile = existingProfile;
                 let wasReassigned = false;
 
-                if (existingProfile.class_id !== newClass.id) {
-                  const { data: updatedProfile, error: updateProfileError } = await supabaseAdmin
+                // Patch : (re)affectation de classe + complétion des champs Massar
+                const profPatch = {};
+                if (existingProfile.class_id !== newClass.id) profPatch.class_id = newClass.id;
+                if (massarCode && !existingProfile.massar_code) profPatch.massar_code = massarCode;
+                if (birthDate) profPatch.date_of_birth = birthDate;
+                if (genderCode) profPatch.gender = genderCode;
+                if (birthPlace) profPatch.birth_place = String(birthPlace).trim();
+
+                if (Object.keys(profPatch).length) {
+                  let { data: updatedProfile, error: updateProfileError } = await supabaseAdmin
                     .from('profiles')
-                    .update({ class_id: newClass.id })
+                    .update(profPatch)
                     .eq('id', existingProfile.id)
                     .select('id, email, first_name, last_name, school_id, class_id')
                     .single();
 
+                  // Repli si gender/birth_place pas encore migrés
+                  if (updateProfileError && /gender|birth_place|column/i.test(updateProfileError.message || '')) {
+                    const { gender: _g, birth_place: _b, ...safePatch } = profPatch;
+                    if (Object.keys(safePatch).length) {
+                      ({ data: updatedProfile, error: updateProfileError } = await supabaseAdmin
+                        .from('profiles').update(safePatch).eq('id', existingProfile.id)
+                        .select('id, email, first_name, last_name, school_id, class_id').single());
+                    } else { updateProfileError = null; updatedProfile = existingProfile; }
+                  }
+
                   if (updateProfileError) {
-                    errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur mise à jour classe: ${updateProfileError.message}` });
+                    errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur mise à jour: ${updateProfileError.message}` });
                     continue;
                   }
 
                   finalExistingProfile = updatedProfile;
-                  wasReassigned = true;
-                  reassignedStudents.push({ id: updatedProfile.id, email: updatedProfile.email, className: name });
+                  if (profPatch.class_id) {
+                    wasReassigned = true;
+                    reassignedStudents.push({ id: updatedProfile.id, email: updatedProfile.email, className: name });
+                  }
                 }
 
                 const existingPayload = {
@@ -1928,36 +2038,48 @@ router.post('/classes/import', async (req, res) => {
 
               if (authError) {
                 console.error(`[Import Class] Échec création après ${attempts} tentatives pour ${emailId}:`, authError);
+                errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Création compte échouée: ${authError.message || authError.msg || authError}` });
                 continue;
               }
 
               const userId = authData?.user?.id;
               if (!userId) {
                 console.error(`[Import Class] Pas d'ID utilisateur pour ${email}`);
+                errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: 'Compte créé sans identifiant' });
                 continue;
               }
               
               console.log(`[Import Class] Utilisateur créé: ${email} (ID: ${userId})`);
 
-              // Créer le profil élève
-              const { data: profile, error: profileError } = await supabaseAdmin
+              // Créer le profil élève. Les colonnes gender/birth_place nécessitent
+              // MIGRATION_STUDENT_FIELDS.sql ; repli automatique si absentes pour ne
+              // jamais perdre d'élève.
+              const baseProfile = {
+                id: userId,
+                email,
+                first_name: firstName,
+                last_name: lastName,
+                role: 'student',
+                class_id: newClass.id,
+                school_id: schoolId,
+                date_of_birth: birthDate || null,
+                massar_code: massarCode || null
+              };
+              let { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
-                .insert({
-                  id: userId,
-                  email,
-                  first_name: firstName,
-                  last_name: lastName,
-                  role: 'student',
-                  class_id: newClass.id,
-                  school_id: schoolId,
-                  date_of_birth: birthDate || null,
-                  massar_code: massarCode || null
-                })
+                .insert({ ...baseProfile, gender: genderCode, birth_place: birthPlace ? String(birthPlace).trim() : null })
                 .select()
                 .single();
 
+              if (profileError && /gender|birth_place|column/i.test(profileError.message || '')) {
+                // Colonnes non encore migrées → réinsertion sans elles
+                ({ data: profile, error: profileError } = await supabaseAdmin
+                  .from('profiles').insert(baseProfile).select().single());
+              }
+
               if (profileError) {
                 console.error(`[Import Class] Erreur profil ${email}:`, profileError);
+                errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur profil: ${profileError.message}` });
                 continue;
               }
 
