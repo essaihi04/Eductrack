@@ -1456,17 +1456,51 @@ const ControlsPage = () => {
                     <h4 className="font-semibold text-green-800 text-lg">{excelGlobalResult.message}</h4>
                   </div>
                   {excelGlobalResult.details && Object.keys(excelGlobalResult.details).length > 0 && (
-                    <div className="space-y-1 text-sm text-green-700">
-                      {Object.entries(excelGlobalResult.details).map(([key, d], i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          {d.success ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-red-500" />}
-                          <span><strong>{key}</strong> : {d.success ? `${d.count} note(s)` : d.error}</span>
-                        </div>
-                      ))}
+                    <div className="space-y-3 text-sm text-green-700">
+                      {Object.entries(excelGlobalResult.details).map(([key, d], i) => {
+                        const levelStyle = {
+                          red:    { dot: 'bg-red-500',    text: 'text-red-700',    chip: 'bg-red-100 text-red-700' },
+                          orange: { dot: 'bg-orange-500', text: 'text-orange-700', chip: 'bg-orange-100 text-orange-700' },
+                          yellow: { dot: 'bg-amber-400',  text: 'text-amber-700',  chip: 'bg-amber-100 text-amber-700' },
+                          gray:   { dot: 'bg-gray-400',   text: 'text-gray-600',   chip: 'bg-gray-100 text-gray-600' },
+                        };
+                        const flagged = d.flagged || [];
+                        const counts = d.flaggedCounts || {};
+                        return (
+                          <div key={i} className="bg-white/60 rounded-lg border border-green-200 p-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {d.success ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-red-500" />}
+                              <span className="font-semibold text-green-800">{key}</span>
+                              <span className="text-green-700">: {d.success ? `${d.count} note(s)` : d.error}</span>
+                              {d.success && d.totalStudents != null && (
+                                <span className="text-xs text-gray-500">• {d.notedStudents}/{d.totalStudents} notés</span>
+                              )}
+                              {['red','orange','yellow','gray'].map(lvl => counts[lvl] ? (
+                                <span key={lvl} className={`text-xs px-2 py-0.5 rounded-full font-medium ${levelStyle[lvl].chip}`}>
+                                  {counts[lvl]} {lvl === 'red' ? 'critiques' : lvl === 'orange' ? 'incidents' : lvl === 'yellow' ? 'sans note' : 'absents'}
+                                </span>
+                              ) : null)}
+                            </div>
+                            {flagged.length > 0 && (
+                              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                                {flagged.map((f, j) => (
+                                  <div key={j} className="flex items-center gap-2 text-xs">
+                                    <span className={`inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 ${levelStyle[f.level]?.dot || 'bg-gray-300'}`}></span>
+                                    <span className="font-medium text-gray-800 truncate">{f.name}</span>
+                                    <span className={`${levelStyle[f.level]?.text || 'text-gray-500'} truncate`}>— {f.status}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                   {excelGlobalResult.skippedStudents > 0 && (
-                    <p className="text-sm text-yellow-700 mt-2">{excelGlobalResult.skippedStudents} élève(s) non reconnu(s) ignoré(s)</p>
+                    <p className="text-sm text-yellow-700 mt-2 flex items-center gap-1">
+                      <AlertTriangle className="w-4 h-4" /> {excelGlobalResult.skippedStudents} élève(s) du fichier non reconnu(s) — vérifiez le code Massar / le nom.
+                    </p>
                   )}
                   <button onClick={resetExcelImport} className="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium">
                     Nouvel import

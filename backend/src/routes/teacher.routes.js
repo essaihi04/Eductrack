@@ -4,6 +4,7 @@ import { authenticate, authorize } from '../middleware/auth.js';
 import multer from 'multer';
 import XLSX from 'xlsx';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { collectControlReportData, buildControlRows } from '../services/bulletins/controlReportPdf.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -2251,6 +2252,36 @@ router.post('/controls/import-excel-notes', async (req, res) => {
     }
 
     console.log(`Import Excel: ${totalInserted} notes importées, ${totalErrors} erreurs, ${skippedCount} élèves ignorés`);
+
+    // Après import : pour chaque contrôle, détecter les élèves à signaler
+    // (note manquante, copie rendue non notée, absent, triche…) — même logique
+    // de couleurs que le rapport de contrôle PDF.
+    for (const controlId of Object.keys(notesByControl)) {
+      if (!results[controlId] || results[controlId].success === false) continue;
+      try {
+        const data = await collectControlReportData(controlId, teacherId);
+        if (data && !data.forbidden) {
+          const rows = buildControlRows(data);
+          const flagged = rows
+            .filter(r => r.statusLevel !== 'ok')
+            .map(r => ({
+              name: `${r.last_name} ${r.first_name}`.trim(),
+              massar_code: r.massar_code,
+              status: r.statusLabel,
+              level: r.statusLevel,        // red | orange | yellow | gray
+              note: r.note,
+              copy: r.copy_submitted || null,
+            }));
+          const counts = flagged.reduce((acc, f) => { acc[f.level] = (acc[f.level] || 0) + 1; return acc; }, {});
+          results[controlId].flagged = flagged;
+          results[controlId].flaggedCounts = counts;
+          results[controlId].totalStudents = rows.length;
+          results[controlId].notedStudents = rows.filter(r => r.hasNote).length;
+        }
+      } catch (e) {
+        console.warn(`[Import Excel] anomalies non calculées pour ${controlId}:`, e.message);
+      }
+    }
 
     res.json({
       success: true,

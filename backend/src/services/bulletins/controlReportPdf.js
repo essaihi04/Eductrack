@@ -374,10 +374,40 @@ export function generateControlReportPdf({ control, cls, subjectName, students, 
 }
 
 /**
- * Charge les données et génère le PDF pour un contrôle donné.
- * @returns {Promise<{ buffer: Buffer, fileName: string } | null>}
+ * Construit les lignes enrichies (note + suivi + statut) pour un contrôle.
+ * Partagé par l'export PDF et l'export Excel.
+ * @returns Array<{ massar_code, last_name, first_name, note, hasNote,
+ *                  copy_submitted, presence, statusLabel, statusLevel }>
  */
-export async function generateControlReportPdfForControl(controlId, teacherId) {
+export function buildControlRows({ students, notesByStudent, trackingByStudent }) {
+  const tracking = trackingByStudent || new Map();
+  const presenceFr = { present: 'Présent', absent: 'Absent', excused: 'Absent justifié', late: 'Retard' };
+  return [...students]
+    .sort((a, b) => `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`, 'ar'))
+    .map(s => {
+      const noteVal = toNum(notesByStudent.get(s.id)?.note);
+      const hasNote = !isNaN(noteVal);
+      const tr = tracking.get(s.id) || null;
+      const status = studentStatus(hasNote, tr);
+      return {
+        massar_code: s.massar_code || '',
+        last_name: s.last_name || '',
+        first_name: s.first_name || '',
+        note: hasNote ? noteVal : null,
+        hasNote,
+        copy_submitted: tr ? (tr.copy_submitted === true ? 'Oui' : tr.copy_submitted === false ? 'Non' : '') : '',
+        presence: tr?.presence ? (presenceFr[tr.presence] || tr.presence) : '',
+        statusLabel: status ? status.label : 'OK',
+        statusLevel: status ? status.level : 'ok',
+      };
+    });
+}
+
+/**
+ * Charge toutes les données d'un contrôle (commun PDF + Excel).
+ * @returns {Promise<null | { forbidden:true } | object>}
+ */
+export async function collectControlReportData(controlId, teacherId) {
   // 1. Contrôle + classe
   const { data: control } = await supabaseAdmin
     .from('controls_plan')
@@ -451,12 +481,23 @@ export async function generateControlReportPdfForControl(controlId, teacherId) {
     ? await getEstablishmentConfig(cls.school_id, cls?.academic_year)
     : null;
 
-  const buffer = await generateControlReportPdf({
+  return {
     control, cls: cls || {}, subjectName,
-    students: students || [], notesByStudent, trackingByStudent, establishment: establishment || {},
-  });
+    students: students || [], notesByStudent, trackingByStudent,
+    establishment: establishment || {},
+  };
+}
 
-  const safe = (control.name || 'controle').replace(/\s+/g, '_')
+/**
+ * Charge les données et génère le PDF pour un contrôle donné.
+ * @returns {Promise<null | { forbidden:true } | { buffer: Buffer, fileName: string }>}
+ */
+export async function generateControlReportPdfForControl(controlId, teacherId) {
+  const data = await collectControlReportData(controlId, teacherId);
+  if (!data || data.forbidden) return data;
+
+  const buffer = await generateControlReportPdf(data);
+  const safe = (data.control.name || 'controle').replace(/\s+/g, '_')
     .replace(/[^\x20-\x7E]/g, '').replace(/[^a-zA-Z0-9_\-]/g, '') || 'controle';
   return { buffer, fileName: `rapport_controle_${safe}.pdf` };
 }
