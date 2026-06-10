@@ -100,6 +100,7 @@ const Sidebar = () => {
         { icon: FileText, label: 'Bulletins', path: '/admin/bulletins' },
         { icon: BookOpen, label: 'Coefficients', path: '/admin/coefficients' },
         { icon: GraduationCap, label: 'Notes d\'examens', path: '/admin/exam-notes' },
+        { icon: ClipboardList, label: 'Notes des profs', path: '/admin/class-notes' },
         { icon: Calendar, label: 'Config. année', path: '/admin/school-year-config' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
         // Section Finance — masquée pour le directeur pédagogique

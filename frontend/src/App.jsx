@@ -70,6 +70,7 @@ import TeacherTrackingDashboard from './pages/admin/TeacherTrackingDashboard';
 import CoefficientsPage from './pages/admin/CoefficientsPage';
 import BulletinsPage from './pages/admin/BulletinsPage';
 import ExamNotesPage from './pages/admin/ExamNotesPage';
+import ClassNotesPage from './pages/admin/ClassNotesPage';
 import AppreciationsPage from './pages/teacher/AppreciationsPage';
 import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
 import ParentFinancePage from './pages/parent/ParentFinancePage';
@@ -148,6 +149,7 @@ function App() {
             <Route path="admin/coefficients" element={<CoefficientsPage />} />
             <Route path="admin/bulletins" element={<BulletinsPage />} />
             <Route path="admin/exam-notes" element={<ExamNotesPage />} />
+            <Route path="admin/class-notes" element={<ClassNotesPage />} />
             <Route path="transport" element={<TransportDashboard />} />
             <Route path="transport/buses" element={<BusesPage />} />
             <Route path="transport/buses/:id" element={<BusDetailPage />} />

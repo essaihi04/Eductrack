@@ -5557,4 +5557,153 @@ router.get('/cahier-de-texte', async (req, res) => {
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════
+//  NOTES DES PROFS — vue admin / direction / responsable pédagogique
+//  Consulter, modifier (override) et exporter les notes publiées par les profs.
+// ════════════════════════════════════════════════════════════════════════
+
+// Vérifie que la classe est dans le périmètre de l'utilisateur (école + scope manager)
+const assertClassInScope = async (req, classId) => {
+  const schoolId = getSchoolId(req);
+  const { data: cls } = await supabaseAdmin
+    .from('classes').select('id, name, level, filiere, academic_year, school_id').eq('id', classId).single();
+  if (!cls) return { error: 404, message: 'Classe introuvable' };
+  if (schoolId && cls.school_id && cls.school_id !== schoolId) return { error: 403, message: 'Classe hors de votre école' };
+  const scoped = await getScopedClassIds(req);
+  if (scoped !== null && !scoped.includes(classId)) return { error: 403, message: 'Classe hors de votre périmètre' };
+  return { cls };
+};
+
+// GET /classes/:classId/controls-overview — synthèse des contrôles d'une classe
+router.get('/classes/:classId/controls-overview', async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const check = await assertClassInScope(req, classId);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    // Élèves de la classe
+    const { data: students } = await supabaseAdmin
+      .from('profiles').select('id').eq('class_id', classId).eq('role', 'student');
+    const totalStudents = (students || []).length;
+
+    // Contrôles de la classe
+    const { data: controls } = await supabaseAdmin
+      .from('controls_plan')
+      .select('id, name, date, start_time, kind, teacher_id')
+      .eq('class_id', classId)
+      .order('date', { ascending: false });
+    const controlIds = (controls || []).map(c => c.id);
+
+    // Notes de tous ces contrôles (1 requête)
+    let notesByControl = {};
+    if (controlIds.length) {
+      const { data: notes } = await supabaseAdmin
+        .from('control_notes').select('control_id, note').in('control_id', controlIds);
+      (notes || []).forEach(n => {
+        (notesByControl[n.control_id] = notesByControl[n.control_id] || []).push(Number(n.note));
+      });
+    }
+
+    // Matière + nom du prof (1 requête chacune)
+    const teacherIds = [...new Set((controls || []).map(c => c.teacher_id).filter(Boolean))];
+    const subjByTeacher = {}, nameByTeacher = {};
+    if (teacherIds.length) {
+      const { data: ts } = await supabaseAdmin
+        .from('teacher_subjects').select('teacher_id, subjects(name)').in('teacher_id', teacherIds);
+      (ts || []).forEach(t => { if (!subjByTeacher[t.teacher_id]) subjByTeacher[t.teacher_id] = t.subjects?.name || ''; });
+      const { data: profs } = await supabaseAdmin
+        .from('profiles').select('id, first_name, last_name').in('id', teacherIds);
+      (profs || []).forEach(p => { nameByTeacher[p.id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
+    }
+
+    const overview = (controls || []).map(c => {
+      const vals = (notesByControl[c.id] || []).filter(v => !isNaN(v));
+      const noted = vals.length;
+      const avg = noted ? Math.round((vals.reduce((a, b) => a + b, 0) / noted) * 100) / 100 : null;
+      return {
+        id: c.id, name: c.name, date: c.date, start_time: c.start_time, kind: c.kind,
+        subject: subjByTeacher[c.teacher_id] || '—',
+        teacher: nameByTeacher[c.teacher_id] || '—',
+        totalStudents, notedStudents: noted, missing: Math.max(0, totalStudents - noted),
+        average: avg,
+      };
+    });
+
+    res.json({ class: check.cls, totalStudents, controls: overview });
+  } catch (e) {
+    console.error('[Admin] controls-overview error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /controls/:controlId/notes-detail — détail éditable (note + statut couleur)
+router.get('/controls/:controlId/notes-detail', async (req, res) => {
+  try {
+    const { controlId } = req.params;
+    const { collectControlReportData, buildControlRows } =
+      await import('../services/bulletins/controlReportPdf.js');
+
+    const data = await collectControlReportData(controlId, null); // null = rôle privilégié
+    if (!data) return res.status(404).json({ error: 'Contrôle introuvable' });
+
+    const check = await assertClassInScope(req, data.control.class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    const rows = buildControlRows(data);
+    res.json({
+      control: data.control,
+      subject: data.subjectName,
+      class: data.cls,
+      hasTracking: (data.trackingByStudent?.size || 0) > 0,
+      rows,
+    });
+  } catch (e) {
+    console.error('[Admin] notes-detail error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /controls/:controlId/notes — modification (override) des notes par l'admin
+router.put('/controls/:controlId/notes', async (req, res) => {
+  try {
+    const { controlId } = req.params;
+    const { notes } = req.body;
+    if (!Array.isArray(notes)) return res.status(400).json({ error: 'notes[] requis' });
+
+    const { data: control } = await supabaseAdmin
+      .from('controls_plan').select('id, class_id').eq('id', controlId).single();
+    if (!control) return res.status(404).json({ error: 'Contrôle introuvable' });
+    const check = await assertClassInScope(req, control.class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    const rows = notes
+      .filter(n => n.student_id && n.note !== '' && n.note != null)
+      .map(n => ({
+        control_id: controlId,
+        student_id: n.student_id,
+        note: Math.min(20, Math.max(0, parseFloat(String(n.note).replace(',', '.')))),
+        appreciation: n.appreciation || '',
+      }))
+      .filter(n => !isNaN(n.note));
+
+    // Suppression des notes vidées (note effacée par l'admin)
+    const toClear = notes.filter(n => n.student_id && (n.note === '' || n.note == null)).map(n => n.student_id);
+    if (toClear.length) {
+      await supabaseAdmin.from('control_notes').delete().eq('control_id', controlId).in('student_id', toClear);
+    }
+
+    let saved = 0;
+    if (rows.length) {
+      const { data, error } = await supabaseAdmin
+        .from('control_notes').upsert(rows, { onConflict: 'control_id,student_id' }).select();
+      if (error) throw error;
+      saved = (data || []).length;
+    }
+    res.json({ saved, cleared: toClear.length });
+  } catch (e) {
+    console.error('[Admin] update control notes error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

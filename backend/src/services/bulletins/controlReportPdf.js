@@ -390,6 +390,7 @@ export function buildControlRows({ students, notesByStudent, trackingByStudent }
       const tr = tracking.get(s.id) || null;
       const status = studentStatus(hasNote, tr);
       return {
+        student_id: s.id,
         massar_code: s.massar_code || '',
         last_name: s.last_name || '',
         first_name: s.first_name || '',
