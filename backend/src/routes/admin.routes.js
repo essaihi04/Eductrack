@@ -1774,10 +1774,12 @@ router.post('/classes/import', async (req, res) => {
         academy, provincialDirection, commune, establishment
       } = classData;
 
-      if (!name || !level) {
-        errors.push({ className: name || 'Inconnue', reason: 'Nom et niveau obligatoires' });
+      if (!name) {
+        errors.push({ className: 'Inconnue', reason: 'Nom de classe obligatoire' });
         continue;
       }
+      // Niveau non détecté (ex. classe spéciale) : on crée quand même la classe
+      // (niveau null) pour ne perdre aucune classe ; l'admin pourra le préciser.
 
       try {
         // 1. Réutiliser la classe existante (même école + nom + année) ou la créer.

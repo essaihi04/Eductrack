@@ -597,13 +597,12 @@ const ClassesPage = () => {
         try {
           const data = e.target.result;
           const workbook = XLSX.read(data);
-          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-          if (rawData.length === 0) {
-            reject(new Error(`Le fichier ${file.name} est vide`));
-            return;
-          }
+          // Un classeur = une ou PLUSIEURS classes (un onglet par classe, de la
+          // maternelle au lycée). parseSheetData parse un onglet → objet classe
+          // ou null. On garde le cas mono-onglet identique à avant.
+          const parseSheetData = (rawData, sheetName) => {
+            if (!rawData || rawData.length === 0) return null;
 
           // Extract class metadata from first rows
           let className = '';
@@ -673,16 +672,12 @@ const ClassesPage = () => {
             }
           }
 
-          // If still no class name, try to extract from filename
+          // Si pas de nom de classe → le nom d'onglet EST le code classe (Massar),
+          // sinon repli sur le nom de fichier.
           if (!className) {
-            const fileName = file.name.replace('.xlsx', '').replace('.xls', '');
-            // Try to find pattern like TCSF-8, 1BACSEF-1, etc.
-            const classMatch = fileName.match(/(TC|1BAC|2BAC|1AC|2AC|3AC)[A-Za-z0-9-]+/i);
-            if (classMatch) {
-              className = classMatch[0].toUpperCase();
-            } else {
-              className = fileName;
-            }
+            className = (sheetName && sheetName.trim())
+              ? sheetName.trim()
+              : file.name.replace(/\.(xlsx|xls)$/i, '');
           }
           
           console.log(`[${file.name}] Metadata extracted:`, {
@@ -731,13 +726,35 @@ const ClassesPage = () => {
               break;
             }
           }
-          
-          if (!level) {
-            console.log(`[${file.name}] ⚠️ Could not map level from: "${levelName}"`);
+
+          // Repli robuste depuis le CODE de classe (onglet Massar), de la
+          // maternelle au lycée. L'ordre compte (APIC avant AP, BAC avant AC).
+          if (!level && className) {
+            const code = className.toUpperCase();
+            let m;
+            if ((m = code.match(/(\d)\s*APIC/)))      level = `${m[1]}AC`;   // collège (parcours international)
+            else if (/1\s*BAC/.test(code))            level = '1BAC';
+            else if (/2\s*BAC/.test(code))            level = '2BAC';
+            else if ((m = code.match(/(\d)\s*AC\b/)))  level = `${m[1]}AC`;   // collège
+            else if ((m = code.match(/(\d)\s*AP/)))    level = `${m[1]}AP`;   // primaire (1APG..6APG)
+            else if (/^TC/.test(code))                level = 'TC';          // tronc commun
+            else if (/^TPS/.test(code))               level = 'TPS';
+            else if (/^PS/.test(code))                level = 'PS';          // préscolaire
+            else if (/^MS/.test(code))                level = 'MS';
+            else if (/^GS/.test(code))                level = 'GS';
+            if (level) console.log(`[${file.name}] Niveau déduit du code "${className}" -> ${level}`);
           }
 
-          // Determine school type based on level
-          if (level && ['1AC', '2AC', '3AC'].includes(level)) {
+          if (!level) {
+            console.log(`[${file.name}] ⚠️ Could not map level from: "${levelName}" / "${className}"`);
+          }
+
+          // Determine school type based on level (maternelle → lycée)
+          if (level && ['TPS', 'PS', 'MS', 'GS'].includes(level)) {
+            schoolType = 'maternelle';
+          } else if (level && ['1AP', '2AP', '3AP', '4AP', '5AP', '6AP'].includes(level)) {
+            schoolType = 'primaire';
+          } else if (level && ['1AC', '2AC', '3AC'].includes(level)) {
             schoolType = 'college';
           } else if (level && ['TC', '1BAC', '2BAC'].includes(level)) {
             schoolType = 'lycee';
@@ -879,8 +896,9 @@ const ClassesPage = () => {
           }
 
           if (headerRowIndex === -1) {
-            reject(new Error(`En-tête non trouvé dans ${file.name}. Colonnes requises: (الرمز ou رقم التلميذ) et (الإسم/النسب ou إسم التلميذ)`));
-            return;
+            // Onglet sans tableau d'élèves (récap, vide…) → on l'ignore
+            console.warn(`[${file.name}] onglet "${sheetName}" sans en-tête élèves → ignoré`);
+            return null;
           }
 
           // Extract students
@@ -963,6 +981,7 @@ const ClassesPage = () => {
 
           const result = {
             fileName: file.name,
+            sheetName,
             className,
             level,
             schoolType,
@@ -975,17 +994,33 @@ const ClassesPage = () => {
             students,
             studentCount: students.length
           };
-          
-          console.log(`[${file.name}] ✓ Final parsed data:`, {
-            className: result.className,
-            level: result.level,
-            schoolType: result.schoolType,
-            filiere: result.filiere,
-            academicYear: result.academicYear,
+
+          console.log(`[${file.name}] ✓ Onglet ${sheetName}:`, {
+            className: result.className, level: result.level,
+            schoolType: result.schoolType, filiere: result.filiere,
             studentCount: result.studentCount
           });
-          
-          resolve(result);
+
+          return result;
+          }; // ── fin parseSheetData ──
+
+          // Parcourir TOUS les onglets (= toutes les classes du fichier)
+          const allResults = [];
+          for (const sheetName of workbook.SheetNames) {
+            try {
+              const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+              const parsed = parseSheetData(sheetRows, sheetName);
+              if (parsed && parsed.students && parsed.students.length > 0) allResults.push(parsed);
+            } catch (err) {
+              console.warn(`[${file.name}] onglet "${sheetName}" ignoré:`, err.message);
+            }
+          }
+
+          if (allResults.length === 0) {
+            reject(new Error(`Aucune classe/élève détecté dans ${file.name}`));
+            return;
+          }
+          resolve(allResults);
         } catch (error) {
           reject(error);
         }
@@ -1016,8 +1051,9 @@ const ClassesPage = () => {
           total: files.length,
           message: `Analyse de ${file.name}...`
         });
-        const classData = await parseExcelFile(file);
-        parsed.push(classData);
+        // parseExcelFile renvoie un tableau de classes (un onglet = une classe)
+        const classList = await parseExcelFile(file);
+        (Array.isArray(classList) ? classList : [classList]).forEach(c => parsed.push(c));
       } catch (error) {
         errors.push({ fileName: file.name, error: error.message });
       }
@@ -1025,7 +1061,7 @@ const ClassesPage = () => {
 
     setParsedClasses(parsed);
     setBulkImportErrors(errors);
-    setBulkImportProgress({ current: files.length, total: files.length, message: `Analyse terminée: ${parsed.length} fichier(s) valide(s)` });
+    setBulkImportProgress({ current: files.length, total: files.length, message: `Analyse terminée : ${parsed.length} classe(s) détectée(s)` });
     setIsBulkImporting(false);
   };
 
