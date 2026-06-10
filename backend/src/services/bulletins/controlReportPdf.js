@@ -47,6 +47,63 @@ const toNum = (v) => {
   return typeof v === 'string' ? parseFloat(v.replace(',', '.')) : Number(v);
 };
 
+// Couleurs de statut
+const STATUS = {
+  ok:     { color: C.good,  label: 'OK' },
+  red:    { color: C.bad },
+  yellow: { color: '#ca8a04' }, // ambre
+  orange: { color: C.mid },
+  gray:   { color: C.gray },
+};
+
+/**
+ * Détermine le statut/anomalie d'un élève en croisant la note et le suivi.
+ * Priorité : triche > copie rendue sans note (rouge) > incohérence noté/non rendu
+ * (orange) > pas de note + copie non rendue (jaune) > absent (gris) > OK.
+ *
+ * @returns {{ level, color, label } | null}  null = rien à signaler
+ */
+function studentStatus(hasNote, tr) {
+  const t = tr || {};
+  const submitted = t.copy_submitted === true;
+  const presence = t.presence || null;
+  const discipline = t.discipline_status || null;
+
+  // Triche
+  if (discipline === 'cheating_attempt' || discipline === 'cheating_confirmed') {
+    return { level: 'red', color: STATUS.red.color, label: 'Triche / fraude' };
+  }
+  // Copie rendue mais pas de note → ROUGE (à corriger)
+  if (submitted && !hasNote) {
+    return { level: 'red', color: STATUS.red.color, label: 'Copie rendue, non notée' };
+  }
+  // Noté mais copie marquée non rendue → ORANGE (incohérence)
+  if (hasNote && t.copy_submitted === false) {
+    return { level: 'orange', color: STATUS.orange.color, label: 'Noté sans copie rendue' };
+  }
+  // Absent
+  if (!hasNote && (presence === 'absent' || presence === 'excused')) {
+    return { level: 'gray', color: STATUS.gray.color,
+      label: presence === 'excused' ? 'Absent justifié' : 'Absent' };
+  }
+  // Pas de note + copie non rendue (présent) → JAUNE
+  if (!hasNote && t.copy_submitted === false) {
+    return { level: 'yellow', color: STATUS.yellow.color, label: 'Pas de note, copie non rendue' };
+  }
+  // Pas de note, aucun suivi → JAUNE (non noté)
+  if (!hasNote) {
+    return { level: 'yellow', color: STATUS.yellow.color, label: 'Non noté' };
+  }
+  // Matériel / téléphone (élève noté mais incident) → ORANGE
+  if (t.phone_use || t.phone_confiscated) {
+    return { level: 'orange', color: STATUS.orange.color, label: 'Téléphone signalé' };
+  }
+  if (t.material_status === 'incomplete' || t.material_status === 'missing') {
+    return { level: 'orange', color: STATUS.orange.color, label: 'Matériel incomplet' };
+  }
+  return null; // OK
+}
+
 /**
  * Calcule les statistiques d'un contrôle à partir des notes.
  */
@@ -84,7 +141,8 @@ function computeStats(notes, totalStudents) {
 /**
  * Génère le buffer PDF du rapport de contrôle.
  */
-export function generateControlReportPdf({ control, cls, subjectName, students, notesByStudent, establishment }) {
+export function generateControlReportPdf({ control, cls, subjectName, students, notesByStudent, trackingByStudent, establishment }) {
+  const tracking = trackingByStudent || new Map();
   return new Promise((resolve, reject) => {
     try {
       const est = establishment || {};
@@ -187,48 +245,116 @@ export function generateControlReportPdf({ control, cls, subjectName, students, 
       });
       y += 10;
 
+      const sorted = [...students].sort((a, b) =>
+        `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`, 'ar'));
+
+      // Pré-calcul des statuts (note + suivi)
+      const rowsData = sorted.map(s => {
+        const noteData = notesByStudent.get(s.id);
+        const noteVal = toNum(noteData?.note);
+        const hasNote = !isNaN(noteVal);
+        const tr = tracking.get(s.id) || null;
+        const status = studentStatus(hasNote, tr);
+        return { s, noteVal, hasNote, tr, status };
+      });
+      const hasTracking = tracking.size > 0;
+
+      // ── ANOMALIES / OBSERVATIONS ──────────────────────────────────────
+      const anomalies = rowsData.filter(r => r.status);
+      doc.fillColor(C.primaryDk).font('Helvetica-Bold').fontSize(11)
+        .text(`Élèves à signaler (${anomalies.length})`, MARGIN, y);
+      y += 16;
+
+      if (anomalies.length === 0) {
+        doc.font('Helvetica').fontSize(9).fillColor(C.good).text('Aucune anomalie : tous les élèves notés, aucun incident.', MARGIN, y);
+        y += 18;
+      } else {
+        // Légende couleurs
+        const legend = [['Copie rendue, non notée', C.bad], ['Pas de note / copie non rendue', '#ca8a04'],
+          ['Incohérence / incident', C.mid], ['Absent', C.gray]];
+        let lx = MARGIN;
+        doc.font('Helvetica').fontSize(7);
+        legend.forEach(([lab, col]) => {
+          doc.roundedRect(lx, y, 8, 8, 2).fill(col);
+          doc.fillColor(C.gray).text(lab, lx + 11, y + 1, { width: 120 });
+          lx += 11 + Math.min(125, doc.widthOfString(lab) + 16);
+        });
+        y += 16;
+
+        anomalies.forEach(r => {
+          if (y + 16 > 805) { doc.addPage({ size: 'A4', margin: 0 }); y = MARGIN; }
+          doc.roundedRect(MARGIN, y + 2, 9, 9, 2).fill(r.status.color);
+          doc.fillColor('#111827').font('Helvetica-Bold').fontSize(9);
+          smartText(doc, `${r.s.last_name || ''} ${r.s.first_name || ''}`.trim(), MARGIN + 15, y + 2, { width: 230, lineBreak: false, ellipsis: true });
+          doc.font('Helvetica').fontSize(9).fillColor(r.status.color);
+          doc.text(r.status.label, MARGIN + 250, y + 2, { width: CONTENT_W - 250 });
+          y += 15;
+        });
+        y += 6;
+      }
+
       // ── TABLEAU DES NOTES PAR ÉLÈVE ────────────────────────────────────
+      if (y + 60 > 805) { doc.addPage({ size: 'A4', margin: 0 }); y = MARGIN; }
       doc.fillColor(C.primaryDk).font('Helvetica-Bold').fontSize(11).text('Notes des élèves', MARGIN, y);
       y += 16;
 
-      const colN = 28, colNote = 70, colName = CONTENT_W - colN - colNote;
+      const colN = 24;
+      const colNote = 62;
+      const colCopie = hasTracking ? 52 : 0;
+      const colStatut = 150;
+      const colName = CONTENT_W - colN - colNote - colCopie - colStatut;
+      const xName = MARGIN + colN;
+      const xCopie = xName + colName;
+      const xNote = xCopie + colCopie;
+      const xStatut = xNote + colNote;
+
       const drawHeaderRow = () => {
         doc.rect(MARGIN, y, CONTENT_W, 20).fill(C.headerBg);
         doc.fillColor(C.primaryDk).font('Helvetica-Bold').fontSize(9);
-        doc.text('#', MARGIN + 6, y + 6, { width: colN - 6 });
-        doc.text('Élève', MARGIN + colN + 4, y + 6, { width: colName - 8 });
-        doc.text('Note', MARGIN + colN + colName, y + 6, { width: colNote, align: 'center' });
+        doc.text('#', MARGIN + 5, y + 6, { width: colN - 5 });
+        doc.text('Élève', xName + 4, y + 6, { width: colName - 8 });
+        if (hasTracking) doc.text('Copie', xCopie, y + 6, { width: colCopie, align: 'center' });
+        doc.text('Note', xNote, y + 6, { width: colNote, align: 'center' });
+        doc.text('Statut', xStatut + 4, y + 6, { width: colStatut - 4 });
         y += 20;
       };
       drawHeaderRow();
 
-      const sorted = [...students].sort((a, b) =>
-        `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`, 'ar'));
-
       const rowH = 18;
-      sorted.forEach((s, idx) => {
-        if (y + rowH > 800) { // nouvelle page
+      let tableStartY = y;
+      rowsData.forEach((r, idx) => {
+        if (y + rowH > 805) { // nouvelle page
           doc.addPage({ size: 'A4', margin: 0 });
-          y = MARGIN;
+          y = MARGIN; tableStartY = y;
           drawHeaderRow();
         }
-        const noteData = notesByStudent.get(s.id);
-        const noteVal = toNum(noteData?.note);
-        const noteStr = isNaN(noteVal) ? '—' : `${noteVal}/20`;
-        const noteColor = isNaN(noteVal) ? C.gray : noteVal >= 15 ? C.good : noteVal >= 10 ? C.mid : C.bad;
+        const noteStr = r.hasNote ? `${r.noteVal}/20` : '—';
+        const noteColor = !r.hasNote ? C.gray : r.noteVal >= 15 ? C.good : r.noteVal >= 10 ? C.mid : C.bad;
 
         if (idx % 2 === 1) doc.rect(MARGIN, y, CONTENT_W, rowH).fill(C.light);
+        // Bande de couleur à gauche si anomalie
+        if (r.status) doc.rect(MARGIN, y, 3, rowH).fill(r.status.color);
+
         doc.fillColor(C.gray).font('Helvetica').fontSize(9).text(String(idx + 1), MARGIN + 6, y + 5, { width: colN - 6 });
         doc.fillColor('#111827');
-        smartText(doc, `${s.last_name || ''} ${s.first_name || ''}`.trim(), MARGIN + colN + 4, y + 5, { width: colName - 8 });
-        doc.font('Helvetica-Bold').fillColor(noteColor)
-          .text(noteStr, MARGIN + colN + colName, y + 5, { width: colNote, align: 'center' });
+        smartText(doc, `${r.s.last_name || ''} ${r.s.first_name || ''}`.trim(), xName + 4, y + 5, { width: colName - 8, lineBreak: false, ellipsis: true });
+        if (hasTracking) {
+          const cs = r.tr?.copy_submitted;
+          const copieTxt = cs === true ? 'Oui' : cs === false ? 'Non' : '—';
+          const copieCol = cs === true ? C.good : cs === false ? C.bad : C.gray;
+          doc.font('Helvetica-Bold').fontSize(8.5).fillColor(copieCol).text(copieTxt, xCopie, y + 5, { width: colCopie, align: 'center' });
+        }
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(noteColor).text(noteStr, xNote, y + 5, { width: colNote, align: 'center' });
+        if (r.status) {
+          doc.font('Helvetica').fontSize(7.5).fillColor(r.status.color);
+          doc.text(r.status.label, xStatut + 4, y + 6, { width: colStatut - 6, lineBreak: false, ellipsis: true });
+        }
         doc.strokeColor('#eef2f7').lineWidth(0.5).moveTo(MARGIN, y + rowH).lineTo(MARGIN + CONTENT_W, y + rowH).stroke();
         y += rowH;
       });
 
-      // Cadre extérieur du tableau
-      doc.rect(MARGIN, y - rowH * sorted.length - 20, CONTENT_W, rowH * sorted.length + 20)
+      // Cadre extérieur du tableau (dernière page)
+      doc.rect(MARGIN, tableStartY - 20, CONTENT_W, y - tableStartY + 20)
         .strokeColor(C.border).lineWidth(0.8).stroke();
 
       // ── PIED DE PAGE ───────────────────────────────────────────────────
@@ -284,6 +410,30 @@ export async function generateControlReportPdfForControl(controlId, teacherId) {
     .eq('control_id', controlId);
   const notesByStudent = new Map((notes || []).map(n => [n.student_id, n]));
 
+  // 3.b Suivi de contrôle (copie rendue, présence, discipline…). Lié aux sessions :
+  //     on retrouve la/les session(s) de contrôle de la même classe + date (+ prof).
+  const trackingByStudent = new Map();
+  try {
+    let sessQ = supabaseAdmin
+      .from('sessions')
+      .select('id')
+      .eq('class_id', control.class_id)
+      .eq('date', control.date);
+    if (control.teacher_id) sessQ = sessQ.eq('teacher_id', control.teacher_id);
+    const { data: sess } = await sessQ;
+    const sessionIds = (sess || []).map(s => s.id);
+    if (sessionIds.length) {
+      const { data: tracks } = await supabaseAdmin
+        .from('control_tracking')
+        .select('student_id, presence, material_status, phone_use, phone_confiscated, discipline_status, copy_submitted')
+        .in('session_id', sessionIds);
+      // Dernier enregistrement par élève fait foi
+      (tracks || []).forEach(t => trackingByStudent.set(t.student_id, t));
+    }
+  } catch (e) {
+    console.warn('[ControlReport] suivi non chargé:', e.message);
+  }
+
   // 4. Matière du prof
   let subjectName = '';
   if (control.teacher_id) {
@@ -303,7 +453,7 @@ export async function generateControlReportPdfForControl(controlId, teacherId) {
 
   const buffer = await generateControlReportPdf({
     control, cls: cls || {}, subjectName,
-    students: students || [], notesByStudent, establishment: establishment || {},
+    students: students || [], notesByStudent, trackingByStudent, establishment: establishment || {},
   });
 
   const safe = (control.name || 'controle').replace(/\s+/g, '_')
