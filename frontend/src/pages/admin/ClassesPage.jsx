@@ -1070,14 +1070,27 @@ const ClassesPage = () => {
     if (parsedClasses.length === 0) return;
 
     setIsBulkImporting(true);
-    setBulkImportProgress({ current: 0, total: parsedClasses.length, message: 'Création des classes et élèves...' });
+    const total = parsedClasses.length;
+    setBulkImportProgress({ current: 0, total, message: 'Création des classes et élèves...' });
 
-    try {
-      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
-      const token = session?.access_token;
+    // Import CLASSE PAR CLASSE : chaque classe = 1 requête courte → évite le
+    // timeout 504 du proxy quand un fichier contient beaucoup d'élèves.
+    const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+    const token = session?.access_token;
 
-      // Format data for backend
-      const classesData = parsedClasses.map(pc => ({
+    const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
+    const aggClasses = [];
+    const aggErrors = [];
+    let aggStudents = 0, aggExisting = 0, aggReassigned = 0, aggOther = 0;
+
+    for (let i = 0; i < parsedClasses.length; i++) {
+      const pc = parsedClasses[i];
+      setBulkImportProgress({
+        current: i, total,
+        message: `Import ${i + 1}/${total} : ${pc.className} (${pc.studentCount} élèves)…`
+      });
+
+      const payload = {
         name: pc.className,
         level: pc.level,
         school_type: pc.schoolType,
@@ -1088,58 +1101,54 @@ const ClassesPage = () => {
         commune: pc.commune || null,
         establishment: pc.establishment || null,
         students: pc.students
-      }));
+      };
 
-      setBulkImportProgress({ current: 0, total: classesData.length, message: 'Envoi au serveur...' });
+      try {
+        const res = await fetch(`${apiUrl}/api/admin/classes/import`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ classes: [payload] })
+        });
 
-      const res = await fetch(`${apiUrl}/api/admin/classes/import`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ classes: classesData })
-      });
-
-      if (res.ok) {
-        const result = await res.json();
-        setBulkImportResult(result);
-        setBulkImportProgress({ current: classesData.length, total: classesData.length, message: 'Importation terminée !' });
-
-        // Stocker les mots de passe dans localStorage
-        if (result.classes && Array.isArray(result.classes)) {
-          const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
-          result.classes.forEach(cls => {
-            if (cls.students && Array.isArray(cls.students)) {
-              cls.students.forEach(student => {
-                if (student.id && student.password) {
-                  storedPasswords[student.id] = student.password;
-                }
-              });
-            }
-          });
-          localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
+        // Réponse non-JSON (ex. page 504 HTML) → on signale et on continue
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) {
+          let reason = `HTTP ${res.status}`;
+          if (res.status === 504) reason = 'Délai dépassé (classe trop volumineuse) — réessayez cette classe seule';
+          aggErrors.push({ fileName: pc.className, error: reason });
+          continue;
         }
 
-        // Refresh class list
-        await fetchData();
-
-        setTimeout(() => {
-          setShowBulkImport(false);
-          setParsedClasses([]);
-          setBulkImportErrors([]);
-          setBulkImportResult(null);
-        }, 3000);
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Erreur lors de l\'import');
+        const result = await res.json();
+        (result.classes || []).forEach(cls => {
+          aggClasses.push(cls);
+          (cls.students || []).forEach(s => { if (s.id && s.password) storedPasswords[s.id] = s.password; });
+        });
+        aggStudents   += result.summary?.new ?? result.totalStudents ?? 0;
+        aggExisting   += result.summary?.existing ?? 0;
+        aggReassigned += result.summary?.reassigned ?? 0;
+        aggOther      += result.summary?.otherSchool ?? 0;
+        (result.errors || []).forEach(e => aggErrors.push({ fileName: pc.className, error: e.reason || e.error || 'erreur' }));
+      } catch (err) {
+        console.error('Import classe', pc.className, err);
+        aggErrors.push({ fileName: pc.className, error: err.message });
       }
-    } catch (error) {
-      console.error('Bulk import error:', error);
-      alert('Erreur lors de l\'import: ' + error.message);
-    } finally {
-      setIsBulkImporting(false);
     }
+
+    localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
+
+    setBulkImportResult({
+      message: `${aggClasses.length} classe(s) importée(s), ${aggStudents} nouvel(le)(s) élève(s)`,
+      classes: aggClasses,
+      totalStudents: aggStudents,
+      summary: { new: aggStudents, existing: aggExisting, reassigned: aggReassigned, otherSchool: aggOther, errors: aggErrors.length },
+      errors: aggErrors.length ? aggErrors : undefined,
+    });
+    setBulkImportErrors(aggErrors);
+    setBulkImportProgress({ current: total, total, message: 'Importation terminée !' });
+
+    await fetchData();
+    setIsBulkImporting(false);
   };
 
   // Download bulk import template
