@@ -1668,7 +1668,13 @@ const ClassesPage = () => {
                           <div>
                             <p className="font-medium">{cls.className || 'Sans nom'}</p>
                             <p className="text-xs text-muted-foreground">
-                              {cls.level || 'Niveau inconnu'} • {cls.schoolType === 'college' ? 'Collège' : cls.schoolType === 'lycee' ? 'Lycée' : 'Type inconnu'}
+                              {cls.level || 'Niveau à préciser'} • {
+                                cls.schoolType === 'maternelle' ? 'Maternelle'
+                                : cls.schoolType === 'primaire' ? 'Primaire'
+                                : cls.schoolType === 'college' ? 'Collège'
+                                : cls.schoolType === 'lycee' ? 'Lycée'
+                                : 'Type à préciser'
+                              }
                               {cls.filiere && ` • ${getFiliereLabel(cls.filiere)}`}
                             </p>
                           </div>
