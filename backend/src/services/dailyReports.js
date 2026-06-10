@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import OpenAI from 'openai';
 import cron from 'node-cron';
 import { sendText, getStatus } from './whatsapp/index.js';
+import { getEstablishmentConfig } from './establishmentHeader.js';
 
 // DeepSeek client (OpenAI-compatible API)
 const deepseek = new OpenAI({
@@ -774,7 +775,7 @@ async function collectStudentPeriodData(studentId, startDate, endDate, schoolId)
   // Get student profile
   const { data: student } = await supabaseAdmin
     .from('profiles')
-    .select('id, first_name, last_name, class_id, classes!fk_profiles_class(name, level, school_type)')
+    .select('id, first_name, last_name, class_id, classes!fk_profiles_class(name, level, school_type, academic_year)')
     .eq('id', studentId)
     .single();
 
@@ -786,6 +787,11 @@ async function collectStudentPeriodData(studentId, startDate, endDate, schoolId)
     .select('name')
     .eq('id', schoolId)
     .maybeSingle();
+
+  // En-tête officiel établissement (académie / direction / établissement / année)
+  const establishment = schoolId
+    ? await getEstablishmentConfig(schoolId, student.classes?.academic_year)
+    : null;
 
   // Get all sessions for this student's class in the period
   const { data: sessions } = await supabaseAdmin
@@ -1136,7 +1142,10 @@ async function collectStudentPeriodData(studentId, startDate, endDate, schoolId)
       className: student.classes?.name,
       level: student.classes?.level,
       schoolType: student.classes?.school_type,
-      schoolName: school?.name || ''
+      schoolName: establishment?.establishment || school?.name || '',
+      academy: establishment?.academy || '',
+      provincialDirection: establishment?.provincial_direction || '',
+      academicYear: student.classes?.academic_year || establishment?.academic_year || ''
     },
     period: { startDate, endDate },
     sessions: sessionDetails,

@@ -727,180 +727,27 @@ const ControlsPage = () => {
   // Fonction pour exporter un contrôle en PDF
   const exportControlToPDF = async (control) => {
     try {
-      // Debug: Vérifier la structure du contrôle
-      console.log('Control data for PDF:', control);
-      console.log('Control class_name:', control.class_name);
-      console.log('Control classes:', control.classes);
-      console.log('Classes list:', classes);
-      
-      // Récupérer le nom de la classe
-      const className = getClassName(control);
-      console.log('Final class name:', className);
-      
-      // Importation de jsPDF avec gestion d'erreur
-      let jsPDF;
-      try {
-        const module = await import('jspdf');
-        jsPDF = module.default;
-      } catch (error) {
-        console.error('Erreur lors du chargement de jsPDF:', error);
-        alert('Impossible de générer le PDF. Veuillez réessayer.');
-        return;
+      const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = authSession?.access_token;
+      const res = await fetch(`${apiUrl}/api/controls-plan/${control.id}/report-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Erreur ${res.status}`);
       }
-      const stats = calculateControlStats(control.id);
-      
-      // Créer un nouveau document PDF
-      const doc = new jsPDF();
-      
-      // Configuration des polices et couleurs
-      doc.setFontSize(20);
-      doc.setTextColor(41, 98, 255); // Bleu
-      
-      // Titre principal
-      doc.text('Rapport de Contrôle', 105, 20, { align: 'center' });
-      
-      // Informations générales
-      doc.setFontSize(16);
-      doc.setTextColor(0, 0, 0);
-      doc.text('Informations générales', 20, 40);
-      
-      doc.setFontSize(12);
-      doc.setTextColor(60, 60, 60);
-      doc.text(`Nom du contrôle : ${control.name}`, 20, 50);
-      doc.text(`Date : ${new Date(control.date).toLocaleDateString('fr-FR')}`, 20, 60);
-      doc.text(`Heures : ${control.start_time} - ${control.end_time}`, 20, 70);
-      doc.text(`Classe : ${className}`, 20, 80);
-      
-      if (control.description) {
-        const descriptionLines = doc.splitTextToSize(control.description, 170);
-        doc.text(`Description :`, 20, 90);
-        doc.setFontSize(10);
-        doc.text(descriptionLines, 20, 100);
-      }
-      
-      // Statistiques principales
-      let yPos = control.description ? 120 : 100;
-      doc.setFontSize(16);
-      doc.setTextColor(0, 0, 0);
-      doc.text('Statistiques principales', 20, yPos);
-      
-      doc.setFontSize(12);
-      doc.setTextColor(60, 60, 60);
-      yPos += 15;
-      doc.text(`Moyenne : ${stats.average.toFixed(2)}/20`, 20, yPos);
-      doc.text(`Élèves notés : ${stats.notedStudents}/${stats.totalStudents} (${stats.notedPercentage}%)`, 20, yPos + 10);
-      doc.text(`Taux de réussite : ${stats.successRate}% (≥10/20)`, 20, yPos + 20);
-      doc.text(`Dispersion : ${stats.dispersion}`, 20, yPos + 30);
-      doc.text(`Note minimale : ${stats.minNote}/20`, 20, yPos + 40);
-      doc.text(`Note maximale : ${stats.maxNote}/20`, 20, yPos + 50);
-      
-      // Répartition des notes avec barres visuelles
-      yPos += 70;
-      doc.setFontSize(16);
-      doc.setTextColor(0, 0, 0);
-      doc.text('Répartition des notes', 20, yPos);
-      
-      // Barre 15-20
-      yPos += 15;
-      doc.setFontSize(12);
-      doc.setTextColor(60, 60, 60);
-      doc.text('15-20', 20, yPos);
-      
-      // Barre de progression
-      doc.setDrawColor(200, 200, 200);
-      doc.setFillColor(200, 200, 200);
-      doc.rect(60, yPos - 5, 100, 8, 'F'); // Fond gris
-      doc.setFillColor(34, 197, 94); // Vert
-      doc.rect(60, yPos - 5, stats.distribution.high, 8, 'F'); // Barre verte
-      doc.text(`${stats.distribution.high}% (${Math.round(stats.notedStudents * stats.distribution.high / 100)} élèves)`, 170, yPos);
-      
-      // Barre 10-14
-      yPos += 15;
-      doc.text('10-14', 20, yPos);
-      doc.setDrawColor(200, 200, 200);
-      doc.setFillColor(200, 200, 200);
-      doc.rect(60, yPos - 5, 100, 8, 'F'); // Fond gris
-      doc.setFillColor(59, 130, 246); // Bleu
-      doc.rect(60, yPos - 5, stats.distribution.medium, 8, 'F'); // Barre bleue
-      doc.text(`${stats.distribution.medium}% (${Math.round(stats.notedStudents * stats.distribution.medium / 100)} élèves)`, 170, yPos);
-      
-      // Barre 0-9
-      yPos += 15;
-      doc.text('0-9', 20, yPos);
-      doc.setDrawColor(200, 200, 200);
-      doc.setFillColor(200, 200, 200);
-      doc.rect(60, yPos - 5, 100, 8, 'F'); // Fond gris
-      doc.setFillColor(239, 68, 68); // Rouge
-      doc.rect(60, yPos - 5, stats.distribution.low, 8, 'F'); // Barre rouge
-      doc.text(`${stats.distribution.low}% (${Math.round(stats.notedStudents * stats.distribution.low / 100)} élèves)`, 170, yPos);
-      
-      // Élèves en échec (s'il y en a)
-      if (stats.failingStudents.length > 0) {
-        yPos += 30;
-        doc.setFontSize(16);
-        doc.setTextColor(220, 38, 38); // Rouge
-        doc.text('Élèves en echec (< 10/20)', 20, yPos);
-        
-        // Note explicative pour les noms arabes
-        yPos += 12;
-        doc.setFontSize(9);
-        doc.setTextColor(100, 100, 100);
-        doc.text('* Note: Les noms en caracteres arabes sont affiches comme images pour compatibilite PDF', 20, yPos);
-        
-        doc.setFontSize(10);
-        doc.setTextColor(60, 60, 60);
-        yPos += 15;
-        
-        stats.failingStudents.forEach((student, index) => {
-          if (yPos > 270) { // Nouvelle page si nécessaire
-            doc.addPage();
-            yPos = 20;
-          }
-          
-          // Vérifier si le nom contient des caractères arabes
-          const arabicRegex = /[\u0600-\u06FF]/;
-          const isArabic = arabicRegex.test(student.name);
-          
-          if (isArabic) {
-            // Créer une image du nom arabe avec de meilleures dimensions
-            const nameImage = createArabicTextImage(student.name, 10);
-            
-            // Calculer les dimensions dynamiquement
-            const imgWidth = Math.min(80, student.name.length * 4); // Largeur max 80px
-            const imgHeight = 12;
-            
-            // Positionnement amélioré
-            doc.addImage(nameImage, 'PNG', 25, yPos - 4, imgWidth, imgHeight);
-            doc.text(`${index + 1}.`, 10, yPos);
-            doc.text(`: ${student.note}/20`, imgWidth + 30, yPos);
-          } else {
-            // Afficher normalement pour les noms non arabes
-            doc.text(`${index + 1}. ${student.name} : ${student.note}/20`, 20, yPos);
-          }
-          
-          yPos += 12;
-        });
-      }
-      
-      // Pied de page
-      const pageCount = doc.internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.text(`Page ${i} / ${pageCount}`, 105, 290, { align: 'center' });
-        doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}`, 105, 285, { align: 'center' });
-      }
-      
-      // Télécharger le PDF
-      const fileName = `rapport_controle_${(control.name || 'controle').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${new Date(control.date).toISOString().split('T')[0]}.pdf`;
-      doc.save(fileName);
-      
-      console.log('PDF exporté avec succès:', fileName);
-      
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rapport_controle_${(control.name || 'controle').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Erreur lors de l\'exportation PDF:', error);
-      alert('❌ Erreur lors de l\'exportation PDF. Veuillez réessayer.');
+      alert('Erreur lors de la generation du PDF. Veuillez reessayer.');
     }
   };
 

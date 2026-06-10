@@ -29,6 +29,7 @@ import {
   isExamLevel
 } from '../services/bulletins/calculator.js';
 import { generateBulletinPdf } from '../services/bulletins/bulletinPdf.js';
+import { getEstablishmentConfig } from '../services/establishmentHeader.js';
 import { getDefaultYearBounds, getCurrentSemester, getCurrentAcademicYear } from '../services/bulletins/schoolCalendar.js';
 
 const router = Router();
@@ -82,6 +83,20 @@ router.get('/config/:academicYear', requireSchoolAdmin, async (req, res) => {
     });
   } catch (e) {
     console.error('[Bulletins] config GET error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /establishment?academic_year=2025/2026  → en-tête officiel pour tout
+//   document généré (accessible à tout utilisateur authentifié : profs inclus).
+router.get('/establishment', async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const academicYear = req.query.academic_year || getCurrentAcademicYear();
+    const data = await getEstablishmentConfig(schoolId, academicYear);
+    res.json(data);
+  } catch (e) {
+    console.error('[Bulletins] establishment error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

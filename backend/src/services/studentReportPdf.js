@@ -458,15 +458,27 @@ function drawDocument(doc, periodData, aiReport) {
   doc.text(initials, MARGIN + 18 - tw / 2, 39);
   doc.restore();
 
-  // School + title
-  doc.font('Helvetica-Bold').fontSize(15).fillColor('#ffffff');
-  smartText(doc, cleanText(st.schoolName) || 'Établissement scolaire', MARGIN + 50, 24, { width: CONTENT_W - 60 });
-  doc.font('Helvetica').fontSize(10).fillColor('#e0f2fe');
-  doc.text('Rapport pédagogique individuel', MARGIN + 50, 46, { width: CONTENT_W - 60 });
-  // Date génération à droite
+  // School + en-tête officiel + title
+  const txtX = MARGIN + 50;
+  const txtW = CONTENT_W - 60 - 150; // garde la droite pour année/date
+  doc.font('Helvetica-Bold').fontSize(14).fillColor('#ffffff');
+  smartText(doc, cleanText(st.schoolName) || 'Établissement scolaire', txtX, 16, { width: txtW });
+  let hy = 34;
+  if (st.academy) {
+    doc.font('Helvetica').fontSize(7).fillColor('#e0f2fe');
+    smartText(doc, cleanText(st.academy), txtX, hy, { width: txtW }); hy += 9;
+  }
+  if (st.provincialDirection) {
+    doc.font('Helvetica').fontSize(7).fillColor('#e0f2fe');
+    smartText(doc, cleanText(st.provincialDirection), txtX, hy, { width: txtW }); hy += 9;
+  }
+  doc.font('Helvetica-Bold').fontSize(9).fillColor('#cffafe');
+  doc.text('Rapport pédagogique individuel', txtX, Math.max(hy, 58), { width: txtW });
+  // Année scolaire + date génération à droite
   doc.font('Helvetica').fontSize(9).fillColor('#cffafe');
+  if (st.academicYear) doc.text(`Année : ${st.academicYear}`, MARGIN, 24, { width: CONTENT_W, align: 'right' });
   const genDate = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
-  doc.text(`Généré le ${genDate}`, MARGIN, 66, { width: CONTENT_W, align: 'right' });
+  doc.text(`Généré le ${genDate}`, MARGIN, 40, { width: CONTENT_W, align: 'right' });
 
   let y = 110;
 

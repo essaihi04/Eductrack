@@ -1,6 +1,7 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { generateControlReportPdfForControl } from '../services/bulletins/controlReportPdf.js';
 
 const router = express.Router();
 
@@ -687,6 +688,32 @@ router.put('/:id/complete', authenticateUser, async (req, res) => {
     res.json({ message: 'Contrôle marqué comme terminé avec succès', control: updatedControl });
   } catch (error) {
     console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Générer le rapport de contrôle en PDF (PDFKit + police arabe + en-tête officiel)
+router.get('/controls-plan/:id/report-pdf', authenticateUser, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Rôles privilégiés → pas de restriction de propriété
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', req.user.id)
+      .single();
+    const privileged = ['admin', 'school_admin', 'super_admin', 'direction_pedagogique', 'pedagogical_manager'].includes(prof?.role);
+
+    const result = await generateControlReportPdfForControl(id, privileged ? null : req.user.id);
+    if (!result) return res.status(404).json({ error: 'Contrôle non trouvé' });
+    if (result.forbidden) return res.status(403).json({ error: 'Accès non autorisé à ce contrôle' });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${result.fileName}"`);
+    res.send(result.buffer);
+  } catch (error) {
+    console.error('Erreur génération rapport de contrôle PDF:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
