@@ -7,6 +7,7 @@ import PDFDocument from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { getEstablishmentConfig } from '../establishmentHeader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ARABIC_FONT_PATH = path.join(__dirname, '..', 'whatsapp', 'chatbot', 'fonts', 'NotoNaskhArabic-Regular.ttf');
@@ -74,7 +75,8 @@ function smartCell(doc, text, x, y, w, opts = {}) {
  * @param {Array}   params.timetableSlots []  (bruts depuis class_timetable)
  * @returns {Promise<Buffer>}
  */
-export function generateTimetablePdf({ student, cls, school, timetableSlots }) {
+export function generateTimetablePdf({ student, cls, school, timetableSlots, establishment }) {
+  const est = establishment || {};
   return new Promise((resolve, reject) => {
     try {
       const chunks = [];
@@ -134,14 +136,29 @@ export function generateTimetablePdf({ student, cls, school, timetableSlots }) {
       doc.font('Helvetica-Bold').fontSize(10).fillColor(C.bannerBg);
       doc.text('EDT', LOGO_X + LOGO_R - 14, LOGO_CY - 6, { width: 28, align: 'center' });
 
-      // Nom de l'école
-      const schoolName = school?.name || 'École';
-      doc.font('Helvetica-Bold').fontSize(17).fillColor('#ffffff');
-      doc.text(schoolName, LOGO_X + LOGO_R * 2 + 12, 14, { width: CONTENT_W * 0.55 });
+      // Nom de l'établissement (config officielle > nom école)
+      const nameX = LOGO_X + LOGO_R * 2 + 12;
+      const nameW = CONTENT_W * 0.52;
+      const schoolName = est.establishment || school?.name || 'École';
+      doc.font('Helvetica-Bold').fontSize(15).fillColor('#ffffff');
+      smartCell(doc, schoolName, nameX, 10, nameW, { lineBreak: false, ellipsis: true });
+
+      // En-tête officiel : Académie / Direction provinciale (en arabe)
+      let hY = 30;
+      if (est.academy) {
+        doc.font('Helvetica').fontSize(7).fillColor('#a7f3d0');
+        smartCell(doc, est.academy, nameX, hY, nameW, { lineBreak: false, ellipsis: true });
+        hY += 10;
+      }
+      if (est.provincial_direction) {
+        doc.font('Helvetica').fontSize(7).fillColor('#a7f3d0');
+        smartCell(doc, est.provincial_direction, nameX, hY, nameW, { lineBreak: false, ellipsis: true });
+        hY += 10;
+      }
 
       // Sous-titre
-      doc.font('Helvetica').fontSize(10).fillColor('#6ee7b7');
-      doc.text('EMPLOI DU TEMPS HEBDOMADAIRE', LOGO_X + LOGO_R * 2 + 12, 38, { width: CONTENT_W * 0.55 });
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#6ee7b7');
+      doc.text('EMPLOI DU TEMPS HEBDOMADAIRE', nameX, Math.max(hY, 50), { width: nameW });
 
       // Infos élève (droite)
       const studentName = `${student.first_name || ''} ${student.last_name || ''}`.trim();
@@ -149,8 +166,9 @@ export function generateTimetablePdf({ student, cls, school, timetableSlots }) {
       doc.text(`Eleve : ${studentName}`, PAGE_W - MARGIN - 240, 14, { width: 240, align: 'right' });
       doc.font('Helvetica').fontSize(10).fillColor('#6ee7b7');
       doc.text(`Classe : ${cls?.name || '—'}`, PAGE_W - MARGIN - 240, 34, { width: 240, align: 'right' });
-      if (cls?.academic_year) {
-        doc.text(`Annee : ${cls.academic_year}`, PAGE_W - MARGIN - 240, 50, { width: 240, align: 'right' });
+      const annee = cls?.academic_year || est.academic_year;
+      if (annee) {
+        doc.text(`Annee : ${annee}`, PAGE_W - MARGIN - 240, 50, { width: 240, align: 'right' });
       }
 
       // ── CAS VIDE ────────────────────────────────────────────────────
@@ -286,14 +304,17 @@ export async function generateTimetablePdfForStudent(studentId) {
       .order('slot_order', { ascending: true }),
   ]);
 
-  const school = cls?.school_id
-    ? (await supabaseAdmin.from('schools').select('id, name').eq('id', cls.school_id).single()).data
+  // En-tête officiel (académie / direction / établissement) — config référencée
+  // automatiquement lors de l'import des listes d'élèves Massar.
+  const establishment = cls?.school_id
+    ? await getEstablishmentConfig(cls.school_id, cls?.academic_year)
     : null;
 
   const buffer = await generateTimetablePdf({
     student,
     cls:   cls || {},
-    school: school || {},
+    school: establishment?.school || {},
+    establishment: establishment || {},
     timetableSlots: slots || [],
   });
 
