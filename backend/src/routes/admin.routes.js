@@ -1764,6 +1764,9 @@ router.post('/classes/import', async (req, res) => {
     const reassignedStudents = [];
     const otherSchoolStudents = []; // Élèves qui existent dans une autre école
     let totalStudentsProcessed = 0;
+    // Cache des années déjà traitées dans CETTE requête → évite de réécrire
+    // la même config établissement/année pour chaque fichier importé.
+    const yearConfigDone = new Set();
 
     for (const classData of classesData) {
       const {
@@ -1830,9 +1833,11 @@ router.post('/classes/import', async (req, res) => {
         }
 
         // 1.b Renseigner la config d'année scolaire (académie / direction / commune /
-        //     établissement) à partir du fichier officiel Massar — sans écraser les
-        //     valeurs déjà saisies par l'admin.
-        if (schoolId && academic_year && (academy || provincialDirection || commune || establishment)) {
+        //     établissement) à partir du fichier officiel Massar — UNE SEULE FOIS par
+        //     année : sert de référence. Réimporter d'autres fichiers de la même
+        //     année/établissement ne réécrit PAS la config (réutilisation simple).
+        if (schoolId && academic_year && (academy || provincialDirection || commune || establishment)
+            && !yearConfigDone.has(academic_year)) {
           try {
             const { data: syc } = await supabaseAdmin
               .from('school_year_config')
@@ -1840,18 +1845,31 @@ router.post('/classes/import', async (req, res) => {
               .eq('school_id', schoolId)
               .eq('academic_year', academic_year)
               .maybeSingle();
-            const sycPatch = {
-              school_id: schoolId,
-              academic_year,
-              academy: syc?.academy || academy || null,
-              provincial_direction: syc?.provincial_direction || provincialDirection || null,
-              region: syc?.region || commune || null,
-              establishment_label: syc?.establishment_label || establishment || null,
-              updated_at: new Date().toISOString()
-            };
-            await supabaseAdmin
-              .from('school_year_config')
-              .upsert(sycPatch, { onConflict: 'school_id,academic_year' });
+
+            // Ne réécrire que s'il manque réellement une info ; sinon on réutilise tel quel.
+            const needsWrite =
+              (academy && !syc?.academy) ||
+              (provincialDirection && !syc?.provincial_direction) ||
+              (commune && !syc?.region) ||
+              (establishment && !syc?.establishment_label);
+
+            if (needsWrite) {
+              await supabaseAdmin
+                .from('school_year_config')
+                .upsert({
+                  school_id: schoolId,
+                  academic_year,
+                  academy: syc?.academy || academy || null,
+                  provincial_direction: syc?.provincial_direction || provincialDirection || null,
+                  region: syc?.region || commune || null,
+                  establishment_label: syc?.establishment_label || establishment || null,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'school_id,academic_year' });
+              console.log(`[Import Class] Config établissement enregistrée (référence) pour ${academic_year}`);
+            } else {
+              console.log(`[Import Class] Config ${academic_year} déjà présente → réutilisée (pas de réécriture)`);
+            }
+            yearConfigDone.add(academic_year); // ne plus retraiter cette année dans cette requête
           } catch (e) {
             console.warn('[Import Class] school_year_config non mis à jour:', e.message);
           }
