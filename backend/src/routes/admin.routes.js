@@ -1588,15 +1588,26 @@ router.get('/classes', async (req, res) => {
       return res.json([]);
     }
 
-    let studentsQuery = supabaseAdmin
-      .from('profiles')
-      .select('id, class_id')
-      .eq('role', 'student')
-      .in('class_id', classIds);
-    studentsQuery = applySchoolFilter(studentsQuery, req);
+    // Récupération PAGINÉE : Supabase/PostgREST plafonne à 1000 lignes par
+    // requête. Sans pagination, dès que l'école dépasse 1000 élèves, les
+    // classes au-delà de cette limite affichent 0 élève alors qu'ils existent.
+    const studentsData = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      let studentsQuery = supabaseAdmin
+        .from('profiles')
+        .select('id, class_id')
+        .eq('role', 'student')
+        .in('class_id', classIds)
+        .range(from, from + PAGE - 1);
+      studentsQuery = applySchoolFilter(studentsQuery, req);
 
-    const { data: studentsData, error: studentsError } = await studentsQuery;
-    if (studentsError) throw studentsError;
+      const { data: pageData, error: studentsError } = await studentsQuery;
+      if (studentsError) throw studentsError;
+
+      if (pageData && pageData.length) studentsData.push(...pageData);
+      if (!pageData || pageData.length < PAGE) break; // dernière page atteinte
+    }
 
     const studentCountByClass = (studentsData || []).reduce((acc, student) => {
       if (!student.class_id) return acc;

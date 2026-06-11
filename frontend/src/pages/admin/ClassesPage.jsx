@@ -56,18 +56,23 @@ const SCHOOL_HIERARCHY = {
         filieres: [
           { value: 'sciences_exp', label: 'Sciences Expérimentales' },
           { value: 'sciences_math', label: 'Sciences Mathématiques' },
-          { value: 'sciences_eco', label: 'Sciences Économiques' },
+          { value: 'sciences_eco', label: 'Sciences Économiques et de Gestion' },
+          { value: 'ste', label: 'Sciences et Technologies Électriques' },
+          { value: 'stm', label: 'Sciences et Technologies Mécaniques' },
           { value: 'lettres', label: 'Lettres et Sciences Humaines' }
         ]
       },
       '2BAC': {
         label: '2ème Bac',
         filieres: [
-          { value: 'svt', label: 'SVT' },
-          { value: 'pc', label: 'PC' },
+          { value: 'svt', label: 'Sciences de la Vie et de la Terre (SVT)' },
+          { value: 'pc', label: 'Sciences Physiques (PC)' },
           { value: 'sciences_math_a', label: 'Sciences Math A' },
           { value: 'sciences_math_b', label: 'Sciences Math B' },
           { value: 'eco', label: 'Sciences Économiques' },
+          { value: 'sciences_gestion', label: 'Sciences de Gestion Comptable' },
+          { value: 'ste', label: 'Sciences et Technologies Électriques' },
+          { value: 'stm', label: 'Sciences et Technologies Mécaniques' },
           { value: 'lettres', label: 'Lettres' },
           { value: 'sciences_humaines', label: 'Sciences Humaines' }
         ]
@@ -788,43 +793,43 @@ const ClassesPage = () => {
             schoolType = 'lycee';
           }
 
-          // Determine filiere based on class name or level name
+          // ── Détection de la filière selon le NIVEAU (programme officiel marocain) ──
+          // Le texte combiné contient le nom/code de la classe (ex. "2bacsgc-1")
+          // ET le libellé arabe du niveau (ex. "علوم التدبير المحاسباتي").
+          // La détection dépend du niveau car une même voie change de code/valeur
+          // entre TC, 1ère Bac et 2ème Bac (ex. sciences éco = "sciences_eco" en
+          // 1Bac mais "eco" en 2Bac ; sciences exp se scinde en svt/pc en 2Bac).
           const combinedText = (className + ' ' + levelName).toLowerCase();
-          
-          // Sciences Expérimentales (SVT)
-          if (combinedText.includes('علوم تجريبية') || combinedText.includes('sciences exp') || 
-              combinedText.includes('sef') || combinedText.includes('svt')) {
-            filiere = 'sciences_exp';
+          const has = (...keys) => keys.some(k => combinedText.includes(k));
+          filiere = '';
+
+          if (level === 'TC') {
+            // Tronc commun : 3 voies (technologique / scientifique / lettres)
+            if (has('تكنولوج', 'technolog', 'tct')) filiere = 'tc_tech';
+            else if (has('آداب', 'أدبي', 'إنساني', 'lettre', 'tcl')) filiere = 'tc_lettres';
+            else if (has('علم', 'scientif', 'tcs')) filiere = 'tc_sciences';
+          } else if (level === '1BAC') {
+            if (has('كهربائي', 'électr', 'electr', 'ste')) filiere = 'ste';
+            else if (has('ميكانيك', 'mécaniq', 'mecaniq', 'stm')) filiere = 'stm';
+            else if (has('اقتصاد', 'إقتصاد', 'économ', 'econom', 'seg')) filiere = 'sciences_eco';
+            else if (has('تجريبي', 'expériment', 'experiment', 'sef')) filiere = 'sciences_exp';
+            else if (has('رياضي', 'mathémat', 'mathemat', 'smf')) filiere = 'sciences_math';
+            else if (has('آداب', 'أدبي', 'إنساني', 'lettre', 'humaine')) filiere = 'lettres';
+          } else if (level === '2BAC') {
+            if (has('التدبير المحاسباتي', 'محاسب', 'gestion comptable', 'sgc')) filiere = 'sciences_gestion';
+            else if (has('كهربائي', 'électr', 'electr', 'ste')) filiere = 'ste';
+            else if (has('ميكانيك', 'mécaniq', 'mecaniq', 'stm')) filiere = 'stm';
+            else if (has('اقتصاد', 'إقتصاد', 'économ', 'econom')) filiere = 'eco';
+            else if (has('رياضية أ', 'math a', 'sma')) filiere = 'sciences_math_a';
+            else if (has('رياضية ب', 'math b', 'smb')) filiere = 'sciences_math_b';
+            else if (has('الحياة والأرض', 'svt')) filiere = 'svt';
+            else if (has('فيزيائي', 'physiq', 'spf')) filiere = 'pc';
+            else if (has('رياضي', 'mathémat', 'mathemat')) filiere = 'sciences_math_a';
+            else if (has('إنساني', 'humaine')) filiere = 'sciences_humaines';
+            else if (has('آداب', 'أدبي', 'lettre')) filiere = 'lettres';
           }
-          // Sciences Physiques (PC)
-          else if (combinedText.includes('علوم فيزيائية') || combinedText.includes('sciences physiques') || 
-                   combinedText.includes('spf') || combinedText.includes('pc')) {
-            filiere = 'pc';
-          }
-          // Sciences Mathématiques
-          else if (combinedText.includes('علوم رياضية') || combinedText.includes('sciences math') || 
-                   combinedText.includes('sm') || combinedText.includes('math')) {
-            filiere = 'sciences_math';
-          }
-          // Sciences Économiques
-          else if (combinedText.includes('علوم اقتصادية') || combinedText.includes('économique') || 
-                   combinedText.includes('eco') || combinedText.includes('se')) {
-            filiere = 'sciences_eco';
-          }
-          // Lettres
-          else if (combinedText.includes('آداب') || combinedText.includes('أدبي') || 
-                   combinedText.includes('lettres') || combinedText.includes('la')) {
-            filiere = 'lettres';
-          }
-          // Tronc Commun - no filiere needed
-          else if (level === 'TC') {
-            filiere = '';
-          }
-          // College - no filiere needed
-          else if (schoolType === 'college') {
-            filiere = '';
-          }
-          
+          // Maternelle / primaire / collège : aucune filière dans le système marocain.
+
           console.log(`[${file.name}] Filiere detection: "${combinedText}" -> ${filiere || '(none)'}`);
 
           // Find student data header row
