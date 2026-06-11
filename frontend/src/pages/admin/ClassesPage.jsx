@@ -1114,7 +1114,7 @@ const ClassesPage = () => {
     const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
     const aggClasses = [];
     const aggErrors = [];
-    let aggStudents = 0, aggExisting = 0, aggReassigned = 0, aggOther = 0;
+    let aggStudents = 0, aggExisting = 0, aggReassigned = 0, aggOther = 0, aggRateLimited = 0;
 
     for (let i = 0; i < parsedClasses.length; i++) {
       const pc = parsedClasses[i];
@@ -1161,6 +1161,7 @@ const ClassesPage = () => {
         aggExisting   += result.summary?.existing ?? 0;
         aggReassigned += result.summary?.reassigned ?? 0;
         aggOther      += result.summary?.otherSchool ?? 0;
+        aggRateLimited += result.summary?.rateLimited ?? result.rateLimited ?? 0;
         (result.errors || []).forEach(e => aggErrors.push({ fileName: pc.className, error: e.reason || e.error || 'erreur' }));
       } catch (err) {
         console.error('Import classe', pc.className, err);
@@ -1171,10 +1172,13 @@ const ClassesPage = () => {
     localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
 
     setBulkImportResult({
-      message: `${aggClasses.length} classe(s) importée(s), ${aggStudents} nouvel(le)(s) élève(s)`,
+      message: aggRateLimited > 0
+        ? `${aggClasses.length} classe(s), ${aggStudents} élève(s) créé(s). ${aggRateLimited} élève(s) non créé(s) (limite Supabase) → réimportez le MÊME fichier dans ~1h pour les reprendre.`
+        : `${aggClasses.length} classe(s) importée(s), ${aggStudents} nouvel(le)(s) élève(s)`,
       classes: aggClasses,
       totalStudents: aggStudents,
-      summary: { new: aggStudents, existing: aggExisting, reassigned: aggReassigned, otherSchool: aggOther, errors: aggErrors.length },
+      rateLimited: aggRateLimited,
+      summary: { new: aggStudents, existing: aggExisting, reassigned: aggReassigned, otherSchool: aggOther, rateLimited: aggRateLimited, errors: aggErrors.length },
       errors: aggErrors.length ? aggErrors : undefined,
     });
     setBulkImportErrors(aggErrors);

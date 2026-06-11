@@ -10,6 +10,110 @@ const router = express.Router();
 router.use(authenticate);
 router.use(authorize('admin', 'school_admin'));
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// D\u00e9tecte une erreur de limitation de d\u00e9bit (rate limit) renvoy\u00e9e par l'API Auth
+// de Supabase. Sur le plan gratuit, cr\u00e9er beaucoup de comptes d'un coup d\u00e9clenche
+// un "rate limit" \u2192 sans gestion, l'\u00e9l\u00e8ve \u00e9tait abandonn\u00e9 (classe \u00e0 0 \u00e9l\u00e8ve).
+const isRateLimitError = (err) => {
+  if (!err) return false;
+  const msg = String(err.message || err.msg || err.error_description || err || '').toLowerCase();
+  const code = String(err.code || err.status || err.statusCode || '').toLowerCase();
+  return (
+    msg.includes('rate limit') ||
+    msg.includes('rate_limit') ||
+    msg.includes('too many') ||
+    msg.includes('over_request') ||
+    msg.includes('over request') ||
+    code === '429' ||
+    code === 'over_request_rate_limit' ||
+    code === 'over_email_send_rate_limit'
+  );
+};
+
+// Une seule tentative de cr\u00e9ation de compte. Deux impl\u00e9mentations possibles :
+//  - USE_DIRECT_AUTH_INSERT=true \u2192 insertion SQL directe (RPC admin_create_student),
+//    contourne le rate limit de l'API Auth. Voir CREATE_STUDENT_DIRECT_AUTH.sql.
+//  - sinon \u2192 API Auth standard (supabaseAdmin.auth.admin.createUser).
+// Renvoie toujours la forme { data: { user: { id } }, error } pour le reste du code.
+const useDirectAuthInsert = String(process.env.USE_DIRECT_AUTH_INSERT || '').toLowerCase() === 'true';
+const createAuthUserOnce = async ({ email, password, firstName, lastName, massarCode }) => {
+  if (useDirectAuthInsert) {
+    const { data, error } = await supabaseAdmin.rpc('admin_create_student', {
+      p_email: email,
+      p_password: password,
+      p_first_name: firstName,
+      p_last_name: lastName,
+      p_role: 'student',
+      p_massar_code: massarCode || null
+    });
+    if (error) return { data: null, error };
+    return { data: { user: { id: data } }, error: null }; // data = uuid renvoy\u00e9 par la fonction
+  }
+  return supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { first_name: firstName, last_name: lastName, role: 'student', massar_code: massarCode || null }
+  });
+};
+
+// Cr\u00e9e un utilisateur Auth en g\u00e9rant 2 cas de retry distincts :
+//  - email d\u00e9j\u00e0 utilis\u00e9  \u2192 on ajoute un suffixe et on r\u00e9essaie (email unique)
+//  - rate limit Supabase \u2192 on attend (backoff exponentiel + jitter) et on r\u00e9essaie
+//    SANS perdre l'\u00e9l\u00e8ve, au lieu d'abandonner imm\u00e9diatement.
+// Retourne { data, error, email } \u2014 `email` peut diff\u00e9rer de l'entr\u00e9e (suffixe).
+const createStudentAuthUser = async ({ email, password, firstName, lastName, massarCode, schoolDomain, emailId, logTag = 'Import' }) => {
+  let currentEmail = email;
+  let emailAttempt = 0;
+  let rateLimitAttempt = 0;
+  const maxEmailAttempts = 5;
+  const maxRateLimitAttempts = 8; // worst case ~2+4+8+15*5 \u2248 89s d'attente cumul\u00e9e
+
+  while (true) {
+    const result = await createAuthUserOnce({ email: currentEmail, password, firstName, lastName, massarCode });
+
+    if (!result.error) {
+      return { data: result.data, error: null, email: currentEmail };
+    }
+
+    // 1) Rate limit \u2192 backoff + retry (ne consomme pas de suffixe email)
+    if (isRateLimitError(result.error)) {
+      rateLimitAttempt++;
+      if (rateLimitAttempt > maxRateLimitAttempts) {
+        return { data: null, error: result.error, email: currentEmail };
+      }
+      const base = Math.min(1000 * Math.pow(2, rateLimitAttempt), 15000); // 2s,4s,8s,\u2026,15s max
+      const jitter = Math.floor(Math.random() * 1000); // \u00e9vite que les lots repartent en m\u00eame temps
+      const waitMs = base + jitter;
+      console.warn(`[${logTag}] Rate limit Supabase \u2014 attente ${waitMs}ms (essai ${rateLimitAttempt}/${maxRateLimitAttempts}) pour ${currentEmail}`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    // 2) Email d\u00e9j\u00e0 utilis\u00e9 \u2192 suffixe + retry
+    const errorMsg = String(result.error.message || result.error.msg || result.error);
+    const errorCode = result.error.code || result.error.status || '';
+    const isEmailExists =
+      errorMsg.includes('already') || errorMsg.includes('exists') ||
+      errorMsg.includes('duplicate') || errorMsg.includes('registered') ||
+      errorCode === 'email_exists' || errorCode === 'user_already_exists' || errorCode === 422;
+
+    if (isEmailExists) {
+      emailAttempt++;
+      if (emailAttempt > maxEmailAttempts) {
+        return { data: null, error: result.error, email: currentEmail };
+      }
+      currentEmail = `${emailId}_${emailAttempt}@${schoolDomain}`;
+      console.log(`[${logTag}] Email existe, tentative ${emailAttempt} avec: ${currentEmail}`);
+      continue;
+    }
+
+    // 3) Autre erreur non r\u00e9cup\u00e9rable \u2192 on rend la main
+    return { data: null, error: result.error, email: currentEmail };
+  }
+};
+
 const normalizeName = (value) =>
   String(value || '')
     .normalize('NFD')
@@ -2016,60 +2120,26 @@ router.post('/classes/import', async (req, res) => {
                 return;
               }
 
-              // Fonction pour créer l'utilisateur avec retry et email unique
-              let authData = null;
-              let authError = null;
-              let attempts = 0;
-              const maxAttempts = 5;
-              
-              while (attempts < maxAttempts) {
-                const result = await supabaseAdmin.auth.admin.createUser({
-                  email,
-                  password,
-                  email_confirm: true,
-                  user_metadata: { 
-                    first_name: firstName, 
-                    last_name: lastName, 
-                    role: 'student',
-                    massar_code: massarCode || null
-                  }
-                });
-                
-                authData = result.data;
-                authError = result.error;
-                
-                if (!authError) {
-                  // Succès - sortir de la boucle
-                  break;
-                }
-                
-                // Vérifier si l'erreur est "email déjà utilisé"
-                const errorMsg = String(authError.message || authError.msg || authError);
-                const errorCode = authError.code || authError.status || '';
-                const isEmailExists = errorMsg.includes('already') || 
-                                      errorMsg.includes('exists') || 
-                                      errorMsg.includes('duplicate') || 
-                                      errorMsg.includes('registered') ||
-                                      errorCode === 'email_exists' ||
-                                      errorCode === 'user_already_exists' ||
-                                      errorCode === 422;
-                
-                if (isEmailExists) {
-                  // Email existe - générer un nouvel email unique avec suffixe
-                  attempts++;
-                  const suffix = `_${attempts}`;
-                  email = `${emailId}${suffix}@${schoolDomain}`;
-                  console.log(`[Import Class] Email existe, tentative ${attempts} avec: ${email}`);
-                } else {
-                  // Autre erreur - ne pas réessayer
-                  console.error(`[Import Class] Erreur auth non-récupérable pour ${email}:`, authError);
-                  break;
-                }
-              }
+              // Créer le compte Auth avec retry intelligent :
+              //  - email déjà utilisé → suffixe unique
+              //  - rate limit Supabase → backoff + retry (ne pas perdre l'élève)
+              const { data: authData, error: authError, email: finalEmail } = await createStudentAuthUser({
+                email, password, firstName, lastName, massarCode, schoolDomain, emailId, logTag: 'Import Class'
+              });
+              email = finalEmail; // peut avoir reçu un suffixe ; réutilisé pour le profil
 
               if (authError) {
-                console.error(`[Import Class] Échec création après ${attempts} tentatives pour ${emailId}:`, authError);
-                errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Création compte échouée: ${authError.message || authError.msg || authError}` });
+                const rateLimited = isRateLimitError(authError);
+                console.error(`[Import Class] Échec création pour ${emailId}:`, authError);
+                errors.push({
+                  className: name,
+                  student: `${firstName} ${lastName}`,
+                  email,
+                  rateLimited,
+                  reason: rateLimited
+                    ? 'Limite Supabase atteinte (réessayez plus tard ou réimportez le même fichier)'
+                    : `Création compte échouée: ${authError.message || authError.msg || authError}`
+                });
                 return;
               }
 
@@ -2154,7 +2224,8 @@ router.post('/classes/import', async (req, res) => {
       }
     }
 
-    console.log(`[Import Classes] ${createdClasses.length} classes créées, ${allCreatedStudents.length} élèves, ${otherSchoolStudents.length} dans autres écoles, ${errors.length} erreurs`);
+    const rateLimitedCount = errors.filter(e => e.rateLimited).length;
+    console.log(`[Import Classes] ${createdClasses.length} classes créées, ${allCreatedStudents.length} élèves, ${otherSchoolStudents.length} dans autres écoles, ${errors.length} erreurs (dont ${rateLimitedCount} rate limit)`);
     res.status(201).json({
       message: `${createdClasses.length} classe(s) importée(s) avec ${allCreatedStudents.length} élève(s)`,
       classes: createdClasses,
@@ -2164,12 +2235,16 @@ router.post('/classes/import', async (req, res) => {
       otherSchoolStudents: otherSchoolStudents.length > 0 ? otherSchoolStudents : undefined,
       otherSchoolCount: otherSchoolStudents.length,
       errors: errors.length > 0 ? errors : undefined,
+      // > 0 quand des élèves n'ont pas pu être créés à cause de la limite Supabase :
+      // réimporter le MÊME fichier reprendra ces élèves (import idempotent).
+      rateLimited: rateLimitedCount,
       summary: {
         new: allCreatedStudents.length,
         existing: allExistingStudents.length,
         reassigned: reassignedStudents.length,
         otherSchool: otherSchoolStudents.length,
         errors: errors.length,
+        rateLimited: rateLimitedCount,
         total: totalStudentsProcessed
       }
     });
@@ -3088,46 +3163,23 @@ router.post('/students/import', async (req, res) => {
         continue;
       }
 
-      // Créer l'utilisateur dans Auth (avec retry email suffixé si déjà utilisé)
-      let finalEmail = email;
-      let authData = null;
-      let authError = null;
-      let attempts = 0;
-      const maxAttempts = 5;
-
-      while (attempts < maxAttempts) {
-        const result = await supabaseAdmin.auth.admin.createUser({
-          email: finalEmail,
-          password,
-          email_confirm: true,
-          user_metadata: { first_name: firstName, last_name: lastName, role: 'student', massar_code: massarCode || null }
-        });
-
-        authData = result.data;
-        authError = result.error;
-
-        if (!authError) break;
-
-        const errorMsg = String(authError.message || authError.msg || '').toLowerCase();
-        const errorCode = String(authError.code || authError.status || '').toLowerCase();
-        const isEmailExists = errorMsg.includes('already') ||
-          errorMsg.includes('exists') ||
-          errorMsg.includes('duplicate') ||
-          errorMsg.includes('registered') ||
-          errorCode === 'email_exists' ||
-          errorCode === 'user_already_exists' ||
-          errorCode === '422';
-
-        if (!isEmailExists) break;
-
-        attempts += 1;
-        finalEmail = `${emailLocalPart}_${attempts}@${emailDomainPart}`;
-        console.log(`[Import] Email déjà utilisé (${email}), tentative ${attempts} avec ${finalEmail}`);
-      }
+      // Créer le compte Auth avec retry intelligent (email suffixé si déjà utilisé,
+      // backoff + retry sur rate limit Supabase au lieu d'abandonner l'élève).
+      const { data: authData, error: authError, email: finalEmail } = await createStudentAuthUser({
+        email, password, firstName, lastName, massarCode,
+        schoolDomain: emailDomainPart, emailId: emailLocalPart, logTag: 'Import'
+      });
 
       if (authError || !authData?.user?.id) {
+        const rateLimited = isRateLimitError(authError);
         console.error(`[Import] Erreur création utilisateur ${email}:`, authError);
-        errors.push({ email, reason: authError?.message || 'Erreur création utilisateur Auth' });
+        errors.push({
+          email,
+          rateLimited,
+          reason: rateLimited
+            ? 'Limite Supabase atteinte (réessayez plus tard ou réimportez le même fichier)'
+            : (authError?.message || 'Erreur création utilisateur Auth')
+        });
         continue;
       }
 
