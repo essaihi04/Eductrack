@@ -41,6 +41,19 @@ const parseMassarTuteur = (workbook) => {
   }
   if (subIdx === -1) return null; // pas le format Massar Tuteur
 
+  // Nom de la classe (« القسم : 1APIC-1 ») dans les lignes d'en-tête du fichier
+  let className = null;
+  for (let i = 0; i < subIdx; i++) {
+    const row = raw[i] || [];
+    const idx = row.findIndex(c => String(c).includes('القسم'));
+    if (idx === -1) continue;
+    for (let j = idx + 1; j < row.length; j++) {
+      const v = String(row[j] || '').trim();
+      if (v) { className = v; break; }
+    }
+    if (className) break;
+  }
+
   // Colonne du code Massar (« رقم التلميذ ») dans la ligne d'entête (subIdx-1)
   const headerRow = raw[subIdx - 1] || [];
   let codeCol = headerRow.findIndex(c => String(c).trim() === 'رقم التلميذ');
@@ -86,7 +99,7 @@ const parseMassarTuteur = (workbook) => {
     pushContact(tutPhoneCol, mapTutelle(T(r, typeCol)));
   }
 
-  return out;
+  return { rows: out, className };
 };
 
 const ParentsPage = () => {
@@ -375,9 +388,17 @@ const ParentsPage = () => {
 
       // 1) Tenter d'abord le format OFFICIEL Massar « Tuteur » (export_Tuteur_*.xlsx).
       //    Si détecté, on extrait directement code Massar + père/mère/tuteur + téléphones.
-      const massarRows = parseMassarTuteur(workbook);
-      if (massarRows && massarRows.length > 0) {
-        setImportPreview({ rows: massarRows, source: 'massar' });
+      const massarResult = parseMassarTuteur(workbook);
+      if (massarResult && massarResult.rows.length > 0) {
+        setImportPreview({ rows: massarResult.rows, source: 'massar' });
+
+        // Si aucune classe n'est sélectionnée, détecter automatiquement la classe
+        // à partir de l'en-tête du fichier (« القسم : 1APIC-1 ») et la pré-sélectionner.
+        if (!importClassId && massarResult.className) {
+          const needle = massarResult.className.trim().toLowerCase();
+          const match = classes.find(c => String(c.name || '').trim().toLowerCase() === needle);
+          if (match) setImportClassId(match.id);
+        }
         return;
       }
 
