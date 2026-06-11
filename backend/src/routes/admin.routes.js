@@ -1880,14 +1880,14 @@ router.post('/classes/import', async (req, res) => {
         // 2. Créer les élèves de cette classe
         const classStudents = [];
         if (Array.isArray(studentsList) && studentsList.length > 0) {
-          for (const student of studentsList) {
+          const processStudent = async (student) => {
             const firstName = String(student.firstName || '').replace(/\s+/g, ' ').trim();
             let lastName = String(student.lastName || '').replace(/\s+/g, ' ').trim();
             const { birthDate, birthPlace, gender } = student;
             const massarCode = student.massarCode ? String(student.massarCode).trim() : null;
 
             if (!firstName && !lastName) {
-              continue; // Ligne réellement vide
+              return; // Ligne réellement vide
             }
             if (!lastName) lastName = firstName; // ne pas perdre un élève sans nom de famille
 
@@ -1936,7 +1936,7 @@ router.post('/classes/import', async (req, res) => {
 
               if (existingProfileError) {
                 errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur recherche profil: ${existingProfileError.message}` });
-                continue;
+                return;
               }
 
               if (existingProfile) {
@@ -1948,7 +1948,7 @@ router.post('/classes/import', async (req, res) => {
                     last_name: existingProfile.last_name,
                     school_id: existingProfile.school_id
                   });
-                  continue;
+                  return;
                 }
 
                 let finalExistingProfile = existingProfile;
@@ -1982,7 +1982,7 @@ router.post('/classes/import', async (req, res) => {
 
                   if (updateProfileError) {
                     errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur mise à jour: ${updateProfileError.message}` });
-                    continue;
+                    return;
                   }
 
                   finalExistingProfile = updatedProfile;
@@ -2002,7 +2002,7 @@ router.post('/classes/import', async (req, res) => {
 
                 classStudents.push(existingPayload);
                 allExistingStudents.push(existingPayload);
-                continue;
+                return;
               }
 
               // Fonction pour créer l'utilisateur avec retry et email unique
@@ -2059,14 +2059,14 @@ router.post('/classes/import', async (req, res) => {
               if (authError) {
                 console.error(`[Import Class] Échec création après ${attempts} tentatives pour ${emailId}:`, authError);
                 errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Création compte échouée: ${authError.message || authError.msg || authError}` });
-                continue;
+                return;
               }
 
               const userId = authData?.user?.id;
               if (!userId) {
                 console.error(`[Import Class] Pas d'ID utilisateur pour ${email}`);
                 errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: 'Compte créé sans identifiant' });
-                continue;
+                return;
               }
               
               console.log(`[Import Class] Utilisateur créé: ${email} (ID: ${userId})`);
@@ -2100,7 +2100,7 @@ router.post('/classes/import', async (req, res) => {
               if (profileError) {
                 console.error(`[Import Class] Erreur profil ${email}:`, profileError);
                 errors.push({ className: name, student: `${firstName} ${lastName}`, email, reason: `Erreur profil: ${profileError.message}` });
-                continue;
+                return;
               }
 
               classStudents.push({
@@ -2117,6 +2117,18 @@ router.post('/classes/import', async (req, res) => {
             } catch (studentErr) {
               console.error(`[Import Class] Erreur élève ${firstName} ${lastName}:`, studentErr);
             }
+          };
+
+          // Création en parallèle par lots (accélère l'import sans saturer
+          // l'API Auth de Supabase ni le proxy).
+          const CONCURRENCY = 6;
+          for (let k = 0; k < studentsList.length; k += CONCURRENCY) {
+            await Promise.all(
+              studentsList.slice(k, k + CONCURRENCY).map(s =>
+                processStudent(s).catch(e =>
+                  console.error('[Import Class] élève (lot) échec:', e?.message))
+              )
+            );
           }
         }
 
