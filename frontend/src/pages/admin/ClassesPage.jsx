@@ -287,6 +287,34 @@ const ClassesPage = () => {
     }
   };
 
+  // Suppression groupée : supprime une liste de classes une par une.
+  const bulkDeleteClasses = async (classList, label) => {
+    const list = (classList || []).filter(Boolean);
+    if (list.length === 0) return;
+    if (!window.confirm(`Supprimer ${list.length} classe(s) — ${label} ?\n\nTous les élèves, suivis et données liés à ces classes seront supprimés. Cette action est irréversible.`)) {
+      return;
+    }
+    const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+    const token = session?.access_token;
+    let ok = 0, fail = 0;
+    for (let i = 0; i < list.length; i++) {
+      const cls = list[i];
+      setDeleteStatus({ type: 'loading', message: `Suppression ${i + 1}/${list.length} — ${cls.name}...` });
+      try {
+        const res = await fetch(`${apiUrl}/api/admin/classes/${cls.id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) ok++; else fail++;
+      } catch { fail++; }
+    }
+    setDeleteStatus({
+      type: fail === 0 ? 'success' : 'error',
+      message: `${ok} classe(s) supprimée(s)${fail ? `, ${fail} échec(s)` : ''} — ${label}`,
+    });
+    await fetchData();
+  };
+
   const addTeacherToClass = async (classId, teacherId) => {
     try {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
@@ -1427,7 +1455,27 @@ const ClassesPage = () => {
             {uncategorized.length > 0 && <><span>·</span><span className="text-orange-600">{uncategorized.length} non classifiée(s)</span></>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {(() => {
+            const years = [...new Set(classes.map((c) => c.academic_year).filter(Boolean))].sort().reverse();
+            if (years.length === 0) return null;
+            return (
+              <select
+                value=""
+                onChange={(e) => {
+                  const yr = e.target.value;
+                  if (!yr) return;
+                  bulkDeleteClasses(classes.filter((c) => c.academic_year === yr), `année ${yr}`);
+                  e.target.value = '';
+                }}
+                className="px-3 py-2 border border-red-200 text-red-700 rounded-lg text-sm bg-white"
+                title="Supprimer toutes les classes d'une année scolaire"
+              >
+                <option value="">🗑️ Supprimer une année…</option>
+                {years.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            );
+          })()}
           <button
             onClick={() => setShowBulkImport(true)}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
@@ -1769,6 +1817,13 @@ const ClassesPage = () => {
                     <h2 className="text-lg font-bold">{typeInfo.label}</h2>
                     <p className="text-sm text-muted-foreground">{typeClassCount} classe(s)</p>
                   </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); bulkDeleteClasses(Object.values(typeLevels).flatMap((lvls) => Object.values(lvls).flat()), `tout ${typeInfo.label}`); }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-red-600 hover:bg-red-50 text-xs font-medium"
+                    title={`Supprimer toutes les classes de ${typeInfo.label}`}
+                  >
+                    <Trash2 className="w-4 h-4" /> Tout supprimer
+                  </button>
                   {isTypeExpanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
                 </div>
 
@@ -1793,6 +1848,13 @@ const ClassesPage = () => {
                               <span className="font-semibold text-sm">{lvlInfo.label}</span>
                               <span className="text-xs text-muted-foreground ml-2">({lvlClassCount})</span>
                             </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); bulkDeleteClasses(Object.values(lvlFilieres).flat(), `${typeInfo.label} · ${lvlInfo.label}`); }}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-red-600 hover:bg-red-50 text-xs font-medium"
+                              title={`Supprimer toutes les classes de ${lvlInfo.label}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Supprimer
+                            </button>
                             {isLvlExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                           </div>
 
