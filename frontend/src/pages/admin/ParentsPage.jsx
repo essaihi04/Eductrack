@@ -3,6 +3,92 @@ import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronU
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 
+// Validation stricte d'un mobile marocain (06/07) → +2126…/+2127… ou null.
+// Le fichier officiel Massar met parfois une adresse dans la colonne téléphone.
+const validMoroccoMobile = (raw) => {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.startsWith('212')) d = '0' + d.slice(3);
+  if (d.length === 9 && /^[67]/.test(d)) d = '0' + d;
+  if (/^0[67][0-9]{8}$/.test(d)) return '+212' + d.slice(1);
+  return null;
+};
+
+// Mappe le type de tutelle Massar (arabe) → libellé relation FR
+const mapTutelle = (t) => {
+  const s = String(t || '').trim();
+  if (s.includes('أب')) return 'père';
+  if (s.includes('أم')) return 'mère';
+  if (s.includes('وصي')) return 'tuteur';
+  return 'tuteur';
+};
+
+// Parse le fichier officiel Massar « Tuteur » (export_Tuteur_*.xlsx).
+// Structure : en-tête sur 2 lignes, 3 blocs (Tuteur / Père / Mère), chacun avec
+// nom AR+FR, profession, téléphone, adresse. L'élève est identifié par son code Massar.
+// Renvoie un tableau de lignes { massar_code, student_full_name, parent_full_name,
+// phone_1, relationship } (1 ligne par contact distinct), ou null si ce n'est pas ce format.
+const parseMassarTuteur = (workbook) => {
+  const sheet = workbook.Sheets['Tuteur'] || workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) return null;
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  // Repérer la ligne de sous-entête : celle qui contient au moins 2 cellules « الهاتف »
+  let subIdx = -1;
+  let phoneCols = [];
+  for (let i = 0; i < Math.min(raw.length, 15); i++) {
+    const cols = (raw[i] || []).map((c, j) => (String(c).trim() === 'الهاتف' ? j : -1)).filter(j => j !== -1);
+    if (cols.length >= 2) { subIdx = i; phoneCols = cols; break; }
+  }
+  if (subIdx === -1) return null; // pas le format Massar Tuteur
+
+  // Colonne du code Massar (« رقم التلميذ ») dans la ligne d'entête (subIdx-1)
+  const headerRow = raw[subIdx - 1] || [];
+  let codeCol = headerRow.findIndex(c => String(c).trim() === 'رقم التلميذ');
+  if (codeCol === -1) codeCol = 2; // position standard
+  const lastCol = codeCol + 1;  // النسب
+  const firstCol = codeCol + 2; // الإسم
+  const typeCol = codeCol + 3;  // نوع الوصاية
+
+  // 3 blocs téléphone, dans l'ordre : Tuteur, Père, Mère
+  const [tutPhoneCol, perePhoneCol, merePhoneCol] = phoneCols;
+  const T = (r, c) => (c == null ? '' : String(r[c] || '').trim());
+  // Pour un bloc, nom = FR si dispo (phoneCol-3 = prénom FR, phoneCol-2 = nom FR),
+  // sinon AR (phoneCol-5 = prénom AR, phoneCol-4 = nom AR).
+  const blockName = (r, phoneCol) => {
+    const frFirst = T(r, phoneCol - 3), frLast = T(r, phoneCol - 2);
+    const arFirst = T(r, phoneCol - 5), arLast = T(r, phoneCol - 4);
+    const fr = `${frFirst} ${frLast}`.trim();
+    const ar = `${arFirst} ${arLast}`.trim();
+    return fr || ar;
+  };
+
+  const out = [];
+  for (let i = subIdx + 1; i < raw.length; i++) {
+    const r = raw[i];
+    if (!r) continue;
+    const massar = T(r, codeCol).toUpperCase();
+    if (!massar) continue;
+    const studentName = `${T(r, lastCol)} ${T(r, firstCol)}`.trim();
+
+    // Candidats contacts : Père et Mère d'abord, puis Tuteur en repli (il duplique
+    // souvent l'un des deux). Dédup par numéro.
+    const seen = new Set();
+    const pushContact = (phoneCol, relationship) => {
+      const phone = validMoroccoMobile(T(r, phoneCol));
+      if (!phone || seen.has(phone)) return;
+      const name = blockName(r, phoneCol);
+      if (!name) return;
+      seen.add(phone);
+      out.push({ massar_code: massar, student_full_name: studentName, parent_full_name: name, phone_1: phone, relationship });
+    };
+    pushContact(perePhoneCol, 'père');
+    pushContact(merePhoneCol, 'mère');
+    pushContact(tutPhoneCol, mapTutelle(T(r, typeCol)));
+  }
+
+  return out;
+};
+
 const ParentsPage = () => {
   const [parents, setParents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -286,6 +372,15 @@ const ParentsPage = () => {
     try {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data);
+
+      // 1) Tenter d'abord le format OFFICIEL Massar « Tuteur » (export_Tuteur_*.xlsx).
+      //    Si détecté, on extrait directement code Massar + père/mère/tuteur + téléphones.
+      const massarRows = parseMassarTuteur(workbook);
+      if (massarRows && massarRows.length > 0) {
+        setImportPreview({ rows: massarRows, source: 'massar' });
+        return;
+      }
+
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
@@ -588,7 +683,37 @@ const ParentsPage = () => {
     return matchSearch && matchClass;
   });
 
-  const uniqueClasses = [...new Set(parents.flatMap(p => (p.children || []).map(c => c.class?.name).filter(Boolean)))];
+  // Options de classes : TOUTES les classes (pas seulement celles ayant déjà un parent),
+  // pour pouvoir repérer les classes sans aucun parent. Triées par niveau puis nom.
+  const classOptions = [...classes]
+    .filter(c => c?.name)
+    .sort((a, b) => String(a.level || '').localeCompare(String(b.level || '')) || a.name.localeCompare(b.name));
+
+  // Map élève → parents liés (pour savoir qui a un parent / un numéro)
+  const studentParentMap = new Map();
+  parents.forEach(p => (p.children || []).forEach(c => {
+    if (!c?.id) return;
+    if (!studentParentMap.has(c.id)) studentParentMap.set(c.id, []);
+    studentParentMap.get(c.id).push(p);
+  }));
+
+  // Élèves dans le périmètre (classe filtrée par nom, ou tous)
+  const filterClassIds = filterClass
+    ? new Set(classes.filter(c => c.name === filterClass).map(c => c.id))
+    : null;
+  const scopedStudents = students.filter(s => !filterClassIds || filterClassIds.has(s.class_id));
+
+  // Statistiques de couverture parents/numéros
+  const stats = scopedStudents.reduce((acc, s) => {
+    const linked = studentParentMap.get(s.id) || [];
+    const hasParent = linked.length > 0;
+    const hasPhone = linked.some(p => (p.contacts || []).length > 0 || p.phone);
+    acc.total += 1;
+    if (hasParent) acc.withParent += 1; else acc.withoutParent += 1;
+    if (hasPhone) acc.withPhone += 1; else acc.withoutPhone += 1;
+    return acc;
+  }, { total: 0, withParent: 0, withoutParent: 0, withPhone: 0, withoutPhone: 0 });
+  const pct = (n) => stats.total ? Math.round((n / stats.total) * 100) : 0;
 
   if (loading) {
     return (
@@ -767,6 +892,7 @@ const ParentsPage = () => {
                         <th className="text-left py-1 px-2">#</th>
                         <th className="text-left py-1 px-2">Élève</th>
                         <th className="text-left py-1 px-2">Parent</th>
+                        <th className="text-left py-1 px-2">Relation</th>
                         <th className="text-left py-1 px-2">Téléphone</th>
                         {importResult && <th className="text-left py-1 px-2">Statut</th>}
                       </tr>
@@ -779,6 +905,7 @@ const ParentsPage = () => {
                             <td className="py-1 px-2 text-muted-foreground">{idx + 1}</td>
                             <td className="py-1 px-2">{row.student_full_name}</td>
                             <td className="py-1 px-2">{row.parent_full_name}</td>
+                            <td className="py-1 px-2 capitalize">{row.relationship || '—'}</td>
                             <td className="py-1 px-2">{row.phone_1}</td>
                             {result && (
                               <td className="py-1 px-2">
@@ -857,18 +984,46 @@ const ParentsPage = () => {
             className="w-full pl-10 pr-4 py-2 border rounded-lg bg-background"
           />
         </div>
-        {uniqueClasses.length > 0 && (
+        {classOptions.length > 0 && (
           <select
             value={filterClass}
             onChange={e => setFilterClass(e.target.value)}
             className="px-3 py-2 border rounded-lg bg-background"
           >
             <option value="">Toutes les classes</option>
-            {uniqueClasses.map(c => (
-              <option key={c} value={c}>{c}</option>
+            {classOptions.map(c => (
+              <option key={c.id} value={c.name}>{c.name}{c.level ? ` · ${c.level}` : ''}</option>
             ))}
           </select>
         )}
+      </div>
+
+      {/* Statistiques de couverture (globales ou pour la classe filtrée) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="rounded-lg border bg-card p-3">
+          <p className="text-xs text-muted-foreground">Élèves{filterClass ? ` · ${filterClass}` : ''}</p>
+          <p className="text-2xl font-bold">{stats.total}</p>
+        </div>
+        <div className="rounded-lg border bg-card p-3">
+          <p className="text-xs text-muted-foreground">Avec parent</p>
+          <p className="text-2xl font-bold text-green-600">{stats.withParent}</p>
+          <p className="text-xs text-muted-foreground">{pct(stats.withParent)}%</p>
+        </div>
+        <div className="rounded-lg border bg-card p-3">
+          <p className="text-xs text-muted-foreground">Sans parent</p>
+          <p className="text-2xl font-bold text-red-500">{stats.withoutParent}</p>
+          <p className="text-xs text-muted-foreground">{pct(stats.withoutParent)}%</p>
+        </div>
+        <div className="rounded-lg border bg-card p-3">
+          <p className="text-xs text-muted-foreground">Avec numéro</p>
+          <p className="text-2xl font-bold text-green-600">{stats.withPhone}</p>
+          <p className="text-xs text-muted-foreground">{pct(stats.withPhone)}%</p>
+        </div>
+        <div className="rounded-lg border bg-card p-3">
+          <p className="text-xs text-muted-foreground">Sans numéro</p>
+          <p className="text-2xl font-bold text-amber-500">{stats.withoutPhone}</p>
+          <p className="text-xs text-muted-foreground">{pct(stats.withoutPhone)}%</p>
+        </div>
       </div>
 
       {/* Parents List */}

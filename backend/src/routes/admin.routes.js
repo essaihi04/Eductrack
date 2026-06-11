@@ -37,14 +37,16 @@ const isRateLimitError = (err) => {
 //  - sinon \u2192 API Auth standard (supabaseAdmin.auth.admin.createUser).
 // Renvoie toujours la forme { data: { user: { id } }, error } pour le reste du code.
 const useDirectAuthInsert = String(process.env.USE_DIRECT_AUTH_INSERT || '').toLowerCase() === 'true';
-const createAuthUserOnce = async ({ email, password, firstName, lastName, massarCode }) => {
+const createAuthUserOnce = async ({ email, password, firstName, lastName, role = 'student', massarCode }) => {
   if (useDirectAuthInsert) {
+    // La fonction RPC est g\u00e9n\u00e9rique (p_role) \u2192 sert aussi bien aux \u00e9l\u00e8ves qu'aux parents,
+    // en contournant le rate limit de l'API Auth.
     const { data, error } = await supabaseAdmin.rpc('admin_create_student', {
       p_email: email,
       p_password: password,
       p_first_name: firstName,
       p_last_name: lastName,
-      p_role: 'student',
+      p_role: role,
       p_massar_code: massarCode || null
     });
     if (error) return { data: null, error };
@@ -54,7 +56,7 @@ const createAuthUserOnce = async ({ email, password, firstName, lastName, massar
     email,
     password,
     email_confirm: true,
-    user_metadata: { first_name: firstName, last_name: lastName, role: 'student', massar_code: massarCode || null }
+    user_metadata: { first_name: firstName, last_name: lastName, role, massar_code: massarCode || null }
   });
 };
 
@@ -150,6 +152,17 @@ const normalizePhoneToE164 = (raw) => {
   return `+${onlyDigits}`;
 };
 
+// Validation STRICTE d'un mobile marocain (06/07). Le fichier officiel Massar met
+// parfois une adresse dans la colonne « téléphone » → on doit rejeter ce qui n'est
+// pas un vrai numéro. Renvoie le format E.164 (+2126…/+2127…) ou null.
+const normalizeMoroccoMobile = (raw) => {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.startsWith('212')) d = '0' + d.slice(3);
+  if (d.length === 9 && /^[67]/.test(d)) d = '0' + d;
+  if (/^0[67][0-9]{8}$/.test(d)) return `+212${d.slice(1)}`;
+  return null;
+};
+
 const generatePlaceholderParentEmail = () =>
   `parent_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}@parents.local`;
 
@@ -219,15 +232,14 @@ const createParentProfile = async ({ email, firstName, lastName, phone, schoolId
   // Mot de passe lisible basé sur prénom + année
   const password = buildParentPassword(firstName);
 
-  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+  // Passe par le même chemin que les élèves (bypass RPC si activé) → pas de rate limit
+  // lors d'un import massif de parents.
+  const { data: authData, error: authError } = await createAuthUserOnce({
     email: finalEmail,
     password,
-    email_confirm: true,
-    user_metadata: {
-      first_name: firstName || 'Parent',
-      last_name: lastName || '',
-      role: 'parent'
-    }
+    firstName: firstName || 'Parent',
+    lastName: lastName || '',
+    role: 'parent'
   });
 
   if (authError) throw authError;
@@ -1004,7 +1016,7 @@ router.post('/parents/import', async (req, res) => {
 
     const { data: students, error: studentsError } = await supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, class_id')
+      .select('id, first_name, last_name, class_id, massar_code')
       .eq('role', 'student')
       .eq('class_id', class_id);
     if (studentsError) throw studentsError;
@@ -1014,24 +1026,40 @@ router.post('/parents/import', async (req, res) => {
       const fullRev = normalizeName(`${s.first_name} ${s.last_name}`);
       return { ...s, full, fullRev };
     });
+    // Index par code Massar (clé fiable du fichier officiel Massar « Tuteur »)
+    const byMassar = new Map();
+    for (const s of studentsIndex) {
+      const code = String(s.massar_code || '').trim().toUpperCase();
+      if (code) byMassar.set(code, s);
+    }
 
     const results = [];
     for (const row of rows) {
       const studentFullNameRaw = row?.student_full_name;
       const parentFullNameRaw = row?.parent_full_name;
-      const phone1 = normalizePhoneToE164(row?.phone_1);
+      const massarRaw = String(row?.massar_code || '').trim().toUpperCase();
+      // Téléphone : validation stricte mobile marocain (rejette adresses/garbage),
+      // repli sur l'ancien normaliseur si jamais ce n'est pas un format MA standard.
+      const phone1 = normalizeMoroccoMobile(row?.phone_1) || normalizePhoneToE164(row?.phone_1);
 
-      if (!studentFullNameRaw || !parentFullNameRaw || !phone1) {
+      if (!parentFullNameRaw || !phone1 || (!studentFullNameRaw && !massarRaw)) {
         results.push({
           row,
           matchStatus: 'invalid',
-          reason: 'Champs requis manquants (student_full_name, parent_full_name, phone_1)'
+          reason: 'Champs requis manquants (élève [nom ou code Massar], parent, téléphone valide)'
         });
         continue;
       }
 
-      const studentNeedle = normalizeName(studentFullNameRaw);
-      const matches = studentsIndex.filter(s => s.full === studentNeedle || s.fullRev === studentNeedle);
+      // 1) Matching prioritaire par code Massar (fiable, sans ambiguïté de nom)
+      let matches = [];
+      if (massarRaw && byMassar.has(massarRaw)) {
+        matches = [byMassar.get(massarRaw)];
+      } else if (studentFullNameRaw) {
+        // 2) Repli sur le nom complet normalisé
+        const studentNeedle = normalizeName(studentFullNameRaw);
+        matches = studentsIndex.filter(s => s.full === studentNeedle || s.fullRev === studentNeedle);
+      }
 
       if (matches.length === 1) {
         const matchedStudent = matches[0];
