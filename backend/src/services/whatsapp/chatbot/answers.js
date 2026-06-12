@@ -544,6 +544,36 @@ export async function getSchoolPaymentInfo(student, parentInfo) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// CODE MASSAR
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Code Massar (رقم التلميذ) + code secret (الرمز السري) de l'élève */
+export async function getMassarCode(student, parentInfo) {
+  // Re-lecture pour avoir les codes à jour (import possible après le début de session)
+  const { data: s } = await supabaseAdmin
+    .from('profiles')
+    .select('first_name, last_name, massar_code, massar_secret')
+    .eq('id', student.id)
+    .single();
+
+  const code = s?.massar_code || student.massar_code;
+  const secret = s?.massar_secret || student.massar_secret;
+  const name = `${s?.first_name || student.first_name || ''} ${s?.last_name || student.last_name || ''}`.trim();
+
+  if (!code && !secret) {
+    return `${header('Code Massar', '🆔')}\n\n` +
+      `Le code Massar de *${name}* n'est pas encore disponible.\n\n` +
+      `_Veuillez contacter l'établissement._${footer(parentInfo?.school_name)}`;
+  }
+
+  const lines = [header('Code Massar', '🆔'), '', `👶 *${name}*`];
+  if (code) lines.push(`🆔 Code Massar : *${code}*`);
+  if (secret) lines.push(`🔑 Code secret : *${secret}*`);
+  lines.push('', '🌐 Connexion : https://massar.men.gov.ma', '', '_Conservez ces informations en lieu sûr._');
+  return lines.join('\n') + footer(parentInfo?.school_name);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // BULLETINS
 // ─────────────────────────────────────────────────────────────────────────
 

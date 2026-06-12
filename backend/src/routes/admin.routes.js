@@ -1199,6 +1199,249 @@ router.post('/parents/import', async (req, res) => {
   }
 });
 
+// Import des codes Massar (رقم التلميذ + الرمز السري) depuis le fichier InfoEleve.
+// Body: { class_id, rows: [{ massar_code, student_full_name, massar_secret }], dryRun }
+// Met à jour massar_secret (et massar_code si absent) des élèves de la classe.
+router.post('/classes/import-massar-secrets', async (req, res) => {
+  try {
+    const { class_id, rows, dryRun } = req.body;
+    if (!class_id) return res.status(400).json({ error: 'class_id requis' });
+    if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'rows requis' });
+
+    const { data: students, error: studentsError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, class_id, massar_code')
+      .eq('role', 'student')
+      .eq('class_id', class_id);
+    if (studentsError) throw studentsError;
+
+    const studentsIndex = (students || []).map(s => ({
+      ...s,
+      full: normalizeName(`${s.last_name} ${s.first_name}`),
+      fullRev: normalizeName(`${s.first_name} ${s.last_name}`)
+    }));
+    const byMassar = new Map();
+    for (const s of studentsIndex) {
+      const code = String(s.massar_code || '').trim().toUpperCase();
+      if (code) byMassar.set(code, s);
+    }
+
+    const results = [];
+    for (const row of rows) {
+      const massarRaw = String(row?.massar_code || '').trim().toUpperCase();
+      const studentFullNameRaw = row?.student_full_name;
+      const secret = String(row?.massar_secret || '').trim();
+
+      if (!secret || (!massarRaw && !studentFullNameRaw)) {
+        results.push({ row, matchStatus: 'invalid', reason: 'Code secret ou identifiant élève manquant' });
+        continue;
+      }
+
+      let matches = [];
+      if (massarRaw && byMassar.has(massarRaw)) {
+        matches = [byMassar.get(massarRaw)];
+      } else if (studentFullNameRaw) {
+        const needle = normalizeName(studentFullNameRaw);
+        matches = studentsIndex.filter(s => s.full === needle || s.fullRev === needle);
+      }
+
+      if (matches.length === 1) {
+        results.push({
+          row,
+          matchStatus: 'matched',
+          student: { id: matches[0].id, first_name: matches[0].first_name, last_name: matches[0].last_name },
+          missingMassar: !matches[0].massar_code
+        });
+      } else if (matches.length > 1) {
+        results.push({ row, matchStatus: 'ambiguous', studentMatches: matches.slice(0, 5).map(s => ({ id: s.id, first_name: s.first_name, last_name: s.last_name })) });
+      } else {
+        results.push({ row, matchStatus: 'not_found' });
+      }
+    }
+
+    if (dryRun === true) {
+      return res.json({ dryRun: true, results });
+    }
+
+    let updated = 0;
+    for (const r of results) {
+      if (r.matchStatus !== 'matched' || !r.student?.id) continue;
+      const updates = { massar_secret: String(r.row.massar_secret).trim() };
+      // Compléter le code Massar s'il manquait sur la fiche élève.
+      if (r.missingMassar && r.row.massar_code) updates.massar_code = String(r.row.massar_code).trim().toUpperCase();
+      const { error: upErr } = await supabaseAdmin
+        .from('profiles')
+        .update(updates)
+        .eq('id', r.student.id);
+      if (upErr) throw upErr;
+      updated++;
+    }
+
+    res.json({ dryRun: false, results, updated });
+  } catch (error) {
+    console.error('Erreur import codes Massar:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Envoyer par WhatsApp les codes Massar (code + secret) aux parents d'une classe.
+// Pour chaque élève de la classe ayant un code secret, envoie à ses parents liés.
+// Envoi au numéro Principal, repli sur le 2e numéro de la famille si échec.
+router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
+  try {
+    const classId = req.params.classId;
+    const schoolId = getSchoolId(req);
+
+    const waStatus = getStatus(schoolId);
+    if (!waStatus.connected) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école. Connectez le numéro de votre école depuis la page WhatsApp.' });
+    }
+
+    let schoolName = 'Votre établissement';
+    if (schoolId) {
+      const { data: school } = await supabaseAdmin.from('schools').select('name').eq('id', schoolId).maybeSingle();
+      if (school?.name) schoolName = school.name;
+    }
+
+    // Élèves de la classe avec un code Massar/secret
+    const { data: students, error: studentsError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, massar_secret')
+      .eq('role', 'student')
+      .eq('class_id', classId);
+    if (studentsError) throw studentsError;
+
+    const withCode = (students || []).filter(s => s.massar_code || s.massar_secret);
+    if (withCode.length === 0) {
+      return res.status(400).json({ error: 'Aucun élève de cette classe n\'a de code Massar. Importez d\'abord le fichier InfoEleve.' });
+    }
+
+    // Parents liés à ces élèves
+    const studentIds = withCode.map(s => s.id);
+    const { data: links, error: linksError } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id, student_id')
+      .in('student_id', studentIds);
+    if (linksError) throw linksError;
+
+    const parentIds = [...new Set((links || []).map(l => l.parent_id))];
+    if (parentIds.length === 0) {
+      return res.status(400).json({ error: 'Aucun parent lié aux élèves de cette classe. Importez d\'abord les parents.' });
+    }
+
+    const [{ data: parents }, { data: contacts }] = await Promise.all([
+      supabaseAdmin.from('profiles').select('id, first_name, phone').in('id', parentIds),
+      supabaseAdmin.from('parent_contacts').select('parent_id, phone_e164, is_primary').in('parent_id', parentIds).eq('channel', 'whatsapp')
+    ]);
+
+    // Numéros par parent (Principal en tête, repli sur les suivants)
+    const phonesByParent = new Map();
+    (contacts || []).forEach(c => {
+      if (!phonesByParent.has(c.parent_id)) phonesByParent.set(c.parent_id, []);
+      const arr = phonesByParent.get(c.parent_id);
+      if (c.is_primary) arr.unshift(c.phone_e164); else arr.push(c.phone_e164);
+    });
+    const parentById = new Map((parents || []).map(p => [p.id, p]));
+
+    // Enfants (avec code) par parent
+    const childrenByParent = new Map();
+    (links || []).forEach(l => {
+      const student = withCode.find(s => s.id === l.student_id);
+      if (!student) return;
+      if (!childrenByParent.has(l.parent_id)) childrenByParent.set(l.parent_id, []);
+      childrenByParent.get(l.parent_id).push(student);
+    });
+
+    let sentCount = 0, errorCount = 0, skipped = 0;
+
+    for (const parentId of parentIds) {
+      const parent = parentById.get(parentId);
+      if (!parent) { skipped++; continue; }
+
+      const fromContacts = phonesByParent.get(parentId) || [];
+      const fallback = normalizePhoneToE164(parent.phone);
+      const phones = [...new Set([...fromContacts, ...(fallback ? [fallback] : [])])];
+      if (phones.length === 0) { skipped++; continue; }
+
+      const kids = childrenByParent.get(parentId) || [];
+      if (kids.length === 0) { skipped++; continue; }
+
+      const blocks = kids.map(k => {
+        const lines = [`👶 *${k.first_name} ${k.last_name}*`];
+        if (k.massar_code) lines.push(`🆔 Code Massar : *${k.massar_code}*`);
+        if (k.massar_secret) lines.push(`🔑 Code secret : *${k.massar_secret}*`);
+        return lines.join('\n');
+      });
+
+      const messageText =
+        `🎓 *Accès Massar* — ${schoolName}\n\n` +
+        `Bonjour ${parent.first_name || ''},\n\n` +
+        `Voici les identifiants Massar de votre/vos enfant(s) :\n\n` +
+        blocks.join('\n\n') +
+        `\n\n🌐 Connexion : https://massar.men.gov.ma\n\n` +
+        `_Conservez ces informations en lieu sûr._`;
+
+      try {
+        // Log message
+        const { data: msgLog } = await supabaseAdmin
+          .from('whatsapp_messages')
+          .insert({
+            school_id: schoolId,
+            sent_by: req.user.id,
+            message_type: 'text',
+            content: messageText,
+            total_recipients: 1,
+            status: 'sending',
+            category: 'general',
+          })
+          .select()
+          .single();
+        if (!msgLog) { errorCount++; continue; }
+
+        // Principal d'abord, repli sur le numéro suivant si échec
+        let waResult = { success: false, message: 'Aucun numéro' };
+        let usedPhone = phones[0];
+        for (const phone of phones) {
+          usedPhone = phone;
+          waResult = await sendText(schoolId, phone, messageText, { urgent: true });
+          if (waResult.success) break;
+          console.error('[Massar WhatsApp] échec, repli numéro suivant', parentId, phone, waResult.message);
+        }
+
+        const { data: recipientLog } = await supabaseAdmin
+          .from('whatsapp_message_recipients')
+          .insert({ message_id: msgLog.id, phone_e164: usedPhone, parent_id: parentId, status: 'pending' })
+          .select()
+          .single();
+
+        if (waResult.success) {
+          if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', recipientLog.id);
+          await supabaseAdmin.from('whatsapp_messages').update({ status: 'sent', sent_count: 1 }).eq('id', msgLog.id);
+          sentCount++;
+        } else {
+          if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'failed', error_message: waResult.message || 'Échec envoi' }).eq('id', recipientLog.id);
+          await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed', failed_count: 1 }).eq('id', msgLog.id);
+          errorCount++;
+        }
+      } catch (err) {
+        console.error('[Massar WhatsApp] erreur parent', parentId, err);
+        errorCount++;
+      }
+    }
+
+    res.json({
+      message: `Codes Massar envoyés à ${sentCount} parent(s)`,
+      sent: sentCount,
+      errors: errorCount,
+      skipped,
+      total: parentIds.length,
+    });
+  } catch (error) {
+    console.error('Erreur POST /classes/:classId/send-massar-whatsapp:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // Créer un élève
 router.post('/students', async (req, res) => {
   try {

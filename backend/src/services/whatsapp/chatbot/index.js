@@ -190,7 +190,7 @@ async function getParentByPhone(phone, schoolId = null) {
 async function getParentChildren(parentId) {
   const { data: links } = await supabaseAdmin
     .from('parent_students')
-    .select('student:student_id(id, first_name, last_name, class_id, classes!fk_profiles_class(name))')
+    .select('student:student_id(id, first_name, last_name, class_id, massar_code, massar_secret, classes!fk_profiles_class(name))')
     .eq('parent_id', parentId);
 
   return (links || [])
@@ -202,17 +202,183 @@ async function getParentChildren(parentId) {
       last_name: s.last_name,
       class_id: s.class_id,
       class_name: s.classes?.name || null,
+      massar_code: s.massar_code || null,
+      massar_secret: s.massar_secret || null,
     }));
 }
 
 async function getStudentById(studentId) {
   const { data: s } = await supabaseAdmin
     .from('profiles')
-    .select('id, first_name, last_name, class_id, classes!fk_profiles_class(name)')
+    .select('id, first_name, last_name, class_id, massar_code, massar_secret, classes!fk_profiles_class(name)')
     .eq('id', studentId)
     .single();
   if (!s) return null;
   return { ...s, class_name: s.classes?.name || null };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Localisation domicile (transport scolaire)
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Saisie "appliquer à tous les enfants" (FR / AR / EN). */
+const APPLY_ALL_RE = /^(0|tous|toutes|all|الكل|كلهم|للجميع)[\s!.]*$/i;
+
+/** Texte d'instructions pour partager sa position via WhatsApp. */
+function locationInstructions(studentName) {
+  return [
+    `*📍 Localisation domicile (transport)*`,
+    '━━━━━━━━━━━━━━━━━━━',
+    `Pour enregistrer votre adresse${studentName ? ` pour *${studentName}*` : ''} :`,
+    '',
+    `*1.* Appuyez sur 📎 (trombone) ou ➕ dans WhatsApp`,
+    `*2.* Choisissez *Localisation*`,
+    `*3.* Envoyez votre *position actuelle* (depuis chez vous)`,
+    '',
+    `_Votre position sera enregistrée dans le profil transport de votre enfant, même s'il n'est pas encore inscrit au bus scolaire._`,
+  ].join('\n');
+}
+
+/**
+ * Détecte une question libre du parent sur l'envoi / la modification de sa
+ * localisation ou adresse de transport (FR / AR / darija). Dans ce cas on
+ * répond avec les instructions de partage au lieu de passer par l'IA.
+ */
+function isLocationHelpQuery(text) {
+  const t = String(text || '').toLowerCase();
+  const mentionsLocation = /(localisation|position|adresse|gps|موقع|الموقع|عنوان|العنوان)/i.test(t);
+  if (!mentionsLocation) return false;
+  const actionIntent = /(envoyer|envoie|partager|partage|changer|change|modifier|modifie|mettre|enregistrer|enregistre|ajouter|ajoute|comment|كيفاش|كيف|باش|أرسل|نرسل|بغيت|تغيير|نبدل|تسجيل)/i.test(t);
+  const transportContext = /(transport|bus|ramassage|domicile|maison|النقل|الحافلة|طوبيس|الدار|المنزل)/i.test(t);
+  return actionIntent || transportContext;
+}
+
+/**
+ * Enregistre la position GPS dans le profil transport de l'élève
+ * (profiles.home_lat / home_lng / home_address). Aucune affectation bus
+ * n'est requise : la position est prête pour une future configuration.
+ */
+async function saveStudentHomeLocation(studentId, location) {
+  const update = { home_lat: location.lat, home_lng: location.lng };
+  const addr = [location.name, location.address].filter(Boolean).join(' — ');
+  if (addr) update.home_address = addr;
+  const { error } = await supabaseAdmin
+    .from('profiles')
+    .update(update)
+    .eq('id', studentId)
+    .eq('role', 'student');
+  if (error) {
+    console.error('[chatbot] saveStudentHomeLocation error:', error.message);
+    return false;
+  }
+  return true;
+}
+
+async function hasActiveBusAssignment(studentId) {
+  const { data } = await supabaseAdmin
+    .from('bus_assignments')
+    .select('id')
+    .eq('student_id', studentId)
+    .eq('active', true)
+    .limit(1);
+  return !!(data && data.length > 0);
+}
+
+/** Message de confirmation après enregistrement de la position. */
+async function locationSavedMessage(child, location) {
+  const lines = [
+    `✅ *Localisation enregistrée* pour *${child.first_name} ${child.last_name}*`,
+    `📍 ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`,
+  ];
+  const addr = [location.name, location.address].filter(Boolean).join(' — ');
+  if (addr) lines.push(`🏠 ${addr}`);
+  const onBus = await hasActiveBusAssignment(child.id);
+  if (onBus) {
+    lines.push('', `🚌 Le trajet du bus sera mis à jour avec cette adresse.`);
+  } else {
+    lines.push('', `🚌 _${child.first_name} n'est pas encore inscrit(e) au bus : votre position est enregistrée et sera utilisée dès son inscription au transport._`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Traite un message de localisation WhatsApp envoyé par le parent.
+ *  - Enfant déjà sélectionné → enregistrement direct (+ proposition "tous")
+ *  - Un seul enfant → enregistrement direct
+ *  - Plusieurs enfants, aucun sélectionné → demande de sélection (ou "tous")
+ */
+async function handleLocationMessage({ location, phone, parentInfo, incomingMsgId }) {
+  const schoolId = parentInfo.school_id;
+  const children = await getParentChildren(parentInfo.parent_id);
+
+  if (children.length === 0) {
+    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro. Contactez ${parentInfo.school_name}.`, { urgent: true });
+    await markProcessed(incomingMsgId);
+    return;
+  }
+
+  const state = State.getState(phone);
+  const selected = state?.studentId
+    ? children.find((c) => c.id === state.studentId)
+    : null;
+
+  // Cible unique : enfant sélectionné ou enfant unique
+  const target = selected || (children.length === 1 ? children[0] : null);
+
+  if (target) {
+    const ok = await saveStudentHomeLocation(target.id, location);
+    if (!ok) {
+      await sendText(schoolId, phone, `⚠️ Erreur lors de l'enregistrement de votre position. Veuillez réessayer.`, { urgent: true });
+      await markProcessed(incomingMsgId);
+      return;
+    }
+    let msg = await locationSavedMessage(target, location);
+    if (children.length > 1) {
+      // Propose d'appliquer la même adresse aux frères et sœurs
+      State.setState(phone, { lastLocation: location });
+      msg += `\n\n_Répondez *tous* pour appliquer cette adresse à tous vos enfants (${children.length})._`;
+    }
+    await sendText(schoolId, phone, msg, { urgent: true });
+    await markProcessed(incomingMsgId);
+    return;
+  }
+
+  // Plusieurs enfants, aucun sélectionné → demander pour quel enfant
+  const lines = [
+    `*📍 Localisation reçue*`,
+    '━━━━━━━━━━━━━━━━━━━',
+    `Pour quel enfant souhaitez-vous enregistrer cette adresse (transport scolaire) ?`,
+    '',
+  ];
+  children.forEach((c, i) => {
+    lines.push(`*${i + 1}.* 👶 ${c.first_name} ${c.last_name}${c.class_name ? ` _(${c.class_name})_` : ''}`);
+  });
+  lines.push(`*0.* 👨‍👩‍👧 Tous mes enfants`);
+  lines.push('');
+  lines.push(`_Répondez avec le numéro de votre choix._`);
+
+  State.setState(phone, {
+    state: 'CHILD',
+    pendingLocation: location,
+    childrenList: children.map((c) => c.id),
+  });
+  await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
+  await markProcessed(incomingMsgId);
+}
+
+/** Applique une position à tous les enfants du parent et confirme. */
+async function applyLocationToAllChildren({ location, phone, parentInfo }) {
+  const children = await getParentChildren(parentInfo.parent_id);
+  let okCount = 0;
+  for (const c of children) {
+    if (await saveStudentHomeLocation(c.id, location)) okCount += 1;
+  }
+  await sendText(
+    parentInfo.school_id,
+    phone,
+    `✅ Localisation enregistrée pour *${okCount}/${children.length}* enfant(s).\n📍 ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}\n\n_Tapez *menu* pour d'autres options._`,
+    { urgent: true }
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -358,6 +524,19 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       const children = await getParentChildren(parentInfo.parent_id);
       return sendChildSelectionMenu(schoolId, phone, children, parentInfo);
     }
+    if (target === 'location') {
+      // Affiche l'adresse actuelle si elle existe, puis les instructions
+      const { data: prof } = await supabaseAdmin
+        .from('profiles')
+        .select('home_lat, home_lng, home_address')
+        .eq('id', student.id)
+        .single();
+      let current = '';
+      if (prof?.home_lat != null && prof?.home_lng != null) {
+        current = `\n\n🏠 Adresse actuelle enregistrée :\n📍 ${Number(prof.home_lat).toFixed(6)}, ${Number(prof.home_lng).toFixed(6)}${prof.home_address ? `\n${prof.home_address}` : ''}\n_Envoyez une nouvelle position pour la remplacer._`;
+      }
+      return sendText(schoolId, phone, locationInstructions(`${student.first_name} ${student.last_name}`) + current, { urgent: true });
+    }
     if (target === 'credentials') {
       // Propose : parent uniquement ou parent + enfant
       const replyMsg = await handleCredentialRequest({
@@ -502,10 +681,11 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
  * @param {string} param0.text        - corps du message
  * @param {string} param0.id          - ID Baileys du message
  * @param {string} param0.schoolId    - school_id résolu via la session Baileys
+ * @param {object} [param0.location]  - localisation partagée { lat, lng, name, address }
  */
-export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }) {
+export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, location = null }) {
   const phone = normalizePhone(from);
-  console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"`);
+  console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"${location ? ` 📍(${location.lat},${location.lng})` : ''}`);
 
   // 0. Déduplication
   const { data: existing } = await supabaseAdmin
@@ -533,13 +713,20 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
       phone_e164: phone,
       parent_id: parentInfo.parent_id,
       school_id: parentInfo.school_id,
-      message_text: text,
+      message_text: text || (location ? `📍 Localisation: ${location.lat},${location.lng}` : ''),
       provider_message_id: id,
       processed: false,
       category: incomingCategory,
     })
     .select()
     .single();
+
+  // 2.bis Localisation partagée → enregistrement dans le profil transport
+  // de l'élève (home_lat/home_lng), même sans affectation bus.
+  if (location) {
+    await handleLocationMessage({ location, phone, parentInfo, incomingMsgId: incomingMsg?.id });
+    return;
+  }
 
   // 3. Demande d'identifiants (toujours prioritaire — court-circuite le menu)
   // Permet au parent de récupérer/réinitialiser son login + mot de passe via
@@ -688,6 +875,37 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
           .filter(Boolean)
       : children;
 
+    // Cas localisation en attente : le parent désigne l'enfant cible
+    if (state.pendingLocation) {
+      const loc = state.pendingLocation;
+      if (APPLY_ALL_RE.test(normalizeDigits(String(text || '').trim()))) {
+        State.setState(phone, { pendingLocation: null, state: 'MENU', currentMenu: 'main' });
+        await applyLocationToAllChildren({ location: loc, phone, parentInfo });
+        await markProcessed(incomingMsg?.id);
+        return;
+      }
+      const locChild = matchChildFromInput(text, orderedChildren);
+      if (locChild) {
+        State.setState(phone, { pendingLocation: null });
+        State.selectStudent(phone, locChild.id);
+        const ok = await saveStudentHomeLocation(locChild.id, loc);
+        const msg = ok
+          ? await locationSavedMessage(locChild, loc)
+          : `⚠️ Erreur lors de l'enregistrement de votre position. Veuillez réessayer.`;
+        await sendText(parentInfo.school_id, phone, `${msg}\n\n_Tapez *menu* pour d'autres options._`, { urgent: true });
+        await markProcessed(incomingMsg?.id);
+        return;
+      }
+      await sendText(
+        parentInfo.school_id,
+        phone,
+        `🤔 Sélection non reconnue. Répondez avec le *numéro* de l'enfant, son *prénom*, ou *0* pour tous.`,
+        { urgent: true }
+      );
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
     const matched = matchChildFromInput(text, orderedChildren);
     if (matched) {
       State.selectStudent(phone, matched.id);
@@ -714,6 +932,11 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
 
   // Mode AI : forward DeepSeek (l'utilisateur a explicitement choisi cette option)
   if (state.state === 'AI') {
+    if (isLocationHelpQuery(text)) {
+      await sendText(parentInfo.school_id, phone, locationInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
     if (isFullWeekTimetableQuery(text)) {
       await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
       await sendTimetablePdf(parentInfo.school_id, phone, student);
@@ -768,6 +991,17 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
 
   // Mode MENU : essayer de matcher une option du menu en cours
   if (state.state === 'MENU') {
+    // Raccourci : après un enregistrement de localisation, "tous" applique la
+    // même adresse à tous les enfants du parent. ("0" est exclu ici car il
+    // signifie "Retour" dans les sous-menus.)
+    if (state.lastLocation && /^(tous|toutes|all|الكل|كلهم|للجميع)[\s!.]*$/i.test(String(text || '').trim())) {
+      const loc = state.lastLocation;
+      State.setState(phone, { lastLocation: null });
+      await applyLocationToAllChildren({ location: loc, phone, parentInfo });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
     const menu = MENUS[state.currentMenu] || MENUS.main;
     const opt = matchMenuOption(menu, text);
     if (opt) {
@@ -787,6 +1021,11 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId }
 
     if (looksLikeQuestion) {
       console.log(`[chatbot] MENU → IA fallback (texte libre): "${trimmed.substring(0, 40)}"`);
+      if (isLocationHelpQuery(text)) {
+        await sendText(parentInfo.school_id, phone, locationInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
+        await markProcessed(incomingMsg?.id);
+        return;
+      }
       if (isFullWeekTimetableQuery(text)) {
         await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
         await sendTimetablePdf(parentInfo.school_id, phone, student);
@@ -857,7 +1096,19 @@ export async function handleBaileysIncoming({ schoolId, msg }) {
     m.buttonsResponseMessage?.selectedButtonId ||
     '';
 
-  if (!text) return;
+  // Localisation partagée (position statique ou live) → profil transport
+  const locMsg = m.locationMessage || m.liveLocationMessage;
+  let location = null;
+  if (locMsg && locMsg.degreesLatitude != null && locMsg.degreesLongitude != null) {
+    location = {
+      lat: Number(locMsg.degreesLatitude),
+      lng: Number(locMsg.degreesLongitude),
+      name: locMsg.name || null,
+      address: locMsg.address || null,
+    };
+  }
+
+  if (!text && !location) return;
 
   const remoteJid = msg.key?.remoteJid || '';
 
@@ -896,5 +1147,5 @@ export async function handleBaileysIncoming({ schoolId, msg }) {
   const from = '+' + phoneJid.split('@')[0];
   const id = msg.key?.id || `${Date.now()}`;
 
-  return handleIncomingWhatsAppMessage({ from, text, id, schoolId });
+  return handleIncomingWhatsAppMessage({ from, text, id, schoolId, location });
 }
