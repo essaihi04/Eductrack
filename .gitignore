@@ -39,3 +39,9 @@ Thumbs.db
 
 backend/test-*.pdf
 backend/test-*.mjs
+
+# Fichiers de travail / temporaires (non versionnés)
+*.docx
+~$*
+check-parent.mjs
+scripts/gen-proposal.cjs
