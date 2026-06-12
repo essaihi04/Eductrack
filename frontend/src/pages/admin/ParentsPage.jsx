@@ -299,6 +299,15 @@ const ParentsPage = () => {
   // ---- LINK STUDENT ----
   const handleLinkStudent = async (parentId) => {
     if (!linkStudentId) return;
+    // Détection : l'élève a-t-il déjà un (autre) parent associé ?
+    const target = students.find(s => s.id === linkStudentId);
+    const others = (target?.parents || []).filter(p => p.id !== parentId);
+    if (others.length > 0) {
+      const list = others.map(p => `${p.first_name} ${p.last_name}${p.relationship ? ` (${p.relationship})` : ''}`).join(', ');
+      if (!confirm(`⚠ Cet élève est déjà associé à ${others.length} parent(s) : ${list}.\n\nVoulez-vous quand même ajouter ce parent supplémentaire ?`)) {
+        return;
+      }
+    }
     try {
       const token = await getToken();
       const res = await fetch(`${apiUrl}/api/admin/parents/${parentId}/link`, {
@@ -1424,6 +1433,12 @@ const ParentsPage = () => {
                                           <span className="flex-1 font-medium">
                                             {highlight(`${s.first_name} ${s.last_name}`)}
                                           </span>
+                                          {s.parents?.length > 0 && (
+                                            <span className={`text-xs px-1.5 py-0.5 rounded ${isSelected ? 'bg-white/20' : 'bg-amber-100 text-amber-700'}`}
+                                              title={s.parents.map(p => `${p.first_name} ${p.last_name}${p.relationship ? ` (${p.relationship})` : ''}`).join(', ')}>
+                                              déjà {s.parents.length} parent{s.parents.length > 1 ? 's' : ''}
+                                            </span>
+                                          )}
                                           {isSelected && (
                                             <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded">✓ Sélectionné</span>
                                           )}

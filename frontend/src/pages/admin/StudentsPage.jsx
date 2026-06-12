@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -17,8 +17,14 @@ const StudentsPage = () => {
     className: '',
     level: '',
     searchName: '',
-    searchEmail: ''
+    searchEmail: '',
+    parentStatus: '' // '', 'with', 'without'
   });
+  // Modale d'ajout de parents (file d'attente pour traiter plusieurs élèves)
+  const [parentModalQueue, setParentModalQueue] = useState([]);
+  const [parentModalIndex, setParentModalIndex] = useState(0);
+  const [parentForm, setParentForm] = useState({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
+  const [parentSaving, setParentSaving] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -167,8 +173,77 @@ const StudentsPage = () => {
         }
       }
 
+      // Filtre par statut parent
+      if (filters.parentStatus === 'without' && (student.parents?.length > 0)) return false;
+      if (filters.parentStatus === 'with' && !(student.parents?.length > 0)) return false;
+
       return true;
     });
+  };
+
+  // Ouvre la modale d'ajout de parents pour une liste d'élèves (file d'attente).
+  const openParentModal = (studentList) => {
+    const list = studentList.filter(Boolean);
+    if (list.length === 0) return;
+    setParentModalQueue(list);
+    setParentModalIndex(0);
+    setParentForm({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
+  };
+
+  const closeParentModal = () => {
+    setParentModalQueue([]);
+    setParentModalIndex(0);
+    setParentForm({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
+  };
+
+  const saveParentsForCurrent = async () => {
+    const student = parentModalQueue[parentModalIndex];
+    if (!student) return;
+    const contacts = [];
+    if (parentForm.pereName.trim() && parentForm.perePhone.trim()) contacts.push({ name: parentForm.pereName.trim(), phone: parentForm.perePhone.trim(), relationship: 'père' });
+    if (parentForm.mereName.trim() && parentForm.merePhone.trim()) contacts.push({ name: parentForm.mereName.trim(), phone: parentForm.merePhone.trim(), relationship: 'mère' });
+    if (parentForm.tuteurName.trim() && parentForm.tuteurPhone.trim()) contacts.push({ name: parentForm.tuteurName.trim(), phone: parentForm.tuteurPhone.trim(), relationship: 'tuteur' });
+    if (contacts.length === 0) {
+      alert('Renseignez au moins un parent (nom + téléphone)');
+      return;
+    }
+    setParentSaving(true);
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`${apiUrl}/api/admin/students/${student.id}/add-parents`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contacts }),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Erreur lors de l\'enregistrement'); return; }
+
+      await fetchData();
+
+      // Passer à l'élève suivant de la file, ou fermer si terminé.
+      if (parentModalIndex < parentModalQueue.length - 1) {
+        setParentModalIndex(i => i + 1);
+        setParentForm({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
+      } else {
+        closeParentModal();
+        alert('Parents enregistrés et associés. Ils apparaissent désormais sur la page Parents.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erreur réseau');
+    } finally {
+      setParentSaving(false);
+    }
+  };
+
+  const skipCurrentInQueue = () => {
+    if (parentModalIndex < parentModalQueue.length - 1) {
+      setParentModalIndex(i => i + 1);
+      setParentForm({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
+    } else {
+      closeParentModal();
+    }
   };
 
   // Récupérer les niveaux uniques disponibles
@@ -601,7 +676,7 @@ L'administration de ${schoolName}`;
           <CardTitle>Filtres</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
             <div>
               <label className="text-xs font-semibold text-gray-700 block mb-1">Rechercher par nom</label>
               <input
@@ -653,9 +728,36 @@ L'administration de ${schoolName}`;
                 ))}
               </select>
             </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Statut parent</label>
+              <select
+                value={filters.parentStatus}
+                onChange={(e) => setFilters({ ...filters, parentStatus: e.target.value })}
+                className="w-full px-3 py-2 border rounded text-sm"
+              >
+                <option value="">Tous</option>
+                <option value="without">⚠ Sans parent</option>
+                <option value="with">👪 Avec parent</option>
+              </select>
+            </div>
           </div>
-          <div className="mt-3 text-sm text-gray-600">
-            Affichage: <span className="font-semibold">{getFilteredStudents().length}</span> / <span className="font-semibold">{students.length}</span> élève(s)
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm text-gray-600">
+              Affichage: <span className="font-semibold">{getFilteredStudents().length}</span> / <span className="font-semibold">{students.length}</span> élève(s)
+              {(() => {
+                const without = students.filter(s => !(s.parents?.length > 0)).length;
+                return without > 0 ? <span className="ml-2 text-amber-600 font-medium">• {without} sans parent</span> : null;
+              })()}
+            </div>
+            {isAdmin && filters.parentStatus === 'without' && getFilteredStudents().length > 0 && (
+              <button
+                onClick={() => openParentModal(getFilteredStudents())}
+                className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
+              >
+                <UserPlus className="w-4 h-4" />
+                Ajouter les parents ({getFilteredStudents().length})
+              </button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -738,6 +840,14 @@ L'administration de ${schoolName}`;
             {isAdmin && selectedStudents.size > 0 && (
               <div className="flex flex-col sm:flex-row gap-2">
                 <button
+                  onClick={() => openParentModal(students.filter(s => selectedStudents.has(s.id)))}
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
+                  title="Ajouter les parents des élèves sélectionnés"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Parents ({selectedStudents.size})
+                </button>
+                <button
                   onClick={sendBulkCredentialsToParents}
                   className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
                   title="Envoyer les identifiants aux parents via WhatsApp"
@@ -792,9 +902,11 @@ L'administration de ${schoolName}`;
                   </div>
                 )}
 
-                {getFilteredStudents().map((student) => (
-                  <div key={student.id} className="border rounded-lg overflow-hidden">
-                    <div className="p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
+                {getFilteredStudents().map((student) => {
+                  const hasParent = student.parents?.length > 0;
+                  return (
+                  <div key={student.id} className={`border rounded-lg overflow-hidden mb-2 ${hasParent ? '' : 'border-amber-300'}`}>
+                    <div className={`p-4 transition-colors ${hasParent ? 'bg-gray-50 hover:bg-gray-100' : 'bg-amber-50 hover:bg-amber-100/70'}`}>
                       <div className="flex items-center gap-2">
                         {/* Checkbox de sélection (admin uniquement) */}
                         {isAdmin && (
@@ -815,12 +927,32 @@ L'administration de ${schoolName}`;
                           className="flex-1 min-w-0 cursor-pointer"
                           onClick={() => togglePasswordVisibility(student.id)}
                         >
-                          <p className="font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</p>
+                            {hasParent ? (
+                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1" title={student.parents.map(p => `${p.first_name} ${p.last_name}${p.relationship ? ` (${p.relationship})` : ''}`).join(', ')}>
+                                <Users className="w-3 h-3" /> {student.parents.length} parent{student.parents.length > 1 ? 's' : ''}
+                              </span>
+                            ) : (
+                              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3" /> Sans parent
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray-500 truncate">{student.email}</p>
                           <p className="text-xs text-gray-400">{student.class_id ? 'Classe assignée' : 'Non assigné'}</p>
                         </div>
 
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openParentModal([student]); }}
+                              className={`p-1.5 rounded transition-colors ${hasParent ? 'hover:bg-gray-200' : 'hover:bg-amber-200'}`}
+                              title={hasParent ? 'Ajouter un autre parent' : 'Ajouter les parents'}
+                            >
+                              <UserPlus className={`w-4 h-4 ${hasParent ? 'text-gray-500' : 'text-amber-600'}`} />
+                            </button>
+                          )}
                           <span
                             className="text-xs text-gray-500 cursor-pointer hover:text-gray-700 px-1"
                             onClick={() => togglePasswordVisibility(student.id)}
@@ -916,12 +1048,113 @@ L'administration de ${schoolName}`;
                     </div>
                   )}
                 </div>
-                ))}
+                );
+                })}
               </div>
             )}
           </div>
         </CardContent>
       </Card>
+
+      {/* Modale d'ajout de parents */}
+      {parentModalQueue.length > 0 && (() => {
+        const student = parentModalQueue[parentModalIndex];
+        if (!student) return null;
+        const existing = student.parents || [];
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeParentModal}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-amber-600" />
+                  <h3 className="font-semibold">Ajouter les parents</h3>
+                </div>
+                <button onClick={closeParentModal} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-4 space-y-4">
+                {/* Élève + progression file d'attente */}
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-sm text-gray-500">Élève</p>
+                  <p className="font-medium">{student.first_name} {student.last_name}</p>
+                  {parentModalQueue.length > 1 && (
+                    <p className="text-xs text-gray-400 mt-1">Élève {parentModalIndex + 1} / {parentModalQueue.length}</p>
+                  )}
+                </div>
+
+                {/* Détection parent existant */}
+                {existing.length > 0 && (
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-800 flex gap-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <div>
+                      Cet élève a déjà <strong>{existing.length} parent(s)</strong> associé(s) :
+                      <span className="block mt-0.5">{existing.map(p => `${p.first_name} ${p.last_name}${p.relationship ? ` (${p.relationship})` : ''}`).join(', ')}</span>
+                      <span className="block mt-1 text-orange-600">Vous ajoutez un parent supplémentaire (les numéros déjà connus seront réutilisés).</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Père */}
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-gray-700">👨 Père</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input type="text" placeholder="Nom du père" value={parentForm.pereName}
+                      onChange={e => setParentForm(f => ({ ...f, pereName: e.target.value }))}
+                      className="px-3 py-2 border rounded text-sm" />
+                    <input type="tel" placeholder="Téléphone (06/07…)" value={parentForm.perePhone}
+                      onChange={e => setParentForm(f => ({ ...f, perePhone: e.target.value }))}
+                      className="px-3 py-2 border rounded text-sm" />
+                  </div>
+                </div>
+
+                {/* Mère */}
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-gray-700">👩 Mère</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input type="text" placeholder="Nom de la mère" value={parentForm.mereName}
+                      onChange={e => setParentForm(f => ({ ...f, mereName: e.target.value }))}
+                      className="px-3 py-2 border rounded text-sm" />
+                    <input type="tel" placeholder="Téléphone (06/07…)" value={parentForm.merePhone}
+                      onChange={e => setParentForm(f => ({ ...f, merePhone: e.target.value }))}
+                      className="px-3 py-2 border rounded text-sm" />
+                  </div>
+                </div>
+
+                {/* Tuteur (optionnel) */}
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-gray-700">🧑 Tuteur (optionnel)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input type="text" placeholder="Nom du tuteur" value={parentForm.tuteurName}
+                      onChange={e => setParentForm(f => ({ ...f, tuteurName: e.target.value }))}
+                      className="px-3 py-2 border rounded text-sm" />
+                    <input type="tel" placeholder="Téléphone (06/07…)" value={parentForm.tuteurPhone}
+                      onChange={e => setParentForm(f => ({ ...f, tuteurPhone: e.target.value }))}
+                      className="px-3 py-2 border rounded text-sm" />
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  Renseignez au moins un parent (nom + téléphone). Le 1er renseigné devient le contact principal.
+                  Les parents seront créés et associés à l'élève, puis visibles sur la page Parents.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 p-4 border-t bg-gray-50">
+                {parentModalQueue.length > 1 && (
+                  <button onClick={skipCurrentInQueue} disabled={parentSaving}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm disabled:opacity-50">
+                    Passer
+                  </button>
+                )}
+                <button onClick={saveParentsForCurrent} disabled={parentSaving}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm disabled:opacity-50">
+                  {parentSaving ? 'Enregistrement…' : (parentModalIndex < parentModalQueue.length - 1 ? 'Enregistrer et suivant' : 'Enregistrer')}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

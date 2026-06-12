@@ -435,7 +435,34 @@ router.get('/students', async (req, res) => {
     const { data, error } = await query;
 
     if (error) throw error;
-    res.json(data);
+
+    // Attacher les parents associés à chaque élève (pour badge « sans parent »
+    // et détection d'association existante).
+    const studentIds = (data || []).map(s => s.id);
+    const parentsByStudent = new Map();
+    if (studentIds.length > 0) {
+      const { data: links } = await supabaseAdmin
+        .from('parent_students')
+        .select('student_id, relationship, parent:profiles!parent_students_parent_id_fkey(id, first_name, last_name)')
+        .in('student_id', studentIds);
+      (links || []).forEach(l => {
+        if (!l.parent) return;
+        if (!parentsByStudent.has(l.student_id)) parentsByStudent.set(l.student_id, []);
+        parentsByStudent.get(l.student_id).push({
+          id: l.parent.id,
+          first_name: l.parent.first_name,
+          last_name: l.parent.last_name,
+          relationship: l.relationship || null,
+        });
+      });
+    }
+
+    const withParents = (data || []).map(s => ({
+      ...s,
+      parents: parentsByStudent.get(s.id) || [],
+    }));
+
+    res.json(withParents);
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -935,6 +962,107 @@ router.delete('/parents/:parentId/unlink/:studentId', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Erreur unlink parent-student:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Ajouter / créer les parents d'un élève depuis un formulaire (page Élèves).
+// Body: { contacts: [{ name, phone, relationship }] }  (père, mère, tuteur…)
+// Réutilise la logique d'import : réutilise un parent existant si un numéro est
+// déjà connu, sinon crée le profil parent ; upsert contacts + lien parent_students.
+// → Les parents apparaissent automatiquement sur la page Parents.
+router.post('/students/:studentId/add-parents', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { contacts: rawContacts } = req.body;
+
+    if (!Array.isArray(rawContacts) || rawContacts.length === 0) {
+      return res.status(400).json({ error: 'Au moins un parent (nom + téléphone) est requis' });
+    }
+
+    // Vérifier que l'élève existe (et récupérer son école)
+    const { data: student, error: studentError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, school_id')
+      .eq('id', studentId)
+      .eq('role', 'student')
+      .single();
+    if (studentError || !student) return res.status(404).json({ error: 'Élève introuvable' });
+
+    // Normalisation + dédup des numéros, en conservant nom + relation.
+    const seenPhones = new Set();
+    const contacts = [];
+    for (const c of rawContacts) {
+      const phone = normalizeMoroccoMobile(c.phone) || normalizePhoneToE164(c.phone);
+      const name = (c.name || '').trim();
+      if (!phone || !name || seenPhones.has(phone)) continue;
+      seenPhones.add(phone);
+      contacts.push({ phone, name, relationship: c.relationship || null });
+    }
+    if (contacts.length === 0) {
+      return res.status(400).json({ error: 'Aucun parent valide (nom + téléphone marocain requis)' });
+    }
+
+    const primary = contacts[0];
+    const parentName = splitFullName(primary.name);
+
+    // Réutiliser un parent existant si l'UN des numéros est déjà connu.
+    const { data: existingContacts } = await supabaseAdmin
+      .from('parent_contacts')
+      .select('parent_id')
+      .in('phone_e164', contacts.map(c => c.phone))
+      .eq('channel', 'whatsapp');
+
+    let parentId = existingContacts?.[0]?.parent_id;
+    let createdParent = false;
+    let parentCredentials = null;
+    if (!parentId) {
+      const parent = await createParentProfile({
+        email: null,
+        firstName: parentName.firstName,
+        lastName: parentName.lastName,
+        phone: primary.phone,
+        schoolId: student.school_id || getSchoolId(req),
+      });
+      parentId = parent.id;
+      createdParent = true;
+      parentCredentials = { email: parent.generatedEmail, password: parent.password };
+    }
+
+    // Upsert de TOUS les contacts (1er = principal), avec libellé Père/Mère.
+    for (let i = 0; i < contacts.length; i++) {
+      const c = contacts[i];
+      const label = [
+        c.relationship ? c.relationship.charAt(0).toUpperCase() + c.relationship.slice(1) : null,
+        c.name,
+      ].filter(Boolean).join(' — ') || null;
+      const { error: upsertContactError } = await supabaseAdmin
+        .from('parent_contacts')
+        .upsert(
+          { parent_id: parentId, phone_e164: c.phone, channel: 'whatsapp', is_primary: i === 0, consent_status: 'pending', label },
+          { onConflict: 'parent_id,phone_e164,channel' }
+        );
+      if (upsertContactError) throw upsertContactError;
+    }
+
+    // Lien parent ↔ élève
+    const { error: linkError } = await supabaseAdmin
+      .from('parent_students')
+      .upsert(
+        { parent_id: parentId, student_id: studentId, relationship: primary.relationship || null },
+        { onConflict: 'parent_id,student_id' }
+      );
+    if (linkError) throw linkError;
+
+    res.status(201).json({
+      success: true,
+      parent_id: parentId,
+      createdParent,
+      contactsCount: contacts.length,
+      credentials: parentCredentials,
+    });
+  } catch (error) {
+    console.error('Erreur add-parents:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
