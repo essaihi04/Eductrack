@@ -119,11 +119,47 @@ const createStudentAuthUser = async ({ email, password, firstName, lastName, mas
 const normalizeName = (value) =>
   String(value || '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')      // diacritiques latines + hamza arabe (NFD)
+    .replace(/[\u0640]/g, '')              // tatweel \u0640
+    .replace(/[\u0622\u0623\u0625\u0671]/g, '\u0627') // \u0622\u0623\u0625\u0671 \u2192 \u0627
+    .replace(/[\u0629]/g, '\u0647')        // \u0629 \u2192 \u0647
+    .replace(/[\u0649]/g, '\u064a')        // \u0649 \u2192 \u064a
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+
+// Nettoie les espaces parasites (tabulations, espaces multiples) d'un nom.
+const cleanSpaces = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+// D\u00e9duit { first_name, last_name } depuis le nom complet officiel Massar
+// (format \u00ab \u0627\u0644\u0646\u0633\u0628 \u0627\u0644\u0625\u0633\u0645 \u00bb = NOM puis Pr\u00e9nom dans une seule colonne).
+// Conserve le pr\u00e9nom actuel s'il correspond \u00e0 la fin du nom Massar (g\u00e8re les
+// pr\u00e9noms compos\u00e9s \u00ab \u0645\u062d\u0645\u062f \u064a\u062d\u064a\u0649 \u00bb, \u00ab \u0641\u0627\u0637\u0645\u0629 \u0627\u0644\u0632\u0647\u0631\u0627\u0621 \u00bb) ; sinon applique la
+// convention Massar (pr\u00e9nom = dernier token, nom = tokens pr\u00e9c\u00e9dents).
+const deriveMassarName = (massarFull, currentFirst) => {
+  const tokens = cleanSpaces(massarFull).split(' ').filter(Boolean);
+  if (tokens.length === 0) return null;
+  if (tokens.length === 1) return { first_name: tokens[0], last_name: '' };
+
+  const curFirst = cleanSpaces(currentFirst);
+  if (curFirst) {
+    const fnTokens = curFirst.split(' ').filter(Boolean);
+    if (fnTokens.length > 0 && fnTokens.length < tokens.length) {
+      const tail = tokens.slice(tokens.length - fnTokens.length).join(' ');
+      if (normalizeName(tail) === normalizeName(curFirst)) {
+        return {
+          first_name: tail,
+          last_name: tokens.slice(0, tokens.length - fnTokens.length).join(' '),
+        };
+      }
+    }
+  }
+  return {
+    first_name: tokens[tokens.length - 1],
+    last_name: tokens.slice(0, tokens.length - 1).join(' '),
+  };
+};
 
 const splitFullName = (fullName) => {
   const normalized = normalizeName(fullName);
@@ -1229,9 +1265,10 @@ router.get('/classes/massar-coverage', async (req, res) => {
 // Import des codes Massar (رقم التلميذ + الرمز السري) depuis le fichier InfoEleve.
 // Body: { class_id, rows: [{ massar_code, student_full_name, massar_secret }], dryRun }
 // Met à jour massar_secret (et massar_code si absent) des élèves de la classe.
+// Corrige aussi le nom officiel de l'élève depuis Massar (fixNames, défaut true).
 router.post('/classes/import-massar-secrets', async (req, res) => {
   try {
-    const { class_id, rows, dryRun } = req.body;
+    const { class_id, rows, dryRun, fixNames = true } = req.body;
     if (!class_id) return res.status(400).json({ error: 'class_id requis' });
     if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'rows requis' });
 
@@ -1273,11 +1310,30 @@ router.post('/classes/import-massar-secrets', async (req, res) => {
       }
 
       if (matches.length === 1) {
+        const m = matches[0];
+        // Correction du nom officiel depuis Massar (matché de façon fiable par code).
+        let nameUpdate = null;
+        if (studentFullNameRaw) {
+          const desired = deriveMassarName(studentFullNameRaw, m.first_name);
+          if (desired) {
+            const before = normalizeName(`${m.last_name} ${m.first_name}`);
+            const after = normalizeName(`${desired.last_name} ${desired.first_name}`);
+            if (before !== after) {
+              nameUpdate = {
+                from: cleanSpaces(`${m.last_name} ${m.first_name}`),
+                to: cleanSpaces(`${desired.last_name} ${desired.first_name}`),
+                first_name: desired.first_name,
+                last_name: desired.last_name,
+              };
+            }
+          }
+        }
         results.push({
           row,
           matchStatus: 'matched',
-          student: { id: matches[0].id, first_name: matches[0].first_name, last_name: matches[0].last_name },
-          missingMassar: !matches[0].massar_code
+          student: { id: m.id, first_name: m.first_name, last_name: m.last_name },
+          missingMassar: !m.massar_code,
+          nameUpdate,
         });
       } else if (matches.length > 1) {
         results.push({ row, matchStatus: 'ambiguous', studentMatches: matches.slice(0, 5).map(s => ({ id: s.id, first_name: s.first_name, last_name: s.last_name })) });
@@ -1291,20 +1347,27 @@ router.post('/classes/import-massar-secrets', async (req, res) => {
     }
 
     let updated = 0;
+    let namesFixed = 0;
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
       const updates = { massar_secret: String(r.row.massar_secret).trim() };
       // Compléter le code Massar s'il manquait sur la fiche élève.
       if (r.missingMassar && r.row.massar_code) updates.massar_code = String(r.row.massar_code).trim().toUpperCase();
+      // Corriger le nom officiel depuis Massar (si activé).
+      if (fixNames && r.nameUpdate) {
+        updates.first_name = r.nameUpdate.first_name;
+        updates.last_name = r.nameUpdate.last_name;
+      }
       const { error: upErr } = await supabaseAdmin
         .from('profiles')
         .update(updates)
         .eq('id', r.student.id);
       if (upErr) throw upErr;
       updated++;
+      if (fixNames && r.nameUpdate) namesFixed++;
     }
 
-    res.json({ dryRun: false, results, updated });
+    res.json({ dryRun: false, results, updated, namesFixed });
   } catch (error) {
     console.error('Erreur import codes Massar:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

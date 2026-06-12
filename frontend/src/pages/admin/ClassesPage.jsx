@@ -211,6 +211,7 @@ const ClassesPage = () => {
   const [massarSendResult, setMassarSendResult] = useState(null);
   const [massarCoverage, setMassarCoverage] = useState({});
   const [quickSendingClassId, setQuickSendingClassId] = useState(null);
+  const [fixMassarNames, setFixMassarNames] = useState(true);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -307,7 +308,7 @@ const ClassesPage = () => {
       const res = await fetch(`${apiUrl}/api/admin/classes/import-massar-secrets`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: massarClassId, rows: massarRows, dryRun }),
+        body: JSON.stringify({ class_id: massarClassId, rows: massarRows, dryRun, fixNames: fixMassarNames }),
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error || 'Erreur import'); return; }
@@ -2116,7 +2117,16 @@ const ClassesPage = () => {
                             <td className="py-1 px-2 font-mono">{row.massar_secret}</td>
                             {r && (
                               <td className="py-1 px-2">
-                                {r.matchStatus === 'matched' && <span className="text-green-600">✓ {r.student.first_name} {r.student.last_name}</span>}
+                                {r.matchStatus === 'matched' && (
+                                  <span className="text-green-600">
+                                    ✓ {r.student.first_name} {r.student.last_name}
+                                    {r.nameUpdate && (
+                                      <span className="block text-amber-600 text-xs">
+                                        ✎ {r.nameUpdate.from} → <strong>{r.nameUpdate.to}</strong>
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
                                 {r.matchStatus === 'not_found' && <span className="text-red-500">✗ Non trouvé</span>}
                                 {r.matchStatus === 'ambiguous' && <span className="text-yellow-600">⚠ Ambigu</span>}
                                 {r.matchStatus === 'invalid' && <span className="text-muted-foreground">— Ignoré</span>}
@@ -2129,11 +2139,27 @@ const ClassesPage = () => {
                   </table>
                 </div>
 
+                {/* Option correction des noms */}
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={fixMassarNames}
+                    onChange={e => { setFixMassarNames(e.target.checked); setMassarResult(null); }}
+                    className="rounded"
+                  />
+                  <span>Corriger les noms des élèves avec les noms officiels Massar
+                    {massarResult && (() => {
+                      const n = massarResult.results.filter(r => r.nameUpdate).length;
+                      return n > 0 ? <span className="text-amber-600"> ({n} à corriger)</span> : null;
+                    })()}
+                  </span>
+                </label>
+
                 {massarResult && (
                   <div className="text-sm space-y-1">
                     <p className="text-green-600">✓ Correspondances : {massarResult.results.filter(r => r.matchStatus === 'matched').length}</p>
                     <p className="text-red-500">✗ Non trouvés : {massarResult.results.filter(r => r.matchStatus === 'not_found').length}</p>
-                    {massarResult.updated != null && <p className="text-indigo-600 font-medium">{massarResult.updated} code(s) secret(s) enregistré(s)</p>}
+                    {massarResult.updated != null && <p className="text-indigo-600 font-medium">{massarResult.updated} code(s) secret(s) enregistré(s){massarResult.namesFixed > 0 ? `, ${massarResult.namesFixed} nom(s) corrigé(s)` : ''}</p>}
                   </div>
                 )}
 
