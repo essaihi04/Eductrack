@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
+import { profilePhotoUpload, PROFILE_PHOTO_WEB_PATH } from '../utils/profilePhoto.js';
 
 const router = express.Router();
 
@@ -138,6 +139,29 @@ router.get('/children/:childId/profile', loadChild, async (req, res) => {
   } catch (e) {
     console.error('[parent] profile error', e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// POST /api/parent/children/:childId/photo
+// Le parent importe la photo de profil de son enfant
+// ============================================================
+router.post('/children/:childId/photo', loadChild, profilePhotoUpload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucune image fournie' });
+    const avatar_url = `${PROFILE_PHOTO_WEB_PATH}/${req.file.filename}`;
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update({ avatar_url })
+      .eq('id', req.childId)
+      .eq('role', 'student')
+      .select('id, avatar_url')
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('[parent] upload photo enfant error', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
   }
 });
 

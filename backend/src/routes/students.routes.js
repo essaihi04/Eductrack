@@ -1,11 +1,31 @@
 import express from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
+import { profilePhotoUpload, PROFILE_PHOTO_WEB_PATH } from '../utils/profilePhoto.js';
 
 const router = express.Router();
 
 // Toutes les routes nécessitent une authentification
 router.use(authenticate);
+
+// Upload de la photo de profil de l'élève (remplace l'avatar emoji)
+router.post('/me/photo', authorize('student'), profilePhotoUpload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucune image fournie' });
+    const avatar_url = `${PROFILE_PHOTO_WEB_PATH}/${req.file.filename}`;
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update({ avatar_url })
+      .eq('id', req.user.id)
+      .select('id, avatar_url')
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('Erreur upload photo profil élève:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
 
 // Récupérer les documents pédagogiques pour un élève
 router.get('/me/documents', authorize('student'), async (req, res) => {
