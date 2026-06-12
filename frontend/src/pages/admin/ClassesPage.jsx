@@ -201,14 +201,11 @@ const ClassesPage = () => {
   const [bulkImportErrors, setBulkImportErrors] = useState([]);
   const [bulkImportResult, setBulkImportResult] = useState(null);
 
-  // Import codes Massar (InfoEleve)
+  // Import codes Massar (InfoEleve) — supporte plusieurs fichiers (1 par classe)
   const [showMassarImport, setShowMassarImport] = useState(false);
-  const [massarRows, setMassarRows] = useState([]);
-  const [massarClassName, setMassarClassName] = useState('');
-  const [massarClassId, setMassarClassId] = useState('');
-  const [massarResult, setMassarResult] = useState(null);
+  // massarFiles: [{ key, fileName, className, classId, rows, result, error }]
+  const [massarFiles, setMassarFiles] = useState([]);
   const [massarBusy, setMassarBusy] = useState(false);
-  const [massarSendResult, setMassarSendResult] = useState(null);
   const [massarCoverage, setMassarCoverage] = useState({});
   const [quickSendingClassId, setQuickSendingClassId] = useState(null);
   const [fixMassarNames, setFixMassarNames] = useState(true);
@@ -222,12 +219,14 @@ const ClassesPage = () => {
 
   const resetMassarModal = () => {
     setShowMassarImport(false);
-    setMassarRows([]);
-    setMassarClassName('');
-    setMassarClassId('');
-    setMassarResult(null);
-    setMassarSendResult(null);
+    setMassarFiles([]);
   };
+
+  const setMassarFileClass = (key, classId) =>
+    setMassarFiles(prev => prev.map(f => f.key === key ? { ...f, classId, result: null } : f));
+
+  const removeMassarFile = (key) =>
+    setMassarFiles(prev => prev.filter(f => f.key !== key));
 
   const fetchMassarCoverage = async (token) => {
     try {
@@ -241,14 +240,9 @@ const ClassesPage = () => {
     }
   };
 
-  // Ouvre la modale d'import Massar avec la classe pré-sélectionnée
-  // (réimport pour mettre à jour les codes d'une classe déjà importée).
-  const openMassarModalForClass = (cls) => {
-    setMassarRows([]);
-    setMassarClassName(cls.name || '');
-    setMassarClassId(cls.id);
-    setMassarResult(null);
-    setMassarSendResult(null);
+  // Ouvre la modale d'import Massar (multi-fichiers ; chaque fichier porte sa classe).
+  const openMassarModalForClass = () => {
+    setMassarFiles([]);
     setShowMassarImport(true);
   };
 
@@ -274,68 +268,77 @@ const ClassesPage = () => {
     }
   };
 
+  // Lecture de PLUSIEURS fichiers InfoEleve (1 par classe). Chaque fichier devient
+  // une entrée avec sa classe détectée automatiquement.
   const handleMassarFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMassarResult(null);
-    setMassarSendResult(null);
-    try {
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data);
-      const parsed = parseMassarInfoEleve(workbook);
-      if (!parsed || parsed.rows.length === 0) {
-        alert('Format non reconnu. Utilisez le fichier officiel Massar « InfoEleve ».');
-        return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const norm = s => String(s || '').trim().toLowerCase();
+    const parsedList = [];
+    for (const file of files) {
+      const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const parsed = parseMassarInfoEleve(workbook);
+        if (!parsed || parsed.rows.length === 0) {
+          parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], result: null, error: 'Format non reconnu (fichier InfoEleve attendu)' });
+          continue;
+        }
+        const match = parsed.className ? classes.find(c => norm(c.name) === norm(parsed.className)) : null;
+        parsedList.push({ key, fileName: file.name, className: parsed.className || null, classId: match ? match.id : '', rows: parsed.rows, result: null, error: null });
+      } catch (err) {
+        console.error('Erreur lecture InfoEleve:', err);
+        parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], result: null, error: 'Erreur de lecture du fichier' });
       }
-      setMassarRows(parsed.rows);
-      setMassarClassName(parsed.className || '');
-      // Pré-sélection de la classe par son nom
-      const match = parsed.className
-        ? classes.find(c => String(c.name || '').trim().toLowerCase() === parsed.className.trim().toLowerCase())
-        : null;
-      setMassarClassId(match ? match.id : '');
-    } catch (err) {
-      console.error('Erreur lecture InfoEleve:', err);
-      alert('Erreur de lecture du fichier.');
     }
+    setMassarFiles(prev => [...prev, ...parsedList]);
+    e.target.value = ''; // permet de re-sélectionner les mêmes fichiers
   };
 
+  // Vérifie (dryRun) ou enregistre (commit) TOUS les fichiers prêts, en parallèle.
   const handleMassarImport = async (dryRun) => {
-    if (!massarClassId || massarRows.length === 0) return;
+    const ready = massarFiles.filter(f => f.classId && f.rows.length > 0);
+    if (ready.length === 0) { alert('Sélectionnez une classe pour au moins un fichier.'); return; }
     setMassarBusy(true);
     try {
       const token = await getMassarToken();
-      const res = await fetch(`${apiUrl}/api/admin/classes/import-massar-secrets`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: massarClassId, rows: massarRows, dryRun, fixNames: fixMassarNames }),
-      });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Erreur import'); return; }
-      setMassarResult(data);
+      const updated = await Promise.all(massarFiles.map(async (f) => {
+        if (!f.classId || !f.rows.length) return f;
+        try {
+          const res = await fetch(`${apiUrl}/api/admin/classes/import-massar-secrets`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ class_id: f.classId, rows: f.rows, dryRun, fixNames: fixMassarNames }),
+          });
+          const data = await res.json();
+          if (!res.ok) return { ...f, result: { error: data.error || 'Erreur' } };
+          return { ...f, result: data };
+        } catch {
+          return { ...f, result: { error: 'Erreur réseau' } };
+        }
+      }));
+      setMassarFiles(updated);
       if (!dryRun) fetchMassarCoverage(token);
-    } catch (err) {
-      console.error(err);
-      alert('Erreur import codes Massar');
     } finally {
       setMassarBusy(false);
     }
   };
 
-  const handleSendMassar = async () => {
-    if (!massarClassId) return;
-    if (!confirm('Envoyer les codes Massar (code + secret) aux parents de cette classe par WhatsApp ?')) return;
+  // Envoi WhatsApp des codes Massar aux parents d'une classe donnée.
+  const handleSendMassar = async (classId, label) => {
+    if (!classId) return;
+    if (!confirm(`Envoyer les codes Massar (code + secret) aux parents de « ${label || 'cette classe'} » par WhatsApp ?`)) return;
     setMassarBusy(true);
-    setMassarSendResult(null);
     try {
       const token = await getMassarToken();
-      const res = await fetch(`${apiUrl}/api/admin/classes/${massarClassId}/send-massar-whatsapp`, {
+      const res = await fetch(`${apiUrl}/api/admin/classes/${classId}/send-massar-whatsapp`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error || 'Erreur envoi'); return; }
-      setMassarSendResult(data);
+      alert(`${data.message || `Envoyé à ${data.sent} parent(s)`}${data.errors > 0 ? ` — ${data.errors} échec(s)` : ''}${data.skipped ? `, ${data.skipped} sans numéro` : ''}`);
     } catch (err) {
       console.error(err);
       alert('Erreur envoi WhatsApp');
@@ -2037,171 +2040,178 @@ const ClassesPage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-              <p className="font-medium mb-1">📋 Fichier officiel Massar « InfoEleve »</p>
-              <p>Export contenant <strong>رقم التلميذ</strong> (code Massar) et <strong>الرمز السري</strong> (code secret). La classe est détectée automatiquement.</p>
+              <p className="font-medium mb-1">📋 Fichiers officiels Massar « InfoEleve » (un par classe)</p>
+              <p>Vous pouvez sélectionner <strong>plusieurs fichiers</strong> à la fois. Chaque fichier contient <strong>رقم التلميذ</strong> (code Massar) et <strong>الرمز السري</strong> (code secret) ; la classe est détectée automatiquement.</p>
             </div>
 
-            {/* Classe pré-sélectionnée + codes déjà importés (réimport pour mise à jour) */}
-            {massarRows.length === 0 && massarClassId && (
-              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm text-purple-800 flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  Classe sélectionnée : <strong>{massarClassName || classes.find(c => c.id === massarClassId)?.name}</strong>
-                  {massarCoverage[massarClassId]?.withSecret > 0 && (
+            {/* Option correction des noms (globale) */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={fixMassarNames}
+                onChange={e => setFixMassarNames(e.target.checked)}
+                className="rounded"
+              />
+              <span>Corriger les noms des élèves avec les noms officiels Massar</span>
+            </label>
+
+            {/* Upload (multiple) */}
+            <div className="border-2 border-dashed border-indigo-300 rounded-lg p-6 text-center">
+              <Upload className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
+              <p className="text-sm font-medium mb-3">Sélectionnez un ou plusieurs fichiers InfoEleve (.xlsx)</p>
+              <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700">
+                <span className="text-sm font-medium">Choisir les fichiers</span>
+                <input type="file" accept=".xlsx,.xls" multiple onChange={handleMassarFileChange} className="hidden" />
+              </label>
+              {massarFiles.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-2">{massarFiles.length} fichier(s) chargé(s) — vous pouvez en ajouter d'autres.</p>
+              )}
+            </div>
+
+            {/* Liste des fichiers (1 carte par fichier/classe) */}
+            {massarFiles.map((f) => {
+              const matched = f.result?.results?.filter(r => r.matchStatus === 'matched').length || 0;
+              const notFound = f.result?.results?.filter(r => r.matchStatus === 'not_found').length || 0;
+              const namesToFix = f.result?.results?.filter(r => r.nameUpdate).length || 0;
+              const committed = f.result && f.result.updated != null;
+              return (
+                <div key={f.key} className="border rounded-lg p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <FileSpreadsheet className="w-4 h-4 text-indigo-600 shrink-0" />
+                        <span className="truncate">{f.fileName}</span>
+                      </p>
+                      {f.error ? (
+                        <p className="text-xs text-red-500 mt-1">{f.error}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {f.rows.length} élève(s){f.className ? <> • Classe détectée : <strong>{f.className}</strong></> : null}
+                        </p>
+                      )}
+                    </div>
+                    <button onClick={() => removeMassarFile(f.key)} className="p-1 hover:bg-muted rounded shrink-0" title="Retirer ce fichier">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {!f.error && (
                     <>
-                      {' '}— codes déjà importés pour <strong>{massarCoverage[massarClassId].withSecret}/{massarCoverage[massarClassId].total}</strong> élève(s).
-                      {' '}Réimportez le fichier InfoEleve pour mettre à jour ces codes.
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="flex-1 min-w-[180px]">
+                          <label className="block text-xs font-medium mb-1">Classe cible *</label>
+                          <select
+                            value={f.classId}
+                            onChange={e => setMassarFileClass(f.key, e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
+                          >
+                            <option value="">— Sélectionner —</option>
+                            {classes.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}{c.level ? ` · ${c.level}` : ''}</option>
+                            ))}
+                          </select>
+                          {!f.classId && f.className && (
+                            <p className="text-xs text-amber-600 mt-1">Classe « {f.className} » non trouvée — sélectionnez-la manuellement.</p>
+                          )}
+                        </div>
+                        {f.classId && (
+                          <button
+                            onClick={() => handleSendMassar(f.classId, f.className || classes.find(c => c.id === f.classId)?.name)}
+                            disabled={massarBusy}
+                            className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50"
+                            title="Envoyer code + secret aux parents de cette classe par WhatsApp"
+                          >
+                            Envoyer (WhatsApp)
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Aperçu compact */}
+                      <div className="max-h-40 overflow-y-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50 sticky top-0">
+                            <tr>
+                              <th className="text-left py-1 px-2">Élève</th>
+                              <th className="text-left py-1 px-2">Code</th>
+                              <th className="text-left py-1 px-2">Secret</th>
+                              {f.result?.results && <th className="text-left py-1 px-2">Statut</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {f.rows.map((row, idx) => {
+                              const r = f.result?.results?.[idx];
+                              return (
+                                <tr key={idx} className="border-t">
+                                  <td className="py-1 px-2">{row.student_full_name || '—'}</td>
+                                  <td className="py-1 px-2 font-mono">{row.massar_code}</td>
+                                  <td className="py-1 px-2 font-mono">{row.massar_secret}</td>
+                                  {r && (
+                                    <td className="py-1 px-2">
+                                      {r.matchStatus === 'matched' && (
+                                        <span className="text-green-600">
+                                          ✓ {r.student.first_name} {r.student.last_name}
+                                          {r.nameUpdate && (
+                                            <span className="block text-amber-600 text-xs">
+                                              ✎ {r.nameUpdate.from} → <strong>{r.nameUpdate.to}</strong>
+                                            </span>
+                                          )}
+                                        </span>
+                                      )}
+                                      {r.matchStatus === 'not_found' && <span className="text-red-500">✗ Non trouvé</span>}
+                                      {r.matchStatus === 'ambiguous' && <span className="text-yellow-600">⚠ Ambigu</span>}
+                                      {r.matchStatus === 'invalid' && <span className="text-muted-foreground">— Ignoré</span>}
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Récap par fichier */}
+                      {f.result?.error && <p className="text-sm text-red-500">{f.result.error}</p>}
+                      {f.result?.results && (
+                        <div className="text-xs flex flex-wrap gap-x-4 gap-y-1">
+                          <span className="text-green-600">✓ {matched} correspondance(s)</span>
+                          {notFound > 0 && <span className="text-red-500">✗ {notFound} non trouvé(s)</span>}
+                          {namesToFix > 0 && !committed && <span className="text-amber-600">✎ {namesToFix} nom(s) à corriger</span>}
+                          {committed && <span className="text-indigo-600 font-medium">{f.result.updated} secret(s) enregistré(s){f.result.namesFixed > 0 ? `, ${f.result.namesFixed} nom(s) corrigé(s)` : ''}</span>}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
-                {massarCoverage[massarClassId]?.withSecret > 0 && (
-                  <button onClick={handleSendMassar} disabled={massarBusy}
-                    className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
-                    Envoyer aux parents (WhatsApp)
-                  </button>
-                )}
-              </div>
-            )}
+              );
+            })}
 
-            {/* Upload */}
-            <div className="border-2 border-dashed border-indigo-300 rounded-lg p-6 text-center">
-              <Upload className="w-8 h-8 text-indigo-500 mx-auto mb-2" />
-              <p className="text-sm font-medium mb-3">Sélectionnez le fichier InfoEleve (.xlsx)</p>
-              <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700">
-                <span className="text-sm font-medium">Choisir le fichier</span>
-                <input type="file" accept=".xlsx,.xls" onChange={handleMassarFileChange} className="hidden" />
-              </label>
-            </div>
-
-            {/* Classe détectée + sélection */}
-            {massarRows.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-sm font-medium">{massarRows.length} élève(s) détecté(s)</span>
-                  {massarClassName && <span className="text-sm text-muted-foreground">• Classe : <strong>{massarClassName}</strong></span>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Classe cible *</label>
-                  <select
-                    value={massarClassId}
-                    onChange={e => { setMassarClassId(e.target.value); setMassarResult(null); }}
-                    className="w-full px-3 py-2 border rounded-lg bg-background"
+            {/* Actions globales */}
+            {massarFiles.some(f => !f.error) && (() => {
+              const ready = massarFiles.filter(f => f.classId && f.rows.length > 0);
+              const totalMatched = massarFiles.reduce((s, f) => s + (f.result?.results?.filter(r => r.matchStatus === 'matched').length || 0), 0);
+              const anyDry = massarFiles.some(f => f.result?.dryRun);
+              const anyCommitted = massarFiles.some(f => f.result && f.result.updated != null);
+              return (
+                <div className="flex flex-wrap gap-2 pt-1 border-t">
+                  <button
+                    onClick={() => handleMassarImport(true)}
+                    disabled={massarBusy || ready.length === 0}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
-                    <option value="">— Sélectionner —</option>
-                    {classes.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}{c.level ? ` · ${c.level}` : ''}</option>
-                    ))}
-                  </select>
-                  {!massarClassId && massarClassName && (
-                    <p className="text-xs text-amber-600 mt-1">Classe « {massarClassName} » non trouvée — sélectionnez-la manuellement.</p>
-                  )}
-                </div>
-
-                {/* Aperçu */}
-                <div className="max-h-52 overflow-y-auto border rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left py-1 px-2">Élève</th>
-                        <th className="text-left py-1 px-2">Code Massar</th>
-                        <th className="text-left py-1 px-2">Code secret</th>
-                        {massarResult && <th className="text-left py-1 px-2">Statut</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {massarRows.map((row, idx) => {
-                        const r = massarResult?.results?.[idx];
-                        return (
-                          <tr key={idx} className="border-t">
-                            <td className="py-1 px-2">{row.student_full_name || '—'}</td>
-                            <td className="py-1 px-2 font-mono">{row.massar_code}</td>
-                            <td className="py-1 px-2 font-mono">{row.massar_secret}</td>
-                            {r && (
-                              <td className="py-1 px-2">
-                                {r.matchStatus === 'matched' && (
-                                  <span className="text-green-600">
-                                    ✓ {r.student.first_name} {r.student.last_name}
-                                    {r.nameUpdate && (
-                                      <span className="block text-amber-600 text-xs">
-                                        ✎ {r.nameUpdate.from} → <strong>{r.nameUpdate.to}</strong>
-                                      </span>
-                                    )}
-                                  </span>
-                                )}
-                                {r.matchStatus === 'not_found' && <span className="text-red-500">✗ Non trouvé</span>}
-                                {r.matchStatus === 'ambiguous' && <span className="text-yellow-600">⚠ Ambigu</span>}
-                                {r.matchStatus === 'invalid' && <span className="text-muted-foreground">— Ignoré</span>}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Option correction des noms */}
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={fixMassarNames}
-                    onChange={e => { setFixMassarNames(e.target.checked); setMassarResult(null); }}
-                    className="rounded"
-                  />
-                  <span>Corriger les noms des élèves avec les noms officiels Massar
-                    {massarResult && (() => {
-                      const n = massarResult.results.filter(r => r.nameUpdate).length;
-                      return n > 0 ? <span className="text-amber-600"> ({n} à corriger)</span> : null;
-                    })()}
-                  </span>
-                </label>
-
-                {massarResult && (
-                  <div className="text-sm space-y-1">
-                    <p className="text-green-600">✓ Correspondances : {massarResult.results.filter(r => r.matchStatus === 'matched').length}</p>
-                    <p className="text-red-500">✗ Non trouvés : {massarResult.results.filter(r => r.matchStatus === 'not_found').length}</p>
-                    {massarResult.updated != null && <p className="text-indigo-600 font-medium">{massarResult.updated} code(s) secret(s) enregistré(s){massarResult.namesFixed > 0 ? `, ${massarResult.namesFixed} nom(s) corrigé(s)` : ''}</p>}
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2">
-                  {!massarResult?.updated && (
-                    <button
-                      onClick={() => handleMassarImport(true)}
-                      disabled={massarBusy || !massarClassId}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {massarBusy ? 'Vérification…' : 'Vérifier les correspondances'}
-                    </button>
-                  )}
-                  {massarResult?.dryRun && massarResult.results.some(r => r.matchStatus === 'matched') && (
+                    {massarBusy ? 'Vérification…' : `Vérifier les correspondances (${ready.length} fichier${ready.length > 1 ? 's' : ''})`}
+                  </button>
+                  {anyDry && !anyCommitted && totalMatched > 0 && (
                     <button
                       onClick={() => handleMassarImport(false)}
                       disabled={massarBusy}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                     >
-                      {massarBusy ? 'Import…' : `Enregistrer (${massarResult.results.filter(r => r.matchStatus === 'matched').length})`}
-                    </button>
-                  )}
-                  {massarClassId && (
-                    <button
-                      onClick={handleSendMassar}
-                      disabled={massarBusy}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-                      title="Envoyer code + secret aux parents de la classe par WhatsApp"
-                    >
-                      {massarBusy ? 'Envoi…' : 'Envoyer aux parents (WhatsApp)'}
+                      {massarBusy ? 'Enregistrement…' : `Enregistrer tout (${totalMatched})`}
                     </button>
                   )}
                 </div>
-
-                {massarSendResult && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-800">
-                    {massarSendResult.message} — {massarSendResult.errors > 0 ? `${massarSendResult.errors} échec(s)` : 'aucun échec'}{massarSendResult.skipped ? `, ${massarSendResult.skipped} sans numéro` : ''}.
-                  </div>
-                )}
-              </div>
-            )}
+              );
+            })()}
           </CardContent>
         </Card>
       )}
