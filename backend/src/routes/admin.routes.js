@@ -452,7 +452,7 @@ router.get('/parents', async (req, res) => {
         .in('parent_id', parentIds),
       supabaseAdmin
         .from('parent_contacts')
-        .select('id, parent_id, phone_e164, channel, is_primary, consent_status, created_at')
+        .select('id, parent_id, phone_e164, channel, is_primary, consent_status, created_at, label')
         .in('parent_id', parentIds)
         .order('is_primary', { ascending: false })
     ]);
@@ -710,17 +710,22 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
       .select('parent_id, phone_e164, channel, is_primary')
       .in('parent_id', ids)
       .eq('channel', 'whatsapp');
-    const phoneByParent = new Map();
+    // Tous les numéros par parent, le Principal en premier (repli sur les suivants
+    // si l'envoi échoue). Dédup en conservant l'ordre.
+    const phonesByParent = new Map();
     (contacts || []).forEach(c => {
-      if (!phoneByParent.has(c.parent_id) || c.is_primary) {
-        phoneByParent.set(c.parent_id, c.phone_e164);
-      }
+      if (!phonesByParent.has(c.parent_id)) phonesByParent.set(c.parent_id, []);
+      const arr = phonesByParent.get(c.parent_id);
+      if (c.is_primary) arr.unshift(c.phone_e164); // principal en tête
+      else arr.push(c.phone_e164);
     });
 
-    const candidates = parents.map(p => ({
-      ...p,
-      phone_e164: phoneByParent.get(p.id) || normalizePhoneToE164(p.phone),
-    })).filter(p => !!p.phone_e164);
+    const candidates = parents.map(p => {
+      const fromContacts = phonesByParent.get(p.id) || [];
+      const fallback = normalizePhoneToE164(p.phone);
+      const phones = [...new Set([...fromContacts, ...(fallback ? [fallback] : [])])];
+      return { ...p, phones, phone_e164: phones[0] || null };
+    }).filter(p => p.phones.length > 0);
 
     if (candidates.length === 0) {
       return res.status(400).json({ error: 'Aucun parent n\'a de numéro WhatsApp' });
@@ -788,11 +793,22 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
 
         if (!msgLog) { errorCount++; continue; }
 
+        // Essayer le numéro Principal d'abord, puis repli sur les suivants (2e
+        // numéro de la famille) tant que l'envoi échoue.
+        let waResult = { success: false, message: 'Aucun numéro' };
+        let usedPhone = parent.phones[0];
+        for (const phone of parent.phones) {
+          usedPhone = phone;
+          waResult = await sendText(schoolId, phone, messageText, { urgent: true });
+          if (waResult.success) break;
+          console.error('[Parents WhatsApp] send failed, repli numéro suivant', parent.id, phone, waResult.message);
+        }
+
         const { data: recipientLog } = await supabaseAdmin
           .from('whatsapp_message_recipients')
           .insert({
             message_id: msgLog.id,
-            phone_e164: parent.phone_e164,
+            phone_e164: usedPhone,
             parent_id: parent.id,
             status: 'pending',
           })
@@ -800,8 +816,6 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
           .single();
 
         if (!recipientLog) { errorCount++; continue; }
-
-        const waResult = await sendText(schoolId, parent.phone_e164, messageText, { urgent: true });
 
         if (waResult.success) {
           await supabaseAdmin
@@ -813,9 +827,9 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
             .update({ status: 'sent', sent_count: 1 })
             .eq('id', msgLog.id);
           sentCount++;
-          sentDetails.push({ parent_id: parent.id, email: newEmail });
+          sentDetails.push({ parent_id: parent.id, email: newEmail, phone: usedPhone });
         } else {
-          console.error('[Parents WhatsApp] send failed', parent.id, waResult.message);
+          console.error('[Parents WhatsApp] send failed (tous numéros)', parent.id, waResult.message);
           await supabaseAdmin
             .from('whatsapp_message_recipients')
             .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
@@ -1094,44 +1108,73 @@ router.post('/parents/import', async (req, res) => {
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
 
-      const parentName = splitFullName(r.row.parent_full_name);
-      const parentPhone = normalizePhoneToE164(r.row.phone_1);
+      // UN SEUL parent (la famille) par élève, avec TOUS les numéros (père + mère
+      // + tuteur) rattachés comme contacts. Si la ligne ne fournit pas `contacts`
+      // (ancien format / modèle générique), on retombe sur le numéro unique.
+      const rawContacts = Array.isArray(r.row.contacts) && r.row.contacts.length
+        ? r.row.contacts
+        : [{ phone: r.row.phone_1, name: r.row.parent_full_name, relationship: r.row.relationship }];
 
-      // Find existing parent by primary phone
-      const { data: existingParentContact, error: existingContactError } = await supabaseAdmin
+      // Normalisation + dédup des numéros, en conservant nom + libellé (Père/Mère).
+      const seenPhones = new Set();
+      const contacts = [];
+      for (const c of rawContacts) {
+        const phone = normalizeMoroccoMobile(c.phone) || normalizePhoneToE164(c.phone);
+        if (!phone || seenPhones.has(phone)) continue;
+        seenPhones.add(phone);
+        contacts.push({
+          phone,
+          name: c.name || r.row.parent_full_name,
+          relationship: c.relationship || null
+        });
+      }
+      if (contacts.length === 0) continue;
+
+      // Contact principal = 1er (père si présent) → nom + numéro du compte parent.
+      const primary = contacts[0];
+      const parentName = splitFullName(primary.name);
+
+      // Réutiliser un parent existant si l'UN des numéros est déjà connu.
+      const { data: existingContacts, error: existingContactError } = await supabaseAdmin
         .from('parent_contacts')
         .select('parent_id')
-        .eq('phone_e164', parentPhone)
-        .eq('channel', 'whatsapp')
-        .maybeSingle();
+        .in('phone_e164', contacts.map(c => c.phone))
+        .eq('channel', 'whatsapp');
       if (existingContactError) throw existingContactError;
 
-      let parentId = existingParentContact?.parent_id;
+      let parentId = existingContacts?.[0]?.parent_id;
       if (!parentId) {
         const parent = await createParentProfile({
           email: null,
           firstName: parentName.firstName,
           lastName: parentName.lastName,
-          phone: parentPhone,
+          phone: primary.phone,
           schoolId: getSchoolId(req)
         });
         parentId = parent.id;
       }
 
-      // Upsert contact
-      const { error: upsertContactError } = await supabaseAdmin
-        .from('parent_contacts')
-        .upsert(
-          {
-            parent_id: parentId,
-            phone_e164: parentPhone,
-            channel: 'whatsapp',
-            is_primary: true,
-            consent_status: 'pending'
-          },
-          { onConflict: 'parent_id,phone_e164,channel' }
-        );
-      if (upsertContactError) throw upsertContactError;
+      // Upsert de TOUS les contacts (le 1er = principal), avec libellé Père/Mère.
+      for (let i = 0; i < contacts.length; i++) {
+        const c = contacts[i];
+        const label = [c.relationship ? c.relationship.charAt(0).toUpperCase() + c.relationship.slice(1) : null, c.name]
+          .filter(Boolean)
+          .join(' — ') || null;
+        const { error: upsertContactError } = await supabaseAdmin
+          .from('parent_contacts')
+          .upsert(
+            {
+              parent_id: parentId,
+              phone_e164: c.phone,
+              channel: 'whatsapp',
+              is_primary: i === 0,
+              consent_status: 'pending',
+              label
+            },
+            { onConflict: 'parent_id,phone_e164,channel' }
+          );
+        if (upsertContactError) throw upsertContactError;
+      }
 
       // Upsert link
       const { error: upsertLinkError } = await supabaseAdmin
@@ -1140,13 +1183,13 @@ router.post('/parents/import', async (req, res) => {
           {
             parent_id: parentId,
             student_id: r.student.id,
-            relationship: r.row.relationship || null
+            relationship: primary.relationship || null
           },
           { onConflict: 'parent_id,student_id' }
         );
       if (upsertLinkError) throw upsertLinkError;
 
-      commits.push({ parent_id: parentId, student_id: r.student.id });
+      commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }
 
     res.json({ dryRun: false, results, commitsCount: commits.length });

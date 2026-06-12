@@ -83,20 +83,36 @@ const parseMassarTuteur = (workbook) => {
     if (!massar) continue;
     const studentName = `${T(r, lastCol)} ${T(r, firstCol)}`.trim();
 
-    // Candidats contacts : Père et Mère d'abord, puis Tuteur en repli (il duplique
-    // souvent l'un des deux). Dédup par numéro.
+    // Père / Mère / Tuteur du même élève → UN SEUL parent (la famille), avec tous
+    // les numéros regroupés dans `contacts`. Dédup par numéro. Le Tuteur duplique
+    // souvent l'un des deux : il est ajouté en dernier (ignoré si numéro déjà vu).
     const seen = new Set();
+    const contacts = [];
     const pushContact = (phoneCol, relationship) => {
       const phone = validMoroccoMobile(T(r, phoneCol));
       if (!phone || seen.has(phone)) return;
       const name = blockName(r, phoneCol);
       if (!name) return;
       seen.add(phone);
-      out.push({ massar_code: massar, student_full_name: studentName, parent_full_name: name, phone_1: phone, relationship });
+      contacts.push({ phone, name, relationship });
     };
     pushContact(perePhoneCol, 'père');
     pushContact(merePhoneCol, 'mère');
     pushContact(tutPhoneCol, mapTutelle(T(r, typeCol)));
+
+    if (contacts.length === 0) continue;
+
+    // Le contact principal (nom + numéro du compte parent) = père si présent,
+    // sinon mère, sinon tuteur (= 1er contact, l'ordre ci-dessus le garantit).
+    const primary = contacts[0];
+    out.push({
+      massar_code: massar,
+      student_full_name: studentName,
+      parent_full_name: primary.name,
+      phone_1: primary.phone,
+      relationship: primary.relationship,
+      contacts // tous les numéros (père + mère + tuteur), avec libellé
+    });
   }
 
   return { rows: out, className };
@@ -693,6 +709,40 @@ const ParentsPage = () => {
     });
   };
 
+  // Tout sélectionner / tout désélectionner (sur les parents actuellement filtrés)
+  const toggleSelectAll = () => {
+    const visibleIds = filteredParents.map(p => p.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedParents.has(id));
+    setSelectedParents(allSelected ? new Set() : new Set(visibleIds));
+  };
+
+  // Suppression groupée des parents sélectionnés
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedParents);
+    if (ids.length === 0) { alert('Sélectionnez au moins un parent'); return; }
+    if (!confirm(`Supprimer ${ids.length} parent(s) et toutes leurs associations ? Cette action est irréversible.`)) return;
+    setBulkSending(true);
+    let ok = 0, ko = 0;
+    try {
+      const token = await getToken();
+      for (const id of ids) {
+        try {
+          const res = await fetch(`${apiUrl}/api/admin/parents/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) ok++; else ko++;
+        } catch { ko++; }
+      }
+      alert(`${ok} parent(s) supprimé(s)${ko > 0 ? `, ${ko} échec(s)` : ''}`);
+      setBulkMode(false);
+      setSelectedParents(new Set());
+      await fetchData();
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
   // ---- FILTER ----
   const filteredParents = parents.filter(p => {
     const name = `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase();
@@ -761,14 +811,33 @@ const ParentsPage = () => {
             {bulkMode ? `${selectedParents.size} sélectionné(s)` : 'Sélection multiple'}
           </button>
           {bulkMode && (
-            <button
-              onClick={() => handleBulkSend('selected')}
-              disabled={bulkSending || selectedParents.size === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
-            >
-              <Send className="w-4 h-4" />
-              {bulkSending ? 'Envoi…' : `Envoyer ID (${selectedParents.size})`}
-            </button>
+            <>
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200"
+              >
+                <CheckCheck className="w-4 h-4" />
+                {filteredParents.length > 0 && filteredParents.every(p => selectedParents.has(p.id))
+                  ? 'Tout désélectionner'
+                  : 'Tout sélectionner'}
+              </button>
+              <button
+                onClick={() => handleBulkSend('selected')}
+                disabled={bulkSending || selectedParents.size === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+                {bulkSending ? 'Envoi…' : `Envoyer ID (${selectedParents.size})`}
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkSending || selectedParents.size === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                {bulkSending ? '...' : `Supprimer (${selectedParents.size})`}
+              </button>
+            </>
           )}
           <button
             onClick={() => handleBulkSend('all')}
@@ -925,9 +994,27 @@ const ParentsPage = () => {
                           <tr key={idx} className="border-b last:border-0">
                             <td className="py-1 px-2 text-muted-foreground">{idx + 1}</td>
                             <td className="py-1 px-2">{row.student_full_name}</td>
-                            <td className="py-1 px-2">{row.parent_full_name}</td>
-                            <td className="py-1 px-2 capitalize">{row.relationship || '—'}</td>
-                            <td className="py-1 px-2">{row.phone_1}</td>
+                            <td className="py-1 px-2">
+                              {row.contacts?.length
+                                ? row.contacts.map((c, i) => (
+                                    <div key={i}>{c.name}</div>
+                                  ))
+                                : row.parent_full_name}
+                            </td>
+                            <td className="py-1 px-2 capitalize">
+                              {row.contacts?.length
+                                ? row.contacts.map((c, i) => (
+                                    <div key={i}>{c.relationship || '—'}</div>
+                                  ))
+                                : (row.relationship || '—')}
+                            </td>
+                            <td className="py-1 px-2">
+                              {row.contacts?.length
+                                ? row.contacts.map((c, i) => (
+                                    <div key={i}>{c.phone}</div>
+                                  ))
+                                : row.phone_1}
+                            </td>
                             {result && (
                               <td className="py-1 px-2">
                                 {result.matchStatus === 'matched' && (
@@ -1396,6 +1483,11 @@ const ParentsPage = () => {
                             <div key={contact.id} className="flex items-center justify-between py-1.5 px-3 bg-accent/30 rounded-lg">
                               <div className="flex items-center gap-2 text-sm">
                                 <span className="font-mono">{contact.phone_e164}</span>
+                                {contact.label && (
+                                  <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">
+                                    {contact.label}
+                                  </span>
+                                )}
                                 {contact.is_primary && (
                                   <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs flex items-center gap-1">
                                     <Star className="w-3 h-3" /> Principal
