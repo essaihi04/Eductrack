@@ -438,13 +438,18 @@ router.get('/students', async (req, res) => {
 
     // Attacher les parents associés à chaque élève (pour badge « sans parent »
     // et détection d'association existante).
+    // Important : on découpe les IDs en lots (un .in() avec trop d'UUID dépasse
+    // la limite de longueur d'URL de PostgREST → « Bad Request »).
     const studentIds = (data || []).map(s => s.id);
     const parentsByStudent = new Map();
-    if (studentIds.length > 0) {
-      const { data: links } = await supabaseAdmin
+    const CHUNK = 200;
+    for (let i = 0; i < studentIds.length; i += CHUNK) {
+      const chunk = studentIds.slice(i, i + CHUNK);
+      const { data: links, error: linksError } = await supabaseAdmin
         .from('parent_students')
         .select('student_id, relationship, parent:profiles!parent_students_parent_id_fkey(id, first_name, last_name)')
-        .in('student_id', studentIds);
+        .in('student_id', chunk);
+      if (linksError) throw linksError;
       (links || []).forEach(l => {
         if (!l.parent) return;
         if (!parentsByStudent.has(l.student_id)) parentsByStudent.set(l.student_id, []);
