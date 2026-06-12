@@ -42,6 +42,7 @@ export const ACCOUNT_MENU = {
     { id: '1', emoji: '🔑', label: 'Mes identifiants (login & mot de passe)', action: 'goto:credentials' },
     { id: '2', emoji: '📍', label: 'Ma localisation (transport scolaire)',    action: 'goto:location' },
     { id: '3', emoji: '📷', label: 'Photo de profil de mon enfant',           action: 'goto:photo' },
+    { id: '4', emoji: '📊', label: 'Rapports IA WhatsApp (fréquence & heure)', action: 'goto:reports' },
     { id: '0', emoji: '🔙', label: 'Retour au menu principal',                action: 'goto:main' },
   ],
 };
