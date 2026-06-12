@@ -17,8 +17,14 @@
 import fs from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { downloadMediaMessage } from 'baileys';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
+import {
+  saveProfilePhotoBuffer,
+  deleteProfilePhotoByUrl,
+  setStudentAvatarUrl,
+} from '../../../utils/profilePhoto.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -382,6 +388,128 @@ async function applyLocationToAllChildren({ location, phone, parentInfo }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Photo de profil (envoyée par le parent via WhatsApp)
+// ─────────────────────────────────────────────────────────────────────────
+
+const PHOTO_YES_RE = /^(oui|yes|ok|d'?accord|واخا|نعم|اه|أجل|wakha|confirmer?)[\s!.]*$/i;
+const PHOTO_NO_RE = /^(non|no|annuler|cancel|لا|ماشي|الغاء|إلغاء)[\s!.]*$/i;
+
+/** Texte d'instructions pour envoyer la photo de profil de l'enfant. */
+function photoInstructions(studentName) {
+  return [
+    `*📷 Photo de profil${studentName ? ` de ${studentName}` : ''}*`,
+    '━━━━━━━━━━━━━━━━━━━',
+    `Envoyez maintenant la *photo de votre enfant* dans cette conversation :`,
+    '',
+    `*1.* Appuyez sur 📎 (trombone) ou 📷`,
+    `*2.* Choisissez une photo claire du visage de votre enfant`,
+    `*3.* Envoyez-la ici`,
+    '',
+    `_La photo sera enregistrée dans son profil et visible dans l'application._`,
+  ].join('\n');
+}
+
+/** Applique une photo (déjà sauvegardée sur disque) au profil d'un enfant. */
+async function applyProfilePhoto(schoolId, phone, child, photoUrl) {
+  const ok = await setStudentAvatarUrl(child.id, photoUrl);
+  if (!ok) {
+    await sendText(schoolId, phone, `⚠️ Erreur lors de l'enregistrement de la photo. Veuillez réessayer.`, { urgent: true });
+    return false;
+  }
+  await sendText(
+    schoolId,
+    phone,
+    `✅ *Photo de profil mise à jour* pour *${child.first_name} ${child.last_name}* 📷\n\n_Elle est maintenant visible dans l'application._\n\n_Tapez *menu* pour d'autres options._`,
+    { urgent: true }
+  );
+  return true;
+}
+
+/**
+ * Traite une image WhatsApp envoyée par le parent → photo de profil enfant.
+ *  - Mode "photo attendue" (option menu) + enfant ciblé → import direct
+ *  - Enfant ciblé (sélectionné / unique / nommé dans la légende) → demande
+ *    de confirmation (oui / non)
+ *  - Plusieurs enfants sans cible → demande pour quel enfant
+ */
+async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingMsgId }) {
+  const schoolId = parentInfo.school_id;
+  const children = await getParentChildren(parentInfo.parent_id);
+
+  if (children.length === 0) {
+    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro. Contactez ${parentInfo.school_name}.`, { urgent: true });
+    await markProcessed(incomingMsgId);
+    return;
+  }
+
+  // Téléchargement du média
+  let buffer;
+  try {
+    buffer = await image.download();
+  } catch (e) {
+    console.error('[chatbot] téléchargement photo échoué:', e.message);
+    await sendText(schoolId, phone, `⚠️ Impossible de télécharger votre photo. Veuillez la renvoyer.`, { urgent: true });
+    await markProcessed(incomingMsgId);
+    return;
+  }
+  const photoUrl = saveProfilePhotoBuffer(buffer, image.mimetype);
+
+  const state = State.getState(phone);
+  const selected = state?.studentId ? children.find((c) => c.id === state.studentId) : null;
+  // Cible : enfant nommé dans la légende > enfant sélectionné > enfant unique
+  const fromCaption = caption ? matchChildFromInput(caption, children) : null;
+  const target = fromCaption || selected || (children.length === 1 ? children[0] : null);
+
+  // Import direct si le parent a explicitement demandé l'envoi via le menu
+  if (state?.awaitingPhoto && target) {
+    State.setState(phone, { awaitingPhoto: false });
+    await applyProfilePhoto(schoolId, phone, target, photoUrl);
+    await markProcessed(incomingMsgId);
+    return;
+  }
+
+  if (target) {
+    // Photo spontanée → confirmation avant d'écraser la photo existante
+    State.setState(phone, {
+      state: 'PHOTO',
+      pendingPhotoUrl: photoUrl,
+      pendingPhotoTargetId: target.id,
+      childrenList: children.map((c) => c.id),
+    });
+    await sendText(
+      schoolId,
+      phone,
+      `📷 *Photo reçue*\n\nDéfinir cette photo comme photo de profil de *${target.first_name} ${target.last_name}* ?\n\n• Répondez *oui* pour confirmer\n• *non* pour annuler${children.length > 1 ? `\n• ou le *prénom / numéro* d'un autre enfant` : ''}`,
+      { urgent: true }
+    );
+    await markProcessed(incomingMsgId);
+    return;
+  }
+
+  // Plusieurs enfants, aucune cible → demander pour quel enfant
+  const lines = [
+    `*📷 Photo reçue*`,
+    '━━━━━━━━━━━━━━━━━━━',
+    `Pour quel enfant souhaitez-vous enregistrer cette photo de profil ?`,
+    '',
+  ];
+  children.forEach((c, i) => {
+    lines.push(`*${i + 1}.* 👶 ${c.first_name} ${c.last_name}${c.class_name ? ` _(${c.class_name})_` : ''}`);
+  });
+  lines.push('');
+  lines.push(`_Répondez avec le numéro de l'enfant, ou *non* pour annuler._`);
+
+  State.setState(phone, {
+    state: 'PHOTO',
+    pendingPhotoUrl: photoUrl,
+    pendingPhotoTargetId: null,
+    childrenList: children.map((c) => c.id),
+  });
+  await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
+  await markProcessed(incomingMsgId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Helpers : conversion chiffres arabes-indic + matching enfant
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -512,7 +640,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     if (target === 'main') {
       return sendMainMenu(schoolId, phone, student, parentInfo);
     }
-    if (target === 'pedagogy' || target === 'finance' || target === 'schoollife') {
+    if (target === 'pedagogy' || target === 'finance' || target === 'schoollife' || target === 'account') {
       return sendSubMenu(schoolId, phone, target, student, parentInfo);
     }
     if (target === 'ai') {
@@ -536,6 +664,12 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
         current = `\n\n🏠 Adresse actuelle enregistrée :\n📍 ${Number(prof.home_lat).toFixed(6)}, ${Number(prof.home_lng).toFixed(6)}${prof.home_address ? `\n${prof.home_address}` : ''}\n_Envoyez une nouvelle position pour la remplacer._`;
       }
       return sendText(schoolId, phone, locationInstructions(`${student.first_name} ${student.last_name}`) + current, { urgent: true });
+    }
+    if (target === 'photo') {
+      // Active le mode "photo attendue" : la prochaine image reçue sera
+      // importée directement comme photo de profil de l'enfant sélectionné.
+      State.setState(phone, { awaitingPhoto: true });
+      return sendText(schoolId, phone, photoInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
     }
     if (target === 'credentials') {
       // Propose : parent uniquement ou parent + enfant
@@ -682,10 +816,11 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
  * @param {string} param0.id          - ID Baileys du message
  * @param {string} param0.schoolId    - school_id résolu via la session Baileys
  * @param {object} [param0.location]  - localisation partagée { lat, lng, name, address }
+ * @param {object} [param0.image]     - image partagée { download(), mimetype }
  */
-export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, location = null }) {
+export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, location = null, image = null }) {
   const phone = normalizePhone(from);
-  console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"${location ? ` 📍(${location.lat},${location.lng})` : ''}`);
+  console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"${location ? ` 📍(${location.lat},${location.lng})` : ''}${image ? ' 📷' : ''}`);
 
   // 0. Déduplication
   const { data: existing } = await supabaseAdmin
@@ -713,7 +848,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
       phone_e164: phone,
       parent_id: parentInfo.parent_id,
       school_id: parentInfo.school_id,
-      message_text: text || (location ? `📍 Localisation: ${location.lat},${location.lng}` : ''),
+      message_text: text || (location ? `📍 Localisation: ${location.lat},${location.lng}` : image ? '📷 Photo reçue' : ''),
       provider_message_id: id,
       processed: false,
       category: incomingCategory,
@@ -725,6 +860,12 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   // de l'élève (home_lat/home_lng), même sans affectation bus.
   if (location) {
     await handleLocationMessage({ location, phone, parentInfo, incomingMsgId: incomingMsg?.id });
+    return;
+  }
+
+  // 2.ter Image partagée → photo de profil de l'enfant (avec confirmation)
+  if (image) {
+    await handlePhotoMessage({ image, caption: text, phone, parentInfo, incomingMsgId: incomingMsg?.id });
     return;
   }
 
@@ -781,6 +922,53 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
 
   // 4. State machine
   let state = State.getState(phone);
+
+  // Mode PHOTO : une photo est en attente de confirmation / de cible.
+  // (Traité avant le bloc "pas d'enfant sélectionné" car ce mode peut
+  // exister sans studentId pour un parent multi-enfants.)
+  if (state?.state === 'PHOTO' && state.pendingPhotoUrl) {
+    const photoUrl = state.pendingPhotoUrl;
+    const children = await getParentChildren(parentInfo.parent_id);
+    const input = normalizeDigits(String(text || '').trim());
+
+    if (PHOTO_NO_RE.test(input)) {
+      deleteProfilePhotoByUrl(photoUrl);
+      State.setState(phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
+      if (state.studentId) State.setMenu(phone, 'main');
+      else State.resetState(phone);
+      await sendText(parentInfo.school_id, phone, `❌ Photo annulée. Tapez *menu* pour d'autres options.`, { urgent: true });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
+    let photoChild = null;
+    if (PHOTO_YES_RE.test(input) && state.pendingPhotoTargetId) {
+      photoChild = children.find((c) => c.id === state.pendingPhotoTargetId) || null;
+    }
+    if (!photoChild) {
+      const ordered = (state.childrenList || [])
+        .map((cid) => children.find((c) => c.id === cid))
+        .filter(Boolean);
+      photoChild = matchChildFromInput(text, ordered.length ? ordered : children);
+    }
+
+    if (photoChild) {
+      State.setState(phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
+      State.selectStudent(phone, photoChild.id);
+      await applyProfilePhoto(parentInfo.school_id, phone, photoChild, photoUrl);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
+    await sendText(
+      parentInfo.school_id,
+      phone,
+      `🤔 Réponse non reconnue. Répondez *oui* pour confirmer, *non* pour annuler, ou le *prénom / numéro* de l'enfant.`,
+      { urgent: true }
+    );
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
 
   // Pas d'état (1re interaction, expiré, ou redémarrage serveur) → essayer
   // d'abord d'interpréter la saisie comme une sélection d'enfant (numéro ou
@@ -1108,7 +1296,17 @@ export async function handleBaileysIncoming({ schoolId, msg }) {
     };
   }
 
-  if (!text && !location) return;
+  // Image partagée → photo de profil de l'enfant (téléchargement lazy : on
+  // ne télécharge le média que si l'expéditeur est un parent connu)
+  let image = null;
+  if (m.imageMessage) {
+    image = {
+      mimetype: m.imageMessage.mimetype || 'image/jpeg',
+      download: () => downloadMediaMessage(msg, 'buffer', {}),
+    };
+  }
+
+  if (!text && !location && !image) return;
 
   const remoteJid = msg.key?.remoteJid || '';
 
@@ -1147,5 +1345,5 @@ export async function handleBaileysIncoming({ schoolId, msg }) {
   const from = '+' + phoneJid.split('@')[0];
   const id = msg.key?.id || `${Date.now()}`;
 
-  return handleIncomingWhatsAppMessage({ from, text, id, schoolId, location });
+  return handleIncomingWhatsAppMessage({ from, text, id, schoolId, location, image });
 }

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Lock, Moon, Sun, Save, AlertCircle, CheckCircle, Eye, EyeOff, User } from 'lucide-react';
+import { Lock, Moon, Sun, Save, AlertCircle, CheckCircle, Eye, EyeOff, User, Camera } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -69,6 +69,9 @@ const StudentProfile = () => {
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
   const [selectedAvatar, setSelectedAvatar] = useState(profile?.avatar || '🙂');
   const [showAvatarList, setShowAvatarList] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url || null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
@@ -107,6 +110,44 @@ const StudentProfile = () => {
 
   const handleAvatarSelect = (avatarId) => {
     setSelectedAvatar(avatarId);
+    // Choisir un emoji remplace la photo importée
+    setAvatarUrl(null);
+  };
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    setMessage({ type: '', text: '' });
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const formData = new FormData();
+      formData.append('photo', file);
+
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const res = await fetch(`${apiUrl}/api/students/me/photo`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAvatarUrl(data.avatar_url);
+        setMessage({ type: 'success', text: '✅ Photo de profil mise à jour !' });
+        setTimeout(() => setMessage({ type: '', text: '' }), 4000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setMessage({ type: 'error', text: err.error || 'Erreur lors de l\'import de la photo' });
+      }
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      setMessage({ type: 'error', text: 'Erreur serveur' });
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
   };
 
   const handleInputChange = (e) => {
@@ -156,6 +197,7 @@ const StudentProfile = () => {
         last_name: formData.lastName,
         phone: formData.phone,
         avatar: selectedAvatar,
+        avatar_url: avatarUrl,
       };
 
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -286,28 +328,53 @@ const StudentProfile = () => {
       {/* Section Avatar et Infos de Base */}
       <Card>
         <CardHeader>
-          <CardTitle>Avatar</CardTitle>
-          <CardDescription>Choisissez votre avatar</CardDescription>
+          <CardTitle>Photo de profil</CardTitle>
+          <CardDescription>Importez votre photo ou choisissez un avatar</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
-            {/* Avatar actuel */}
-            <div className="flex items-center gap-6">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-4xl shadow-lg">
-                {selectedAvatar || '🙂'}
-              </div>
-              <div className="flex-1">
+            {/* Avatar / photo actuelle */}
+            <div className="flex items-center gap-6 flex-wrap">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl.startsWith('http') ? avatarUrl : `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${avatarUrl}`}
+                  alt="Photo de profil"
+                  className="w-24 h-24 rounded-full object-cover shadow-lg border-2 border-primary/30"
+                />
+              ) : (
+                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-4xl shadow-lg">
+                  {selectedAvatar || '🙂'}
+                </div>
+              )}
+              <div className="flex-1 min-w-[150px]">
                 <p className="font-medium text-lg">{profile?.first_name} {profile?.last_name}</p>
                 <p className="text-sm text-muted-foreground">
                   {profile?.role === 'admin' || profile?.role === 'school_admin' ? 'Administrateur' : profile?.role === 'teacher' ? 'Professeur' : 'Élève'}
                 </p>
               </div>
-              <button
-                onClick={() => setShowAvatarList(!showAvatarList)}
-                className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
-              >
-                {showAvatarList ? 'Fermer' : 'Changer'}
-              </button>
+              <div className="flex gap-2">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={uploadingPhoto}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  <Camera className="w-4 h-4" />
+                  {uploadingPhoto ? 'Import…' : 'Importer une photo'}
+                </button>
+                <button
+                  onClick={() => setShowAvatarList(!showAvatarList)}
+                  className="px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/80 transition-colors"
+                >
+                  {showAvatarList ? 'Fermer' : 'Avatar emoji'}
+                </button>
+              </div>
             </div>
 
             {/* Liste d'avatars */}

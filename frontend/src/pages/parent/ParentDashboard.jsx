@@ -104,9 +104,17 @@ const ChildCard = ({ child, onOpen }) => {
       className="text-left rounded-xl border border-gray-200 bg-white p-5 shadow-sm hover:shadow-md transition group"
     >
       <div className="flex items-start gap-4">
-        <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 text-white flex items-center justify-center font-bold text-lg shrink-0">
-          {(child.first_name?.[0] || '').toUpperCase()}{(child.last_name?.[0] || '').toUpperCase()}
-        </div>
+        {child.avatar_url ? (
+          <img
+            src={child.avatar_url.startsWith('http') ? child.avatar_url : `${apiUrl}${child.avatar_url}`}
+            alt={`${child.first_name} ${child.last_name}`}
+            className="w-14 h-14 rounded-full object-cover shrink-0 border border-gray-200"
+          />
+        ) : (
+          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 text-white flex items-center justify-center font-bold text-lg shrink-0">
+            {(child.first_name?.[0] || '').toUpperCase()}{(child.last_name?.[0] || '').toUpperCase()}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-gray-900 truncate">

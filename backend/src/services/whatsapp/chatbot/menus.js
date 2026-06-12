@@ -28,10 +28,21 @@ export const MAIN_MENU = {
     { id: '2', emoji: '💰', label: 'Finance / Paiements', action: 'goto:finance' },
     { id: '3', emoji: '🎒', label: 'Vie scolaire', action: 'goto:schoollife' },
     { id: '4', emoji: '💬', label: 'Poser une question libre', action: 'goto:ai' },
-    { id: '5', emoji: '🔑', label: 'Mes identifiants (login & mot de passe)', action: 'goto:credentials' },
-    { id: '6', emoji: '🆔', label: 'Code Massar de mon enfant', action: A.getMassarCode },
-    { id: '7', emoji: '👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
-    { id: '8', emoji: '📍', label: 'Ma localisation (transport scolaire)', action: 'goto:location' },
+    { id: '5', emoji: '🆔', label: 'Code Massar de mon enfant', action: A.getMassarCode },
+    { id: '6', emoji: '👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
+    { id: '7', emoji: '⚙️', label: 'Configuration du compte', action: 'goto:account' },
+  ],
+};
+
+export const ACCOUNT_MENU = {
+  id: 'account',
+  title: 'Configuration du compte ⚙️',
+  description: 'Gérez votre compte et le profil de votre enfant',
+  options: [
+    { id: '1', emoji: '🔑', label: 'Mes identifiants (login & mot de passe)', action: 'goto:credentials' },
+    { id: '2', emoji: '📍', label: 'Ma localisation (transport scolaire)',    action: 'goto:location' },
+    { id: '3', emoji: '📷', label: 'Photo de profil de mon enfant',           action: 'goto:photo' },
+    { id: '0', emoji: '🔙', label: 'Retour au menu principal',                action: 'goto:main' },
   ],
 };
 
@@ -83,6 +94,7 @@ export const MENUS = {
   pedagogy: PEDAGOGY_MENU,
   finance: FINANCE_MENU,
   schoollife: SCHOOL_LIFE_MENU,
+  account: ACCOUNT_MENU,
 };
 
 // ─────────────────────────────────────────────────────────────────────────

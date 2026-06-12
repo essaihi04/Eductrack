@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft, BookOpen, FileText, Activity, Bus, GraduationCap,
   CheckCircle2, XCircle, Clock, AlertCircle, Calendar, Award,
   Eye, Download, BookOpen as BookOpenIcon, Edit3, Home as HomeIcon, RotateCcw, Star, FileImage,
-  ChevronDown, ChevronUp, TrendingUp, AlertTriangle,
+  ChevronDown, ChevronUp, TrendingUp, AlertTriangle, Camera,
 } from 'lucide-react';
 import {
   LineChart, Line, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
@@ -84,8 +84,38 @@ const ParentChildPage = () => {
   const [timetable, setTimetable] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
 
   useEffect(() => { load(); }, [childId]);
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const formData = new FormData();
+      formData.append('photo', file);
+      const res = await fetch(`${apiUrl}/api/parent/children/${childId}/photo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || 'Erreur lors de l\'import de la photo');
+      }
+      const data = await res.json();
+      setProfile((p) => ({ ...p, avatar_url: data.avatar_url }));
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
 
   const load = async () => {
     try {
@@ -138,8 +168,33 @@ const ParentChildPage = () => {
       {/* Header */}
       <div className="rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 text-white p-6 shadow-lg mb-6">
         <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur flex items-center justify-center font-bold text-2xl">
-            {(profile.first_name?.[0] || '').toUpperCase()}{(profile.last_name?.[0] || '').toUpperCase()}
+          <div className="relative group">
+            {profile.avatar_url ? (
+              <img
+                src={profile.avatar_url.startsWith('http') ? profile.avatar_url : `${apiUrl}${profile.avatar_url}`}
+                alt={`${profile.first_name} ${profile.last_name}`}
+                className="w-16 h-16 rounded-full object-cover border-2 border-white/40"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur flex items-center justify-center font-bold text-2xl">
+                {(profile.first_name?.[0] || '').toUpperCase()}{(profile.last_name?.[0] || '').toUpperCase()}
+              </div>
+            )}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={handlePhotoUpload}
+            />
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              disabled={uploadingPhoto}
+              title="Importer la photo de mon enfant"
+              className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-white text-blue-600 shadow flex items-center justify-center hover:bg-blue-50 transition disabled:opacity-50"
+            >
+              <Camera className="w-4 h-4" />
+            </button>
           </div>
           <div className="flex-1">
             <h1 className="text-2xl font-bold">{profile.first_name} {profile.last_name}</h1>

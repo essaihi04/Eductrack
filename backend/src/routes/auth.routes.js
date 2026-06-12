@@ -185,11 +185,13 @@ router.put('/profile', async (req, res) => {
       return res.status(401).json({ error: 'Utilisateur non authentifié' });
     }
 
-    const { first_name, last_name, phone, avatar } = req.body;
+    const { first_name, last_name, phone, avatar, avatar_url } = req.body;
 
     const updateData = {};
     if (phone !== undefined) updateData.phone = phone;
     if (avatar !== undefined) updateData.avatar = avatar;
+    // avatar_url: null pour revenir à l'avatar emoji après une photo importée
+    if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
 
     const { data, error } = await supabaseAdmin
       .from('profiles')
