@@ -468,8 +468,8 @@ const WhatsAppInboxPage = () => {
         <div className="flex-1 overflow-y-auto bg-white">
           <div className="max-w-4xl mx-auto p-4">
             <div className="mb-4">
-              <h2 className="text-base font-semibold text-gray-800">Journal des messages API</h2>
-              <p className="text-xs text-gray-500">Logs de tous les messages envoyés via WasenderAPI</p>
+              <h2 className="text-base font-semibold text-gray-800">Journal des messages</h2>
+              <p className="text-xs text-gray-500">Historique de tous les messages WhatsApp envoyés</p>
             </div>
 
             {apiLogsLoading ? (

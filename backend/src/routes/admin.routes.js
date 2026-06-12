@@ -325,50 +325,6 @@ const applySchoolFilter = (query, req, column = 'school_id') => {
   return query;
 };
 
-const WASENDER_BASE = 'https://www.wasenderapi.com';
-
-const safeJson = async (response) => {
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    console.error('WasenderAPI returned non-JSON:', text.substring(0, 200));
-    return { success: false, message: `WasenderAPI error (HTTP ${response.status})` };
-  }
-};
-
-const getGlobalApiKey = () => process.env.WASENDER_API_KEY || null;
-
-const getSchoolSessionId = async (schoolId) => {
-  if (!schoolId) return null;
-  const { data } = await supabaseAdmin
-    .from('whatsapp_school_sessions')
-    .select('wasender_session_id')
-    .eq('school_id', schoolId)
-    .single();
-  return data?.wasender_session_id || null;
-};
-
-const getSessionApiKey = async (schoolId) => {
-  const globalKey = getGlobalApiKey();
-  if (!globalKey) return null;
-
-  const mappedSessionId = await getSchoolSessionId(schoolId);
-  if (!mappedSessionId) return null;
-
-  const detailRes = await fetch(`${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}`, {
-    headers: { 'Authorization': `Bearer ${globalKey}` }
-  });
-  const detailData = await safeJson(detailRes);
-  if (detailData.success && detailData.data?.api_key && detailData.data.status === 'connected') {
-    return detailData.data.api_key;
-  }
-  return null;
-};
-
-const WASENDER_MIN_INTERVAL_MS = 5000;
-const waitWasenderInterval = () => new Promise((resolve) => setTimeout(resolve, WASENDER_MIN_INTERVAL_MS));
-
 // ==================== ÉLÈVES ====================
 
 // Récupérer le parent d'un élève
@@ -2112,9 +2068,9 @@ router.post('/students/:id/reset-password', async (req, res) => {
             const recipients = Object.values(uniquePhones);
 
             if (recipients.length > 0) {
-              const sessionApiKey = await getSessionApiKey(student.school_id);
+              const waStatus = getStatus(student.school_id);
 
-              if (sessionApiKey) {
+              if (waStatus.connected) {
                 // Formater le message avec login et mot de passe séparés
                 const messageText = `🔐 *Réinitialisation du mot de passe*\n\n` +
                   `Le mot de passe de votre enfant *${student.first_name} ${student.last_name}* a été réinitialisé.\n\n` +
@@ -2140,7 +2096,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                   .single();
 
                 if (msgLog) {
-                  // Envoyer les messages séquentiellement (limite Wasender: 1 message / 5 secondes)
+                  // Envoi via Baileys (sendText intègre déjà le délai anti-ban)
                   for (const contact of recipients) {
                     try {
                       const recipientLog = await supabaseAdmin
@@ -2155,19 +2111,9 @@ router.post('/students/:id/reset-password', async (req, res) => {
                         .single();
 
                       if (recipientLog.data) {
-                        const response = await fetch(`${WASENDER_BASE}/api/send-message`, {
-                          method: 'POST',
-                          headers: {
-                            'Authorization': `Bearer ${sessionApiKey}`,
-                            'Content-Type': 'application/json'
-                          },
-                          body: JSON.stringify({
-                            to: contact.phone_e164,
-                            text: messageText
-                          })
-                        });
+                        const waResult = await sendText(student.school_id, contact.phone_e164, messageText, { urgent: true });
 
-                        if (response.ok) {
+                        if (waResult.success) {
                           await supabaseAdmin
                             .from('whatsapp_message_recipients')
                             .update({ status: 'sent', sent_at: new Date().toISOString() })
@@ -2175,11 +2121,9 @@ router.post('/students/:id/reset-password', async (req, res) => {
                         } else {
                           await supabaseAdmin
                             .from('whatsapp_message_recipients')
-                            .update({ status: 'failed', error_message: 'Échec envoi API' })
+                            .update({ status: 'failed', error_message: waResult.message || 'Échec envoi' })
                             .eq('id', recipientLog.data.id);
                         }
-
-                        await waitWasenderInterval();
                       }
                     } catch (err) {
                       console.error('Erreur envoi WhatsApp:', err);

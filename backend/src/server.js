@@ -20,7 +20,6 @@ import controlsPlanRoutes from './routes/controlsPlan.routes.js';
 import documentsRoutes from './routes/documents.routes.js';
 import superadminRoutes from './routes/superadmin.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
-import webhooksRoutes from './routes/webhooks.routes.js';
 import financeRoutes from './routes/finance.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
 import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
@@ -66,9 +65,6 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(join(__dirname, '../uploads')));
 
 // Routes
-// Webhooks (sans authentification JWT - doit être avant les autres routes)
-app.use('/api/webhooks', webhooksRoutes);
-
 app.use('/api/auth', authRoutes);
 // IMPORTANT: sous-routes /api/admin/* spécifiques montées AVANT le routeur admin générique
 // (sinon le middleware authorize('admin') du routeur admin bloque les autres rôles)

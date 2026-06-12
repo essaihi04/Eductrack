@@ -711,53 +711,60 @@ router.get('/messages/:messageId/details', async (req, res) => {
 
 // ==================== INBOX / MESSAGE LOGS ====================
 
-// GET /message-logs — fetch message logs from WasenderAPI for THIS school's session
+// GET /message-logs — journaux des messages envoyés, depuis la base locale
+// (Baileys écrit dans whatsapp_messages / whatsapp_message_recipients).
 router.get('/message-logs', async (req, res) => {
   try {
-    const globalKey = getGlobalApiKey();
-    if (!globalKey) return res.status(400).json({ error: 'Clé API non configurée' });
-
     const schoolId = getSchoolId(req);
-    const mappedSessionId = await getSchoolSessionId(schoolId);
-    if (!mappedSessionId) {
-      return res.json({ success: true, messages: [], total: 0 });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const perPage = Math.min(100, parseInt(req.query.per_page, 10) || 50);
+    const from = (page - 1) * perPage;
+    const to = from + perPage - 1;
+
+    let q = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id, content, message_type, status, created_at, total_recipients', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { data: msgs, count, error } = await q;
+    if (error) throw error;
+
+    // Destinataires (par lots pour éviter la limite d'URL des .in()).
+    const ids = (msgs || []).map(m => m.id);
+    const recipientsByMsg = new Map();
+    if (ids.length > 0) {
+      const recs = await selectInChunks(
+        ids,
+        (chunk) => supabaseAdmin.from('whatsapp_message_recipients').select('message_id, phone_e164, status, error_message, sent_at').in('message_id', chunk)
+      );
+      recs.forEach(r => {
+        if (!recipientsByMsg.has(r.message_id)) recipientsByMsg.set(r.message_id, []);
+        recipientsByMsg.get(r.message_id).push(r);
+      });
     }
 
-    const { page = 1, per_page = 50 } = req.query;
+    const messages = (msgs || []).map(m => {
+      const recs = recipientsByMsg.get(m.id) || [];
+      const to = recs.length === 1 ? recs[0].phone_e164 : `${recs.length || m.total_recipients || 0} destinataire(s)`;
+      const failed = recs.find(r => r.status === 'failed');
+      let content = m.content;
+      if (typeof content !== 'string') { try { content = JSON.stringify(content); } catch { content = ''; } }
+      return {
+        id: m.id,
+        to,
+        content,
+        rawContent: m.content,
+        status: m.status,
+        failed_reason: failed?.error_message || null,
+        created_at: m.created_at,
+        updated_at: m.created_at,
+        direction: 'outgoing',
+      };
+    });
 
-    const logsRes = await fetch(
-      `${WASENDER_BASE}/api/whatsapp-sessions/${mappedSessionId}/message-logs?page=${page}&per_page=${per_page}`,
-      { headers: { 'Authorization': `Bearer ${globalKey}` } }
-    );
-    const logsData = await safeJson(logsRes);
-
-    if (logsData.success && logsData.data) {
-      const messages = (logsData.data.data || []).map(m => {
-        let content = m.content;
-        try { content = JSON.parse(m.content); } catch {}
-        return {
-          id: m.id,
-          to: m.to,
-          content: typeof content === 'object' ? content.text || JSON.stringify(content) : content,
-          rawContent: m.content,
-          status: m.status,
-          failed_reason: m.failed_reason,
-          created_at: m.created_at,
-          updated_at: m.updated_at,
-          direction: 'outgoing'
-        };
-      });
-
-      res.json({
-        success: true,
-        messages,
-        total: logsData.data.total || 0,
-        currentPage: logsData.data.current_page || 1,
-        lastPage: logsData.data.last_page || 1
-      });
-    } else {
-      res.json({ success: true, messages: [], total: 0 });
-    }
+    const lastPage = count ? Math.max(1, Math.ceil(count / perPage)) : 1;
+    res.json({ success: true, messages, total: count || 0, currentPage: page, lastPage });
   } catch (error) {
     console.error('Erreur message logs:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -817,7 +824,7 @@ router.get('/conversations', async (req, res) => {
         const chunk = messageIds.slice(i, i + 50);
         const { data: recs } = await supabaseAdmin
           .from('whatsapp_message_recipients')
-          .select('id, message_id, parent_id, phone_e164, status, error_message, sent_at, wasender_msg_id')
+          .select('id, message_id, parent_id, phone_e164, status, error_message, sent_at')
           .in('message_id', chunk);
         if (recs) allRecipients = allRecipients.concat(recs);
       }
