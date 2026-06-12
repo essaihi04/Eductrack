@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -209,6 +209,8 @@ const ClassesPage = () => {
   const [massarResult, setMassarResult] = useState(null);
   const [massarBusy, setMassarBusy] = useState(false);
   const [massarSendResult, setMassarSendResult] = useState(null);
+  const [massarCoverage, setMassarCoverage] = useState({});
+  const [quickSendingClassId, setQuickSendingClassId] = useState(null);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -224,6 +226,51 @@ const ClassesPage = () => {
     setMassarClassId('');
     setMassarResult(null);
     setMassarSendResult(null);
+  };
+
+  const fetchMassarCoverage = async (token) => {
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/classes/massar-coverage`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) setMassarCoverage(data || {});
+    } catch (err) {
+      console.error('Erreur chargement couverture Massar:', err);
+    }
+  };
+
+  // Ouvre la modale d'import Massar avec la classe pré-sélectionnée
+  // (réimport pour mettre à jour les codes d'une classe déjà importée).
+  const openMassarModalForClass = (cls) => {
+    setMassarRows([]);
+    setMassarClassName(cls.name || '');
+    setMassarClassId(cls.id);
+    setMassarResult(null);
+    setMassarSendResult(null);
+    setShowMassarImport(true);
+  };
+
+  // Envoi rapide des codes Massar depuis le badge de la carte classe,
+  // sans ouvrir la modale d'import.
+  const quickSendMassar = async (cls) => {
+    if (!confirm(`Envoyer les codes Massar (code + secret) aux parents de la classe « ${cls.name} » par WhatsApp ?`)) return;
+    setQuickSendingClassId(cls.id);
+    try {
+      const token = await getMassarToken();
+      const res = await fetch(`${apiUrl}/api/admin/classes/${cls.id}/send-massar-whatsapp`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Erreur envoi'); return; }
+      alert(data.message || `Envoyé à ${data.sent} parent(s)`);
+    } catch (err) {
+      console.error(err);
+      alert('Erreur envoi WhatsApp');
+    } finally {
+      setQuickSendingClassId(null);
+    }
   };
 
   const handleMassarFileChange = async (e) => {
@@ -265,6 +312,7 @@ const ClassesPage = () => {
       const data = await res.json();
       if (!res.ok) { alert(data.error || 'Erreur import'); return; }
       setMassarResult(data);
+      if (!dryRun) fetchMassarCoverage(token);
     } catch (err) {
       console.error(err);
       alert('Erreur import codes Massar');
@@ -319,6 +367,8 @@ const ClassesPage = () => {
       for (const cls of classesData) {
         fetchClassTeachers(cls.id, token);
       }
+
+      fetchMassarCoverage(token);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -1445,6 +1495,24 @@ const ClassesPage = () => {
             <span className="text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded">
               {classTeachers[cls.id]?.length || 0} prof(s)
             </span>
+            {massarCoverage[cls.id]?.withSecret > 0 && (
+              <span
+                className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded flex items-center gap-1"
+                title="Codes Massar importés pour cette classe"
+              >
+                🆔 {massarCoverage[cls.id].withSecret}/{massarCoverage[cls.id].total}
+              </span>
+            )}
+            <button onClick={() => openMassarModalForClass(cls)} className="p-1 text-purple-600 hover:bg-purple-100 rounded"
+              title={massarCoverage[cls.id]?.withSecret > 0 ? 'Réimporter / mettre à jour les codes Massar' : 'Importer les codes Massar (InfoEleve)'}>
+              <CreditCard className="w-3.5 h-3.5" />
+            </button>
+            {massarCoverage[cls.id]?.withSecret > 0 && (
+              <button onClick={() => quickSendMassar(cls)} disabled={quickSendingClassId === cls.id}
+                className="p-1 text-purple-600 hover:bg-purple-100 rounded disabled:opacity-50" title="Envoyer les codes Massar aux parents (WhatsApp)">
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button onClick={() => navigate(`/classes/${cls.id}/timetable`)} className="p-1 text-indigo-600 hover:bg-indigo-100 rounded" title="Emploi du temps">
               <Calendar className="w-3.5 h-3.5" />
             </button>
@@ -1971,6 +2039,27 @@ const ClassesPage = () => {
               <p className="font-medium mb-1">📋 Fichier officiel Massar « InfoEleve »</p>
               <p>Export contenant <strong>رقم التلميذ</strong> (code Massar) et <strong>الرمز السري</strong> (code secret). La classe est détectée automatiquement.</p>
             </div>
+
+            {/* Classe pré-sélectionnée + codes déjà importés (réimport pour mise à jour) */}
+            {massarRows.length === 0 && massarClassId && (
+              <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm text-purple-800 flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  Classe sélectionnée : <strong>{massarClassName || classes.find(c => c.id === massarClassId)?.name}</strong>
+                  {massarCoverage[massarClassId]?.withSecret > 0 && (
+                    <>
+                      {' '}— codes déjà importés pour <strong>{massarCoverage[massarClassId].withSecret}/{massarCoverage[massarClassId].total}</strong> élève(s).
+                      {' '}Réimportez le fichier InfoEleve pour mettre à jour ces codes.
+                    </>
+                  )}
+                </div>
+                {massarCoverage[massarClassId]?.withSecret > 0 && (
+                  <button onClick={handleSendMassar} disabled={massarBusy}
+                    className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
+                    Envoyer aux parents (WhatsApp)
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Upload */}
             <div className="border-2 border-dashed border-indigo-300 rounded-lg p-6 text-center">

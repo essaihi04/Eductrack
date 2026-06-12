@@ -1199,6 +1199,33 @@ router.post('/parents/import', async (req, res) => {
   }
 });
 
+// Couverture des codes Massar par classe : { [class_id]: { total, withSecret } }.
+// Utilisé par la page Classes pour afficher un badge persistant + bouton d'envoi.
+router.get('/classes/massar-coverage', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('class_id, massar_secret')
+      .eq('role', 'student')
+      .not('class_id', 'is', null);
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const coverage = {};
+    for (const s of data || []) {
+      if (!coverage[s.class_id]) coverage[s.class_id] = { total: 0, withSecret: 0 };
+      coverage[s.class_id].total++;
+      if (s.massar_secret) coverage[s.class_id].withSecret++;
+    }
+    res.json(coverage);
+  } catch (error) {
+    console.error('Erreur GET massar-coverage:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // Import des codes Massar (رقم التلميذ + الرمز السري) depuis le fichier InfoEleve.
 // Body: { class_id, rows: [{ massar_code, student_full_name, massar_secret }], dryRun }
 // Met à jour massar_secret (et massar_code si absent) des élèves de la classe.
