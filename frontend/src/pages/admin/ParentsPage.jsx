@@ -118,6 +118,57 @@ const parseMassarTuteur = (workbook) => {
   return { rows: out, className };
 };
 
+// Parse le format générique (modèle Élève / Parent / Téléphone / Relation).
+// Retourne { rows } ou null si l'en-tête n'est pas reconnu.
+const parseGenericParents = (workbook) => {
+  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+  let headerRowIndex = -1, colStudentName = -1, colParentName = -1, colPhone = -1, colRelationship = -1;
+  for (let i = 0; i < Math.min(rawData.length, 20); i++) {
+    const row = rawData[i];
+    if (!row) continue;
+    let tmpStudent = -1, tmpParent = -1, tmpPhone = -1, tmpRelation = -1;
+    for (let j = 0; j < row.length; j++) {
+      const raw = String(row[j] || '').trim();
+      const cell = raw.toLowerCase();
+      if (!cell) continue;
+      if (cell === 'nom complet élève' || cell === 'nom complet eleve') { tmpStudent = j; continue; }
+      if (cell === 'nom complet parent') { tmpParent = j; continue; }
+      if (cell === 'téléphone' || cell === 'telephone') { tmpPhone = j; continue; }
+      if (cell.startsWith('relation')) { tmpRelation = j; continue; }
+      if (tmpRelation === -1 && (cell.includes('relation') || cell.includes('lien') || cell.includes('صلة'))) {
+        tmpRelation = j;
+      } else if (tmpPhone === -1 && (cell.includes('téléphone') || cell.includes('telephone') || cell.includes('phone') || cell.includes('هاتف') || cell.includes('whatsapp'))) {
+        tmpPhone = j;
+      } else if (tmpStudent === -1 && (cell.includes('élève') || cell.includes('eleve') || cell.includes('etudiant') || cell.includes('étudiant') || cell.includes('student') || cell.includes('التلميذ'))) {
+        tmpStudent = j;
+      } else if (tmpParent === -1 && (cell.includes('parent') || cell.includes('الولي'))) {
+        tmpParent = j;
+      }
+    }
+    if (tmpStudent !== -1 && tmpParent !== -1 && tmpPhone !== -1) {
+      headerRowIndex = i; colStudentName = tmpStudent; colParentName = tmpParent; colPhone = tmpPhone; colRelationship = tmpRelation;
+      break;
+    }
+  }
+  if (headerRowIndex === -1) return null;
+
+  const rows = [];
+  for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+    const row = rawData[i];
+    if (!row) continue;
+    const studentName = String(row[colStudentName] || '').trim();
+    const parentName = String(row[colParentName] || '').trim();
+    const phone = String(row[colPhone] || '').trim();
+    const relationship = colRelationship !== -1 ? String(row[colRelationship] || '').trim() : '';
+    if (studentName && parentName && phone) {
+      rows.push({ student_full_name: studentName, parent_full_name: parentName, phone_1: phone, relationship: relationship || undefined });
+    }
+  }
+  return rows.length ? { rows } : null;
+};
+
 const ParentsPage = () => {
   const [parents, setParents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -158,13 +209,12 @@ const ParentsPage = () => {
   const [selectedParents, setSelectedParents] = useState(new Set());
   const [bulkSending, setBulkSending] = useState(false);
 
-  // Import
+  // Import (multi-fichiers : 1 par classe)
   const [showImport, setShowImport] = useState(false);
-  const [importClassId, setImportClassId] = useState('');
-  const [importFile, setImportFile] = useState(null);
-  const [importPreview, setImportPreview] = useState(null);
+  const [importClassId, setImportClassId] = useState(''); // pour le modèle à télécharger
+  // importFiles: [{ key, fileName, className, classId, rows, source, result, error }]
+  const [importFiles, setImportFiles] = useState([]);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState(null);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -400,130 +450,49 @@ const ParentsPage = () => {
   };
 
   // ---- IMPORT EXCEL ----
+  // Lecture de PLUSIEURS fichiers (Massar Tuteur ou modèle générique). Chaque
+  // fichier devient une entrée avec sa classe détectée automatiquement (Massar).
   const handleImportFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImportFile(file);
-    setImportPreview(null);
-    setImportResult(null);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const norm = s => String(s || '').trim().toLowerCase();
+    const parsedList = [];
+    for (const file of files) {
+      const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
 
-    try {
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data);
-
-      // 1) Tenter d'abord le format OFFICIEL Massar « Tuteur » (export_Tuteur_*.xlsx).
-      //    Si détecté, on extrait directement code Massar + père/mère/tuteur + téléphones.
-      const massarResult = parseMassarTuteur(workbook);
-      if (massarResult && massarResult.rows.length > 0) {
-        setImportPreview({ rows: massarResult.rows, source: 'massar' });
-
-        // Si aucune classe n'est sélectionnée, détecter automatiquement la classe
-        // à partir de l'en-tête du fichier (« القسم : 1APIC-1 ») et la pré-sélectionner.
-        if (!importClassId && massarResult.className) {
-          const needle = massarResult.className.trim().toLowerCase();
-          const match = classes.find(c => String(c.name || '').trim().toLowerCase() === needle);
-          if (match) setImportClassId(match.id);
-        }
-        return;
-      }
-
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-      // Find header row: look for columns containing student name, parent name, phone
-      let headerRowIndex = -1;
-      let colStudentName = -1;
-      let colParentName = -1;
-      let colPhone = -1;
-      let colRelationship = -1;
-
-      for (let i = 0; i < Math.min(rawData.length, 20); i++) {
-        const row = rawData[i];
-        if (!row) continue;
-
-        // Reset per row
-        let tmpStudent = -1, tmpParent = -1, tmpPhone = -1, tmpRelation = -1;
-
-        for (let j = 0; j < row.length; j++) {
-          const raw = String(row[j] || '').trim();
-          const cell = raw.toLowerCase();
-          if (!cell) continue;
-
-          // Exact matches for our template headers (highest priority)
-          if (cell === 'nom complet élève' || cell === 'nom complet eleve') {
-            tmpStudent = j; continue;
-          }
-          if (cell === 'nom complet parent') {
-            tmpParent = j; continue;
-          }
-          if (cell === 'téléphone' || cell === 'telephone') {
-            tmpPhone = j; continue;
-          }
-          if (cell.startsWith('relation')) {
-            tmpRelation = j; continue;
-          }
-
-          // Keyword fallback (order matters: check relation first to avoid père/mère matching parent)
-          if (tmpRelation === -1 && (cell.includes('relation') || cell.includes('lien') || cell.includes('صلة'))) {
-            tmpRelation = j;
-          } else if (tmpPhone === -1 && (cell.includes('téléphone') || cell.includes('telephone') || cell.includes('phone') || cell.includes('هاتف') || cell.includes('whatsapp'))) {
-            tmpPhone = j;
-          } else if (tmpStudent === -1 && (cell.includes('élève') || cell.includes('eleve') || cell.includes('etudiant') || cell.includes('étudiant') || cell.includes('student') || cell.includes('التلميذ'))) {
-            tmpStudent = j;
-          } else if (tmpParent === -1 && (cell.includes('parent') || cell.includes('الولي'))) {
-            tmpParent = j;
-          }
+        // 1) Format officiel Massar « Tuteur » (auto-détection de la classe).
+        const massar = parseMassarTuteur(workbook);
+        if (massar && massar.rows.length > 0) {
+          const match = massar.className ? classes.find(c => norm(c.name) === norm(massar.className)) : null;
+          parsedList.push({ key, fileName: file.name, className: massar.className || null, classId: match ? match.id : '', rows: massar.rows, source: 'massar', result: null, error: null });
+          continue;
         }
 
-        if (tmpStudent !== -1 && tmpParent !== -1 && tmpPhone !== -1) {
-          headerRowIndex = i;
-          colStudentName = tmpStudent;
-          colParentName = tmpParent;
-          colPhone = tmpPhone;
-          colRelationship = tmpRelation;
-          break;
+        // 2) Modèle générique (Élève / Parent / Téléphone / Relation).
+        const generic = parseGenericParents(workbook);
+        if (generic) {
+          parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: generic.rows, source: 'generic', result: null, error: null });
+          continue;
         }
+
+        parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], source: null, result: null, error: 'Format non reconnu (Massar Tuteur ou modèle Élève/Parent/Téléphone)' });
+      } catch (error) {
+        console.error('Error reading Excel:', error);
+        parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], source: null, result: null, error: 'Erreur de lecture du fichier' });
       }
-
-      if (headerRowIndex === -1) {
-        alert('En-tête non trouvé. Le fichier doit contenir des colonnes: Élève (nom complet), Parent (nom), Téléphone.');
-        setImportFile(null);
-        return;
-      }
-
-      const rows = [];
-      for (let i = headerRowIndex + 1; i < rawData.length; i++) {
-        const row = rawData[i];
-        if (!row) continue;
-
-        const studentName = String(row[colStudentName] || '').trim();
-        const parentName = String(row[colParentName] || '').trim();
-        const phone = String(row[colPhone] || '').trim();
-        const relationship = colRelationship !== -1 ? String(row[colRelationship] || '').trim() : '';
-
-        if (studentName && parentName && phone) {
-          rows.push({
-            student_full_name: studentName,
-            parent_full_name: parentName,
-            phone_1: phone,
-            relationship: relationship || undefined
-          });
-        }
-      }
-
-      if (rows.length === 0) {
-        alert('Aucune ligne valide trouvée dans le fichier.');
-        setImportFile(null);
-        return;
-      }
-
-      setImportPreview({ rows, headerRowIndex, colStudentName, colParentName, colPhone });
-    } catch (error) {
-      console.error('Error reading Excel:', error);
-      alert('Erreur lecture du fichier Excel');
-      setImportFile(null);
     }
+    setImportFiles(prev => [...prev, ...parsedList]);
+    e.target.value = ''; // permet de re-sélectionner les mêmes fichiers
   };
+
+  const setImportFileClass = (key, classId) =>
+    setImportFiles(prev => prev.map(f => f.key === key ? { ...f, classId, result: null } : f));
+
+  const removeImportFile = (key) =>
+    setImportFiles(prev => prev.filter(f => f.key !== key));
 
   const handleExportTemplate = () => {
     const selectedClass = classes.find(c => c.id === importClassId);
@@ -555,61 +524,47 @@ const ParentsPage = () => {
     XLSX.writeFile(wb, `modele_parents_${className.replace(/\s+/g, '_')}.xlsx`);
   };
 
-  const handleImportDryRun = async () => {
-    if (!importClassId || !importPreview?.rows?.length) return;
+  // Vérifie (dryRun) ou enregistre (commit) TOUS les fichiers prêts, en parallèle.
+  const runImport = async (dryRun) => {
+    const ready = importFiles.filter(f => f.classId && f.rows.length > 0 && (dryRun || f.result?.dryRun));
+    if (ready.length === 0) {
+      alert(dryRun ? 'Sélectionnez une classe pour au moins un fichier.' : 'Vérifiez d\'abord les correspondances.');
+      return;
+    }
+    if (!dryRun && !confirm('Confirmer l\'import ? Les parents seront créés et associés aux élèves.')) return;
     setImporting(true);
     try {
       const token = await getToken();
-      const res = await fetch(`${apiUrl}/api/admin/parents/import`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: importClassId, rows: importPreview.rows, dryRun: true })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setImportResult(data);
-      } else {
-        alert(data.error || 'Erreur dry run');
+      let totalCommits = 0;
+      const updated = await Promise.all(importFiles.map(async (f) => {
+        if (!f.classId || !f.rows.length) return f;
+        if (!dryRun && !f.result?.dryRun) return f; // ne commit que les fichiers vérifiés
+        try {
+          const res = await fetch(`${apiUrl}/api/admin/parents/import`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ class_id: f.classId, rows: f.rows, dryRun })
+          });
+          const data = await res.json();
+          if (!res.ok) return { ...f, result: { error: data.error || 'Erreur' } };
+          if (!dryRun) totalCommits += data.commitsCount || 0;
+          return { ...f, result: data };
+        } catch {
+          return { ...f, result: { error: 'Erreur réseau' } };
+        }
+      }));
+      setImportFiles(updated);
+      if (!dryRun) {
+        await fetchData();
+        alert(`Import terminé : ${totalCommits} association(s) créée(s).`);
       }
-    } catch (error) {
-      console.error('Error dry run:', error);
-      alert('Erreur dry run');
     } finally {
       setImporting(false);
     }
   };
 
-  const handleImportCommit = async () => {
-    if (!importClassId || !importPreview?.rows?.length) return;
-    if (!confirm('Confirmer l\'import ? Les parents seront créés et associés aux élèves.')) return;
-    setImporting(true);
-    try {
-      const token = await getToken();
-      const res = await fetch(`${apiUrl}/api/admin/parents/import`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: importClassId, rows: importPreview.rows, dryRun: false })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setImportResult(data);
-        alert(`Import terminé : ${data.commitsCount || 0} association(s) créée(s).`);
-        setShowImport(false);
-        setImportFile(null);
-        setImportPreview(null);
-        setImportResult(null);
-        setImportClassId('');
-        await fetchData();
-      } else {
-        alert(data.error || 'Erreur import');
-      }
-    } catch (error) {
-      console.error('Error import commit:', error);
-      alert('Erreur import');
-    } finally {
-      setImporting(false);
-    }
-  };
+  const handleImportDryRun = () => runImport(true);
+  const handleImportCommit = () => runImport(false);
 
   // ---- CREATE / RESET CREDENTIALS (single parent) ----
   const handleCreateCredentials = async (parent, force = false) => {
@@ -936,155 +891,186 @@ const ParentsPage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Le fichier Excel doit contenir les colonnes : <strong>Élève</strong> (nom complet), <strong>Parent</strong> (nom), <strong>Téléphone</strong>.
-              Une colonne <strong>Relation</strong> (père/mère/tuteur) est optionnelle.
+              Importez <strong>un ou plusieurs fichiers</strong> à la fois. Le format officiel Massar « Tuteur »
+              détecte automatiquement la classe et les parents (père/mère/tuteur). Sinon, utilisez le modèle
+              avec les colonnes <strong>Élève</strong>, <strong>Parent</strong>, <strong>Téléphone</strong>, <strong>Relation</strong>.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Classe *</label>
-                <select
-                  value={importClassId}
-                  onChange={e => { setImportClassId(e.target.value); setImportPreview(null); setImportResult(null); }}
-                  className="w-full px-3 py-2 border rounded-lg bg-background"
-                >
-                  <option value="">-- Sélectionner une classe --</option>
-                  {classes.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.level})</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Fichier Excel *</label>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleImportFileChange}
-                  className="w-full px-3 py-2 border rounded-lg bg-background"
-                />
-              </div>
+            {/* Upload (multiple) */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Fichiers Excel *</label>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                multiple
+                onChange={handleImportFileChange}
+                className="w-full px-3 py-2 border rounded-lg bg-background"
+              />
+              {importFiles.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">{importFiles.length} fichier(s) chargé(s) — vous pouvez en ajouter d'autres.</p>
+              )}
             </div>
 
-            <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
               <Download className="w-5 h-5 text-blue-600 shrink-0" />
               <div className="flex-1 text-sm">
-                <p className="font-medium text-blue-800 dark:text-blue-300">Modèle Excel</p>
-                <p className="text-blue-600 dark:text-blue-400">Téléchargez le modèle pré-rempli avec les noms des élèves de la classe sélectionnée.</p>
+                <p className="font-medium text-blue-800 dark:text-blue-300">Modèle Excel (optionnel)</p>
+                <p className="text-blue-600 dark:text-blue-400">Téléchargez un modèle pré-rempli avec les élèves d'une classe.</p>
               </div>
+              <select
+                value={importClassId}
+                onChange={e => setImportClassId(e.target.value)}
+                className="px-3 py-2 border rounded-lg bg-background text-sm"
+              >
+                <option value="">-- Classe du modèle --</option>
+                {classes.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.level})</option>
+                ))}
+              </select>
               <button
                 onClick={handleExportTemplate}
                 disabled={!importClassId}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm whitespace-nowrap flex items-center gap-2"
               >
                 <Download className="w-4 h-4" />
-                Télécharger le modèle
+                Télécharger
               </button>
             </div>
 
-            {importPreview && (
-              <div className="border rounded-lg p-4 space-y-3">
-                <p className="font-medium">{importPreview.rows.length} ligne(s) détectée(s)</p>
-                <div className="max-h-60 overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-1 px-2">#</th>
-                        <th className="text-left py-1 px-2">Élève</th>
-                        <th className="text-left py-1 px-2">Parent</th>
-                        <th className="text-left py-1 px-2">Relation</th>
-                        <th className="text-left py-1 px-2">Téléphone</th>
-                        {importResult && <th className="text-left py-1 px-2">Statut</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {importPreview.rows.map((row, idx) => {
-                        const result = importResult?.results?.[idx];
-                        return (
-                          <tr key={idx} className="border-b last:border-0">
-                            <td className="py-1 px-2 text-muted-foreground">{idx + 1}</td>
-                            <td className="py-1 px-2">{row.student_full_name}</td>
-                            <td className="py-1 px-2">
-                              {row.contacts?.length
-                                ? row.contacts.map((c, i) => (
-                                    <div key={i}>{c.name}</div>
-                                  ))
-                                : row.parent_full_name}
-                            </td>
-                            <td className="py-1 px-2 capitalize">
-                              {row.contacts?.length
-                                ? row.contacts.map((c, i) => (
-                                    <div key={i}>{c.relationship || '—'}</div>
-                                  ))
-                                : (row.relationship || '—')}
-                            </td>
-                            <td className="py-1 px-2">
-                              {row.contacts?.length
-                                ? row.contacts.map((c, i) => (
-                                    <div key={i}>{c.phone}</div>
-                                  ))
-                                : row.phone_1}
-                            </td>
-                            {result && (
-                              <td className="py-1 px-2">
-                                {result.matchStatus === 'matched' && (
-                                  <span className="text-green-600 font-medium">
-                                    ✓ {result.student.first_name} {result.student.last_name}
-                                  </span>
-                                )}
-                                {result.matchStatus === 'not_found' && (
-                                  <span className="text-red-500 font-medium">✗ Non trouvé</span>
-                                )}
-                                {result.matchStatus === 'ambiguous' && (
-                                  <span className="text-yellow-600 font-medium">⚠ Ambigu</span>
-                                )}
-                                {result.matchStatus === 'invalid' && (
-                                  <span className="text-gray-400">— Invalide</span>
-                                )}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {importResult && (
-                  <div className="text-sm space-y-1">
-                    <p className="text-green-600">✓ Correspondances : {importResult.results.filter(r => r.matchStatus === 'matched').length}</p>
-                    <p className="text-red-500">✗ Non trouvés : {importResult.results.filter(r => r.matchStatus === 'not_found').length}</p>
-                    <p className="text-yellow-600">⚠ Ambigus : {importResult.results.filter(r => r.matchStatus === 'ambiguous').length}</p>
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  {!importResult && (
-                    <button
-                      onClick={handleImportDryRun}
-                      disabled={importing || !importClassId}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {importing ? 'Vérification...' : 'Vérifier les correspondances'}
+            {/* Liste des fichiers (1 carte par fichier/classe) */}
+            {importFiles.map((f) => {
+              const matched = f.result?.results?.filter(r => r.matchStatus === 'matched').length || 0;
+              const notFound = f.result?.results?.filter(r => r.matchStatus === 'not_found').length || 0;
+              const ambiguous = f.result?.results?.filter(r => r.matchStatus === 'ambiguous').length || 0;
+              const committed = f.result && f.result.commitsCount != null && !f.result.dryRun;
+              return (
+                <div key={f.key} className="border rounded-lg p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Upload className="w-4 h-4 text-primary shrink-0" />
+                        <span className="truncate">{f.fileName}</span>
+                        {f.source === 'massar' && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Massar</span>}
+                      </p>
+                      {f.error ? (
+                        <p className="text-xs text-red-500 mt-1">{f.error}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {f.rows.length} ligne(s){f.className ? <> • Classe détectée : <strong>{f.className}</strong></> : null}
+                        </p>
+                      )}
+                    </div>
+                    <button onClick={() => removeImportFile(f.key)} className="p-1 hover:bg-muted rounded shrink-0" title="Retirer ce fichier">
+                      <X className="w-4 h-4" />
                     </button>
+                  </div>
+
+                  {!f.error && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Classe cible *</label>
+                        <select
+                          value={f.classId}
+                          onChange={e => setImportFileClass(f.key, e.target.value)}
+                          className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
+                        >
+                          <option value="">-- Sélectionner une classe --</option>
+                          {classes.map(c => (
+                            <option key={c.id} value={c.id}>{c.name} ({c.level})</option>
+                          ))}
+                        </select>
+                        {!f.classId && f.className && (
+                          <p className="text-xs text-amber-600 mt-1">Classe « {f.className} » non trouvée — sélectionnez-la manuellement.</p>
+                        )}
+                      </div>
+
+                      {/* Aperçu compact */}
+                      <div className="max-h-48 overflow-y-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50 sticky top-0">
+                            <tr>
+                              <th className="text-left py-1 px-2">Élève</th>
+                              <th className="text-left py-1 px-2">Parent</th>
+                              <th className="text-left py-1 px-2">Tél.</th>
+                              {f.result?.results && <th className="text-left py-1 px-2">Statut</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {f.rows.map((row, idx) => {
+                              const result = f.result?.results?.[idx];
+                              return (
+                                <tr key={idx} className="border-t">
+                                  <td className="py-1 px-2">{row.student_full_name}</td>
+                                  <td className="py-1 px-2">
+                                    {row.contacts?.length ? row.contacts.map((c, i) => <div key={i}>{c.name}{c.relationship ? ` (${c.relationship})` : ''}</div>) : row.parent_full_name}
+                                  </td>
+                                  <td className="py-1 px-2">
+                                    {row.contacts?.length ? row.contacts.map((c, i) => <div key={i}>{c.phone}</div>) : row.phone_1}
+                                  </td>
+                                  {result && (
+                                    <td className="py-1 px-2">
+                                      {result.matchStatus === 'matched' && <span className="text-green-600 font-medium">✓ {result.student.first_name} {result.student.last_name}</span>}
+                                      {result.matchStatus === 'not_found' && <span className="text-red-500 font-medium">✗ Non trouvé</span>}
+                                      {result.matchStatus === 'ambiguous' && <span className="text-yellow-600 font-medium">⚠ Ambigu</span>}
+                                      {result.matchStatus === 'invalid' && <span className="text-gray-400">— Invalide</span>}
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Récap par fichier */}
+                      {f.result?.error && <p className="text-sm text-red-500">{f.result.error}</p>}
+                      {f.result?.results && (
+                        <div className="text-xs flex flex-wrap gap-x-4 gap-y-1">
+                          <span className="text-green-600">✓ {matched} correspondance(s)</span>
+                          {notFound > 0 && <span className="text-red-500">✗ {notFound} non trouvé(s)</span>}
+                          {ambiguous > 0 && <span className="text-yellow-600">⚠ {ambiguous} ambigu(s)</span>}
+                          {committed && <span className="text-green-700 font-medium">{f.result.commitsCount} association(s) créée(s)</span>}
+                        </div>
+                      )}
+                    </>
                   )}
-                  {importResult?.dryRun && importResult.results.some(r => r.matchStatus === 'matched') && (
+                </div>
+              );
+            })}
+
+            {/* Actions globales */}
+            {importFiles.some(f => !f.error) && (() => {
+              const ready = importFiles.filter(f => f.classId && f.rows.length > 0);
+              const totalMatched = importFiles.reduce((s, f) => s + (f.result?.results?.filter(r => r.matchStatus === 'matched').length || 0), 0);
+              const anyDry = importFiles.some(f => f.result?.dryRun);
+              const anyCommitted = importFiles.some(f => f.result && f.result.commitsCount != null && !f.result.dryRun);
+              return (
+                <div className="flex flex-wrap gap-2 pt-1 border-t">
+                  <button
+                    onClick={handleImportDryRun}
+                    disabled={importing || ready.length === 0}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {importing ? 'Vérification...' : `Vérifier les correspondances (${ready.length} fichier${ready.length > 1 ? 's' : ''})`}
+                  </button>
+                  {anyDry && !anyCommitted && totalMatched > 0 && (
                     <button
                       onClick={handleImportCommit}
                       disabled={importing}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                     >
-                      {importing ? 'Import en cours...' : `Confirmer l'import (${importResult.results.filter(r => r.matchStatus === 'matched').length} parent(s))`}
+                      {importing ? 'Import en cours...' : `Confirmer l'import (${totalMatched} parent(s))`}
                     </button>
                   )}
                   <button
-                    onClick={() => { setImportPreview(null); setImportResult(null); setImportFile(null); }}
+                    onClick={() => setImportFiles([])}
                     className="px-4 py-2 border rounded-lg hover:bg-accent"
                   >
-                    Annuler
+                    Tout effacer
                   </button>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </CardContent>
         </Card>
       )}
