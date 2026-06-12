@@ -293,9 +293,17 @@ const Sidebar = () => {
           to="/profile"
           className="flex items-center gap-3 mb-4 px-2 hover:bg-muted/50 rounded-lg transition-colors"
         >
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-2xl cursor-pointer hover:scale-105 transition-transform">
-            {profile?.role === 'student' ? (profile?.avatar || '🙂') : <UserCircle className="w-6 h-6 text-primary" />}
-          </div>
+          {profile?.avatar_url ? (
+            <img
+              src={profile.avatar_url.startsWith('http') ? profile.avatar_url : `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${profile.avatar_url}`}
+              alt="Photo de profil"
+              className="w-10 h-10 rounded-full object-cover cursor-pointer hover:scale-105 transition-transform border border-border"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-2xl cursor-pointer hover:scale-105 transition-transform">
+              {profile?.role === 'student' ? (profile?.avatar || '🙂') : <UserCircle className="w-6 h-6 text-primary" />}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate">
               {profile?.first_name}
