@@ -1575,8 +1575,9 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
       childrenByParent.get(l.parent_id).push(student);
     });
 
-    let sentCount = 0, errorCount = 0, skipped = 0;
-
+    // Construire les messages par parent (avant de répondre).
+    let skipped = 0;
+    const jobs = [];
     for (const parentId of parentIds) {
       const parent = parentById.get(parentId);
       if (!parent) { skipped++; continue; }
@@ -1604,64 +1605,78 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
         `\n\n🌐 Connexion : https://massar.men.gov.ma\n\n` +
         `_Conservez ces informations en lieu sûr._`;
 
-      try {
-        // Log message
-        const { data: msgLog } = await supabaseAdmin
-          .from('whatsapp_messages')
-          .insert({
-            school_id: schoolId,
-            sent_by: req.user.id,
-            message_type: 'text',
-            content: messageText,
-            total_recipients: 1,
-            status: 'sending',
-            category: 'general',
-          })
-          .select()
-          .single();
-        if (!msgLog) { errorCount++; continue; }
-
-        // Principal d'abord, repli sur le numéro suivant si échec
-        let waResult = { success: false, message: 'Aucun numéro' };
-        let usedPhone = phones[0];
-        for (const phone of phones) {
-          usedPhone = phone;
-          waResult = await sendText(schoolId, phone, messageText, { urgent: true });
-          if (waResult.success) break;
-          console.error('[Massar WhatsApp] échec, repli numéro suivant', parentId, phone, waResult.message);
-        }
-
-        const { data: recipientLog } = await supabaseAdmin
-          .from('whatsapp_message_recipients')
-          .insert({ message_id: msgLog.id, phone_e164: usedPhone, parent_id: parentId, status: 'pending' })
-          .select()
-          .single();
-
-        if (waResult.success) {
-          if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', recipientLog.id);
-          await supabaseAdmin.from('whatsapp_messages').update({ status: 'sent', sent_count: 1 }).eq('id', msgLog.id);
-          sentCount++;
-        } else {
-          if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'failed', error_message: waResult.message || 'Échec envoi' }).eq('id', recipientLog.id);
-          await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed', failed_count: 1 }).eq('id', msgLog.id);
-          errorCount++;
-        }
-      } catch (err) {
-        console.error('[Massar WhatsApp] erreur parent', parentId, err);
-        errorCount++;
-      }
+      jobs.push({ parentId, phones, messageText });
     }
 
+    if (jobs.length === 0) {
+      return res.status(400).json({ error: 'Aucun parent avec un numéro WhatsApp pour cette classe.' });
+    }
+
+    // Répondre immédiatement : l'envoi (délais anti-ban) est trop long pour une
+    // requête HTTP synchrone (provoquait des timeouts 504). On envoie en arrière-plan,
+    // la progression est visible dans les journaux WhatsApp.
     res.json({
-      message: `Codes Massar envoyés à ${sentCount} parent(s)`,
-      sent: sentCount,
-      errors: errorCount,
+      started: true,
+      total: jobs.length,
       skipped,
-      total: parentIds.length,
+      message: `Envoi des codes Massar lancé pour ${jobs.length} parent(s). L'envoi se poursuit en arrière-plan.`,
     });
+
+    // Boucle d'envoi détachée (ne bloque pas la réponse HTTP).
+    (async () => {
+      let sentCount = 0, errorCount = 0;
+      for (const job of jobs) {
+        try {
+          const { data: msgLog } = await supabaseAdmin
+            .from('whatsapp_messages')
+            .insert({
+              school_id: schoolId,
+              sent_by: req.user.id,
+              message_type: 'text',
+              content: job.messageText,
+              total_recipients: 1,
+              status: 'sending',
+              category: 'general',
+            })
+            .select()
+            .single();
+          if (!msgLog) { errorCount++; continue; }
+
+          // Principal d'abord, repli sur le numéro suivant si échec
+          let waResult = { success: false, message: 'Aucun numéro' };
+          let usedPhone = job.phones[0];
+          for (const phone of job.phones) {
+            usedPhone = phone;
+            waResult = await sendText(schoolId, phone, job.messageText, { urgent: true });
+            if (waResult.success) break;
+            console.error('[Massar WhatsApp] échec, repli numéro suivant', job.parentId, phone, waResult.message);
+          }
+
+          const { data: recipientLog } = await supabaseAdmin
+            .from('whatsapp_message_recipients')
+            .insert({ message_id: msgLog.id, phone_e164: usedPhone, parent_id: job.parentId, status: 'pending' })
+            .select()
+            .single();
+
+          if (waResult.success) {
+            if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', recipientLog.id);
+            await supabaseAdmin.from('whatsapp_messages').update({ status: 'sent', sent_count: 1 }).eq('id', msgLog.id);
+            sentCount++;
+          } else {
+            if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'failed', error_message: waResult.message || 'Échec envoi' }).eq('id', recipientLog.id);
+            await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed', failed_count: 1 }).eq('id', msgLog.id);
+            errorCount++;
+          }
+        } catch (err) {
+          console.error('[Massar WhatsApp] erreur parent', job.parentId, err);
+          errorCount++;
+        }
+      }
+      console.log(`[Massar WhatsApp] terminé (classe ${classId}) : ${sentCount} envoyé(s), ${errorCount} échec(s), ${skipped} ignoré(s)`);
+    })();
   } catch (error) {
     console.error('Erreur POST /classes/:classId/send-massar-whatsapp:', error);
-    res.status(500).json({ error: error.message || 'Erreur serveur' });
+    if (!res.headersSent) res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 

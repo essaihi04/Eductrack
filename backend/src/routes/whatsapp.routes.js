@@ -21,6 +21,21 @@ const getSchoolId = (req) => {
   return req.user.school_id || null;
 };
 
+// Exécute une requête .in(...) par lots et agrège les résultats. Évite le
+// « Bad Request » de PostgREST quand la liste d'IDs est trop longue (URL trop
+// longue) — fréquent dès que l'école a beaucoup d'élèves/parents.
+const selectInChunks = async (ids, queryFn, chunkSize = 200) => {
+  const out = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    if (chunk.length === 0) continue;
+    const { data, error } = await queryFn(chunk);
+    if (error) throw error;
+    if (data) out.push(...data);
+  }
+  return out;
+};
+
 // ==================== READ-ONLY DATA (accessible à tous les rôles autorisés sur ce router) ====================
 // Ces endpoints permettent aux finance_manager, transport_manager, pedagogical_manager
 // d'accéder aux listes nécessaires (classes, profs, matières) sans toucher à /api/admin/*
@@ -155,13 +170,12 @@ router.get('/recipients', async (req, res) => {
       return res.json({ count: 0, recipients: [] });
     }
 
-    // Get parent IDs linked to these students
-    const { data: parentLinks, error: linksError } = await supabaseAdmin
-      .from('parent_students')
-      .select('parent_id, student_id')
-      .in('student_id', studentIds);
-
-    if (linksError) throw linksError;
+    // Get parent IDs linked to these students (par lots : un .in() avec trop
+    // d'UUID dépasse la limite de longueur d'URL de PostgREST → « Bad Request »).
+    const parentLinks = await selectInChunks(
+      studentIds,
+      (chunk) => supabaseAdmin.from('parent_students').select('parent_id, student_id').in('student_id', chunk)
+    );
 
     const parentIds = [...new Set((parentLinks || []).map(l => l.parent_id))];
 
@@ -170,14 +184,10 @@ router.get('/recipients', async (req, res) => {
     }
 
     // Get parent contacts (WhatsApp phones)
-    const { data: contacts, error: contactsError } = await supabaseAdmin
-      .from('parent_contacts')
-      .select('parent_id, phone_e164, is_primary, consent_status')
-      .in('parent_id', parentIds)
-      .eq('channel', 'whatsapp')
-      .order('is_primary', { ascending: false });
-
-    if (contactsError) throw contactsError;
+    const contacts = await selectInChunks(
+      parentIds,
+      (chunk) => supabaseAdmin.from('parent_contacts').select('parent_id, phone_e164, is_primary, consent_status').in('parent_id', chunk).eq('channel', 'whatsapp').order('is_primary', { ascending: false })
+    );
 
     // Deduplicate: one phone per parent (prefer primary)
     const parentPhoneMap = {};

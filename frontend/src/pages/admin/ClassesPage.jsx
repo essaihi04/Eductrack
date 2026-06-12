@@ -257,9 +257,10 @@ const ClassesPage = () => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Erreur envoi'); return; }
-      alert(data.message || `Envoyé à ${data.sent} parent(s)`);
+      let data = {};
+      try { data = await res.json(); } catch { /* réponse non-JSON (timeout proxy) */ }
+      if (!res.ok) { alert(data.error || `Erreur envoi (${res.status})`); return; }
+      alert(data.message || `Envoyé à ${data.sent ?? data.total ?? 0} parent(s)`);
     } catch (err) {
       console.error(err);
       alert('Erreur envoi WhatsApp');
@@ -336,9 +337,10 @@ const ClassesPage = () => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Erreur envoi'); return; }
-      alert(`${data.message || `Envoyé à ${data.sent} parent(s)`}${data.errors > 0 ? ` — ${data.errors} échec(s)` : ''}${data.skipped ? `, ${data.skipped} sans numéro` : ''}`);
+      let data = {};
+      try { data = await res.json(); } catch { /* réponse non-JSON (timeout proxy) */ }
+      if (!res.ok) { alert(data.error || `Erreur envoi (${res.status})`); return; }
+      alert(`${data.message || `Envoyé à ${data.sent ?? data.total ?? 0} parent(s)`}${data.skipped ? ` (${data.skipped} sans numéro)` : ''}`);
     } catch (err) {
       console.error(err);
       alert('Erreur envoi WhatsApp');
