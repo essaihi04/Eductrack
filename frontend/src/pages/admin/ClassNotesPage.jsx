@@ -168,6 +168,7 @@ const ClassNotesPage = () => {
   const [massarPreview, setMassarPreview] = useState(null); // résultats dryRun
   const [massarResult, setMassarResult] = useState(null);   // résultats import réel
   const [massarBusy, setMassarBusy] = useState(false);
+  const [createMissing, setCreateMissing] = useState(true); // créer les matières absentes
 
   useEffect(() => {
     (async () => {
@@ -288,6 +289,7 @@ const ClassNotesPage = () => {
       const token = await getToken();
       const payload = {
         dryRun,
+        createMissing,
         files: ready.map(f => ({
           fileName: f.fileName,
           className: f.className,
@@ -458,6 +460,11 @@ const ClassNotesPage = () => {
                   </div>
                 </div>
               )}
+
+              <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+                <input type="checkbox" checked={createMissing} onChange={e => setCreateMissing(e.target.checked)} />
+                Créer automatiquement les matières absentes (selon le fichier Massar)
+              </label>
 
               <div className="flex items-center gap-2">
                 <button onClick={() => runMassarImport(true)} disabled={massarBusy}

@@ -1541,32 +1541,56 @@ router.post('/classes/import-massar-secrets', async (req, res) => {
 // crée (ou réutilise) les contrôles et upserte les notes.
 // ─────────────────────────────────────────────────────────────────────────
 
-// Alias des matières Massar (libellés arabes) → noms canoniques possibles côté app.
-// On matche dans les deux sens contre la table subjects de l'école.
+// Alias des matières Massar (libellés arabes) → matière officielle (nom + code).
+// Couvre tous les cycles marocains (primaire, collège, lycée). Sert à la fois à
+// matcher une matière existante ET à créer la matière manquante avec le bon nom.
 const MASSAR_SUBJECT_ALIASES = [
-  { canon: 'Arabe', aliases: ['اللغة العربية', 'العربية', 'arabe', 'اللغة العربية وآدابها'] },
-  { canon: 'Français', aliases: ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français'] },
-  { canon: 'Anglais', aliases: ['اللغة الإنجليزية', 'الإنجليزية', 'english', 'anglais', 'اللغة الانجليزية'] },
-  { canon: 'Mathématiques', aliases: ['الرياضيات', 'maths', 'mathematiques', 'mathématiques'] },
-  { canon: 'PC', aliases: ['الفيزياء والكيمياء', 'الفيزياء', 'علوم فيزيائية', 'physique', 'physique-chimie', 'pc', 'physique chimie'] },
-  { canon: 'SVT', aliases: ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'] },
-  { canon: 'Sociales', aliases: [
+  { name: 'Langue Arabe', code: 'AR', aliases: ['اللغة العربية', 'العربية', 'arabe', 'langue arabe', 'اللغة العربية وآدابها'] },
+  { name: 'Langue Française', code: 'FR', aliases: ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français', 'langue francaise'] },
+  { name: 'Langue Anglaise', code: 'EN', aliases: ['اللغة الإنجليزية', 'الإنجليزية', 'english', 'anglais', 'langue anglaise', 'اللغة الانجليزية'] },
+  { name: 'Langue Espagnole', code: 'ES', aliases: ['اللغة الإسبانية', 'الإسبانية', 'espagnol', 'langue espagnole'] },
+  { name: 'Langue Allemande', code: 'DE', aliases: ['اللغة الألمانية', 'الألمانية', 'allemand', 'langue allemande'] },
+  { name: 'Langue Italienne', code: 'IT', aliases: ['اللغة الإيطالية', 'الإيطالية', 'italien', 'langue italienne'] },
+  { name: 'Amazighe', code: 'AMZ', aliases: ['اللغة الأمازيغية', 'الأمازيغية', 'amazighe', 'tamazight'] },
+  { name: 'Mathématiques', code: 'MATH', aliases: ['الرياضيات', 'maths', 'mathematiques', 'mathématiques'] },
+  { name: 'Physique-Chimie', code: 'PC', aliases: ['الفيزياء والكيمياء', 'الفيزياء', 'علوم فيزيائية', 'physique', 'physique-chimie', 'pc', 'physique chimie'] },
+  { name: 'Sciences de la Vie et de la Terre', code: 'SVT', aliases: ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'] },
+  { name: 'Activité Scientifique', code: 'ACTSCI', aliases: ['النشاط العلمي', 'activité scientifique', 'activite scientifique'] },
+  { name: 'Histoire-Géographie', code: 'HG', aliases: [
     'الاجتماعيات', 'الاجتماعيات (تاريخ وجغرافيا)', 'التاريخ والجغرافيا', 'تاريخ وجغرافيا',
     'sociales', 'science sociale', 'sciences sociales', 'éducation sociale', 'education sociale',
     'histoire-géographie', 'histoire géographie', 'histoire geographie', 'histoire-geographie',
     'histoire-géo', 'histoire géo', 'histoire geo', 'géographie-histoire', 'geographie histoire',
     'histoire et géographie', 'histoire et geographie', 'hist-géo', 'hist geo', 'hg',
   ] },
-  { canon: 'Éducation islamique', aliases: ['التربية الإسلامية', 'الإسلامية', 'education islamique', 'éducation islamique', 'التربية الاسلامية'] },
-  { canon: 'Éducation physique', aliases: ['التربية البدنية', 'التربية البدنية والرياضية', 'education physique', 'éducation physique', 'eps', 'sport'] },
-  { canon: 'Informatique', aliases: ['المعلوميات', 'معلوميات', 'informatique', 'معلوميات التدبير', 'informatique de gestion'] },
-  { canon: 'Philosophie', aliases: ['الفلسفة', 'philosophie'] },
-  { canon: 'Technologie', aliases: ['التكنولوجيا', 'technologie', 'التربية التكنولوجية'] },
-  { canon: 'Éducation artistique', aliases: ['التربية الفنية', 'التربية التشكيلية', 'education artistique', 'éducation artistique', 'arts plastiques'] },
+  { name: 'Éducation Islamique', code: 'ISLAM', aliases: ['التربية الإسلامية', 'الإسلامية', 'education islamique', 'éducation islamique', 'التربية الاسلامية'] },
+  { name: 'Éducation Physique et Sportive', code: 'EPS', aliases: ['التربية البدنية', 'التربية البدنية والرياضية', 'education physique', 'éducation physique', 'eps', 'sport'] },
+  { name: 'Informatique', code: 'INFO', aliases: ['المعلوميات', 'معلوميات', 'الإعلاميات', 'informatique', 'info', 'معلوميات التدبير', 'informatique de gestion'] },
+  { name: 'Philosophie', code: 'PHILO', aliases: ['الفلسفة', 'philosophie'] },
+  { name: 'Technologie', code: 'TECH', aliases: ['التكنولوجيا', 'technologie', 'التربية التكنولوجية', 'التربية التكنولوجية الصناعية'] },
+  { name: 'Arts Plastiques', code: 'ART', aliases: ['التربية الفنية', 'التربية التشكيلية', 'education artistique', 'éducation artistique', 'arts plastiques', 'arts plastiques et visuels'] },
+  { name: 'Musique', code: 'MUS', aliases: ['التربية الموسيقية', 'موسيقى', 'musique', 'education musicale', 'éducation musicale'] },
+  { name: 'Éducation Familiale', code: 'EDFAM', aliases: ['التربية الأسرية', 'education familiale', 'éducation familiale'] },
+  { name: "Sciences de l'Ingénieur", code: 'SI', aliases: ['علوم المهندس', "sciences de l'ingenieur", "sciences de l'ingénieur"] },
+  { name: 'Comptabilité', code: 'COMPTA', aliases: ['المحاسبة', 'المحاسبة والرياضيات المالية', 'comptabilite', 'comptabilité'] },
+  { name: 'Économie et Organisation Administrative des Entreprises', code: 'EOAE', aliases: ['الاقتصاد والتنظيم الإداري للمقاولات', 'الاقتصاد والتنظيم الإداري', 'eoae', 'economie et organisation administrative'] },
+  { name: 'Économie Générale et Statistique', code: 'EGS', aliases: ['الاقتصاد العام والإحصاء', 'الاقتصاد العام', 'economie generale et statistique', 'économie générale et statistique', 'economie generale'] },
+  { name: 'Droit', code: 'DROIT', aliases: ['القانون', 'droit'] },
+  { name: 'Traduction', code: 'TRAD', aliases: ['الترجمة', 'traduction'] },
 ];
 
-// Cherche, dans la table subjects de l'école, la matière correspondant au libellé
-// Massar (arabe). Renvoie { id, name } ou null.
+// Normes (formes normalisées) d'un groupe d'alias, nom inclus.
+const aliasGroupNorms = (g) => [g.name, ...g.aliases].map(normalizeName);
+
+// Trouve le groupe d'alias officiel correspondant à un libellé Massar (arabe ou FR).
+const findAliasGroup = (label) => {
+  const needle = normalizeName(label);
+  if (!needle) return null;
+  return MASSAR_SUBJECT_ALIASES.find(g => aliasGroupNorms(g).includes(needle)) || null;
+};
+
+// Cherche la matière correspondant au libellé Massar dans la table subjects de l'école.
+// Renvoie { id, name } ou null.
 async function resolveSubject(subjectArabic, schoolId) {
   const needle = normalizeName(subjectArabic);
   if (!needle) return null;
@@ -1580,14 +1604,12 @@ async function resolveSubject(subjectArabic, schoolId) {
   let hit = subjects.find(s => normalizeName(s.name) === needle);
   if (hit) return hit;
 
-  // 2) Via la table d'alias : trouver le groupe d'alias contenant le libellé fichier,
-  //    puis une matière de l'école dont le nom matche le canon ou un alias du groupe.
-  const group = MASSAR_SUBJECT_ALIASES.find(g =>
-    [g.canon, ...g.aliases].some(a => normalizeName(a) === needle)
-  );
+  // 2) Via la table d'alias : groupe contenant le libellé fichier → matière de l'école
+  //    dont le nom matche le nom officiel ou un alias du groupe.
+  const group = findAliasGroup(subjectArabic);
   if (group) {
-    const groupNorms = [group.canon, ...group.aliases].map(normalizeName);
-    hit = subjects.find(s => groupNorms.includes(normalizeName(s.name)));
+    const norms = aliasGroupNorms(group);
+    hit = subjects.find(s => norms.includes(normalizeName(s.name)));
     if (hit) return hit;
   }
 
@@ -1599,39 +1621,100 @@ async function resolveSubject(subjectArabic, schoolId) {
   return hit || null;
 }
 
+// Crée (si absente) la matière correspondant au libellé Massar dans l'école et la renvoie.
+// Utilise le nom officiel + code de la table d'alias ; à défaut, le libellé brut du fichier.
+// write=false (aperçu) : ne crée rien, renvoie une matière synthétique (id null).
+async function getOrCreateSubject(subjectArabic, schoolId, { write = true } = {}) {
+  const existing = await resolveSubject(subjectArabic, schoolId);
+  if (existing) return { subject: existing, created: false };
+
+  const group = findAliasGroup(subjectArabic);
+  const name = group ? group.name : String(subjectArabic || '').trim();
+  if (!name) return { subject: null, created: false };
+  const code = group
+    ? group.code
+    : (name.normalize('NFD').replace(/[^a-zA-Z]/g, '').slice(0, 6).toUpperCase() || 'MAT')
+      + '_' + Math.random().toString(36).slice(2, 6);
+
+  if (!write) return { subject: { id: null, name }, created: true };
+
+  const { data: created, error } = await supabaseAdmin
+    .from('subjects')
+    .insert({ school_id: schoolId, name, code })
+    .select('id, name')
+    .single();
+  if (error) {
+    // Course possible (autre fichier a créé la même matière en parallèle) → re-résoudre
+    const again = await resolveSubject(subjectArabic, schoolId);
+    if (again) return { subject: again, created: false };
+    throw error;
+  }
+  return { subject: created, created: true };
+}
+
 // Résout le prof à utiliser pour (classe, matière) :
 //  - priorité : prof rattaché à la classe ET enseignant la matière
 //  - sinon : 1er prof de l'école enseignant la matière → on crée le lien class_teachers
+//  - sinon (si fallbackToClassTeacher) : un prof de la classe, rattaché à la matière
 //  - sinon : null
-async function resolveTeacherForSubject(classId, subjectId, schoolId) {
-  // Profs enseignant la matière
-  const { data: ts } = await supabaseAdmin
-    .from('teacher_subjects').select('teacher_id').eq('subject_id', subjectId);
+async function resolveTeacherForSubject(classId, subjectId, schoolId, { fallbackToClassTeacher = false, write = true } = {}) {
+  // Matière synthétique (aperçu d'une matière à créer) : pas de prof attitré possible
+  const { data: ts } = subjectId
+    ? await supabaseAdmin.from('teacher_subjects').select('teacher_id').eq('subject_id', subjectId)
+    : { data: [] };
   const subjectTeacherIds = [...new Set((ts || []).map(t => t.teacher_id))];
-  if (subjectTeacherIds.length === 0) return null;
 
   // Restreindre à l'école si possible
   let validTeacherIds = subjectTeacherIds;
-  if (schoolId) {
+  if (schoolId && subjectTeacherIds.length) {
     const { data: profs } = await supabaseAdmin
       .from('profiles').select('id').eq('school_id', schoolId).eq('role', 'teacher')
       .in('id', subjectTeacherIds);
     validTeacherIds = (profs || []).map(p => p.id);
-    if (validTeacherIds.length === 0) return null;
   }
 
-  // Prof rattaché à la classe ?
-  const { data: ct } = await supabaseAdmin
-    .from('class_teachers').select('teacher_id').eq('class_id', classId)
-    .in('teacher_id', validTeacherIds);
-  if (ct && ct.length > 0) return ct[0].teacher_id;
+  if (validTeacherIds.length) {
+    // Prof rattaché à la classe ?
+    const { data: ct } = await supabaseAdmin
+      .from('class_teachers').select('teacher_id').eq('class_id', classId)
+      .in('teacher_id', validTeacherIds);
+    if (ct && ct.length > 0) return ct[0].teacher_id;
 
-  // Sinon : 1er prof de la matière + créer le lien classe↔prof
-  const teacherId = validTeacherIds[0];
-  await supabaseAdmin
-    .from('class_teachers')
-    .upsert({ class_id: classId, teacher_id: teacherId }, { onConflict: 'class_id,teacher_id' });
-  return teacherId;
+    // Sinon : 1er prof de la matière + créer le lien classe↔prof
+    const teacherId = validTeacherIds[0];
+    if (write) {
+      await supabaseAdmin
+        .from('class_teachers')
+        .upsert({ class_id: classId, teacher_id: teacherId }, { onConflict: 'class_id,teacher_id' });
+    }
+    return teacherId;
+  }
+
+  // Aucun prof n'enseigne la matière. Repli : prendre un prof déjà rattaché à la
+  // classe et lui associer la matière (le lien pourra être corrigé ensuite).
+  if (fallbackToClassTeacher) {
+    const { data: classTeachers } = await supabaseAdmin
+      .from('class_teachers').select('teacher_id').eq('class_id', classId);
+    let fbId = (classTeachers || [])[0]?.teacher_id || null;
+    if (!fbId && schoolId) {
+      // Dernier repli : n'importe quel prof de l'école → on le rattache à la classe
+      const { data: anyProf } = await supabaseAdmin
+        .from('profiles').select('id').eq('school_id', schoolId).eq('role', 'teacher').limit(1);
+      fbId = (anyProf || [])[0]?.id || null;
+      if (fbId && write) {
+        await supabaseAdmin.from('class_teachers')
+          .upsert({ class_id: classId, teacher_id: fbId }, { onConflict: 'class_id,teacher_id' });
+      }
+    }
+    if (fbId) {
+      if (write && subjectId) {
+        await supabaseAdmin.from('teacher_subjects')
+          .upsert({ teacher_id: fbId, subject_id: subjectId }, { onConflict: 'teacher_id,subject_id' });
+      }
+      return fbId;
+    }
+  }
+  return null;
 }
 
 // Décale la date d'un contrôle dans les bornes du semestre, selon son rang.
@@ -1645,7 +1728,7 @@ function controlDateInBounds(start, end, index) {
 
 router.post('/classes/import-massar-notes', async (req, res) => {
   try {
-    const { files, academic_year, dryRun } = req.body;
+    const { files, academic_year, dryRun, createMissing = true } = req.body;
     if (!Array.isArray(files) || files.length === 0) {
       return res.status(400).json({ error: 'Aucun fichier fourni' });
     }
@@ -1673,7 +1756,7 @@ router.post('/classes/import-massar-notes', async (req, res) => {
       const r = {
         fileName: file.fileName || '',
         className: file.className || '',
-        subject: null, teacher: null, semester: file.semester || null,
+        subject: null, subjectCreated: false, teacher: null, semester: file.semester || null,
         controlsCreated: 0, controlsReused: 0, notesUpserted: 0,
         matched: 0, unmatched: 0, error: null,
       };
@@ -1683,7 +1766,8 @@ router.post('/classes/import-massar-notes', async (req, res) => {
         const cls = classByName.get(normalizeName(file.className));
         if (!cls) { r.error = `Classe « ${file.className} » introuvable`; results.push(r); continue; }
 
-        // 2) Matière — priorité au choix explicite (subject_id), sinon auto-détection
+        // 2) Matière — priorité au choix explicite (subject_id), sinon auto-détection,
+        //    sinon création de la matière manquante (si createMissing).
         let subject = null;
         if (file.subject_id) {
           let sq = supabaseAdmin.from('subjects').select('id, name').eq('id', file.subject_id);
@@ -1692,15 +1776,20 @@ router.post('/classes/import-massar-notes', async (req, res) => {
           subject = sOverride || null;
         }
         if (!subject) subject = await resolveSubject(file.subjectArabic, schoolId);
+        if (!subject && createMissing) {
+          const goc = await getOrCreateSubject(file.subjectArabic, schoolId, { write: !dryRun });
+          subject = goc.subject;
+          r.subjectCreated = goc.created;
+        }
         if (!subject) {
-          r.error = `Matière « ${file.subjectArabic} » non reconnue — choisissez-la manuellement`;
+          r.error = `Matière « ${file.subjectArabic} » non reconnue — choisissez-la manuellement ou activez la création`;
           results.push(r); continue;
         }
-        r.subject = subject.name;
+        r.subject = subject.name + (r.subjectCreated ? ' (créée)' : '');
 
-        // 3) Prof
-        const teacherId = await resolveTeacherForSubject(cls.id, subject.id, schoolId);
-        if (!teacherId) { r.error = `Aucun professeur n'enseigne « ${subject.name} »`; results.push(r); continue; }
+        // 3) Prof — avec repli sur un prof de la classe (matière sans prof attitré)
+        const teacherId = await resolveTeacherForSubject(cls.id, subject.id, schoolId, { fallbackToClassTeacher: true, write: !dryRun });
+        if (!teacherId) { r.error = `Aucun professeur disponible pour « ${subject.name} » (ajoutez un prof à la classe)`; results.push(r); continue; }
         const { data: teacherProf } = await supabaseAdmin
           .from('profiles').select('first_name, last_name').eq('id', teacherId).maybeSingle();
         r.teacher = teacherProf ? `${teacherProf.first_name || ''} ${teacherProf.last_name || ''}`.trim() : '—';
@@ -3137,6 +3226,9 @@ const DEFAULT_MOROCCAN_SUBJECTS = [
   { name: 'Informatique', code: 'INFO', description: 'Sciences informatiques et programmation' },
   { name: 'Économie et Gestion', code: 'ECO', description: 'Sciences économiques et gestion' },
   { name: 'Comptabilité', code: 'COMPTA', description: 'Comptabilité générale et analytique' },
+  { name: 'Économie Générale et Statistique', code: 'EGS', description: 'Économie générale et statistiques (lycée)' },
+  { name: 'Économie et Organisation Administrative des Entreprises', code: 'EOAE', description: 'EOAE (lycée filière économie)' },
+  { name: 'Éducation Familiale', code: 'EDFAM', description: 'Éducation familiale (collège)' },
   { name: "Sciences de l'Ingénieur", code: 'SI', description: "Sciences de l'ingénieur et technologie" },
   { name: 'Éducation Physique et Sportive', code: 'EPS', description: 'Sport et activités physiques' },
   { name: 'Arts Plastiques', code: 'ART', description: 'Arts plastiques et éducation artistique' },
