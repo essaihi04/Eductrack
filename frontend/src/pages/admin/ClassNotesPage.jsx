@@ -19,20 +19,24 @@ const normSubject = (x) => String(x ?? '')
   .replace(/[أإآى]/g, 'ا').replace(/ة/g, 'ه')
   .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
-// Alias matière Massar (arabe) → variantes de noms possibles (FR/AR) côté app.
+// Alias matière Massar (arabe) → { name: nom officiel (sera créé si absent), aliases }.
 const SUBJECT_ALIAS_GROUPS = [
-  ['اللغة العربية', 'العربية', 'arabe', 'langue arabe'],
-  ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français', 'langue francaise'],
-  ['اللغة الإنجليزية', 'الإنجليزية', 'anglais', 'english', 'langue anglaise'],
-  ['الرياضيات', 'maths', 'mathematiques'],
-  ['الفيزياء والكيمياء', 'الفيزياء', 'physique chimie', 'physique-chimie', 'pc'],
-  ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'],
-  ['الاجتماعيات', 'التاريخ والجغرافيا', 'sociales', 'sciences sociales', 'histoire geographie', 'histoire-géographie', 'hist geo', 'hg'],
-  ['التربية الإسلامية', 'education islamique', 'éducation islamique', 'islamique'],
-  ['التربية البدنية', 'education physique', 'éducation physique', 'eps', 'sport'],
-  ['المعلوميات', 'معلوميات', 'informatique', 'info', 'tic'],
-  ['الفلسفة', 'philosophie'],
-  ['التكنولوجيا', 'technologie'],
+  { name: 'Langue Arabe', aliases: ['اللغة العربية', 'العربية', 'arabe', 'langue arabe'] },
+  { name: 'Langue Française', aliases: ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français', 'langue francaise'] },
+  { name: 'Langue Anglaise', aliases: ['اللغة الإنجليزية', 'الإنجليزية', 'anglais', 'english', 'langue anglaise'] },
+  { name: 'Mathématiques', aliases: ['الرياضيات', 'maths', 'mathematiques'] },
+  { name: 'Physique-Chimie', aliases: ['الفيزياء والكيمياء', 'الفيزياء', 'physique chimie', 'physique-chimie', 'pc'] },
+  { name: 'Sciences de la Vie et de la Terre', aliases: ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'] },
+  { name: 'Histoire-Géographie', aliases: ['الاجتماعيات', 'التاريخ والجغرافيا', 'sociales', 'sciences sociales', 'histoire geographie', 'histoire-géographie', 'hist geo', 'hg'] },
+  { name: 'Éducation Islamique', aliases: ['التربية الإسلامية', 'education islamique', 'éducation islamique', 'islamique'] },
+  { name: 'Éducation Physique et Sportive', aliases: ['التربية البدنية', 'education physique', 'éducation physique', 'eps', 'sport'] },
+  { name: 'Informatique', aliases: ['المعلوميات', 'معلوميات', 'الإعلاميات', 'informatique', 'info', 'tic'] },
+  { name: 'Philosophie', aliases: ['الفلسفة', 'philosophie'] },
+  { name: 'Technologie', aliases: ['التكنولوجيا', 'technologie'] },
+  { name: 'Arts Plastiques', aliases: ['التربية الفنية', 'التربية التشكيلية', 'arts plastiques', 'education artistique'] },
+  { name: 'Musique', aliases: ['التربية الموسيقية', 'musique', 'education musicale'] },
+  { name: 'Amazighe', aliases: ['اللغة الأمازيغية', 'الأمازيغية', 'amazighe', 'tamazight'] },
+  { name: 'Activité Scientifique', aliases: ['النشاط العلمي', 'activité scientifique', 'activite scientifique'] },
 ];
 
 // Devine l'id de matière (app) à partir du libellé Massar arabe.
@@ -43,9 +47,9 @@ const guessSubjectId = (subjectArabic, subjects) => {
   let hit = subjects.find(s => normSubject(s.name) === needle);
   if (hit) return hit.id;
   // via alias
-  const group = SUBJECT_ALIAS_GROUPS.find(g => g.some(a => normSubject(a) === needle));
+  const group = SUBJECT_ALIAS_GROUPS.find(g => [g.name, ...g.aliases].some(a => normSubject(a) === needle));
   if (group) {
-    const norms = group.map(normSubject);
+    const norms = [group.name, ...group.aliases].map(normSubject);
     hit = subjects.find(s => norms.includes(normSubject(s.name)));
     if (hit) return hit.id;
   }
@@ -55,6 +59,13 @@ const guessSubjectId = (subjectArabic, subjects) => {
     return n && (n.includes(needle) || needle.includes(n));
   });
   return hit ? hit.id : '';
+};
+
+// Nom officiel qui sera créé pour un libellé Massar non reconnu (sinon le libellé brut).
+const guessCanonicalName = (subjectArabic) => {
+  const needle = normSubject(subjectArabic);
+  const group = SUBJECT_ALIAS_GROUPS.find(g => [g.name, ...g.aliases].some(a => normSubject(a) === needle));
+  return group ? group.name : String(subjectArabic || '').trim();
 };
 
 // Renvoie la 1re cellule non vide à droite d'une cellule contenant `needle`.
@@ -401,9 +412,15 @@ const ClassNotesPage = () => {
                                 <select
                                   value={f.subjectId || ''}
                                   onChange={e => setFileSubject(i, e.target.value)}
-                                  className={`border rounded px-2 py-1 text-sm min-w-[150px] ${f.subjectId ? '' : 'border-amber-400 bg-amber-50'}`}
+                                  className={`border rounded px-2 py-1 text-sm min-w-[170px] ${
+                                    f.subjectId ? '' : createMissing ? 'border-green-400 bg-green-50' : 'border-amber-400 bg-amber-50'
+                                  }`}
                                 >
-                                  <option value="">— Auto / à choisir —</option>
+                                  <option value="">
+                                    {createMissing
+                                      ? `➕ Créer : ${guessCanonicalName(f.subjectArabic) || f.subjectArabic}`
+                                      : '— À choisir —'}
+                                  </option>
                                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>
                               </td>
