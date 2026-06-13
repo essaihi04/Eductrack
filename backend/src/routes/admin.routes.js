@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
+import { getSemesterBounds } from '../services/bulletins/calculator.js';
 
 const router = express.Router();
 
@@ -1529,6 +1530,291 @@ router.post('/classes/import-massar-secrets', async (req, res) => {
     res.json({ dryRun: false, results, updated, namesFixed });
   } catch (error) {
     console.error('Erreur import codes Massar:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Import EN VRAC des notes de contrôle continu (fichiers Massar « NotesCC »).
+// Multi-fichiers : 1 fichier = 1 classe + 1 matière. Le client parse les .xlsx
+// et envoie du JSON structuré. Le backend résout classe/matière/prof/semestre,
+// crée (ou réutilise) les contrôles et upserte les notes.
+// ─────────────────────────────────────────────────────────────────────────
+
+// Alias des matières Massar (libellés arabes) → noms canoniques possibles côté app.
+// On matche dans les deux sens contre la table subjects de l'école.
+const MASSAR_SUBJECT_ALIASES = [
+  { canon: 'Arabe', aliases: ['اللغة العربية', 'العربية', 'arabe', 'اللغة العربية وآدابها'] },
+  { canon: 'Français', aliases: ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français'] },
+  { canon: 'Anglais', aliases: ['اللغة الإنجليزية', 'الإنجليزية', 'english', 'anglais', 'اللغة الانجليزية'] },
+  { canon: 'Mathématiques', aliases: ['الرياضيات', 'maths', 'mathematiques', 'mathématiques'] },
+  { canon: 'PC', aliases: ['الفيزياء والكيمياء', 'الفيزياء', 'علوم فيزيائية', 'physique', 'physique-chimie', 'pc', 'physique chimie'] },
+  { canon: 'SVT', aliases: ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'] },
+  { canon: 'Sociales', aliases: ['الاجتماعيات', 'sociales', 'الاجتماعيات (تاريخ وجغرافيا)'] },
+  { canon: 'Histoire-Géographie', aliases: ['التاريخ والجغرافيا', 'histoire-géographie', 'histoire geographie'] },
+  { canon: 'Éducation islamique', aliases: ['التربية الإسلامية', 'الإسلامية', 'education islamique', 'éducation islamique', 'التربية الاسلامية'] },
+  { canon: 'Éducation physique', aliases: ['التربية البدنية', 'التربية البدنية والرياضية', 'education physique', 'éducation physique', 'eps', 'sport'] },
+  { canon: 'Informatique', aliases: ['المعلوميات', 'معلوميات', 'informatique', 'معلوميات التدبير', 'informatique de gestion'] },
+  { canon: 'Philosophie', aliases: ['الفلسفة', 'philosophie'] },
+  { canon: 'Technologie', aliases: ['التكنولوجيا', 'technologie', 'التربية التكنولوجية'] },
+  { canon: 'Éducation artistique', aliases: ['التربية الفنية', 'التربية التشكيلية', 'education artistique', 'éducation artistique', 'arts plastiques'] },
+];
+
+// Cherche, dans la table subjects de l'école, la matière correspondant au libellé
+// Massar (arabe). Renvoie { id, name } ou null.
+async function resolveSubject(subjectArabic, schoolId) {
+  const needle = normalizeName(subjectArabic);
+  if (!needle) return null;
+
+  let q = supabaseAdmin.from('subjects').select('id, name');
+  if (schoolId) q = q.eq('school_id', schoolId);
+  const { data: subjects } = await q;
+  if (!subjects || subjects.length === 0) return null;
+
+  // 1) Correspondance directe (nom matière == libellé fichier, normalisé)
+  let hit = subjects.find(s => normalizeName(s.name) === needle);
+  if (hit) return hit;
+
+  // 2) Via la table d'alias : trouver le groupe d'alias contenant le libellé fichier,
+  //    puis une matière de l'école dont le nom matche le canon ou un alias du groupe.
+  const group = MASSAR_SUBJECT_ALIASES.find(g =>
+    [g.canon, ...g.aliases].some(a => normalizeName(a) === needle)
+  );
+  if (group) {
+    const groupNorms = [group.canon, ...group.aliases].map(normalizeName);
+    hit = subjects.find(s => groupNorms.includes(normalizeName(s.name)));
+    if (hit) return hit;
+  }
+
+  // 3) Repli : inclusion partielle (ex. « الفيزياء والكيمياء » contient « الفيزياء »)
+  hit = subjects.find(s => {
+    const n = normalizeName(s.name);
+    return n && (n.includes(needle) || needle.includes(n));
+  });
+  return hit || null;
+}
+
+// Résout le prof à utiliser pour (classe, matière) :
+//  - priorité : prof rattaché à la classe ET enseignant la matière
+//  - sinon : 1er prof de l'école enseignant la matière → on crée le lien class_teachers
+//  - sinon : null
+async function resolveTeacherForSubject(classId, subjectId, schoolId) {
+  // Profs enseignant la matière
+  const { data: ts } = await supabaseAdmin
+    .from('teacher_subjects').select('teacher_id').eq('subject_id', subjectId);
+  const subjectTeacherIds = [...new Set((ts || []).map(t => t.teacher_id))];
+  if (subjectTeacherIds.length === 0) return null;
+
+  // Restreindre à l'école si possible
+  let validTeacherIds = subjectTeacherIds;
+  if (schoolId) {
+    const { data: profs } = await supabaseAdmin
+      .from('profiles').select('id').eq('school_id', schoolId).eq('role', 'teacher')
+      .in('id', subjectTeacherIds);
+    validTeacherIds = (profs || []).map(p => p.id);
+    if (validTeacherIds.length === 0) return null;
+  }
+
+  // Prof rattaché à la classe ?
+  const { data: ct } = await supabaseAdmin
+    .from('class_teachers').select('teacher_id').eq('class_id', classId)
+    .in('teacher_id', validTeacherIds);
+  if (ct && ct.length > 0) return ct[0].teacher_id;
+
+  // Sinon : 1er prof de la matière + créer le lien classe↔prof
+  const teacherId = validTeacherIds[0];
+  await supabaseAdmin
+    .from('class_teachers')
+    .upsert({ class_id: classId, teacher_id: teacherId }, { onConflict: 'class_id,teacher_id' });
+  return teacherId;
+}
+
+// Décale la date d'un contrôle dans les bornes du semestre, selon son rang.
+function controlDateInBounds(start, end, index) {
+  const s = new Date(start);
+  const e = new Date(end);
+  const d = new Date(s.getTime() + index * 14 * 24 * 3600 * 1000); // +2 semaines par contrôle
+  if (d > e) return end;
+  return d.toISOString().slice(0, 10);
+}
+
+router.post('/classes/import-massar-notes', async (req, res) => {
+  try {
+    const { files, academic_year, dryRun } = req.body;
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'Aucun fichier fourni' });
+    }
+    const schoolId = getSchoolId(req);
+    const academicYear = academic_year || (() => {
+      const now = new Date();
+      const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+      return `${y}/${y + 1}`;
+    })();
+
+    // Classes de l'école (pour matcher par nom) + périmètre éventuel (manager)
+    let clsQuery = supabaseAdmin.from('classes').select('id, name, school_id');
+    if (schoolId) clsQuery = clsQuery.eq('school_id', schoolId);
+    const { data: allClasses } = await clsQuery;
+    const scoped = await getScopedClassIds(req); // null = pas de restriction
+    const classByName = new Map(
+      (allClasses || [])
+        .filter(c => scoped === null || scoped.includes(c.id))
+        .map(c => [normalizeName(c.name), c])
+    );
+
+    const results = [];
+
+    for (const file of files) {
+      const r = {
+        fileName: file.fileName || '',
+        className: file.className || '',
+        subject: null, teacher: null, semester: file.semester || null,
+        controlsCreated: 0, controlsReused: 0, notesUpserted: 0,
+        matched: 0, unmatched: 0, error: null,
+      };
+
+      try {
+        // 1) Classe
+        const cls = classByName.get(normalizeName(file.className));
+        if (!cls) { r.error = `Classe « ${file.className} » introuvable`; results.push(r); continue; }
+
+        // 2) Matière
+        const subject = await resolveSubject(file.subjectArabic, schoolId);
+        if (!subject) { r.error = `Matière « ${file.subjectArabic} » non reconnue`; results.push(r); continue; }
+        r.subject = subject.name;
+
+        // 3) Prof
+        const teacherId = await resolveTeacherForSubject(cls.id, subject.id, schoolId);
+        if (!teacherId) { r.error = `Aucun professeur n'enseigne « ${subject.name} »`; results.push(r); continue; }
+        const { data: teacherProf } = await supabaseAdmin
+          .from('profiles').select('first_name, last_name').eq('id', teacherId).maybeSingle();
+        r.teacher = teacherProf ? `${teacherProf.first_name || ''} ${teacherProf.last_name || ''}`.trim() : '—';
+
+        // 4) Bornes semestre
+        const semester = Number(file.semester) === 2 ? 2 : 1;
+        r.semester = semester;
+        const { start, end } = await getSemesterBounds(schoolId, academicYear, semester);
+
+        // 5) Élèves de la classe (pour matcher code Massar / nom)
+        const { data: classStudents } = await supabaseAdmin
+          .from('profiles')
+          .select('id, first_name, last_name, massar_code')
+          .eq('role', 'student').eq('class_id', cls.id);
+        const byMassar = new Map();
+        const byName = new Map();
+        for (const s of (classStudents || [])) {
+          const code = normalizeName(s.massar_code);
+          if (code) byMassar.set(code, s);
+          byName.set(normalizeName(`${s.last_name} ${s.first_name}`), s);
+          byName.set(normalizeName(`${s.first_name} ${s.last_name}`), s);
+        }
+
+        // 6) Colonnes de notes distinctes (slots) présentes dans le fichier
+        const slots = [];
+        const seenSlots = new Set();
+        for (const row of (file.rows || [])) {
+          for (const g of (row.grades || [])) {
+            if (!seenSlots.has(g.slot)) {
+              seenSlots.add(g.slot);
+              slots.push({ slot: g.slot, kind: g.kind === 'activity' ? 'activity' : 'control', label: g.label });
+            }
+          }
+        }
+        // Ordre stable : contrôles d'abord (par n°), activité ensuite
+        slots.sort((a, b) => {
+          if (a.kind !== b.kind) return a.kind === 'activity' ? 1 : -1;
+          return String(a.slot).localeCompare(String(b.slot));
+        });
+
+        // Contrôles existants de la classe pour ce prof, dans le semestre
+        const { data: existingControls } = await supabaseAdmin
+          .from('controls_plan')
+          .select('id, name, kind, date')
+          .eq('class_id', cls.id).eq('teacher_id', teacherId)
+          .gte('date', start).lte('date', end);
+
+        // 7) Find-or-create chaque contrôle → control_id par slot
+        const controlIdBySlot = {};
+        for (let i = 0; i < slots.length; i++) {
+          const sl = slots[i];
+          const labelNorm = normalizeName(sl.label);
+          let ctrl = (existingControls || []).find(
+            c => normalizeName(c.name) === labelNorm && c.kind === sl.kind
+          );
+          if (ctrl) {
+            r.controlsReused++;
+          } else if (!dryRun) {
+            const { data: created, error: cErr } = await supabaseAdmin
+              .from('controls_plan')
+              .insert({
+                teacher_id: teacherId,
+                class_id: cls.id,
+                name: sl.label,
+                date: controlDateInBounds(start, end, sl.kind === 'activity' ? slots.length : i),
+                kind: sl.kind,
+                status: 'completed',
+                description: 'Importé depuis Massar (NotesCC)',
+              })
+              .select('id').single();
+            if (cErr) throw cErr;
+            ctrl = created;
+            r.controlsCreated++;
+          } else {
+            r.controlsCreated++; // aperçu : compterait comme à créer
+          }
+          if (ctrl) controlIdBySlot[sl.slot] = ctrl.id;
+        }
+
+        // 8) Match élèves + upsert notes
+        const notesToUpsert = [];
+        const matchedStudentIds = new Set();
+        for (const row of (file.rows || [])) {
+          let student = null;
+          const code = normalizeName(row.massar_code);
+          if (code && byMassar.has(code)) student = byMassar.get(code);
+          if (!student && row.student_full_name) student = byName.get(normalizeName(row.student_full_name));
+          if (!student) { r.unmatched++; continue; }
+          matchedStudentIds.add(student.id);
+
+          for (const g of (row.grades || [])) {
+            const cid = controlIdBySlot[g.slot];
+            if (!cid) continue;
+            const v = parseFloat(String(g.value).replace(',', '.'));
+            if (isNaN(v)) continue;
+            notesToUpsert.push({
+              control_id: cid,
+              student_id: student.id,
+              note: Math.min(20, Math.max(0, v)),
+              appreciation: '',
+            });
+          }
+        }
+        r.matched = matchedStudentIds.size;
+
+        if (!dryRun && notesToUpsert.length) {
+          // Upsert par contrôle (onConflict control_id,student_id)
+          const byControl = {};
+          for (const n of notesToUpsert) (byControl[n.control_id] = byControl[n.control_id] || []).push(n);
+          for (const cid of Object.keys(byControl)) {
+            const { data, error: upErr } = await supabaseAdmin
+              .from('control_notes')
+              .upsert(byControl[cid], { onConflict: 'control_id,student_id', ignoreDuplicates: false })
+              .select('id');
+            if (upErr) throw upErr;
+            r.notesUpserted += (data || []).length;
+          }
+        } else if (dryRun) {
+          r.notesUpserted = notesToUpsert.length;
+        }
+      } catch (e) {
+        r.error = e.message || 'Erreur de traitement';
+      }
+      results.push(r);
+    }
+
+    res.json({ dryRun: !!dryRun, academicYear, results });
+  } catch (error) {
+    console.error('Erreur import notes Massar:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });

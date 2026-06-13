@@ -1,6 +1,91 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ClipboardList, RefreshCw, FileDown, Save, X, Users, AlertTriangle, Pencil } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { ClipboardList, RefreshCw, FileDown, Save, X, Users, AlertTriangle, Pencil, Upload, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+
+// Motifs des colonnes de notes Massar (contrôles + activité intégrée)
+const MASSAR_GRADE_PATTERNS = [
+  { pattern: /الفرض\s*(الأول|1)/, label: 'الفرض الأول', slot: 'c1', kind: 'control' },
+  { pattern: /الفرض\s*(الثاني|2)/, label: 'الفرض الثاني', slot: 'c2', kind: 'control' },
+  { pattern: /الفرض\s*(الثالث|3)/, label: 'الفرض الثالث', slot: 'c3', kind: 'control' },
+  { pattern: /الفرض\s*(الرابع|4)/, label: 'الفرض الرابع', slot: 'c4', kind: 'control' },
+  { pattern: /الأنشطة\s*المندمجة/, label: 'الأنشطة المندمجة', slot: 'activity', kind: 'activity' },
+];
+
+// Renvoie la 1re cellule non vide à droite d'une cellule contenant `needle`.
+const valueRightOf = (rows, needle) => {
+  for (const row of rows) {
+    if (!row) continue;
+    for (let j = 0; j < row.length; j++) {
+      if (String(row[j] || '').includes(needle)) {
+        for (let k = j + 1; k < row.length; k++) {
+          const v = String(row[k] || '').trim();
+          if (v) return v;
+        }
+      }
+    }
+  }
+  return '';
+};
+
+// Parse un fichier Massar « NotesCC » → { className, subjectArabic, semester, rows }.
+const parseNotesCC = (workbook) => {
+  const sheet = workbook.Sheets['NotesCC'] || workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) return null;
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  const className = valueRightOf(rows, 'القسم');
+  const subjectArabic = valueRightOf(rows, 'المادة');
+  const dorra = valueRightOf(rows, 'الدورة');
+  const semester = /الثاني/.test(dorra) ? 2 : 1;
+
+  // Ligne d'en-tête = celle contenant « إسم التلميذ »
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 30); i++) {
+    if ((rows[i] || []).some(c => String(c || '').includes('إسم التلميذ'))) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return { className, subjectArabic, semester, rows: [], gradeCols: [] };
+
+  const header = rows[headerIdx] || [];
+  let massarCol = header.findIndex(c => String(c || '').includes('رقم'));
+  let nameCol = header.findIndex(c => String(c || '').includes('إسم التلميذ'));
+
+  // Colonnes de notes (dédupliquées par slot — cellules fusionnées note/التغيب)
+  const gradeCols = [];
+  const seen = new Set();
+  for (let j = 0; j < header.length; j++) {
+    const cell = String(header[j] || '').trim();
+    if (!cell) continue;
+    for (const gp of MASSAR_GRADE_PATTERNS) {
+      if (gp.pattern.test(cell) && !seen.has(gp.slot)) {
+        seen.add(gp.slot);
+        gradeCols.push({ colIndex: j, slot: gp.slot, kind: gp.kind, label: gp.label });
+        break;
+      }
+    }
+  }
+
+  // Données dès header + 2 (saute le sous-en-tête النقطة/التغيب)
+  const dataStart = headerIdx + 2;
+  const dataRows = [];
+  for (let i = dataStart; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const name = String(row[nameCol] || '').trim();
+    const massar = String(row[massarCol] || '').trim();
+    if (!name || name.includes('إسم') || name.includes('اسم') || name.includes('رقم')) continue;
+    if (!name && !massar) continue;
+    const grades = [];
+    for (const gc of gradeCols) {
+      const raw = row[gc.colIndex];
+      if (raw === '' || raw === null || raw === undefined) continue;
+      grades.push({ slot: gc.slot, kind: gc.kind, label: gc.label, value: raw });
+    }
+    dataRows.push({ massar_code: massar, student_full_name: name, grades });
+  }
+
+  return { className, subjectArabic, semester, gradeCols, rows: dataRows };
+};
 
 // Couleurs de statut (alignées sur le rapport de contrôle)
 const LEVEL = {
@@ -31,6 +116,12 @@ const ClassNotesPage = () => {
   const [editRows, setEditRows] = useState([]);     // notes éditables
   const [savingEdit, setSavingEdit] = useState(false);
   const [exporting, setExporting] = useState(false);
+
+  // Import Massar (notes de contrôle continu) — multi-fichiers
+  const [massarFiles, setMassarFiles] = useState([]); // [{ fileName, className, subjectArabic, semester, gradeCols, rows, error }]
+  const [massarPreview, setMassarPreview] = useState(null); // résultats dryRun
+  const [massarResult, setMassarResult] = useState(null);   // résultats import réel
+  const [massarBusy, setMassarBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -111,6 +202,69 @@ const ClassNotesPage = () => {
     finally { setExporting(false); }
   };
 
+  // ─── Import Massar (notes CC) : sélection + parsing client ───
+  const handleMassarFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setMassarResult(null); setMassarPreview(null); setMsg('');
+    const parsed = [];
+    for (const file of files) {
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf);
+        const p = parseNotesCC(wb);
+        if (!p || !p.rows.length) {
+          parsed.push({ fileName: file.name, error: 'Format NotesCC non reconnu (ou aucun élève)' });
+          continue;
+        }
+        parsed.push({ fileName: file.name, ...p });
+      } catch (err) {
+        parsed.push({ fileName: file.name, error: 'Erreur de lecture du fichier' });
+      }
+    }
+    setMassarFiles(parsed);
+    e.target.value = '';
+  };
+
+  // Envoie au backend (dryRun = aperçu, sinon import réel)
+  const runMassarImport = async (dryRun) => {
+    const ready = massarFiles.filter(f => !f.error && f.rows?.length);
+    if (!ready.length) { setMsg('❌ Aucun fichier exploitable'); return; }
+    setMassarBusy(true); setMsg('');
+    try {
+      const token = await getToken();
+      const payload = {
+        dryRun,
+        files: ready.map(f => ({
+          fileName: f.fileName,
+          className: f.className,
+          subjectArabic: f.subjectArabic,
+          semester: f.semester,
+          rows: f.rows,
+        })),
+      };
+      const res = await fetch(`${apiUrl}/api/admin/classes/import-massar-notes`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Erreur ${res.status}`);
+      const data = await res.json();
+      if (dryRun) { setMassarPreview(data.results); setMassarResult(null); }
+      else {
+        setMassarResult(data.results); setMassarPreview(null);
+        const tot = data.results.reduce((a, r) => a + (r.notesUpserted || 0), 0);
+        setMsg(`✅ Import terminé : ${tot} note(s) enregistrée(s)`);
+        loadOverview();
+      }
+    } catch (e) { setMsg(`❌ ${e.message}`); }
+    finally { setMassarBusy(false); }
+  };
+
+  const closeMassar = () => {
+    setMassarFiles([]); setMassarPreview(null); setMassarResult(null);
+  };
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -132,6 +286,126 @@ const ClassNotesPage = () => {
             <span className="ml-4 text-sm text-gray-500 inline-flex items-center gap-1">
               <Users className="w-4 h-4" /> {overview.totalStudents} élèves • {overview.controls.length} contrôle(s)
             </span>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ─── Import Massar (notes de contrôle continu, multi-classes) ─── */}
+      <Card className="border-indigo-200">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
+            Import Massar — notes de contrôle continu (plusieurs classes/matières)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+            Sélectionnez <strong>un ou plusieurs fichiers</strong> Massar « <code>export_notesCC_*.xlsx</code> »
+            (un par classe/matière). La classe, la matière, le semestre, le nombre de contrôles et la note
+            d'activité sont détectés automatiquement.
+          </div>
+
+          <label className="inline-flex items-center gap-2 text-sm px-4 py-2 border rounded-lg hover:bg-gray-50 cursor-pointer w-fit">
+            <Upload className="w-4 h-4" /> Choisir des fichiers Massar
+            <input type="file" accept=".xlsx,.xls" multiple onChange={handleMassarFiles} className="hidden" />
+          </label>
+
+          {massarFiles.length > 0 && (
+            <div className="space-y-3">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 text-left text-gray-600">
+                      <th className="px-3 py-2 border-b">Fichier</th>
+                      <th className="px-3 py-2 border-b">Classe</th>
+                      <th className="px-3 py-2 border-b">Matière (Massar)</th>
+                      <th className="px-3 py-2 border-b text-center">Sem.</th>
+                      <th className="px-3 py-2 border-b text-center">Contrôles</th>
+                      <th className="px-3 py-2 border-b text-center">Élèves</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {massarFiles.map((f, i) => {
+                      const nbControls = (f.gradeCols || []).filter(c => c.kind === 'control').length;
+                      const hasActivity = (f.gradeCols || []).some(c => c.kind === 'activity');
+                      return (
+                        <tr key={i} className="border-b">
+                          <td className="px-3 py-1.5 text-gray-700 truncate max-w-[180px]" title={f.fileName}>{f.fileName}</td>
+                          {f.error ? (
+                            <td colSpan={5} className="px-3 py-1.5 text-red-600">⚠️ {f.error}</td>
+                          ) : (
+                            <>
+                              <td className="px-3 py-1.5 font-medium">{f.className || '—'}</td>
+                              <td className="px-3 py-1.5" dir="rtl">{f.subjectArabic || '—'}</td>
+                              <td className="px-3 py-1.5 text-center">{f.semester}</td>
+                              <td className="px-3 py-1.5 text-center">
+                                {nbControls}
+                                {hasActivity && <span className="ml-1 text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full">+ activité</span>}
+                              </td>
+                              <td className="px-3 py-1.5 text-center">{f.rows?.length || 0}</td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Aperçu (dryRun) : résolution classe/matière/prof côté serveur */}
+              {massarPreview && (
+                <div className="border rounded-lg p-3 bg-gray-50">
+                  <p className="text-sm font-medium text-gray-700 mb-2">Aperçu (rien n'est encore enregistré)</p>
+                  <div className="space-y-1 text-sm">
+                    {massarPreview.map((r, i) => (
+                      <div key={i} className={`flex flex-wrap items-center gap-x-2 ${r.error ? 'text-red-600' : 'text-gray-700'}`}>
+                        <span className="font-medium">{r.className || r.fileName}</span>
+                        {r.error ? <span>— ⚠️ {r.error}</span> : (
+                          <span>
+                            — {r.subject} • prof : {r.teacher} • sem. {r.semester} •{' '}
+                            {r.controlsCreated} contrôle(s) à créer, {r.controlsReused} réutilisé(s) •{' '}
+                            {r.matched} élève(s) reconnu(s){r.unmatched ? `, ${r.unmatched} non reconnu(s)` : ''} •{' '}
+                            {r.notesUpserted} note(s)
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Résultat import réel */}
+              {massarResult && (
+                <div className="border rounded-lg p-3 bg-green-50">
+                  <p className="text-sm font-medium text-green-800 mb-2 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4" /> Import terminé
+                  </p>
+                  <div className="space-y-1 text-sm">
+                    {massarResult.map((r, i) => (
+                      <div key={i} className={`${r.error ? 'text-red-600' : 'text-gray-700'}`}>
+                        <span className="font-medium">{r.className || r.fileName}</span>
+                        {r.error ? ` — ⚠️ ${r.error}` : ` — ${r.subject} : ${r.controlsCreated} créé(s), ${r.controlsReused} réutilisé(s), ${r.notesUpserted} note(s), ${r.matched} élève(s)${r.unmatched ? `, ${r.unmatched} non reconnu(s)` : ''}`}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button onClick={() => runMassarImport(true)} disabled={massarBusy}
+                  className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                  {massarBusy ? '…' : 'Aperçu'}
+                </button>
+                <button onClick={() => runMassarImport(false)} disabled={massarBusy}
+                  className="text-sm px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg inline-flex items-center gap-2 disabled:opacity-50">
+                  <Save className="w-4 h-4" /> {massarBusy ? 'Import…' : 'Importer'}
+                </button>
+                <button onClick={closeMassar} disabled={massarBusy}
+                  className="text-sm px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                  Fermer
+                </button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
