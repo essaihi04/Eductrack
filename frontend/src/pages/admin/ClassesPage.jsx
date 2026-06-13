@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -210,6 +210,12 @@ const ClassesPage = () => {
   const [quickSendingClassId, setQuickSendingClassId] = useState(null);
   const [fixMassarNames, setFixMassarNames] = useState(true);
 
+  // Édition manuelle des codes Massar d'une classe
+  const [massarEditClass, setMassarEditClass] = useState(null); // { id, name }
+  const [massarEditRows, setMassarEditRows] = useState([]);      // [{ id, first_name, last_name, massar_code, massar_secret }]
+  const [massarEditLoading, setMassarEditLoading] = useState(false);
+  const [massarEditSaving, setMassarEditSaving] = useState(false);
+
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   const getMassarToken = async () => {
@@ -244,6 +250,79 @@ const ClassesPage = () => {
   const openMassarModalForClass = () => {
     setMassarFiles([]);
     setShowMassarImport(true);
+  };
+
+  // Ouvre la modale d'édition manuelle des codes Massar d'une classe :
+  // charge la liste des élèves avec leurs code + secret, éditables.
+  const openMassarEditForClass = async (cls) => {
+    setMassarEditClass({ id: cls.id, name: cls.name });
+    setMassarEditRows([]);
+    setMassarEditLoading(true);
+    try {
+      const token = await getMassarToken();
+      const res = await fetch(`${apiUrl}/api/admin/classes/${cls.id}/students-massar`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMassarEditRows((data.students || []).map(s => ({
+          id: s.id,
+          first_name: s.first_name,
+          last_name: s.last_name,
+          massar_code: s.massar_code || '',
+          massar_secret: s.massar_secret || '',
+        })));
+      } else {
+        alert(data.error || 'Erreur de chargement des élèves');
+        setMassarEditClass(null);
+      }
+    } catch (err) {
+      console.error('Erreur chargement codes Massar:', err);
+      alert('Erreur réseau');
+      setMassarEditClass(null);
+    } finally {
+      setMassarEditLoading(false);
+    }
+  };
+
+  const setMassarEditField = (id, field, value) =>
+    setMassarEditRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+
+  const closeMassarEdit = () => {
+    setMassarEditClass(null);
+    setMassarEditRows([]);
+  };
+
+  const saveMassarEdit = async () => {
+    if (!massarEditClass) return;
+    setMassarEditSaving(true);
+    try {
+      const token = await getMassarToken();
+      const res = await fetch(`${apiUrl}/api/admin/classes/students-massar`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          class_id: massarEditClass.id,
+          updates: massarEditRows.map(r => ({
+            id: r.id,
+            massar_code: r.massar_code,
+            massar_secret: r.massar_secret,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchMassarCoverage(token);
+        closeMassarEdit();
+      } else {
+        alert(data.error || 'Erreur lors de l\'enregistrement');
+      }
+    } catch (err) {
+      console.error('Erreur enregistrement codes Massar:', err);
+      alert('Erreur réseau');
+    } finally {
+      setMassarEditSaving(false);
+    }
   };
 
   // Envoi rapide des codes Massar depuis le badge de la carte classe,
@@ -1513,6 +1592,10 @@ const ClassesPage = () => {
               title={massarCoverage[cls.id]?.withSecret > 0 ? 'Réimporter / mettre à jour les codes Massar' : 'Importer les codes Massar (InfoEleve)'}>
               <CreditCard className="w-3.5 h-3.5" />
             </button>
+            <button onClick={() => openMassarEditForClass(cls)} className="p-1 text-purple-600 hover:bg-purple-100 rounded"
+              title="Voir / modifier manuellement les codes Massar des élèves">
+              <ListChecks className="w-3.5 h-3.5" />
+            </button>
             {massarCoverage[cls.id]?.withSecret > 0 && (
               <button onClick={() => quickSendMassar(cls)} disabled={quickSendingClassId === cls.id}
                 className="p-1 text-purple-600 hover:bg-purple-100 rounded disabled:opacity-50" title="Envoyer les codes Massar aux parents (WhatsApp)">
@@ -2020,6 +2103,85 @@ const ClassesPage = () => {
       )}
 
       {/* Massar Codes Import Modal */}
+      {/* Modale : édition manuelle des codes Massar d'une classe */}
+      {massarEditClass && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={closeMassarEdit}>
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                  <ListChecks className="w-5 h-5 text-purple-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">Codes Massar — {massarEditClass.name}</h3>
+                  <p className="text-sm text-muted-foreground">Modifiez manuellement le code Massar et le code secret de chaque élève</p>
+                </div>
+              </div>
+              <button onClick={closeMassarEdit} className="p-2 hover:bg-muted rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-5">
+              {massarEditLoading ? (
+                <p className="text-center text-muted-foreground py-8">Chargement des élèves…</p>
+              ) : massarEditRows.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">Aucun élève dans cette classe.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground border-b">
+                      <th className="py-2 pr-3 font-medium">Élève</th>
+                      <th className="py-2 px-2 font-medium">Code Massar</th>
+                      <th className="py-2 pl-2 font-medium">Code secret</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {massarEditRows.map(r => (
+                      <tr key={r.id} className="border-b last:border-0">
+                        <td className="py-2 pr-3 align-middle">{r.last_name} {r.first_name}</td>
+                        <td className="py-2 px-2">
+                          <input
+                            type="text"
+                            value={r.massar_code}
+                            onChange={e => setMassarEditField(r.id, 'massar_code', e.target.value)}
+                            placeholder="Code Massar"
+                            className="w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 bg-transparent uppercase"
+                          />
+                        </td>
+                        <td className="py-2 pl-2">
+                          <input
+                            type="text"
+                            value={r.massar_secret}
+                            onChange={e => setMassarEditField(r.id, 'massar_secret', e.target.value)}
+                            placeholder="Code secret"
+                            className="w-full px-2 py-1.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-400 bg-transparent"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 p-4 border-t">
+              <button onClick={closeMassarEdit} className="px-4 py-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors">
+                Fermer
+              </button>
+              <button
+                onClick={saveMassarEdit}
+                disabled={massarEditSaving || massarEditLoading || massarEditRows.length === 0}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                {massarEditSaving ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showMassarImport && (
         <Card className="border-indigo-200">
           <CardHeader>

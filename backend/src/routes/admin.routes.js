@@ -1351,6 +1351,76 @@ router.get('/classes/massar-coverage', async (req, res) => {
   }
 });
 
+// Liste des élèves d'une classe avec leurs codes Massar (code + secret),
+// pour édition manuelle depuis la page Classes.
+router.get('/classes/:classId/students-massar', async (req, res) => {
+  try {
+    const { classId } = req.params;
+    if (!classId) return res.status(400).json({ error: 'classId requis' });
+    const schoolId = getSchoolId(req);
+
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, massar_secret')
+      .eq('role', 'student')
+      .eq('class_id', classId);
+    if (schoolId) query = query.eq('school_id', schoolId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const students = (data || []).sort((a, b) =>
+      `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`, 'fr')
+    );
+    res.json({ students });
+  } catch (error) {
+    console.error('Erreur GET students-massar:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Mise à jour manuelle des codes Massar d'une classe.
+// Body: { class_id, updates: [{ id, massar_code, massar_secret }] }
+router.put('/classes/students-massar', async (req, res) => {
+  try {
+    const { class_id, updates } = req.body;
+    if (!class_id) return res.status(400).json({ error: 'class_id requis' });
+    if (!Array.isArray(updates)) return res.status(400).json({ error: 'updates requis' });
+    const schoolId = getSchoolId(req);
+
+    // Récupère les élèves de la classe pour limiter les mises à jour à ce périmètre.
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('role', 'student')
+      .eq('class_id', class_id);
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data: classStudents, error: studentsError } = await query;
+    if (studentsError) throw studentsError;
+    const allowedIds = new Set((classStudents || []).map(s => s.id));
+
+    let updated = 0;
+    for (const u of updates) {
+      if (!u?.id || !allowedIds.has(u.id)) continue;
+      const patch = {
+        massar_code: String(u.massar_code || '').trim().toUpperCase() || null,
+        massar_secret: String(u.massar_secret || '').trim() || null,
+      };
+      const { error: upErr } = await supabaseAdmin
+        .from('profiles')
+        .update(patch)
+        .eq('id', u.id);
+      if (upErr) throw upErr;
+      updated++;
+    }
+
+    res.json({ updated });
+  } catch (error) {
+    console.error('Erreur PUT students-massar:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // Import des codes Massar (رقم التلميذ + الرمز السري) depuis le fichier InfoEleve.
 // Body: { class_id, rows: [{ massar_code, student_full_name, massar_secret }], dryRun }
 // Met à jour massar_secret (et massar_code si absent) des élèves de la classe.
