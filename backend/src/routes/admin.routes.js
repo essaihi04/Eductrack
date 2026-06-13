@@ -1691,7 +1691,9 @@ async function resolveTeacherForSubject(classId, subjectId, schoolId, { fallback
   }
 
   // Aucun prof n'enseigne la matière. Repli : prendre un prof déjà rattaché à la
-  // classe et lui associer la matière (le lien pourra être corrigé ensuite).
+  // classe (juste pour renseigner teacher_id, NOT NULL). La matière du contrôle est
+  // portée par controls_plan.subject_id — on NE modifie PAS teacher_subjects (cela
+  // corromprait la matière déduite des autres contrôles de ce prof).
   if (fallbackToClassTeacher) {
     const { data: classTeachers } = await supabaseAdmin
       .from('class_teachers').select('teacher_id').eq('class_id', classId);
@@ -1706,13 +1708,7 @@ async function resolveTeacherForSubject(classId, subjectId, schoolId, { fallback
           .upsert({ class_id: classId, teacher_id: fbId }, { onConflict: 'class_id,teacher_id' });
       }
     }
-    if (fbId) {
-      if (write && subjectId) {
-        await supabaseAdmin.from('teacher_subjects')
-          .upsert({ teacher_id: fbId, subject_id: subjectId }, { onConflict: 'teacher_id,subject_id' });
-      }
-      return fbId;
-    }
+    if (fbId) return fbId;
   }
   return null;
 }
@@ -1830,29 +1826,37 @@ router.post('/classes/import-massar-notes', async (req, res) => {
           return String(a.slot).localeCompare(String(b.slot));
         });
 
-        // Contrôles existants de la classe pour ce prof, dans le semestre
+        // Contrôles existants de la classe dans le semestre (toutes matières)
         const { data: existingControls } = await supabaseAdmin
           .from('controls_plan')
-          .select('id, name, kind, date')
-          .eq('class_id', cls.id).eq('teacher_id', teacherId)
+          .select('id, name, kind, date, subject_id, teacher_id')
+          .eq('class_id', cls.id)
           .gte('date', start).lte('date', end);
 
-        // 7) Find-or-create chaque contrôle → control_id par slot
+        // 7) Find-or-create chaque contrôle → control_id par slot.
+        //    Réutilisation par matière (subject_id) ; repli sur les contrôles
+        //    hérités sans matière (subject_id null) du même prof.
         const controlIdBySlot = {};
         for (let i = 0; i < slots.length; i++) {
           const sl = slots[i];
           const labelNorm = normalizeName(sl.label);
-          let ctrl = (existingControls || []).find(
-            c => normalizeName(c.name) === labelNorm && c.kind === sl.kind
-          );
+          const sameLabelKind = c => normalizeName(c.name) === labelNorm && c.kind === sl.kind;
+          let ctrl = (existingControls || []).find(c => sameLabelKind(c) && c.subject_id === subject.id)
+            || (existingControls || []).find(c => sameLabelKind(c) && !c.subject_id && c.teacher_id === teacherId);
           if (ctrl) {
             r.controlsReused++;
+            // Compléter / corriger la matière du contrôle réutilisé
+            if (!dryRun && subject.id && ctrl.subject_id !== subject.id) {
+              await supabaseAdmin.from('controls_plan')
+                .update({ subject_id: subject.id }).eq('id', ctrl.id);
+            }
           } else if (!dryRun) {
             const { data: created, error: cErr } = await supabaseAdmin
               .from('controls_plan')
               .insert({
                 teacher_id: teacherId,
                 class_id: cls.id,
+                subject_id: subject.id,
                 name: sl.label,
                 date: controlDateInBounds(start, end, sl.kind === 'activity' ? slots.length : i),
                 kind: sl.kind,
@@ -6625,7 +6629,7 @@ router.get('/classes/:classId/controls-overview', async (req, res) => {
     // Contrôles de la classe
     const { data: controls } = await supabaseAdmin
       .from('controls_plan')
-      .select('id, name, date, start_time, kind, teacher_id')
+      .select('id, name, date, start_time, kind, teacher_id, subject_id')
       .eq('class_id', classId)
       .order('date', { ascending: false });
     const controlIds = (controls || []).map(c => c.id);
@@ -6652,13 +6656,22 @@ router.get('/classes/:classId/controls-overview', async (req, res) => {
       (profs || []).forEach(p => { nameByTeacher[p.id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
     }
 
+    // Matière explicite des contrôles (prioritaire sur la déduction via le prof)
+    const ovSubjectIds = [...new Set((controls || []).map(c => c.subject_id).filter(Boolean))];
+    const subjById = {};
+    if (ovSubjectIds.length) {
+      const { data: subjRows } = await supabaseAdmin
+        .from('subjects').select('id, name').in('id', ovSubjectIds);
+      (subjRows || []).forEach(s => { subjById[s.id] = s.name; });
+    }
+
     const overview = (controls || []).map(c => {
       const vals = (notesByControl[c.id] || []).filter(v => !isNaN(v));
       const noted = vals.length;
       const avg = noted ? Math.round((vals.reduce((a, b) => a + b, 0) / noted) * 100) / 100 : null;
       return {
         id: c.id, name: c.name, date: c.date, start_time: c.start_time, kind: c.kind,
-        subject: subjByTeacher[c.teacher_id] || '—',
+        subject: (c.subject_id && subjById[c.subject_id]) || subjByTeacher[c.teacher_id] || '—',
         teacher: nameByTeacher[c.teacher_id] || '—',
         totalStudents, notedStudents: noted, missing: Math.max(0, totalStudents - noted),
         average: avg,

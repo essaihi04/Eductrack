@@ -154,7 +154,7 @@ export const computeStudentBulletin = async ({
   // 3. Tous les controls_plan de la classe sur la période
   const { data: controls } = await supabaseAdmin
     .from('controls_plan')
-    .select('id, name, date, teacher_id, kind')
+    .select('id, name, date, teacher_id, kind, subject_id')
     .eq('class_id', classId)
     .gte('date', start)
     .lte('date', end);
@@ -162,6 +162,16 @@ export const computeStudentBulletin = async ({
   const controlsArr = controls || [];
   const controlIds = controlsArr.map(c => c.id);
   const teacherIds = [...new Set(controlsArr.map(c => c.teacher_id).filter(Boolean))];
+
+  // Matières référencées directement par les contrôles (correspondance fiable,
+  // prioritaire sur la déduction via le professeur).
+  const subjectIds = [...new Set(controlsArr.map(c => c.subject_id).filter(Boolean))];
+  const subjectById = new Map();
+  if (subjectIds.length) {
+    const { data: subjRows } = await supabaseAdmin
+      .from('subjects').select('id, name').in('id', subjectIds);
+    (subjRows || []).forEach(s => subjectById.set(s.id, { id: s.id, name: s.name }));
+  }
 
   // 4. Notes de l'élève sur ces contrôles
   let notes = [];
@@ -183,7 +193,8 @@ export const computeStudentBulletin = async ({
   const noteByControl = new Map((notes || []).map(n => [n.control_id, Number(n.note)]));
 
   for (const ctrl of controlsArr) {
-    const subj = teacherSubjMap.get(ctrl.teacher_id);
+    // Priorité : matière explicite du contrôle ; repli : matière déduite du prof.
+    const subj = (ctrl.subject_id && subjectById.get(ctrl.subject_id)) || teacherSubjMap.get(ctrl.teacher_id);
     if (!subj || !subj.name) continue;
     const key = subj.name.trim();
     if (!buckets[key]) {
