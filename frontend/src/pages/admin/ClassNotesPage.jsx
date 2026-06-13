@@ -12,6 +12,51 @@ const MASSAR_GRADE_PATTERNS = [
   { pattern: /الأنشطة\s*المندمجة/, label: 'الأنشطة المندمجة', slot: 'activity', kind: 'activity' },
 ];
 
+// Normalisation légère (FR + AR) pour matcher les noms de matières.
+const normSubject = (x) => String(x ?? '')
+  .trim().toLowerCase()
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[أإآى]/g, 'ا').replace(/ة/g, 'ه')
+  .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+// Alias matière Massar (arabe) → variantes de noms possibles (FR/AR) côté app.
+const SUBJECT_ALIAS_GROUPS = [
+  ['اللغة العربية', 'العربية', 'arabe', 'langue arabe'],
+  ['اللغة الفرنسية', 'الفرنسية', 'francais', 'français', 'langue francaise'],
+  ['اللغة الإنجليزية', 'الإنجليزية', 'anglais', 'english', 'langue anglaise'],
+  ['الرياضيات', 'maths', 'mathematiques'],
+  ['الفيزياء والكيمياء', 'الفيزياء', 'physique chimie', 'physique-chimie', 'pc'],
+  ['علوم الحياة والأرض', 'svt', 'sciences de la vie et de la terre'],
+  ['الاجتماعيات', 'التاريخ والجغرافيا', 'sociales', 'sciences sociales', 'histoire geographie', 'histoire-géographie', 'hist geo', 'hg'],
+  ['التربية الإسلامية', 'education islamique', 'éducation islamique', 'islamique'],
+  ['التربية البدنية', 'education physique', 'éducation physique', 'eps', 'sport'],
+  ['المعلوميات', 'معلوميات', 'informatique', 'info', 'tic'],
+  ['الفلسفة', 'philosophie'],
+  ['التكنولوجيا', 'technologie'],
+];
+
+// Devine l'id de matière (app) à partir du libellé Massar arabe.
+const guessSubjectId = (subjectArabic, subjects) => {
+  const needle = normSubject(subjectArabic);
+  if (!needle || !subjects?.length) return '';
+  // direct
+  let hit = subjects.find(s => normSubject(s.name) === needle);
+  if (hit) return hit.id;
+  // via alias
+  const group = SUBJECT_ALIAS_GROUPS.find(g => g.some(a => normSubject(a) === needle));
+  if (group) {
+    const norms = group.map(normSubject);
+    hit = subjects.find(s => norms.includes(normSubject(s.name)));
+    if (hit) return hit.id;
+  }
+  // inclusion partielle
+  hit = subjects.find(s => {
+    const n = normSubject(s.name);
+    return n && (n.includes(needle) || needle.includes(n));
+  });
+  return hit ? hit.id : '';
+};
+
 // Renvoie la 1re cellule non vide à droite d'une cellule contenant `needle`.
 const valueRightOf = (rows, needle) => {
   for (const row of rows) {
@@ -106,6 +151,7 @@ const ClassNotesPage = () => {
   };
 
   const [classes, setClasses] = useState([]);
+  const [subjects, setSubjects] = useState([]); // matières de l'école (pour mapping)
   const [selectedClass, setSelectedClass] = useState('');
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -127,8 +173,15 @@ const ClassNotesPage = () => {
     (async () => {
       try {
         const token = await getToken();
-        const res = await fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok) setClasses(await res.json());
+        const [cRes, sRes] = await Promise.all([
+          fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${apiUrl}/api/admin/subjects`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        if (cRes.ok) setClasses(await cRes.json());
+        if (sRes.ok) {
+          const subs = await sRes.json();
+          setSubjects((Array.isArray(subs) ? subs : []).sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr')));
+        }
       } catch (e) { console.error(e); }
     })();
   }, []);
@@ -217,7 +270,7 @@ const ClassNotesPage = () => {
           parsed.push({ fileName: file.name, error: 'Format NotesCC non reconnu (ou aucun élève)' });
           continue;
         }
-        parsed.push({ fileName: file.name, ...p });
+        parsed.push({ fileName: file.name, ...p, subjectId: guessSubjectId(p.subjectArabic, subjects) });
       } catch (err) {
         parsed.push({ fileName: file.name, error: 'Erreur de lecture du fichier' });
       }
@@ -239,6 +292,7 @@ const ClassNotesPage = () => {
           fileName: f.fileName,
           className: f.className,
           subjectArabic: f.subjectArabic,
+          subject_id: f.subjectId || null,
           semester: f.semester,
           rows: f.rows,
         })),
@@ -260,6 +314,9 @@ const ClassNotesPage = () => {
     } catch (e) { setMsg(`❌ ${e.message}`); }
     finally { setMassarBusy(false); }
   };
+
+  const setFileSubject = (idx, subjectId) =>
+    setMassarFiles(prev => prev.map((f, i) => i === idx ? { ...f, subjectId } : f));
 
   const closeMassar = () => {
     setMassarFiles([]); setMassarPreview(null); setMassarResult(null);
@@ -319,6 +376,7 @@ const ClassNotesPage = () => {
                       <th className="px-3 py-2 border-b">Fichier</th>
                       <th className="px-3 py-2 border-b">Classe</th>
                       <th className="px-3 py-2 border-b">Matière (Massar)</th>
+                      <th className="px-3 py-2 border-b">Matière (app)</th>
                       <th className="px-3 py-2 border-b text-center">Sem.</th>
                       <th className="px-3 py-2 border-b text-center">Contrôles</th>
                       <th className="px-3 py-2 border-b text-center">Élèves</th>
@@ -332,11 +390,21 @@ const ClassNotesPage = () => {
                         <tr key={i} className="border-b">
                           <td className="px-3 py-1.5 text-gray-700 truncate max-w-[180px]" title={f.fileName}>{f.fileName}</td>
                           {f.error ? (
-                            <td colSpan={5} className="px-3 py-1.5 text-red-600">⚠️ {f.error}</td>
+                            <td colSpan={6} className="px-3 py-1.5 text-red-600">⚠️ {f.error}</td>
                           ) : (
                             <>
                               <td className="px-3 py-1.5 font-medium">{f.className || '—'}</td>
                               <td className="px-3 py-1.5" dir="rtl">{f.subjectArabic || '—'}</td>
+                              <td className="px-3 py-1.5">
+                                <select
+                                  value={f.subjectId || ''}
+                                  onChange={e => setFileSubject(i, e.target.value)}
+                                  className={`border rounded px-2 py-1 text-sm min-w-[150px] ${f.subjectId ? '' : 'border-amber-400 bg-amber-50'}`}
+                                >
+                                  <option value="">— Auto / à choisir —</option>
+                                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>
+                              </td>
                               <td className="px-3 py-1.5 text-center">{f.semester}</td>
                               <td className="px-3 py-1.5 text-center">
                                 {nbControls}

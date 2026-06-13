@@ -1683,9 +1683,19 @@ router.post('/classes/import-massar-notes', async (req, res) => {
         const cls = classByName.get(normalizeName(file.className));
         if (!cls) { r.error = `Classe « ${file.className} » introuvable`; results.push(r); continue; }
 
-        // 2) Matière
-        const subject = await resolveSubject(file.subjectArabic, schoolId);
-        if (!subject) { r.error = `Matière « ${file.subjectArabic} » non reconnue`; results.push(r); continue; }
+        // 2) Matière — priorité au choix explicite (subject_id), sinon auto-détection
+        let subject = null;
+        if (file.subject_id) {
+          let sq = supabaseAdmin.from('subjects').select('id, name').eq('id', file.subject_id);
+          if (schoolId) sq = sq.eq('school_id', schoolId);
+          const { data: sOverride } = await sq.maybeSingle();
+          subject = sOverride || null;
+        }
+        if (!subject) subject = await resolveSubject(file.subjectArabic, schoolId);
+        if (!subject) {
+          r.error = `Matière « ${file.subjectArabic} » non reconnue — choisissez-la manuellement`;
+          results.push(r); continue;
+        }
         r.subject = subject.name;
 
         // 3) Prof
