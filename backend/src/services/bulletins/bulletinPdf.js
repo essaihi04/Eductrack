@@ -118,13 +118,15 @@ export async function generateBulletinPdf({
       doc.font('Helvetica').fontSize(8).text("Ministère de l'Éducation Nationale", MARGIN, y, { width: 250 });
       y += 14;
 
-      // Académie / Direction (depuis config)
+      // Académie / Direction (depuis config) — souvent en arabe → smartText
       if (config.academy) {
-        doc.font('Helvetica').fontSize(7).fillColor('#555').text(config.academy, MARGIN, y, { width: 250 });
+        doc.fontSize(7).fillColor('#555');
+        smartText(doc, config.academy, MARGIN, y, { width: 250 });
         y += 10;
       }
       if (config.provincial_direction) {
-        doc.font('Helvetica').fontSize(7).text(config.provincial_direction, MARGIN, y, { width: 250 });
+        doc.fontSize(7).fillColor('#555');
+        smartText(doc, config.provincial_direction, MARGIN, y, { width: 250 });
         y += 10;
       }
 
