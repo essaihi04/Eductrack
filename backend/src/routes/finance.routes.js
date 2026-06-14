@@ -1355,22 +1355,16 @@ function getMonthName(month) {
 // Ordre des mois dans une année scolaire (Sept → Août)
 const ACADEMIC_MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
-// Rassemble les items applicables d'un plan (modèle + personnalisés activés).
-// Les items personnalisés ont priorité : un frais du modèle déjà présent à
-// l'identique dans les items personnalisés n'est PAS recompté (évite le
-// doublement quand un plan porte à la fois un modèle et ses frais importés).
-function planItemKey(it) {
-  return `${it.category}|${String(it.name || '').trim().toLowerCase()}|${it.recurrence}|${Number(it.amount) || 0}`;
-}
+// Rassemble les frais applicables d'un plan.
+// Règle anti-doublement : si l'élève a des frais PERSONNALISÉS, ceux-ci font foi
+// (le modèle n'est plus qu'une étiquette/source). Sinon, on utilise les frais du
+// modèle attaché (cas d'une application en masse par classe, sans personnalisation).
 function collectPlanItems(plan) {
   const customItems = (plan.custom_items || [])
     .filter(it => it.enabled !== false)
     .map(it => ({ ...it, _source: 'custom' }));
-  const customKeys = new Set(customItems.map(planItemKey));
-  const templateItems = (plan.template?.fee_template_items || [])
-    .map(it => ({ ...it, _source: 'template' }))
-    .filter(it => !customKeys.has(planItemKey(it)));
-  return [...templateItems, ...customItems];
+  if (customItems.length > 0) return customItems;
+  return (plan.template?.fee_template_items || []).map(it => ({ ...it, _source: 'template' }));
 }
 
 // Détermine si un item est dû un mois donné

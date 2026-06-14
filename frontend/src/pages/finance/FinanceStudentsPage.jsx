@@ -429,7 +429,7 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
           : [];
         setForm({
           academic_year: existing.academic_year,
-          template_id: '',
+          template_id: existing.template_id || '',
           sibling_discount_percent: existing.sibling_discount_percent || 0,
           sibling_discount_type: existing.sibling_discount_type || 'percent',
           sibling_discount_amount: existing.sibling_discount_amount || 0,
@@ -487,18 +487,19 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
   // Clé d'unicité d'un frais (catégorie|nom|récurrence|montant)
   const itemKey = (it) => `${it.category}|${(it.name || '').trim().toLowerCase()}|${it.recurrence}|${Number(it.amount) || 0}`;
 
-  // Sélection d'un modèle : ses frais sont récupérés automatiquement comme
-  // items personnalisés et le modèle est détaché (contrôle total par élève).
-  // On évite d'ajouter en double les frais déjà présents (anti-doublement).
+  // Sélection d'un modèle : ses frais sont récupérés comme frais de l'élève
+  // (modifiables). Le modèle reste mémorisé comme ÉTIQUETTE (template_id) pour
+  // afficher quel modèle a été appliqué. On évite d'ajouter en double.
   const onSelectTemplate = (templateId) => {
     if (!templateId) { setForm({ ...form, template_id: '' }); return; }
     const existingKeys = new Set(form.custom_items.map(itemKey));
     const toAdd = templateItemsToCustom(templateId).filter(it => !existingKeys.has(itemKey(it)));
     if (toAdd.length === 0) {
-      alert('Les frais de ce modèle sont déjà présents dans le plan.');
+      // Déjà présents : on met juste à jour l'étiquette du modèle appliqué.
+      setForm({ ...form, template_id: templateId });
       return;
     }
-    setForm({ ...form, template_id: '', custom_items: [...form.custom_items, ...toAdd] });
+    setForm({ ...form, template_id: templateId, custom_items: [...form.custom_items, ...toAdd] });
   };
 
   return (
@@ -537,7 +538,14 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
                     ));
                   })()}
                 </select>
-                <p className="text-xs text-gray-500 mt-1">Les frais du modèle sont ajoutés ci-dessous, modifiables par élève.</p>
+                {form.template_id ? (
+                  <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Modèle appliqué : <strong>{templates.find(t => t.id === form.template_id)?.name || 'modèle'}</strong> — frais modifiables ci-dessous
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">Les frais du modèle sont ajoutés ci-dessous, modifiables par élève.</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Réduction fratrie</label>
