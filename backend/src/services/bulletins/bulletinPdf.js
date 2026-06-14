@@ -10,10 +10,12 @@ import PDFDocument from 'pdfkit';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import { computeMention, computeCertification } from './calculator.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const _require = createRequire(import.meta.url);
 
 // Police arabe (même fichier que invoicePdf)
 const ARABIC_FONT_PATH = path.join(__dirname, '..', 'whatsapp', 'chatbot', 'fonts', 'NotoNaskhArabic-Regular.ttf');
@@ -23,9 +25,29 @@ const ARABIC_FEATURES = ['rtla', 'rclt'];
 
 function hasArabic(text) { return ARABIC_RE.test(String(text || '')); }
 
+// La police arabe (Noto Naskh) ne contient pas les glyphes latins (tiret, slash,
+// parenthèses, lettres a-z…) : ils s'affichent en « tofu » (carré). On remplace
+// les caractères non couverts par un espace pour un rendu propre des champs
+// arabes (académie/direction) contenant un séparateur « - » par exemple.
+let _arFontkit;
+function arFontSupports(cp) {
+  if (_arFontkit === undefined) {
+    try { _arFontkit = _require('fontkit').openSync(ARABIC_FONT_PATH); }
+    catch (_) { _arFontkit = null; }
+  }
+  if (!_arFontkit) return true;
+  try { return _arFontkit.hasGlyphForCodePoint(cp); } catch (_) { return true; }
+}
+function sanitizeArabic(t) {
+  let out = '';
+  for (const ch of t) out += arFontSupports(ch.codePointAt(0)) ? ch : ' ';
+  return out.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
 function smartText(doc, text, x, y, opts = {}) {
-  const t = String(text == null ? '' : text);
+  let t = String(text == null ? '' : text);
   const useAr = hasArabic(t);
+  if (useAr) t = sanitizeArabic(t);
   const prev = doc._font?.name || 'Helvetica';
   if (useAr) doc.font(ARABIC_FONT_NAME);
   const finalOpts = useAr ? { ...opts, features: [...(opts.features || []), ...ARABIC_FEATURES] } : opts;
@@ -421,8 +443,14 @@ export async function generateBulletinPdf({
       doc.moveTo(MARGIN, footerY).lineTo(PAGE_W - MARGIN, footerY).strokeColor('#ccc').lineWidth(0.5).stroke();
 
       doc.font('Helvetica').fontSize(7).fillColor('#999');
-      doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, MARGIN, footerY + 8);
-      doc.text('EduTrack — Système de gestion scolaire', MARGIN, footerY + 18, { width: CONTENT_W, align: 'center' });
+      // Le pied de page est sous la marge basse : on neutralise temporairement
+      // la marge basse pour empêcher PDFKit de basculer sur une nouvelle page
+      // (sinon pages vides parasites).
+      const prevBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, MARGIN, footerY + 8, { lineBreak: false });
+      doc.text('EduTrack — Système de gestion scolaire', MARGIN, footerY + 18, { width: CONTENT_W, align: 'center', lineBreak: false });
+      doc.page.margins.bottom = prevBottom;
 
       // Signature zones
       if (y + 60 < footerY) {
