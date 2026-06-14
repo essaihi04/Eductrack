@@ -333,9 +333,12 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
   try {
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
-    const { template_id, academic_year, sibling_discount_percent, sibling_discount_type, sibling_discount_amount, scholarship_amount, custom_notes, custom_items } = req.body;
+    const { template_id, academic_year, sibling_discount_percent, sibling_discount_type, sibling_discount_amount, scholarship_amount, custom_notes, custom_items, start_month, end_month, custom_discount_amount, custom_discount_reason } = req.body;
     if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
     const discountType = sibling_discount_type === 'amount' ? 'amount' : 'percent';
+    // Mois d'entrée/sortie : null si non précisé (= année complète)
+    const startMonthVal = start_month ? Number(start_month) : null;
+    const endMonthVal = end_month ? Number(end_month) : null;
     // Colonne UUID : une chaîne vide doit devenir NULL (sinon erreur / non détaché)
     const templateIdValue = template_id ? template_id : null;
 
@@ -357,6 +360,9 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
           sibling_discount_type: discountType,
           sibling_discount_amount: sibling_discount_amount || 0,
           scholarship_amount: scholarship_amount || 0,
+          start_month: startMonthVal, end_month: endMonthVal,
+          custom_discount_amount: custom_discount_amount || 0,
+          custom_discount_reason: custom_discount_reason || null,
           custom_notes, updated_at: new Date().toISOString()
         })
         .eq('id', planId);
@@ -372,6 +378,9 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
           sibling_discount_type: discountType,
           sibling_discount_amount: sibling_discount_amount || 0,
           scholarship_amount: scholarship_amount || 0,
+          start_month: startMonthVal, end_month: endMonthVal,
+          custom_discount_amount: custom_discount_amount || 0,
+          custom_discount_reason: custom_discount_reason || null,
           custom_notes,
           created_by: req.user.id
         })
@@ -814,6 +823,18 @@ router.put('/invoices/:id/cancel', async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
+
+    // Bloquer l'annulation d'une facture ayant des paiements confirmés
+    // (sinon l'argent encaissé resterait sans facture → écart de caisse).
+    const { data: pays } = await supabaseAdmin
+      .from('payments')
+      .select('id')
+      .eq('invoice_id', id)
+      .eq('status', 'confirmed')
+      .limit(1);
+    if (pays && pays.length > 0) {
+      return res.status(400).json({ error: 'Facture déjà payée : annulez d\'abord le(s) paiement(s) associé(s).' });
+    }
 
     const { error } = await supabaseAdmin
       .from('invoices')
@@ -1371,12 +1392,58 @@ function itemAppliesToMonth(it, month) {
   return false;
 }
 
+// ── Période de facturation propre à l'élève (entrée / sortie) ──────────────
+const monthIdxAcademic = (m) => ACADEMIC_MONTH_ORDER.indexOf(Number(m));
+
+function planRange(plan) {
+  const s = plan.start_month ? Number(plan.start_month) : 9; // défaut : septembre
+  const e = plan.end_month ? Number(plan.end_month) : 8;     // défaut : août (fin année scolaire)
+  return { sIdx: monthIdxAcademic(s), eIdx: monthIdxAcademic(e) };
+}
+
+function monthInPlanRange(plan, month) {
+  const { sIdx, eIdx } = planRange(plan);
+  const idx = monthIdxAcademic(month);
+  if (idx < 0) return false;
+  if (sIdx < 0 || eIdx < 0) return true;
+  return idx >= sIdx && idx <= eIdx;
+}
+
+// Mois effectif d'un frais ponctuel/annuel, ramené dans la période de l'élève :
+// un frais d'inscription dû en septembre est facturé au mois d'entrée si l'élève
+// arrive plus tard (sinon il serait perdu).
+function effectiveOneTimeMonth(plan, it) {
+  const { sIdx, eIdx } = planRange(plan);
+  let dueIdx = monthIdxAcademic(it.due_month ?? 9);
+  if (dueIdx < 0) dueIdx = sIdx >= 0 ? sIdx : 0;
+  if (sIdx >= 0 && dueIdx < sIdx) dueIdx = sIdx; // dû avant l'entrée → à l'entrée
+  if (eIdx >= 0 && dueIdx > eIdx) dueIdx = eIdx; // dû après la sortie → à la sortie
+  return ACADEMIC_MONTH_ORDER[dueIdx];
+}
+
+// Applicabilité d'un item à un mois EN TENANT COMPTE de la période de l'élève
+function itemAppliesToPlanMonth(plan, it, month) {
+  if (!monthInPlanRange(plan, month)) return false;
+  if (it.recurrence === 'one_time' || it.recurrence === 'annual') {
+    return effectiveOneTimeMonth(plan, it) === Number(month);
+  }
+  return itemAppliesToMonth(it, month);
+}
+
+// Liste ordonnée des mois ayant au moins un frais dans le plan (période élève incluse)
+function getScheduleMonths(plan) {
+  const items = collectPlanItems(plan);
+  return ACADEMIC_MONTH_ORDER.filter(m =>
+    items.some(it => itemAppliesToPlanMonth(plan, it, m) && Number(it.amount) > 0)
+  );
+}
+
 // Calcule les lignes + totaux d'un plan pour un mois (avec réductions identiques à generate-monthly)
 function computeMonthForPlan(plan, month) {
   const items = collectPlanItems(plan);
   const lines = [];
   for (const it of items) {
-    if (itemAppliesToMonth(it, month) && Number(it.amount) > 0) {
+    if (itemAppliesToPlanMonth(plan, it, month) && Number(it.amount) > 0) {
       lines.push({
         description: it.name,
         category: it.category,
@@ -1387,24 +1454,20 @@ function computeMonthForPlan(plan, month) {
     }
   }
   const subtotal = lines.reduce((s, l) => s + l.amount, 0);
-  // Réduction fratrie : soit un pourcentage du sous-total, soit un montant fixe
-  // (DH) déduit chaque mois facturé.
+  // Nombre RÉEL de mois facturés (pour répartir bourse et remise annuelle)
+  const billableCount = getScheduleMonths(plan).length || 1;
+  // Réduction fratrie : pourcentage du sous-total OU montant fixe déduit chaque mois.
   const siblingDiscount = plan.sibling_discount_type === 'amount'
     ? Math.min(subtotal, Number(plan.sibling_discount_amount || 0))
     : subtotal * (Number(plan.sibling_discount_percent || 0) / 100);
+  // Bourse + remise libre : montants ANNUELS répartis sur les mois réellement facturés.
   const scholarship = Number(plan.scholarship_amount || 0);
-  const monthlyScholarship = scholarship > 0 ? scholarship / 10 : 0; // réparti sur 10 mensualités
-  const discount = siblingDiscount + monthlyScholarship;
+  const monthlyScholarship = scholarship > 0 ? scholarship / billableCount : 0;
+  const customDiscount = Number(plan.custom_discount_amount || 0);
+  const monthlyCustom = customDiscount > 0 ? customDiscount / billableCount : 0;
+  const discount = siblingDiscount + monthlyScholarship + monthlyCustom;
   const total = Math.max(0, subtotal - discount);
   return { lines, subtotal, discount, total };
-}
-
-// Liste ordonnée des mois ayant au moins un frais dans le plan
-function getScheduleMonths(plan) {
-  const items = collectPlanItems(plan);
-  return ACADEMIC_MONTH_ORDER.filter(m =>
-    items.some(it => itemAppliesToMonth(it, m) && Number(it.amount) > 0)
-  );
 }
 
 // Année civile correspondant à un mois dans une année scolaire "2025-2026"

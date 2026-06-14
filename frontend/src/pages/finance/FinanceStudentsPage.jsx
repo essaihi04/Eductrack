@@ -374,9 +374,21 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
     sibling_discount_type: 'percent',
     sibling_discount_amount: 0,
     scholarship_amount: 0,
+    start_month: '',
+    end_month: '',
+    custom_discount_amount: 0,
+    custom_discount_reason: '',
     custom_notes: '',
     custom_items: []
   });
+
+  // Mois de l'année scolaire (ordre Sept → Août)
+  const SCHOOL_MONTHS = [
+    { v: 9, l: 'Septembre' }, { v: 10, l: 'Octobre' }, { v: 11, l: 'Novembre' },
+    { v: 12, l: 'Décembre' }, { v: 1, l: 'Janvier' }, { v: 2, l: 'Février' },
+    { v: 3, l: 'Mars' }, { v: 4, l: 'Avril' }, { v: 5, l: 'Mai' },
+    { v: 6, l: 'Juin' }, { v: 7, l: 'Juillet' }, { v: 8, l: 'Août' },
+  ];
 
   function getCurrentYear() {
     const y = new Date().getFullYear();
@@ -422,6 +434,10 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
           sibling_discount_type: existing.sibling_discount_type || 'percent',
           sibling_discount_amount: existing.sibling_discount_amount || 0,
           scholarship_amount: existing.scholarship_amount || 0,
+          start_month: existing.start_month || '',
+          end_month: existing.end_month || '',
+          custom_discount_amount: existing.custom_discount_amount || 0,
+          custom_discount_reason: existing.custom_discount_reason || '',
           custom_notes: existing.custom_notes || '',
           custom_items: [...tplItems, ...existingItems]
         });
@@ -551,7 +567,43 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
                 <input type="number" step="0.01" min="0" value={form.scholarship_amount}
                   onChange={e => setForm({ ...form, scholarship_amount: Number(e.target.value) })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-                <p className="text-xs text-gray-500 mt-1">Répartie sur 10 mensualités</p>
+                <p className="text-xs text-gray-500 mt-1">Répartie sur les mois facturés</p>
+              </div>
+
+              {/* Période de facturation propre à l'élève (entrée / sortie) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mois d'entrée</label>
+                <select value={form.start_month} onChange={e => setForm({ ...form, start_month: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white">
+                  <option value="">Début d'année (Sept.)</option>
+                  {SCHOOL_MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Inscription en cours d'année : ne facture pas les mois avant l'entrée.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mois de sortie</label>
+                <select value={form.end_month} onChange={e => setForm({ ...form, end_month: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white">
+                  <option value="">Fin d'année (Juin/Août)</option>
+                  {SCHOOL_MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Départ en cours d'année : arrête la facturation après ce mois.</p>
+              </div>
+
+              {/* Remise exceptionnelle libre (montant annuel + motif) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Remise exceptionnelle / année (MAD)</label>
+                <input type="number" step="0.01" min="0" value={form.custom_discount_amount}
+                  onChange={e => setForm({ ...form, custom_discount_amount: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                <p className="text-xs text-gray-500 mt-1">Répartie sur les mois facturés</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Motif de la remise</label>
+                <input type="text" value={form.custom_discount_reason}
+                  onChange={e => setForm({ ...form, custom_discount_reason: e.target.value })}
+                  placeholder="Ex : geste commercial, enfant du personnel…"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
               </div>
             </div>
 
