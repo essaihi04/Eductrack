@@ -468,11 +468,21 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
     }));
   };
 
+  // Clé d'unicité d'un frais (catégorie|nom|récurrence|montant)
+  const itemKey = (it) => `${it.category}|${(it.name || '').trim().toLowerCase()}|${it.recurrence}|${Number(it.amount) || 0}`;
+
   // Sélection d'un modèle : ses frais sont récupérés automatiquement comme
   // items personnalisés et le modèle est détaché (contrôle total par élève).
+  // On évite d'ajouter en double les frais déjà présents (anti-doublement).
   const onSelectTemplate = (templateId) => {
     if (!templateId) { setForm({ ...form, template_id: '' }); return; }
-    setForm({ ...form, template_id: '', custom_items: [...form.custom_items, ...templateItemsToCustom(templateId)] });
+    const existingKeys = new Set(form.custom_items.map(itemKey));
+    const toAdd = templateItemsToCustom(templateId).filter(it => !existingKeys.has(itemKey(it)));
+    if (toAdd.length === 0) {
+      alert('Les frais de ce modèle sont déjà présents dans le plan.');
+      return;
+    }
+    setForm({ ...form, template_id: '', custom_items: [...form.custom_items, ...toAdd] });
   };
 
   return (
@@ -499,9 +509,17 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
                 <select value="" onChange={e => onSelectTemplate(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg">
                   <option value="">Choisir un modèle à importer…</option>
-                  {templates.filter(t => t.academic_year === form.academic_year).map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
+                  {(() => {
+                    const sameYear = templates.filter(t => t.academic_year === form.academic_year);
+                    // Si aucun modèle pour l'année saisie, on montre tous les modèles
+                    // (le filtre par année exacte cachait les modèles → « non récupérés »).
+                    const list = sameYear.length ? sameYear : templates;
+                    return list.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}{t.academic_year !== form.academic_year ? ` (${t.academic_year})` : ''}
+                      </option>
+                    ));
+                  })()}
                 </select>
                 <p className="text-xs text-gray-500 mt-1">Les frais du modèle sont ajoutés ci-dessous, modifiables par élève.</p>
               </div>
