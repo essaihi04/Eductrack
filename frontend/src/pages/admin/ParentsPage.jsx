@@ -674,6 +674,23 @@ const ParentsPage = () => {
         body: JSON.stringify(f.global ? { global: true, rows, dryRun: isDry } : { class_id: f.classId, rows, dryRun: isDry })
       });
 
+      // Envoi d'un lot avec relance automatique (réseau / 5xx / timeout) → fiabilité.
+      const postChunkWithRetry = async (f, rows, attempts = 3) => {
+        for (let a = 1; a <= attempts; a++) {
+          try {
+            const res = await postChunk(f, rows, false);
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) return { ok: true, data };
+            // 5xx / 504 → on retente ; 4xx → inutile de retenter.
+            if (res.status < 500 || a === attempts) return { ok: false, error: data.error || `Erreur ${res.status}` };
+          } catch (e) {
+            if (a === attempts) return { ok: false, error: 'Erreur réseau' };
+          }
+          await new Promise(r => setTimeout(r, 800 * a)); // back-off progressif
+        }
+        return { ok: false, error: 'Échec après plusieurs tentatives' };
+      };
+
       // ---- DRY RUN : lecture seule + matching en mémoire → une requête par fichier (rapide). ----
       if (dryRun) {
         const updated = await Promise.all(importFiles.map(async (f) => {
@@ -695,24 +712,22 @@ const ParentsPage = () => {
       const commitFiles = ready; // déjà filtrés (vérifiés + prêts)
       const total = commitFiles.reduce((s, f) => s + f.rows.length, 0);
       setImportProgress({ done: 0, total });
-      let totalCommits = 0, totalMassar = 0;
+      let totalCommits = 0, totalMassar = 0, totalCreated = 0, totalReused = 0, failedChunks = 0;
       const resultByKey = {};
       for (const f of commitFiles) {
         const agg = { dryRun: false, results: [], commitsCount: 0, massarBackfilled: 0 };
         for (let i = 0; i < f.rows.length; i += COMMIT_CHUNK) {
           const chunk = f.rows.slice(i, i + COMMIT_CHUNK);
-          try {
-            const res = await postChunk(f, chunk, false);
-            const data = await res.json();
-            if (res.ok) {
-              if (Array.isArray(data.results)) agg.results.push(...data.results);
-              agg.commitsCount += data.commitsCount || 0;
-              agg.massarBackfilled += data.massarBackfilled || 0;
-            } else {
-              agg.error = data.error || 'Erreur';
-            }
-          } catch {
-            agg.error = 'Erreur réseau';
+          const { ok, data, error } = await postChunkWithRetry(f, chunk);
+          if (ok) {
+            if (Array.isArray(data.results)) agg.results.push(...data.results);
+            agg.commitsCount += data.commitsCount || 0;
+            agg.massarBackfilled += data.massarBackfilled || 0;
+            totalCreated += data.parentsCreated || 0;
+            totalReused += data.parentsReused || 0;
+          } else {
+            agg.error = error || 'Erreur';
+            failedChunks++;
           }
           setImportProgress(p => (p ? { ...p, done: p.done + chunk.length } : p));
         }
@@ -722,7 +737,12 @@ const ParentsPage = () => {
       }
       setImportFiles(prev => prev.map(f => resultByKey[f.key] ? { ...f, result: resultByKey[f.key] } : f));
       await fetchData();
-      alert(`Import terminé : ${totalCommits} association(s) créée(s).${totalMassar > 0 ? `\n${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : ''}`);
+      alert(
+        `Import terminé : ${totalCommits} association(s) créée(s).\n` +
+        `• ${totalCreated} compte(s) parent créé(s), ${totalReused} réutilisé(s) (même numéro = même compte).` +
+        (totalMassar > 0 ? `\n• ${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : '') +
+        (failedChunks > 0 ? `\n⚠ ${failedChunks} lot(s) en échec — relancez l'import pour les terminer (les associations déjà créées ne seront pas dupliquées).` : '')
+      );
     } finally {
       setImporting(false);
       setImportProgress(null);

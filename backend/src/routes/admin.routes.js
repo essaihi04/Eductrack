@@ -1254,6 +1254,8 @@ router.post('/parents/import', async (req, res) => {
     // Commit: only rows with matched + exact student id
     const commits = [];
     let massarBackfilled = 0;
+    let parentsCreated = 0;
+    let parentsReused = 0;
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
 
@@ -1315,6 +1317,9 @@ router.post('/parents/import', async (req, res) => {
           schoolId: getSchoolId(req)
         });
         parentId = parent.id;
+        parentsCreated++;
+      } else {
+        parentsReused++;
       }
 
       // Upsert de TOUS les contacts (le 1er = principal), avec libellé Père/Mère.
@@ -1355,7 +1360,7 @@ router.post('/parents/import', async (req, res) => {
       commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }
 
-    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled });
+    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled, parentsCreated, parentsReused });
   } catch (error) {
     console.error('Erreur import parents:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
