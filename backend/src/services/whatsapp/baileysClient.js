@@ -142,6 +142,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       entry.status = 'connected';
       entry.qr = null;
       entry.qrDataUrl = null;
+      entry.pairingCode = null;
       entry.reconnectAttempts = 0;
       entry.loggedOutRetried = false;
       // Récupère le numéro
@@ -306,6 +307,59 @@ export function getStatus(schoolId) {
 export function getQrDataUrl(schoolId) {
   const entry = sockets.get(schoolId);
   return entry?.qrDataUrl || null;
+}
+
+/**
+ * Code d'appairage (8 caractères) déjà généré pour cette école, le cas échéant.
+ */
+export function getPairingCode(schoolId) {
+  return sockets.get(schoolId)?.pairingCode || null;
+}
+
+/**
+ * Connexion par CODE (alternative au QR) — utile quand le scan échoue (iPhone).
+ * L'utilisateur saisit ce code dans WhatsApp → Appareils connectés →
+ * « Lier avec numéro de téléphone ».
+ * @param {string} schoolId
+ * @param {string} phone  numéro complet au format international (avec ou sans +)
+ */
+export async function requestPairingCode(schoolId, phone, { onIncoming } = {}) {
+  if (!schoolId) throw new Error('schoolId requis');
+  const clean = String(phone || '').replace(/[^\d]/g, '');
+  if (clean.length < 8) {
+    throw new Error('Numéro invalide. Utilisez le format international, ex : 2126XXXXXXXX');
+  }
+
+  let entry = getEntry(schoolId);
+  if (entry.status === 'connected') throw new Error('Session déjà connectée');
+
+  // Démarre la session si le socket n'est pas actif
+  if (!entry.sock || !['connecting', 'qr'].includes(entry.status)) {
+    await startSession(schoolId, { onIncoming });
+    entry = getEntry(schoolId);
+  }
+  const sock = entry.sock;
+  if (!sock) throw new Error('Impossible de démarrer la session');
+  if (sock.authState?.creds?.registered) throw new Error('Numéro déjà appairé');
+
+  // Le WebSocket doit être ouvert avant requestPairingCode → on réessaie ~12s.
+  let code = null;
+  let lastErr = null;
+  for (let i = 0; i < 8; i++) {
+    try {
+      code = await sock.requestPairingCode(clean);
+      if (code) break;
+    } catch (e) {
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  if (!code) throw lastErr || new Error('Impossible de générer le code, réessayez.');
+
+  entry.pairingCode = code;
+  entry.status = 'qr'; // en attente d'appairage (code ou QR)
+  console.log(`[baileys][${schoolId}] Code d'appairage généré pour ${clean}`);
+  return code;
 }
 
 /**

@@ -8,7 +8,7 @@
  * Les media sont téléchargés depuis URL puis envoyés en buffer.
  */
 
-import { getSocket, phoneToJid, checkNumberExists, getStatus, startSession, logoutSession, getQrDataUrl, bootstrapAllSessions } from './baileysClient.js';
+import { getSocket, phoneToJid, checkNumberExists, getStatus, startSession, logoutSession, getQrDataUrl, getPairingCode, requestPairingCode, bootstrapAllSessions } from './baileysClient.js';
 import {
   checkAllowed,
   waitHumanDelay,
@@ -176,6 +176,8 @@ export {
   logoutSession,
   getStatus,
   getQrDataUrl,
+  getPairingCode,
+  requestPairingCode,
   checkNumberExists,
   bootstrapAllSessions,
   ensureWarmupStarted,

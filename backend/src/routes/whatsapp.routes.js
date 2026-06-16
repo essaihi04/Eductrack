@@ -6,6 +6,7 @@ import { resolveCategoryForSending, allowedCategoriesForRole, canSeePedagogicalR
 import {
   sendText, sendImage, sendDocument, sendMediaBuffer,
   startSession, logoutSession, getStatus, getQrDataUrl,
+  requestPairingCode,
   getStats as getAntiBanStats,
 } from '../services/whatsapp/index.js';
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
@@ -1116,6 +1117,36 @@ router.get('/session-qr', async (req, res) => {
   } catch (error) {
     console.error('Erreur QR code:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// POST /session-pairing-code — connexion par CODE (alternative au QR).
+// Body : { phone }. Renvoie un code à 8 caractères à saisir dans WhatsApp →
+// Appareils connectés → « Lier avec numéro de téléphone ».
+router.post('/session-pairing-code', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    let { phone } = req.body || {};
+    // Repli : numéro enregistré sur la session si non fourni
+    if (!phone) {
+      const { data: row } = await supabaseAdmin
+        .from('whatsapp_school_sessions')
+        .select('phone_number')
+        .eq('school_id', schoolId)
+        .maybeSingle();
+      phone = row?.phone_number || null;
+    }
+    if (!phone) {
+      return res.status(400).json({ error: 'Numéro de téléphone requis (format international, ex : +212600000000)' });
+    }
+
+    const code = await requestPairingCode(schoolId, phone, { onIncoming: handleBaileysIncoming });
+    res.json({ success: true, code });
+  } catch (error) {
+    console.error('Erreur code appairage:', error);
+    res.status(400).json({ success: false, error: error.message || 'Impossible de générer le code' });
   }
 });
 

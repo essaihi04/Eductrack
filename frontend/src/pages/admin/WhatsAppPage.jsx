@@ -121,6 +121,12 @@ const WhatsAppPage = () => {
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState('');
   const lastQrSrcRef = useRef(null); // dernière source QR affichée (anti-clignotement)
+  // Connexion par code (alternative au QR, utile sur iPhone)
+  const [showPairing, setShowPairing] = useState(false);
+  const [pairingPhone, setPairingPhone] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
+  const [pairingLoading, setPairingLoading] = useState(false);
+  const [pairingError, setPairingError] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [newSessionPhone, setNewSessionPhone] = useState('');
@@ -689,6 +695,26 @@ const WhatsAppPage = () => {
       if (!silent) setQrError('Erreur de connexion');
     } finally { if (!silent) setQrLoading(false); }
   }, [apiUrl]);
+
+  // Connexion par code (alternative au QR) — saisie du numéro → code à 8 car.
+  const requestPairing = useCallback(async () => {
+    const phone = (pairingPhone || sessionStatus?.session?.phone || '').trim();
+    if (!phone) { setPairingError('Entrez le numéro WhatsApp (format international, ex : +212600000000)'); return; }
+    setPairingLoading(true); setPairingError(''); setPairingCode('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-pairing-code`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      });
+      const data = await res.json();
+      if (data.success && data.code) setPairingCode(data.code);
+      else setPairingError(data.error || 'Impossible de générer le code');
+    } catch (e) {
+      setPairingError('Erreur de connexion au serveur');
+    } finally { setPairingLoading(false); }
+  }, [apiUrl, pairingPhone, sessionStatus]);
 
   // Booléen stable : true si on doit poller la connexion (évite que les timers
   // se réinitialisent à chaque rafraîchissement de sessionStatus).
@@ -2828,6 +2854,40 @@ const WhatsAppPage = () => {
                         Android : Menu (⋮) · iPhone : Réglages ⚙️ → <strong>Appareils connectés</strong> → <strong>Connecter un appareil</strong>
                       </p>
                       <p className="text-[11px] text-gray-400 mt-1">Scannez depuis WhatsApp (pas l'app Appareil photo). Augmentez la luminosité de l'écran.</p>
+                    </div>
+
+                    {/* Alternative : connexion par code (iPhone qui ne scanne pas) */}
+                    <div className="w-full max-w-sm border-t border-gray-200 pt-3">
+                      {!showPairing ? (
+                        <button onClick={() => { setShowPairing(true); setPairingPhone(sessionStatus?.session?.phone || ''); }}
+                          className="text-sm text-green-700 hover:underline">
+                          📱 Le QR ne se scanne pas ? Se connecter avec un code
+                        </button>
+                      ) : (
+                        <div className="space-y-2 text-left">
+                          <label className="block text-xs font-semibold text-gray-700">Numéro WhatsApp (format international)</label>
+                          <div className="flex gap-2">
+                            <input type="text" value={pairingPhone} onChange={e => setPairingPhone(e.target.value)}
+                              placeholder="+212600000000"
+                              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+                            <button onClick={requestPairing} disabled={pairingLoading}
+                              className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
+                              {pairingLoading ? '…' : 'Obtenir le code'}
+                            </button>
+                          </div>
+                          {pairingError && <p className="text-xs text-red-600">{pairingError}</p>}
+                          {pairingCode && (
+                            <div className="text-center bg-green-50 border border-green-200 rounded-lg p-3">
+                              <p className="text-xs text-gray-600 mb-1">Saisissez ce code dans WhatsApp :</p>
+                              <p className="text-2xl font-bold tracking-widest text-green-800 select-all">{pairingCode}</p>
+                              <p className="text-[11px] text-gray-500 mt-2">
+                                WhatsApp → <strong>Appareils connectés</strong> → <strong>Connecter un appareil</strong> →
+                                <strong> Lier avec numéro de téléphone</strong> → entrez ce code.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : qrError ? (
