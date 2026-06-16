@@ -473,7 +473,7 @@ router.get('/parents', async (req, res) => {
     const [{ data: links, error: linksError }, { data: contacts, error: contactsError }] = await Promise.all([
       supabaseAdmin
         .from('parent_students')
-        .select('parent_id, student_id, relationship, student:profiles!parent_students_student_id_fkey(id, first_name, last_name, class_id, classes:classes!fk_profiles_class(name, level))')
+        .select('parent_id, student_id, relationship, student:profiles!parent_students_student_id_fkey(id, first_name, last_name, class_id, classes:classes!fk_profiles_class(name, level, filiere))')
         .in('parent_id', parentIds),
       supabaseAdmin
         .from('parent_contacts')

@@ -3,6 +3,18 @@ import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronU
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import * as XLSX from 'xlsx';
 
+// Libellés lisibles des filières (lycée). Sert au filtre « Filière » de la page Parents.
+const FILIERE_LABELS = {
+  tc_sciences: 'TC Sciences', tc_lettres: 'TC Lettres', tc_tech: 'TC Technologique',
+  sciences_exp: 'Sciences Expérimentales', sciences_math: 'Sciences Mathématiques',
+  sciences_eco: 'Sciences Éco. et Gestion', ste: 'Sciences et Tech. Électriques',
+  stm: 'Sciences et Tech. Mécaniques', lettres: 'Lettres et Sciences Humaines',
+  svt: 'SVT', pc: 'Sciences Physiques (PC)', sciences_math_a: 'Sciences Math A',
+  sciences_math_b: 'Sciences Math B', eco: 'Sciences Économiques',
+  sciences_gestion: 'Sciences de Gestion Comptable', sciences_humaines: 'Sciences Humaines',
+};
+const filiereLabel = (v) => FILIERE_LABELS[v] || v || '';
+
 // Validation stricte d'un mobile marocain (06/07) → +2126…/+2127… ou null.
 // Le fichier officiel Massar met parfois une adresse dans la colonne téléphone.
 const validMoroccoMobile = (raw) => {
@@ -286,6 +298,7 @@ const ParentsPage = () => {
   const [expandedParent, setExpandedParent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('');
+  const [filterFiliere, setFilterFiliere] = useState('');
 
   // Create parent form
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -900,8 +913,9 @@ const ParentsPage = () => {
     const matchSearch = !searchTerm || name.includes(searchTerm.toLowerCase()) || phone.includes(searchTerm.toLowerCase());
 
     const matchClass = !filterClass || (p.children || []).some(c => c.class?.name === filterClass);
+    const matchFiliere = !filterFiliere || (p.children || []).some(c => c.class?.filiere === filterFiliere);
 
-    return matchSearch && matchClass;
+    return matchSearch && matchClass && matchFiliere;
   });
 
   // Options de classes : TOUTES les classes (pas seulement celles ayant déjà un parent),
@@ -909,6 +923,22 @@ const ParentsPage = () => {
   const classOptions = [...classes]
     .filter(c => c?.name)
     .sort((a, b) => String(a.level || '').localeCompare(String(b.level || '')) || a.name.localeCompare(b.name));
+
+  // Options de filières présentes dans l'école (classes ayant une filière renseignée).
+  const filiereOptions = [...new Set(classes.map(c => c?.filiere).filter(Boolean))]
+    .sort((a, b) => filiereLabel(a).localeCompare(filiereLabel(b)));
+
+  // Répartition des parents (filtrés) par nombre d'enfants : 1 / 2 / 3 / 4+.
+  const childrenDistribution = filteredParents.reduce((acc, p) => {
+    const n = (p.children || []).length;
+    if (n <= 0) acc.zero += 1;
+    else if (n === 1) acc.one += 1;
+    else if (n === 2) acc.two += 1;
+    else if (n === 3) acc.three += 1;
+    else acc.fourPlus += 1;
+    return acc;
+  }, { zero: 0, one: 0, two: 0, three: 0, fourPlus: 0 });
+  const distribTotal = childrenDistribution.one + childrenDistribution.two + childrenDistribution.three + childrenDistribution.fourPlus;
 
   // Map élève → parents liés (pour savoir qui a un parent / un numéro)
   const studentParentMap = new Map();
@@ -1338,6 +1368,18 @@ const ParentsPage = () => {
             className="w-full pl-10 pr-4 py-2 border rounded-lg bg-background"
           />
         </div>
+        {filiereOptions.length > 0 && (
+          <select
+            value={filterFiliere}
+            onChange={e => setFilterFiliere(e.target.value)}
+            className="px-3 py-2 border rounded-lg bg-background"
+          >
+            <option value="">Toutes les filières</option>
+            {filiereOptions.map(f => (
+              <option key={f} value={f}>{filiereLabel(f)}</option>
+            ))}
+          </select>
+        )}
         {classOptions.length > 0 && (
           <select
             value={filterClass}
@@ -1379,6 +1421,58 @@ const ParentsPage = () => {
           <p className="text-xs text-muted-foreground">{pct(stats.withoutPhone)}%</p>
         </div>
       </div>
+
+      {/* Répartition des parents par nombre d'enfants */}
+      {distribTotal > 0 && (() => {
+        const buckets = [
+          { key: 'one', label: '1 enfant', value: childrenDistribution.one, color: 'bg-sky-500', text: 'text-sky-600' },
+          { key: 'two', label: '2 enfants', value: childrenDistribution.two, color: 'bg-violet-500', text: 'text-violet-600' },
+          { key: 'three', label: '3 enfants', value: childrenDistribution.three, color: 'bg-amber-500', text: 'text-amber-600' },
+          { key: 'fourPlus', label: '4 enfants et +', value: childrenDistribution.fourPlus, color: 'bg-rose-500', text: 'text-rose-600' },
+        ];
+        const dpct = (n) => Math.round((n / distribTotal) * 100);
+        return (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold">Répartition des parents par nombre d'enfants</p>
+                <p className="text-xs text-muted-foreground">{distribTotal} parent(s) avec enfant{filterFiliere ? ` · ${filiereLabel(filterFiliere)}` : ''}{filterClass ? ` · ${filterClass}` : ''}</p>
+              </div>
+
+              {/* Tuiles */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {buckets.map(b => (
+                  <div key={b.key} className="rounded-lg border bg-card p-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block w-2.5 h-2.5 rounded-full ${b.color}`} />
+                      <p className="text-xs text-muted-foreground">{b.label}</p>
+                    </div>
+                    <p className={`text-2xl font-bold ${b.text}`}>{b.value}</p>
+                    <p className="text-xs text-muted-foreground">{dpct(b.value)}%</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Barre proportionnelle segmentée */}
+              <div className="w-full h-3 rounded-full overflow-hidden flex bg-muted">
+                {buckets.map(b => b.value > 0 && (
+                  <div
+                    key={b.key}
+                    className={b.color}
+                    style={{ width: `${dpct(b.value)}%` }}
+                    title={`${b.label} : ${b.value} (${dpct(b.value)}%)`}
+                  />
+                ))}
+              </div>
+              {childrenDistribution.zero > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  + {childrenDistribution.zero} parent(s) sans enfant associé (non comptés dans la répartition).
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Parents List */}
       {filteredParents.length === 0 ? (
