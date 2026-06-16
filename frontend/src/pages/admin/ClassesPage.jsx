@@ -1237,18 +1237,23 @@ const ClassesPage = () => {
             let firstName = '';
             let lastName = '';
 
+            // Libellés d'en-tête EXACTS à exclure (et non en sous-chaîne : un vrai
+            // prénom comme « اسماعيل » commence par « اسم » et était filtré à tort).
+            const HEADER_FIRST = ['الإسم', 'الاسم', 'إسم', 'اسم', 'إسم التلميذ', 'اسم التلميذ'];
+            const HEADER_LAST = ['النسب', 'نسب'];
+
             // Format 2: Separate first name and last name columns (الإسم and النسب)
             if (lastNameColIndex !== -1 && studentNameColIndex !== -1) {
               const firstNameCell = row[studentNameColIndex];
               const lastNameCell = row[lastNameColIndex];
 
               if (firstNameCell && typeof firstNameCell === 'string' && firstNameCell.trim() &&
-                  !firstNameCell.includes('الإسم') && !firstNameCell.includes('اسم')) {
+                  !HEADER_FIRST.includes(firstNameCell.trim())) {
                 firstName = firstNameCell.trim();
               }
 
               if (lastNameCell && typeof lastNameCell === 'string' && lastNameCell.trim() &&
-                  !lastNameCell.includes('النسب') && !lastNameCell.includes('نسب')) {
+                  !HEADER_LAST.includes(lastNameCell.trim())) {
                 lastName = lastNameCell.trim();
               }
             }
@@ -1257,7 +1262,7 @@ const ClassesPage = () => {
               const studentName = row[studentNameColIndex];
 
               if (studentName && typeof studentName === 'string' && studentName.trim() &&
-                  !studentName.includes('إسم') && !studentName.includes('اسم')) {
+                  !HEADER_FIRST.includes(studentName.trim())) {
                 const fullName = studentName.trim();
                 const nameParts = fullName.split(/\s+/);
 
