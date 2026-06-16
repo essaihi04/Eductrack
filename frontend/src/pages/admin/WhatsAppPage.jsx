@@ -2818,10 +2818,16 @@ const WhatsAppPage = () => {
                   <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div></div>
                 ) : qrCode ? (
                   <div className="flex flex-col items-center gap-4">
-                    <div className="p-4 bg-white border-2 border-gray-200 rounded-xl"><img src={qrCode} alt="QR Code" className="w-80 h-80" style={{ imageRendering: 'pixelated' }} /></div>
+                    {/* Pas de imageRendering:pixelated : le downscale 512→320 en
+                        nearest-neighbor déforme les modules et empêche le scan
+                        sur iPhone (scanner iOS plus exigeant). Rendu lisse = net. */}
+                    <div className="p-4 bg-white border-2 border-gray-200 rounded-xl"><img src={qrCode} alt="QR Code" className="w-80 h-80" /></div>
                     <div className="text-center">
-                      <p className="text-sm text-gray-700 font-medium">Scannez avec WhatsApp</p>
-                      <p className="text-xs text-gray-500 mt-1">Menu (⋮) → Appareils connectés → Connecter</p>
+                      <p className="text-sm text-gray-700 font-medium">Scannez avec l'application WhatsApp</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Android : Menu (⋮) · iPhone : Réglages ⚙️ → <strong>Appareils connectés</strong> → <strong>Connecter un appareil</strong>
+                      </p>
+                      <p className="text-[11px] text-gray-400 mt-1">Scannez depuis WhatsApp (pas l'app Appareil photo). Augmentez la luminosité de l'écran.</p>
                     </div>
                   </div>
                 ) : qrError ? (
