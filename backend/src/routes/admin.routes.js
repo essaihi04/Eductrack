@@ -1178,7 +1178,9 @@ router.post('/parents/import', async (req, res) => {
     });
     // Index par code Massar (clé fiable du fichier officiel Massar « Tuteur »)
     const byMassar = new Map();
+    const byId = new Map();
     for (const s of studentsIndex) {
+      byId.set(s.id, s);
       const code = String(s.massar_code || '').trim().toUpperCase();
       if (code) byMassar.set(code, s);
     }
@@ -1201,9 +1203,13 @@ router.post('/parents/import', async (req, res) => {
         continue;
       }
 
-      // 1) Matching prioritaire par code Massar (fiable, sans ambiguïté de nom)
+      // 0) Élève assigné manuellement depuis l'aperçu (résolution des « non trouvés »).
       let matches = [];
-      if (massarRaw && byMassar.has(massarRaw)) {
+      const forcedId = row?.student_id;
+      if (forcedId && byId.has(forcedId)) {
+        matches = [byId.get(forcedId)];
+      } else if (massarRaw && byMassar.has(massarRaw)) {
+        // 1) Matching prioritaire par code Massar (fiable, sans ambiguïté de nom)
         matches = [byMassar.get(massarRaw)];
       } else if (studentFullNameRaw) {
         // 2) Repli sur le nom complet normalisé

@@ -233,6 +233,46 @@ const parseKoolSchool = (workbook) => {
   return rows.length ? { rows } : null;
 };
 
+// Sélecteur d'élève recherchable, pour résoudre manuellement les lignes « non trouvées ».
+// `students` = liste candidate ; `value` = id sélectionné ; `onChange(id)`.
+const StudentPicker = ({ students, value, onChange }) => {
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const selected = students.find(s => s.id === value);
+  const needle = search.trim().toLowerCase();
+  const matches = needle
+    ? students.filter(s => `${s.last_name || ''} ${s.first_name || ''}`.toLowerCase().includes(needle)).slice(0, 12)
+    : students.slice(0, 12);
+
+  return (
+    <div className="relative flex-1 min-w-0">
+      <input
+        type="text"
+        value={open ? search : (selected ? `${selected.last_name || ''} ${selected.first_name || ''}`.trim() : search)}
+        onChange={e => { setSearch(e.target.value); setOpen(true); }}
+        onFocus={() => { setSearch(''); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Rechercher un élève…"
+        className={`w-full px-2 py-1 border rounded text-sm bg-background ${selected ? 'border-green-500' : ''}`}
+      />
+      {open && matches.length > 0 && (
+        <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-popover border rounded-lg shadow-lg">
+          {matches.map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onMouseDown={() => { onChange(s.id); setOpen(false); }}
+              className="w-full text-left px-2 py-1 text-sm hover:bg-accent"
+            >
+              {s.last_name} {s.first_name}{s.class?.name ? <span className="text-muted-foreground"> · {s.class.name}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ParentsPage = () => {
   const [parents, setParents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -561,6 +601,15 @@ const ParentsPage = () => {
 
   const setImportFileClass = (key, classId) =>
     setImportFiles(prev => prev.map(f => f.key === key ? { ...f, classId, result: null } : f));
+
+  // Assigne manuellement un élève à une ligne (résolution des « non trouvés »).
+  // On garde le résultat affiché : la ligne reste visible tant qu'on n'a pas re-vérifié.
+  const setRowStudent = (key, rowIdx, studentId) =>
+    setImportFiles(prev => prev.map(f => {
+      if (f.key !== key) return f;
+      const rows = f.rows.map((r, i) => i === rowIdx ? { ...r, student_id: studentId || undefined } : r);
+      return { ...f, rows };
+    }));
 
   const removeImportFile = (key) =>
     setImportFiles(prev => prev.filter(f => f.key !== key));
@@ -1115,6 +1164,45 @@ const ParentsPage = () => {
                           {committed && <span className="text-green-700 font-medium">{f.result.commitsCount} association(s) créée(s)</span>}
                         </div>
                       )}
+
+                      {/* Résolution manuelle des lignes non trouvées / ambiguës */}
+                      {f.result?.results && !committed && (notFound + ambiguous > 0) && (() => {
+                        // Élèves candidats : ceux de la classe cible, ou toute l'école (liste globale).
+                        const candidates = f.global
+                          ? students
+                          : students.filter(s => s.class_id === f.classId);
+                        const candidatesSorted = [...candidates].sort((a, b) =>
+                          `${a.last_name || ''} ${a.first_name || ''}`.localeCompare(`${b.last_name || ''} ${b.first_name || ''}`));
+                        return (
+                          <div className="border border-amber-300 rounded-lg p-2 bg-amber-50/60 dark:bg-amber-950/20 space-y-2">
+                            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                              Associer manuellement les élèves non trouvés ({notFound + ambiguous}), puis re-cliquez sur « Vérifier les correspondances » :
+                            </p>
+                            {f.rows.map((row, idx) => {
+                              const result = f.result.results[idx];
+                              if (!result || (result.matchStatus !== 'not_found' && result.matchStatus !== 'ambiguous')) return null;
+                              const phones = row.contacts?.length ? row.contacts.map(c => c.phone).join(', ') : row.phone_1;
+                              const assigned = row.student_id ? students.find(s => s.id === row.student_id) : null;
+                              return (
+                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                  <div className="sm:w-1/3 min-w-0 text-sm">
+                                    <span className="font-medium truncate">{row.student_full_name || '(sans nom)'}</span>
+                                    <span className="text-muted-foreground text-xs block truncate">{phones}</span>
+                                  </div>
+                                  <StudentPicker
+                                    students={candidatesSorted}
+                                    value={row.student_id}
+                                    onChange={(id) => setRowStudent(f.key, idx, id)}
+                                  />
+                                  {assigned && (
+                                    <span className="text-xs text-green-600 shrink-0">✓ à re-vérifier</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
                 </div>
