@@ -324,6 +324,7 @@ const ParentsPage = () => {
   // importFiles: [{ key, fileName, className, classId, rows, source, result, error }]
   const [importFiles, setImportFiles] = useState([]);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(null); // { done, total } pendant le commit
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -653,6 +654,10 @@ const ParentsPage = () => {
   // Un fichier est « prêt » s'il a des lignes et (soit une classe cible, soit le mode global).
   const isFileReady = (f) => f.rows.length > 0 && (f.global || f.classId);
 
+  // Taille d'un lot de commit : chaque ligne crée un compte parent (lent), donc on
+  // découpe pour rester sous le timeout du serveur et alimenter la barre de progression.
+  const COMMIT_CHUNK = 20;
+
   const runImport = async (dryRun) => {
     const ready = importFiles.filter(f => isFileReady(f) && (dryRun || f.result?.dryRun));
     if (ready.length === 0) {
@@ -663,32 +668,64 @@ const ParentsPage = () => {
     setImporting(true);
     try {
       const token = await getToken();
-      let totalCommits = 0;
-      let totalMassar = 0;
-      const updated = await Promise.all(importFiles.map(async (f) => {
-        if (!isFileReady(f)) return f;
-        if (!dryRun && !f.result?.dryRun) return f; // ne commit que les fichiers vérifiés
-        try {
-          const res = await fetch(`${apiUrl}/api/admin/parents/import`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(f.global ? { global: true, rows: f.rows, dryRun } : { class_id: f.classId, rows: f.rows, dryRun })
-          });
-          const data = await res.json();
-          if (!res.ok) return { ...f, result: { error: data.error || 'Erreur' } };
-          if (!dryRun) { totalCommits += data.commitsCount || 0; totalMassar += data.massarBackfilled || 0; }
-          return { ...f, result: data };
-        } catch {
-          return { ...f, result: { error: 'Erreur réseau' } };
-        }
-      }));
-      setImportFiles(updated);
-      if (!dryRun) {
-        await fetchData();
-        alert(`Import terminé : ${totalCommits} association(s) créée(s).${totalMassar > 0 ? `\n${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : ''}`);
+      const postChunk = (f, rows, isDry) => fetch(`${apiUrl}/api/admin/parents/import`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(f.global ? { global: true, rows, dryRun: isDry } : { class_id: f.classId, rows, dryRun: isDry })
+      });
+
+      // ---- DRY RUN : lecture seule + matching en mémoire → une requête par fichier (rapide). ----
+      if (dryRun) {
+        const updated = await Promise.all(importFiles.map(async (f) => {
+          if (!isFileReady(f)) return f;
+          try {
+            const res = await postChunk(f, f.rows, true);
+            const data = await res.json();
+            if (!res.ok) return { ...f, result: { error: data.error || 'Erreur' } };
+            return { ...f, result: data };
+          } catch {
+            return { ...f, result: { error: 'Erreur réseau' } };
+          }
+        }));
+        setImportFiles(updated);
+        return;
       }
+
+      // ---- COMMIT : découpé en lots séquentiels, avec barre de progression. ----
+      const commitFiles = ready; // déjà filtrés (vérifiés + prêts)
+      const total = commitFiles.reduce((s, f) => s + f.rows.length, 0);
+      setImportProgress({ done: 0, total });
+      let totalCommits = 0, totalMassar = 0;
+      const resultByKey = {};
+      for (const f of commitFiles) {
+        const agg = { dryRun: false, results: [], commitsCount: 0, massarBackfilled: 0 };
+        for (let i = 0; i < f.rows.length; i += COMMIT_CHUNK) {
+          const chunk = f.rows.slice(i, i + COMMIT_CHUNK);
+          try {
+            const res = await postChunk(f, chunk, false);
+            const data = await res.json();
+            if (res.ok) {
+              if (Array.isArray(data.results)) agg.results.push(...data.results);
+              agg.commitsCount += data.commitsCount || 0;
+              agg.massarBackfilled += data.massarBackfilled || 0;
+            } else {
+              agg.error = data.error || 'Erreur';
+            }
+          } catch {
+            agg.error = 'Erreur réseau';
+          }
+          setImportProgress(p => (p ? { ...p, done: p.done + chunk.length } : p));
+        }
+        totalCommits += agg.commitsCount;
+        totalMassar += agg.massarBackfilled;
+        resultByKey[f.key] = agg;
+      }
+      setImportFiles(prev => prev.map(f => resultByKey[f.key] ? { ...f, result: resultByKey[f.key] } : f));
+      await fetchData();
+      alert(`Import terminé : ${totalCommits} association(s) créée(s).${totalMassar > 0 ? `\n${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : ''}`);
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -1221,29 +1258,47 @@ const ParentsPage = () => {
               const anyDry = importFiles.some(f => f.result?.dryRun);
               const anyCommitted = importFiles.some(f => f.result && f.result.commitsCount != null && !f.result.dryRun);
               return (
-                <div className="flex flex-wrap gap-2 pt-1 border-t">
-                  <button
-                    onClick={handleImportDryRun}
-                    disabled={importing || ready.length === 0}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {importing ? 'Vérification...' : `Vérifier les correspondances (${ready.length} fichier${ready.length > 1 ? 's' : ''})`}
-                  </button>
-                  {anyDry && !anyCommitted && totalMatched > 0 && (
-                    <button
-                      onClick={handleImportCommit}
-                      disabled={importing}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                    >
-                      {importing ? 'Import en cours...' : `Confirmer l'import (${totalMatched} parent(s))`}
-                    </button>
+                <div className="pt-1 border-t space-y-3">
+                  {/* Barre de progression du commit (par lots) */}
+                  {importProgress && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Import en cours… {importProgress.done}/{importProgress.total}</span>
+                        <span>{Math.round((importProgress.done / Math.max(importProgress.total, 1)) * 100)}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-green-600 transition-all duration-300"
+                          style={{ width: `${Math.round((importProgress.done / Math.max(importProgress.total, 1)) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
                   )}
-                  <button
-                    onClick={() => setImportFiles([])}
-                    className="px-4 py-2 border rounded-lg hover:bg-accent"
-                  >
-                    Tout effacer
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={handleImportDryRun}
+                      disabled={importing || ready.length === 0}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {importing && !importProgress ? 'Vérification...' : `Vérifier les correspondances (${ready.length} fichier${ready.length > 1 ? 's' : ''})`}
+                    </button>
+                    {anyDry && !anyCommitted && totalMatched > 0 && (
+                      <button
+                        onClick={handleImportCommit}
+                        disabled={importing}
+                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {importProgress ? 'Import en cours...' : `Confirmer l'import (${totalMatched} parent(s))`}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setImportFiles([])}
+                      disabled={importing}
+                      className="px-4 py-2 border rounded-lg hover:bg-accent disabled:opacity-50"
+                    >
+                      Tout effacer
+                    </button>
+                  </div>
                 </div>
               );
             })()}
