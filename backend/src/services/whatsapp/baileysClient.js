@@ -77,12 +77,7 @@ const MAX_LOGGED_OUT_RETRIES = 6;
 /**
  * Démarre (ou redémarre) une session pour une école.
  */
-// Intervalle minimum entre deux (re)démarrages d'une même session. Empêche le
-// polling frontend (/session-qr toutes les 3s) de relancer la connexion en
-// boucle pendant un flap 401 → matraquage WhatsApp = risque de ban.
-const MIN_START_INTERVAL_MS = 15_000;
-
-export async function startSession(schoolId, { onIncoming, force = false } = {}) {
+export async function startSession(schoolId, { onIncoming } = {}) {
   if (!schoolId) throw new Error('schoolId requis');
   const entry = getEntry(schoolId);
 
@@ -90,13 +85,6 @@ export async function startSession(schoolId, { onIncoming, force = false } = {})
   if (entry.sock && (entry.status === 'connecting' || entry.status === 'connected' || entry.status === 'qr')) {
     return entry;
   }
-
-  // Cooldown : sauf relance explicite (force), on ne redémarre pas une session
-  // qui vient d'être tentée il y a moins de MIN_START_INTERVAL_MS.
-  if (!force && entry.lastStartAt && (Date.now() - entry.lastStartAt) < MIN_START_INTERVAL_MS) {
-    return entry;
-  }
-  entry.lastStartAt = Date.now();
 
   entry.status = 'connecting';
   entry.lastError = null;
@@ -215,7 +203,7 @@ export async function startSession(schoolId, { onIncoming, force = false } = {})
         entry.loggedOutAttempts = 0;
         // Délai plus long pour éviter que creds.update ne soit pas encore flushé
         // sur disque (cause majoritaire des 401 post-restart en boucle).
-        setTimeout(() => startSession(schoolId, { onIncoming, force: true }), 3000);
+        setTimeout(() => startSession(schoolId, { onIncoming }), 3000);
         return;
       }
 
@@ -231,7 +219,7 @@ export async function startSession(schoolId, { onIncoming, force = false } = {})
           const delay = loggedOutRetryDelay(entry.loggedOutAttempts - 1);
           entry.status = 'disconnected';
           console.log(`[baileys][${schoolId}] ⚠️ 401 (tentative ${entry.loggedOutAttempts}/${MAX_LOGGED_OUT_RETRIES}) — retry dans ${delay}ms (auth conservé)`);
-          setTimeout(() => startSession(schoolId, { onIncoming, force: true }), delay);
+          setTimeout(() => startSession(schoolId, { onIncoming }), delay);
           return;
         }
 
@@ -253,7 +241,7 @@ export async function startSession(schoolId, { onIncoming, force = false } = {})
       entry.reconnectAttempts += 1;
       const delay = reconnectDelay(entry.reconnectAttempts);
       console.log(`[baileys][${schoolId}] Reconnexion dans ${delay}ms (tentative ${entry.reconnectAttempts})`);
-      setTimeout(() => startSession(schoolId, { onIncoming, force: true }), delay);
+      setTimeout(() => startSession(schoolId, { onIncoming }), delay);
     }
   });
 
@@ -347,7 +335,7 @@ export async function requestPairingCode(schoolId, phone, { onIncoming } = {}) {
 
   // Démarre la session si le socket n'est pas actif
   if (!entry.sock || !['connecting', 'qr'].includes(entry.status)) {
-    await startSession(schoolId, { onIncoming, force: true });
+    await startSession(schoolId, { onIncoming });
     entry = getEntry(schoolId);
   }
   const sock = entry.sock;
@@ -456,7 +444,7 @@ export async function bootstrapAllSessions(onIncoming) {
     if (!fs.existsSync(authDir)) continue; // pas encore appairé
     try {
       console.log(`[baileys] bootstrap ${schoolId} (auth présent)`);
-      await startSession(schoolId, { onIncoming, force: true });
+      await startSession(schoolId, { onIncoming });
     } catch (e) {
       console.error(`[baileys] bootstrap ${schoolId}:`, e.message);
     }

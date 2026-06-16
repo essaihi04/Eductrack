@@ -1095,15 +1095,8 @@ router.get('/session-qr', async (req, res) => {
     if (status.connected) {
       return res.json({ success: false, error: 'Session déjà connectée, pas besoin de QR code', connected: true });
     }
-    // force=1 → relance explicite par l'utilisateur (bouton « Obtenir le QR »).
-    // Le polling silencieux (toutes les 3s) n'envoie PAS force → il ne relance
-    // jamais une session en pause 'needs_reconnect' (anti-matraquage WhatsApp).
-    const force = req.query.force === '1' || req.query.force === 'true';
-    const restartStates = force
-      ? ['disconnected', 'logged_out', 'needs_reconnect']
-      : ['disconnected', 'logged_out'];
-    if (restartStates.includes(status.status)) {
-      await startSession(schoolId, { onIncoming: handleBaileysIncoming, force });
+    if (['disconnected', 'logged_out', 'needs_reconnect'].includes(status.status)) {
+      await startSession(schoolId, { onIncoming: handleBaileysIncoming });
     }
 
     // Polling : attend max 15s qu'un QR soit généré

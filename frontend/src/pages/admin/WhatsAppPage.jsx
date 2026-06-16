@@ -671,10 +671,7 @@ const WhatsAppPage = () => {
     if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); lastQrSrcRef.current = null; }
     try {
       const token = await getAuthToken();
-      // force=1 seulement sur action manuelle (bouton) — jamais sur le polling
-      // silencieux, pour ne pas relancer en boucle une session en pause.
-      const url = `${apiUrl}/api/admin/whatsapp/session-qr${silent ? '' : '?force=1'}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       // Nouveau backend Baileys : retourne qrDataUrl (image PNG déjà encodée)
       // Ancien backend Wasender : retournait qrString (texte brut à transformer)
