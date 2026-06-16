@@ -1144,8 +1144,10 @@ router.post('/sessions', async (req, res) => {
       try { await logoutSession(schoolId); } catch (e) { console.warn('purge logout:', e.message); }
     }
 
-    // Crée/maj le mapping en DB
-    await supabaseAdmin
+    // Crée/maj le mapping en DB. On NE laisse PAS l'erreur silencieuse : si la
+    // colonne héritée wasender_session_id est encore NOT NULL (ou autre souci
+    // de schéma), l'INSERT échoue et le nom/numéro « disparaissent » au scan.
+    const { error: upErr } = await supabaseAdmin
       .from('whatsapp_school_sessions')
       .upsert({
         school_id: schoolId,
@@ -1155,6 +1157,13 @@ router.post('/sessions', async (req, res) => {
         status: 'connecting',
         updated_at: new Date().toISOString(),
       }, { onConflict: 'school_id' });
+    if (upErr) {
+      console.error('[whatsapp] upsert session échoué:', upErr.message);
+      return res.status(500).json({
+        error: 'Impossible d\'enregistrer la session. Vérifiez la migration de la table whatsapp_school_sessions (wasender_session_id doit être nullable).',
+        details: upErr.message,
+      });
+    }
 
     // Démarre la session Baileys (callback chatbot pour les messages entrants)
     await startSession(schoolId, { onIncoming: handleBaileysIncoming });
