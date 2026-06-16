@@ -181,20 +181,22 @@ const parseKoolSchool = (workbook) => {
   const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
   // Repérer l'en-tête : une ligne contenant « code massar » ET « tél parent 1 ».
-  let headerIdx = -1, colCode = -1, colName = -1, colPhone1 = -1, colPhone2 = -1;
+  let headerIdx = -1, colCode = -1, colName = -1, colNameAr = -1, colPhone1 = -1, colPhone2 = -1;
   for (let i = 0; i < Math.min(raw.length, 30); i++) {
     const row = raw[i] || [];
-    let code = -1, name = -1, p1 = -1, p2 = -1;
+    let code = -1, name = -1, nameAr = -1, p1 = -1, p2 = -1;
     for (let j = 0; j < row.length; j++) {
       const cell = String(row[j] || '').trim().toLowerCase();
       if (!cell) continue;
       if (code === -1 && cell.includes('code massar')) code = j;
+      // « Nom et prénom (ar) » → colonne arabe ; « Nom et prénom » → colonne latine.
+      else if (cell.includes('nom et pr') && (cell.includes('(ar)') || cell.includes('ar)'))) nameAr = j;
       else if (cell === 'nom et prénom' || cell === 'nom et prenom') name = j;
       else if (cell.includes('parent 1') || cell.includes('parent1')) p1 = j;
       else if (cell.includes('parent 2') || cell.includes('parent2')) p2 = j;
     }
     if (code !== -1 && p1 !== -1) {
-      headerIdx = i; colCode = code; colName = name; colPhone1 = p1; colPhone2 = p2;
+      headerIdx = i; colCode = code; colName = name; colNameAr = nameAr; colPhone1 = p1; colPhone2 = p2;
       break;
     }
   }
@@ -207,6 +209,7 @@ const parseKoolSchool = (workbook) => {
     const massar = String(r[colCode] || '').trim().toUpperCase();
     if (!massar) continue;
     const studentName = colName !== -1 ? String(r[colName] || '').trim() : '';
+    const studentNameAr = colNameAr !== -1 ? String(r[colNameAr] || '').trim() : '';
 
     // Le fichier ne fournit pas de nom de parent → on utilise le nom de l'élève (la famille).
     const seen = new Set();
@@ -223,7 +226,9 @@ const parseKoolSchool = (workbook) => {
     rows.push({
       massar_code: massar,
       student_full_name: studentName,
-      parent_full_name: studentName,
+      student_full_name_ar: studentNameAr || undefined,
+      // Nom du parent = nom de l'élève (FR si dispo, sinon AR) — fichier sans nom de parent.
+      parent_full_name: studentName || studentNameAr,
       phone_1: contacts[0].phone,
       relationship: undefined,
       contacts

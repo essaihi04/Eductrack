@@ -1211,10 +1211,16 @@ router.post('/parents/import', async (req, res) => {
       } else if (massarRaw && byMassar.has(massarRaw)) {
         // 1) Matching prioritaire par code Massar (fiable, sans ambiguïté de nom)
         matches = [byMassar.get(massarRaw)];
-      } else if (studentFullNameRaw) {
-        // 2) Repli sur le nom complet normalisé
-        const studentNeedle = normalizeName(studentFullNameRaw);
-        matches = studentsIndex.filter(s => s.full === studentNeedle || s.fullRev === studentNeedle);
+      } else {
+        // 2) Repli sur le nom complet normalisé — on essaie le nom latin PUIS le nom
+        //    arabe (l'élève peut être enregistré en arabe dans la base, et inversement).
+        const needles = [row?.student_full_name, row?.student_full_name_ar]
+          .map(n => normalizeName(n))
+          .filter(Boolean);
+        for (const needle of needles) {
+          matches = studentsIndex.filter(s => s.full === needle || s.fullRev === needle);
+          if (matches.length > 0) break;
+        }
       }
 
       if (matches.length === 1) {
