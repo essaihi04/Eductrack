@@ -125,11 +125,14 @@ export async function startSession(schoolId, { onIncoming } = {}) {
 
     if (qr) {
       entry.qr = qr;
-      // errorCorrectionLevel: 'M' = robustesse moyenne (15% des données récupérables
-      // si camera de mauvaise qualité / reflets). Plus fiable que 'L' à l'écran.
+      // errorCorrectionLevel: 'L' (7%) = comme WhatsApp Web → QR MOINS dense
+      // (carrés plus gros à taille d'écran égale) donc plus facile à scanner,
+      // notamment sur iPhone (scanner iOS plus exigeant sur les QR denses).
+      // À l'écran (sans reflets d'impression), 'L' est largement suffisant.
+      // margin: 4 = grande zone blanche autour (quiet zone), comme WhatsApp Web.
       // width: 512 = QR HD, downscalé en CSS, reste net même sur écrans Retina.
       entry.qrDataUrl = await QRCode.toDataURL(qr, {
-        errorCorrectionLevel: 'M',
+        errorCorrectionLevel: 'L',
         margin: 4,
         width: 512,
         color: { dark: '#000000', light: '#FFFFFF' },
