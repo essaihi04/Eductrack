@@ -169,6 +169,70 @@ const parseGenericParents = (workbook) => {
   return rows.length ? { rows } : null;
 };
 
+// Parse la « Liste globale des élèves » exportée par KoolSchool.
+// Structure : quelques lignes de titre, puis un en-tête
+//   N° | Code massar | Nom et prénom | Nom et prénom (ar) | Classe | Tél parent 1 | Tél parent 2 | ...
+// C'est une liste GLOBALE (toutes classes), donc le matching se fait par code Massar.
+// Le fichier ne contient PAS de nom de parent → on reprend le nom de l'élève (la famille).
+// Renvoie { rows } ou null si l'en-tête n'est pas reconnu.
+const parseKoolSchool = (workbook) => {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!sheet) return null;
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  // Repérer l'en-tête : une ligne contenant « code massar » ET « tél parent 1 ».
+  let headerIdx = -1, colCode = -1, colName = -1, colPhone1 = -1, colPhone2 = -1;
+  for (let i = 0; i < Math.min(raw.length, 30); i++) {
+    const row = raw[i] || [];
+    let code = -1, name = -1, p1 = -1, p2 = -1;
+    for (let j = 0; j < row.length; j++) {
+      const cell = String(row[j] || '').trim().toLowerCase();
+      if (!cell) continue;
+      if (code === -1 && cell.includes('code massar')) code = j;
+      else if (cell === 'nom et prénom' || cell === 'nom et prenom') name = j;
+      else if (cell.includes('parent 1') || cell.includes('parent1')) p1 = j;
+      else if (cell.includes('parent 2') || cell.includes('parent2')) p2 = j;
+    }
+    if (code !== -1 && p1 !== -1) {
+      headerIdx = i; colCode = code; colName = name; colPhone1 = p1; colPhone2 = p2;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+
+  const rows = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const r = raw[i];
+    if (!r) continue;
+    const massar = String(r[colCode] || '').trim().toUpperCase();
+    if (!massar) continue;
+    const studentName = colName !== -1 ? String(r[colName] || '').trim() : '';
+
+    // Le fichier ne fournit pas de nom de parent → on utilise le nom de l'élève (la famille).
+    const seen = new Set();
+    const contacts = [];
+    [colPhone1, colPhone2].forEach((col) => {
+      if (col === -1) return;
+      const phone = validMoroccoMobile(r[col]);
+      if (!phone || seen.has(phone)) return;
+      seen.add(phone);
+      contacts.push({ phone, name: studentName, relationship: undefined });
+    });
+    if (contacts.length === 0) continue;
+
+    rows.push({
+      massar_code: massar,
+      student_full_name: studentName,
+      parent_full_name: studentName,
+      phone_1: contacts[0].phone,
+      relationship: undefined,
+      contacts
+    });
+  }
+
+  return rows.length ? { rows } : null;
+};
+
 const ParentsPage = () => {
   const [parents, setParents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -471,14 +535,21 @@ const ParentsPage = () => {
           continue;
         }
 
-        // 2) Modèle générique (Élève / Parent / Téléphone / Relation).
+        // 2) Liste globale KoolSchool (toutes classes, match par code Massar).
+        const kool = parseKoolSchool(workbook);
+        if (kool && kool.rows.length > 0) {
+          parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: kool.rows, source: 'koolschool', global: true, result: null, error: null });
+          continue;
+        }
+
+        // 3) Modèle générique (Élève / Parent / Téléphone / Relation).
         const generic = parseGenericParents(workbook);
         if (generic) {
           parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: generic.rows, source: 'generic', result: null, error: null });
           continue;
         }
 
-        parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], source: null, result: null, error: 'Format non reconnu (Massar Tuteur ou modèle Élève/Parent/Téléphone)' });
+        parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], source: null, result: null, error: 'Format non reconnu (Massar Tuteur, liste globale KoolSchool, ou modèle Élève/Parent/Téléphone)' });
       } catch (error) {
         console.error('Error reading Excel:', error);
         parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: [], source: null, result: null, error: 'Erreur de lecture du fichier' });
@@ -525,8 +596,11 @@ const ParentsPage = () => {
   };
 
   // Vérifie (dryRun) ou enregistre (commit) TOUS les fichiers prêts, en parallèle.
+  // Un fichier est « prêt » s'il a des lignes et (soit une classe cible, soit le mode global).
+  const isFileReady = (f) => f.rows.length > 0 && (f.global || f.classId);
+
   const runImport = async (dryRun) => {
-    const ready = importFiles.filter(f => f.classId && f.rows.length > 0 && (dryRun || f.result?.dryRun));
+    const ready = importFiles.filter(f => isFileReady(f) && (dryRun || f.result?.dryRun));
     if (ready.length === 0) {
       alert(dryRun ? 'Sélectionnez une classe pour au moins un fichier.' : 'Vérifiez d\'abord les correspondances.');
       return;
@@ -536,18 +610,19 @@ const ParentsPage = () => {
     try {
       const token = await getToken();
       let totalCommits = 0;
+      let totalMassar = 0;
       const updated = await Promise.all(importFiles.map(async (f) => {
-        if (!f.classId || !f.rows.length) return f;
+        if (!isFileReady(f)) return f;
         if (!dryRun && !f.result?.dryRun) return f; // ne commit que les fichiers vérifiés
         try {
           const res = await fetch(`${apiUrl}/api/admin/parents/import`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ class_id: f.classId, rows: f.rows, dryRun })
+            body: JSON.stringify(f.global ? { global: true, rows: f.rows, dryRun } : { class_id: f.classId, rows: f.rows, dryRun })
           });
           const data = await res.json();
           if (!res.ok) return { ...f, result: { error: data.error || 'Erreur' } };
-          if (!dryRun) totalCommits += data.commitsCount || 0;
+          if (!dryRun) { totalCommits += data.commitsCount || 0; totalMassar += data.massarBackfilled || 0; }
           return { ...f, result: data };
         } catch {
           return { ...f, result: { error: 'Erreur réseau' } };
@@ -556,7 +631,7 @@ const ParentsPage = () => {
       setImportFiles(updated);
       if (!dryRun) {
         await fetchData();
-        alert(`Import terminé : ${totalCommits} association(s) créée(s).`);
+        alert(`Import terminé : ${totalCommits} association(s) créée(s).${totalMassar > 0 ? `\n${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : ''}`);
       }
     } finally {
       setImporting(false);
@@ -891,9 +966,10 @@ const ParentsPage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Importez <strong>un ou plusieurs fichiers</strong> à la fois. Le format officiel Massar « Tuteur »
-              détecte automatiquement la classe et les parents (père/mère/tuteur). Sinon, utilisez le modèle
-              avec les colonnes <strong>Élève</strong>, <strong>Parent</strong>, <strong>Téléphone</strong>, <strong>Relation</strong>.
+              Importez <strong>un ou plusieurs fichiers</strong> à la fois. Trois formats sont reconnus automatiquement :
+              le format officiel <strong>Massar « Tuteur »</strong> (détecte la classe + père/mère/tuteur),
+              la <strong>liste globale KoolSchool</strong> (« Liste globale des élèves » — reconnaissance par code Massar, toutes classes),
+              ou le modèle générique avec les colonnes <strong>Élève</strong>, <strong>Parent</strong>, <strong>Téléphone</strong>, <strong>Relation</strong>.
             </p>
 
             {/* Upload (multiple) */}
@@ -951,6 +1027,7 @@ const ParentsPage = () => {
                         <Upload className="w-4 h-4 text-primary shrink-0" />
                         <span className="truncate">{f.fileName}</span>
                         {f.source === 'massar' && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Massar</span>}
+                        {f.source === 'koolschool' && <span className="text-xs bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded">KoolSchool</span>}
                       </p>
                       {f.error ? (
                         <p className="text-xs text-red-500 mt-1">{f.error}</p>
@@ -967,22 +1044,28 @@ const ParentsPage = () => {
 
                   {!f.error && (
                     <>
-                      <div>
-                        <label className="block text-xs font-medium mb-1">Classe cible *</label>
-                        <select
-                          value={f.classId}
-                          onChange={e => setImportFileClass(f.key, e.target.value)}
-                          className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
-                        >
-                          <option value="">-- Sélectionner une classe --</option>
-                          {classes.map(c => (
-                            <option key={c.id} value={c.id}>{c.name} ({c.level})</option>
-                          ))}
-                        </select>
-                        {!f.classId && f.className && (
-                          <p className="text-xs text-amber-600 mt-1">Classe « {f.className} » non trouvée — sélectionnez-la manuellement.</p>
-                        )}
-                      </div>
+                      {f.global ? (
+                        <p className="text-xs text-teal-700 bg-teal-50 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800 rounded-lg px-3 py-2">
+                          Liste globale — les élèves sont reconnus automatiquement par leur <strong>code Massar</strong> (toutes classes). Aucune classe à sélectionner.
+                        </p>
+                      ) : (
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Classe cible *</label>
+                          <select
+                            value={f.classId}
+                            onChange={e => setImportFileClass(f.key, e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
+                          >
+                            <option value="">-- Sélectionner une classe --</option>
+                            {classes.map(c => (
+                              <option key={c.id} value={c.id}>{c.name} ({c.level})</option>
+                            ))}
+                          </select>
+                          {!f.classId && f.className && (
+                            <p className="text-xs text-amber-600 mt-1">Classe « {f.className} » non trouvée — sélectionnez-la manuellement.</p>
+                          )}
+                        </div>
+                      )}
 
                       {/* Aperçu compact */}
                       <div className="max-h-48 overflow-y-auto border rounded-lg">
@@ -1040,7 +1123,7 @@ const ParentsPage = () => {
 
             {/* Actions globales */}
             {importFiles.some(f => !f.error) && (() => {
-              const ready = importFiles.filter(f => f.classId && f.rows.length > 0);
+              const ready = importFiles.filter(f => isFileReady(f));
               const totalMatched = importFiles.reduce((s, f) => s + (f.result?.results?.filter(r => r.matchStatus === 'matched').length || 0), 0);
               const anyDry = importFiles.some(f => f.result?.dryRun);
               const anyCommitted = importFiles.some(f => f.result && f.result.commitsCount != null && !f.result.dryRun);

@@ -1148,17 +1148,27 @@ router.delete('/parents/:parentId/contacts/:contactId', async (req, res) => {
 
 // Import parents (JSON) - dryRun + commit
 // Body attendu: { class_id, rows: [{ student_full_name, parent_full_name, phone_1, relationship? }], dryRun?: boolean }
+// Mode global (liste KoolSchool) : { global: true, rows, dryRun } — match par code Massar
+// sur TOUS les élèves de l'école, sans class_id.
 router.post('/parents/import', async (req, res) => {
   try {
-    const { class_id, rows, dryRun } = req.body;
-    if (!class_id) return res.status(400).json({ error: 'class_id requis' });
+    const { class_id, rows, dryRun, global } = req.body;
+    const isGlobal = global === true;
+    if (!isGlobal && !class_id) return res.status(400).json({ error: 'class_id requis' });
     if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'rows requis' });
 
-    const { data: students, error: studentsError } = await supabaseAdmin
+    let studentsQuery = supabaseAdmin
       .from('profiles')
       .select('id, first_name, last_name, class_id, massar_code')
-      .eq('role', 'student')
-      .eq('class_id', class_id);
+      .eq('role', 'student');
+    if (isGlobal) {
+      // Liste globale : restreindre à l'école de l'admin (sécurité), match par code Massar.
+      const schoolId = getSchoolId(req);
+      if (schoolId) studentsQuery = studentsQuery.eq('school_id', schoolId);
+    } else {
+      studentsQuery = studentsQuery.eq('class_id', class_id);
+    }
+    const { data: students, error: studentsError } = await studentsQuery;
     if (studentsError) throw studentsError;
 
     const studentsIndex = (students || []).map(s => {
@@ -1206,7 +1216,7 @@ router.post('/parents/import', async (req, res) => {
         results.push({
           row: { ...row, phone_1: phone1 },
           matchStatus: 'matched',
-          student: { id: matchedStudent.id, first_name: matchedStudent.first_name, last_name: matchedStudent.last_name },
+          student: { id: matchedStudent.id, first_name: matchedStudent.first_name, last_name: matchedStudent.last_name, massar_code: matchedStudent.massar_code || null },
           actionsPreview: ['upsert_parent', 'upsert_contact', 'upsert_link']
         });
       } else if (matches.length > 1) {
@@ -1231,8 +1241,23 @@ router.post('/parents/import', async (req, res) => {
 
     // Commit: only rows with matched + exact student id
     const commits = [];
+    let massarBackfilled = 0;
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
+
+      // Renseigner / mettre à jour le code Massar de l'élève si le fichier en fournit un
+      // et que l'élève n'en a pas (ou un code différent). Utile quand l'élève a été
+      // matché par son nom (liste KoolSchool) mais n'avait pas encore de code Massar.
+      const rowMassar = String(r.row.massar_code || '').trim().toUpperCase();
+      const currentMassar = String(r.student.massar_code || '').trim().toUpperCase();
+      if (rowMassar && rowMassar !== currentMassar) {
+        const { error: massarUpdateError } = await supabaseAdmin
+          .from('profiles')
+          .update({ massar_code: rowMassar })
+          .eq('id', r.student.id);
+        if (massarUpdateError) throw massarUpdateError;
+        massarBackfilled++;
+      }
 
       // UN SEUL parent (la famille) par élève, avec TOUS les numéros (père + mère
       // + tuteur) rattachés comme contacts. Si la ligne ne fournit pas `contacts`
@@ -1318,7 +1343,7 @@ router.post('/parents/import', async (req, res) => {
       commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }
 
-    res.json({ dryRun: false, results, commitsCount: commits.length });
+    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled });
   } catch (error) {
     console.error('Erreur import parents:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
