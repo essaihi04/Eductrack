@@ -120,6 +120,7 @@ const WhatsAppPage = () => {
   const [qrCode, setQrCode] = useState(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState('');
+  const lastQrSrcRef = useRef(null); // dernière source QR affichée (anti-clignotement)
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [newSessionPhone, setNewSessionPhone] = useState('');
@@ -632,8 +633,10 @@ const WhatsAppPage = () => {
   };
 
   // ===================== CONNECTION LOGIC =====================
-  const fetchStatus = useCallback(async () => {
-    setConnLoading(true);
+  // silent=true (polling auto) → ne déclenche PAS le spinner plein écran de la
+  // section (sinon la partie connexion « se recharge » toutes les 2s et masque le QR).
+  const fetchStatus = useCallback(async (silent = false) => {
+    if (!silent) setConnLoading(true);
     try {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-status`, {
@@ -647,7 +650,7 @@ const WhatsAppPage = () => {
     } catch (error) {
       console.error('Erreur statut:', error);
       setSessionStatus({ connected: false, error: 'Erreur de connexion au serveur' });
-    } finally { setConnLoading(false); }
+    } finally { if (!silent) setConnLoading(false); }
   }, [apiUrl]);
 
   useEffect(() => {
@@ -655,9 +658,11 @@ const WhatsAppPage = () => {
   }, [activeTab, fetchStatus]);
 
   // fetchQR : récupère un QR. silent=true → pas de spinner ni reset du QR affiché
-  // (utilisé pour le polling auto en arrière-plan)
+  // (utilisé pour le polling auto en arrière-plan). On ne remplace l'image QR que
+  // si la SOURCE a réellement changé (rotation Baileys ~20s), sinon l'image
+  // clignote/rechargerait toutes les 3s et serait illisible au scan.
   const fetchQR = useCallback(async (silent = false) => {
-    if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); }
+    if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); lastQrSrcRef.current = null; }
     try {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr`, { headers: { Authorization: `Bearer ${token}` } });
@@ -665,10 +670,16 @@ const WhatsAppPage = () => {
       // Nouveau backend Baileys : retourne qrDataUrl (image PNG déjà encodée)
       // Ancien backend Wasender : retournait qrString (texte brut à transformer)
       if (data.success && data.qrDataUrl) {
-        setQrCode(data.qrDataUrl);
+        if (data.qrDataUrl !== lastQrSrcRef.current) {
+          lastQrSrcRef.current = data.qrDataUrl;
+          setQrCode(data.qrDataUrl);
+        }
         setQrError('');
       } else if (data.success && data.qrString) {
-        setQrCode(await QRCode.toDataURL(data.qrString, { width: 300, margin: 2 }));
+        if (data.qrString !== lastQrSrcRef.current) {
+          lastQrSrcRef.current = data.qrString;
+          setQrCode(await QRCode.toDataURL(data.qrString, { width: 300, margin: 2 }));
+        }
         setQrError('');
       } else if (!silent) {
         setQrError(data.error || 'QR code non disponible');
@@ -694,7 +705,7 @@ const WhatsAppPage = () => {
   useEffect(() => {
     if (!needsPolling) return;
 
-    const statusTimer = setInterval(() => { fetchStatus(); }, 2000);
+    const statusTimer = setInterval(() => { fetchStatus(true); }, 2000);
     const qrTimer = setInterval(() => { fetchQR(true); }, 3000);
     return () => { clearInterval(statusTimer); clearInterval(qrTimer); };
   }, [needsPolling, fetchStatus, fetchQR]);
