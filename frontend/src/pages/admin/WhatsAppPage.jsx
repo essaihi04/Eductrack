@@ -132,6 +132,18 @@ const WhatsAppPage = () => {
   const [newSessionPhone, setNewSessionPhone] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  // Onboarding Cloud API (numéro officiel Meta)
+  const [cloudCC, setCloudCC] = useState('212');
+  const [cloudPhone, setCloudPhone] = useState('');
+  const [cloudName, setCloudName] = useState('');
+  const [cloudMethod, setCloudMethod] = useState('SMS');
+  const [cloudStep, setCloudStep] = useState('form'); // form | code | done
+  const [cloudCode, setCloudCode] = useState('');
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudError, setCloudError] = useState('');
+  const [cloudPin, setCloudPin] = useState(null);
+  // Ancien flux Baileys (QR) masqué par défaut au profit du Cloud
+  const [showLegacy, setShowLegacy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -663,6 +675,48 @@ const WhatsAppPage = () => {
     if (activeTab === 'connection') fetchStatus();
   }, [activeTab, fetchStatus]);
 
+  // Onboarding Cloud API : ajoute le numéro + envoie le code de vérification
+  const handleCloudAddNumber = async () => {
+    if (!cloudPhone || !cloudName) { setCloudError('Numéro et nom affiché requis'); return; }
+    setCloudLoading(true); setCloudError('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/cloud/add-number`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cc: cloudCC, phone: cloudPhone, verified_name: cloudName, code_method: cloudMethod }),
+      });
+      const data = await res.json();
+      if (data.success) setCloudStep('code');
+      else setCloudError(data.error || 'Erreur lors de l\'ajout du numéro');
+    } catch (e) {
+      console.error('Erreur cloud add:', e);
+      setCloudError('Erreur de connexion au serveur');
+    } finally { setCloudLoading(false); }
+  };
+
+  // Onboarding Cloud API : vérifie le code reçu et active le numéro
+  const handleCloudVerify = async () => {
+    if (!cloudCode) { setCloudError('Code requis'); return; }
+    setCloudLoading(true); setCloudError('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/cloud/verify`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: cloudCode }),
+      });
+      const data = await res.json();
+      if (data.success) { setCloudPin(data.pin || null); setCloudStep('done'); fetchStatus(); }
+      else setCloudError(data.error || 'Vérification échouée');
+    } catch (e) {
+      console.error('Erreur cloud verify:', e);
+      setCloudError('Erreur de connexion au serveur');
+    } finally { setCloudLoading(false); }
+  };
+
+  const isCloudConnected = sessionStatus?.provider === 'cloud' && sessionStatus?.connected;
+
   // fetchQR : récupère un QR. silent=true → pas de spinner ni reset du QR affiché
   // (utilisé pour le polling auto en arrière-plan). On ne remplace l'image QR que
   // si la SOURCE a réellement changé (rotation Baileys ~20s), sinon l'image
@@ -720,6 +774,8 @@ const WhatsAppPage = () => {
   // se réinitialisent à chaque rafraîchissement de sessionStatus).
   const needsPolling = activeTab === 'connection'
     && Boolean(sessionStatus?.session)
+    && sessionStatus?.provider !== 'cloud' // pas de QR Baileys pour les écoles Cloud
+    && showLegacy // ne poller le QR que si l'utilisateur a ouvert l'ancienne méthode
     && !sessionStatus?.connected;
 
   // Polling automatique tant que la session n'est pas connectée :
@@ -2749,12 +2805,9 @@ const WhatsAppPage = () => {
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
                 </div>
               ) : sessionStatus?.status === 'no_session' ? (
-                <div className="text-center py-6 space-y-3">
-                  <p className="text-gray-500 text-sm">Aucune session WhatsApp trouvée.</p>
-                  <button onClick={() => setShowCreateForm(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
-                    <Plus className="w-4 h-4" /> Créer une session
-                  </button>
+                <div className="text-center py-6 space-y-2">
+                  <p className="text-gray-500 text-sm">Aucun numéro connecté.</p>
+                  <p className="text-gray-500 text-sm">Utilisez la <strong>connexion via API officielle</strong> ci-dessous. 👇</p>
                 </div>
               ) : sessionStatus ? (
                 <div className="space-y-4">
@@ -2798,6 +2851,100 @@ const WhatsAppPage = () => {
               )}
             </div>
 
+            {/* Cloud API onboarding (numéro officiel Meta) */}
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-6 shadow-sm space-y-4">
+              <div>
+                <h2 className="text-base font-semibold text-emerald-900 flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5" /> Connexion via API officielle WhatsApp (recommandé)
+                </h2>
+                <p className="text-xs text-emerald-700 mt-1">
+                  Boutons cliquables, pas de QR, pas de risque de blocage. Le numéro doit être
+                  <strong> dédié</strong> et ne plus être utilisé dans l'application WhatsApp.
+                </p>
+              </div>
+
+              {isCloudConnected ? (
+                <div className="flex items-center gap-3 p-4 bg-white rounded-lg border border-emerald-200">
+                  <CheckCircle className="w-6 h-6 text-emerald-600" />
+                  <div>
+                    <p className="font-medium text-emerald-800">Numéro officiel connecté</p>
+                    <p className="text-sm text-emerald-700">{sessionStatus?.session?.phone || '—'}</p>
+                  </div>
+                </div>
+              ) : cloudStep === 'done' ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3 p-4 bg-white rounded-lg border border-emerald-200">
+                    <CheckCircle className="w-6 h-6 text-emerald-600" />
+                    <p className="font-medium text-emerald-800">Numéro vérifié et activé ✅</p>
+                  </div>
+                  {cloudPin && (
+                    <p className="text-xs text-gray-600">Code PIN 2FA généré (à conserver) : <strong>{cloudPin}</strong></p>
+                  )}
+                </div>
+              ) : cloudStep === 'code' ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-emerald-800">
+                    Un code a été envoyé par {cloudMethod === 'SMS' ? 'SMS' : 'appel'} au
+                    {' '}<strong>+{cloudCC} {cloudPhone}</strong>. Saisissez-le ci-dessous.
+                  </p>
+                  <input type="text" value={cloudCode} onChange={(e) => setCloudCode(e.target.value)}
+                    placeholder="Code à 6 chiffres"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+                  {cloudError && (
+                    <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                      <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" /><p className="text-sm text-red-800">{cloudError}</p>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <button onClick={handleCloudVerify} disabled={cloudLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">
+                      {cloudLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} Vérifier et connecter
+                    </button>
+                    <button onClick={() => { setCloudStep('form'); setCloudError(''); setCloudCode(''); }}
+                      className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Recommencer</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">Indicatif</label>
+                      <input type="text" value={cloudCC} onChange={(e) => setCloudCC(e.target.value.replace(/[^\d]/g, ''))}
+                        placeholder="212" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">Numéro (sans indicatif) *</label>
+                      <input type="text" value={cloudPhone} onChange={(e) => setCloudPhone(e.target.value.replace(/[^\d]/g, ''))}
+                        placeholder="600000000" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Nom affiché de l'établissement *</label>
+                    <input type="text" value={cloudName} onChange={(e) => setCloudName(e.target.value)}
+                      placeholder="Ex: Groupe Scolaire Al Amal"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Recevoir le code par</label>
+                    <select value={cloudMethod} onChange={(e) => setCloudMethod(e.target.value)}
+                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500">
+                      <option value="SMS">SMS</option>
+                      <option value="VOICE">Appel vocal</option>
+                    </select>
+                  </div>
+                  {cloudError && (
+                    <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                      <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" /><p className="text-sm text-red-800">{cloudError}</p>
+                    </div>
+                  )}
+                  <button onClick={handleCloudAddNumber} disabled={cloudLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">
+                    {cloudLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Envoyer le code de vérification
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Create Session Form */}
             {showCreateForm && (
               <div className="rounded-lg border border-green-200 bg-green-50 p-6 shadow-sm space-y-4">
@@ -2830,8 +2977,8 @@ const WhatsAppPage = () => {
               </div>
             )}
 
-            {/* QR Code */}
-            {sessionStatus && !sessionStatus.connected && sessionStatus.session && (
+            {/* QR Code (ancienne méthode Baileys, masquée par défaut) */}
+            {showLegacy && sessionStatus && !sessionStatus.connected && sessionStatus.provider !== 'cloud' && sessionStatus.session && (
               <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2"><QrCode className="w-5 h-5" /> Scanner le QR Code</h2>
@@ -2900,17 +3047,36 @@ const WhatsAppPage = () => {
               </div>
             )}
 
-            {/* Instructions */}
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-blue-900 flex items-center gap-2"><Info className="w-4 h-4" /> Comment connecter WhatsApp</h3>
-              <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
-                <li>Cliquez sur <strong>"Créer une session"</strong> ci-dessus et renseignez le nom et le numéro WhatsApp de votre école</li>
-                <li>Cliquez sur <strong>"Obtenir le QR"</strong> pour afficher le code QR de connexion</li>
-                <li>Ouvrez <strong>WhatsApp</strong> sur votre téléphone → Menu (⋮) → <strong>Appareils connectés</strong> → Connecter un appareil</li>
-                <li>Scannez le <strong>QR code</strong> affiché sur cette page avec votre téléphone</li>
-                <li>Une fois connecté, les messages seront envoyés automatiquement aux parents</li>
-              </ol>
-            </div>
+            {/* Méthode alternative : ancien flux Baileys (QR), masqué par défaut */}
+            {sessionStatus?.provider !== 'cloud' && (
+              <div className="text-center">
+                {!showLegacy ? (
+                  <button onClick={() => setShowLegacy(true)}
+                    className="text-xs text-gray-400 hover:text-gray-600 underline">
+                    Méthode alternative : connexion par QR code (Baileys, non-officielle)
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-5 space-y-3 text-left">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><QrCode className="w-4 h-4" /> Connexion par QR code (ancienne méthode)</h3>
+                      <button onClick={() => setShowLegacy(false)} className="text-xs text-gray-400 hover:text-gray-600 underline">Masquer</button>
+                    </div>
+                    <p className="text-xs text-gray-500">Méthode non-officielle (Baileys), sans boutons et avec risque de blocage. Préférez l'API officielle ci-dessus.</p>
+                    {sessionStatus?.status === 'no_session' && (
+                      <button onClick={() => setShowCreateForm(true)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm font-medium">
+                        <Plus className="w-4 h-4" /> Créer une session QR
+                      </button>
+                    )}
+                    <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
+                      <li>Créez une session avec le numéro WhatsApp de l'école</li>
+                      <li>Cliquez sur « Obtenir le QR »</li>
+                      <li>WhatsApp → Appareils connectés → Connecter un appareil → scannez</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            )}
 
             {sessionStatus?.connected && (
               <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg border border-green-200">
