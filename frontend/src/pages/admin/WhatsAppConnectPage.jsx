@@ -33,6 +33,9 @@ const WhatsAppConnectPage = () => {
   const [cloudError, setCloudError] = useState('');
   const [cloudPin, setCloudPin] = useState(null);
 
+  // Affiche l'ancien flux Baileys (QR) — masqué par défaut au profit du Cloud
+  const [showLegacy, setShowLegacy] = useState(false);
+
   const getAuthToken = async () => {
     const { supabase } = await import('../../lib/supabase');
     const { data: { session } } = await supabase.auth.getSession();
@@ -239,15 +242,9 @@ const WhatsAppConnectPage = () => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
           </div>
         ) : sessionStatus?.status === 'no_session' ? (
-          <div className="text-center py-6 space-y-3">
-            <p className="text-gray-500 text-sm">Aucune session WhatsApp trouvée.</p>
-            <button
-              onClick={() => setShowCreateForm(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
-            >
-              <Plus className="w-4 h-4" />
-              Créer une session
-            </button>
+          <div className="text-center py-6 space-y-2">
+            <p className="text-gray-500 text-sm">Aucun numéro connecté.</p>
+            <p className="text-gray-500 text-sm">Utilisez la <strong>connexion via API officielle</strong> ci-dessous. 👇</p>
           </div>
         ) : sessionStatus ? (
           <div className="space-y-4">
@@ -525,8 +522,8 @@ const WhatsAppConnectPage = () => {
         </div>
       )}
 
-      {/* QR Code Section */}
-      {sessionStatus && !sessionStatus.connected && sessionStatus.session && (
+      {/* QR Code Section (ancienne méthode Baileys, masquée par défaut) */}
+      {showLegacy && sessionStatus && !sessionStatus.connected && sessionStatus.provider !== 'cloud' && sessionStatus.session && (
         <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
@@ -572,20 +569,50 @@ const WhatsAppConnectPage = () => {
         </div>
       )}
 
-      {/* Instructions */}
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-5 space-y-3">
-        <h3 className="text-sm font-semibold text-blue-900 flex items-center gap-2">
-          <Info className="w-4 h-4" />
-          Instructions de configuration
-        </h3>
-        <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
-          <li>Cliquez sur "Créer une session" et entrez le nom et numéro de téléphone WhatsApp de votre école</li>
-          <li>Cliquez sur "Obtenir le QR" pour afficher le code QR de connexion</li>
-          <li>Ouvrez WhatsApp sur votre téléphone → Menu (⋮) → Appareils connectés → Connecter un appareil</li>
-          <li>Scannez le QR code affiché sur cette page</li>
-          <li>Une fois connecté, vous pouvez envoyer des messages aux parents depuis la page "Envoyer"</li>
-        </ol>
-      </div>
+      {/* Méthode alternative : ancien flux Baileys (QR), masqué par défaut */}
+      {sessionStatus?.provider !== 'cloud' && (
+        <div className="text-center">
+          {!showLegacy ? (
+            <button
+              onClick={() => setShowLegacy(true)}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              Méthode alternative : connexion par QR code (Baileys, non-officielle)
+            </button>
+          ) : (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-5 space-y-3 text-left">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <QrCode className="w-4 h-4" /> Connexion par QR code (ancienne méthode)
+                </h3>
+                <button
+                  onClick={() => setShowLegacy(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 underline"
+                >
+                  Masquer
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Méthode non-officielle (Baileys), sans boutons et avec risque de blocage.
+                Préférez l'API officielle ci-dessus.
+              </p>
+              {sessionStatus?.status === 'no_session' && (
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm font-medium"
+                >
+                  <Plus className="w-4 h-4" /> Créer une session QR
+                </button>
+              )}
+              <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
+                <li>Créez une session avec le numéro WhatsApp de l'école</li>
+                <li>Cliquez sur « Obtenir le QR »</li>
+                <li>WhatsApp → Appareils connectés → Connecter un appareil → scannez</li>
+              </ol>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Connected success */}
       {sessionStatus?.connected && (
