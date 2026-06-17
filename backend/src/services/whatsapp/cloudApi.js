@@ -24,6 +24,7 @@ import { supabaseAdmin } from '../../config/supabase.js';
 const API_VERSION = process.env.WA_API_VERSION || 'v21.0';
 const GRAPH = `https://graph.facebook.com/${API_VERSION}`;
 const TOKEN = () => process.env.WA_TOKEN;
+const WABA_ID = () => process.env.WA_WABA_ID;
 
 const ok = (msgId, extra = {}) => ({ success: true, data: { msgId, ...extra } });
 const fail = (message, extra = {}) => ({ success: false, message, ...extra });
@@ -264,6 +265,61 @@ export async function sendTemplate(schoolId, phone, templateName, languageCode =
       ...(components.length ? { components } : {}),
     },
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Onboarding d'un numéro depuis l'app (token central, sous le WABA central)
+// Flux Meta : addPhoneNumber → requestCode → verifyCode → registerNumber
+// ─────────────────────────────────────────────────────────────────────────
+
+async function graphPost(path, body) {
+  const res = await fetch(`${GRAPH}/${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* corps vide */ }
+  return { ok: res.ok, status: res.status, data };
+}
+
+/** Ajoute un numéro sous le WABA central → renvoie son phone_number_id. */
+export async function addPhoneNumber({ cc, phone, verifiedName }) {
+  if (!WABA_ID() || !TOKEN()) return { success: false, message: 'WA_WABA_ID ou WA_TOKEN manquant côté serveur' };
+  const { ok, data } = await graphPost(`${WABA_ID()}/phone_numbers`, {
+    cc: String(cc),
+    phone_number: String(phone),
+    verified_name: verifiedName,
+  });
+  if (!ok) return { success: false, message: data?.error?.message || 'Ajout du numéro échoué' };
+  return { success: true, phoneNumberId: data.id };
+}
+
+/** Demande l'envoi du code de vérification (SMS ou VOICE). */
+export async function requestCode(phoneNumberId, method = 'SMS', language = 'fr') {
+  const { ok, data } = await graphPost(`${phoneNumberId}/request_code`, {
+    code_method: method,
+    language,
+  });
+  if (!ok) return { success: false, message: data?.error?.message || 'Envoi du code échoué' };
+  return { success: true };
+}
+
+/** Vérifie le code reçu sur le numéro. */
+export async function verifyCode(phoneNumberId, code) {
+  const { ok, data } = await graphPost(`${phoneNumberId}/verify_code`, { code: String(code) });
+  if (!ok) return { success: false, message: data?.error?.message || 'Code invalide' };
+  return { success: true };
+}
+
+/** Active le numéro pour la messagerie Cloud API (définit un PIN 2FA). */
+export async function registerNumber(phoneNumberId, pin) {
+  const { ok, data } = await graphPost(`${phoneNumberId}/register`, {
+    messaging_product: 'whatsapp',
+    pin: String(pin),
+  });
+  if (!ok) return { success: false, message: data?.error?.message || 'Activation Cloud API échouée' };
+  return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────

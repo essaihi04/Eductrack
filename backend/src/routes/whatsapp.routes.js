@@ -11,6 +11,7 @@ import {
 } from '../services/whatsapp/index.js';
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
+import * as cloud from '../services/whatsapp/cloudApi.js';
 
 const router = express.Router();
 
@@ -1045,12 +1046,30 @@ router.get('/session-status', async (req, res) => {
 
     const status = getStatus(schoolId);
 
-    // Métadonnées DB (numéro, warm-up, quotas)
+    // Métadonnées DB (numéro, warm-up, quotas, provider)
     const { data: row } = await supabaseAdmin
       .from('whatsapp_school_sessions')
-      .select('phone_number, session_name, warmup_started_at, last_connected_at, status')
+      .select('phone_number, phone_number_id, provider, session_name, warmup_started_at, last_connected_at, status')
       .eq('school_id', schoolId)
       .maybeSingle();
+
+    // École en mode Cloud API : pas de socket Baileys, l'état vient de la DB.
+    if (row?.provider === 'cloud') {
+      const cloudConnected = row.status === 'connected';
+      return res.json({
+        connected: cloudConnected,
+        status: row.status || 'pending_verification',
+        provider: 'cloud',
+        session: {
+          id: schoolId,
+          name: row.session_name || null,
+          phone: row.phone_number || null,
+          phone_number_id: row.phone_number_id || null,
+          status: row.status || 'pending_verification',
+          last_connected_at: row.last_connected_at || null,
+        },
+      });
+    }
 
     // Aucun socket en mémoire ET aucune ligne DB → pas de session du tout
     if (!status.connected && status.status === 'disconnected' && !row) {
@@ -1147,6 +1166,95 @@ router.post('/session-pairing-code', async (req, res) => {
   } catch (error) {
     console.error('Erreur code appairage:', error);
     res.status(400).json({ success: false, error: error.message || 'Impossible de générer le code' });
+  }
+});
+
+// ==================== CLOUD API ONBOARDING ====================
+
+// POST /cloud/add-number — déclare le numéro de l'école sous le WABA central
+// et déclenche l'envoi du code de vérification (SMS/appel).
+// Body : { cc?, phone, verified_name, code_method? }
+router.post('/cloud/add-number', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const { cc = '212', phone, verified_name, code_method = 'SMS' } = req.body || {};
+    if (!phone || !verified_name) {
+      return res.status(400).json({ error: 'Numéro et nom affiché requis' });
+    }
+    const cleanPhone = String(phone).replace(/[^\d]/g, '');
+
+    const add = await cloud.addPhoneNumber({ cc, phone: cleanPhone, verifiedName: verified_name });
+    if (!add.success) return res.status(400).json({ error: add.message });
+
+    // Enregistre le mapping (en attente de vérification)
+    const { error: upErr } = await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .upsert({
+        school_id: schoolId,
+        provider: 'cloud',
+        phone_number_id: add.phoneNumberId,
+        session_name: verified_name,
+        phone_number: `+${cc}${cleanPhone}`,
+        status: 'pending_verification',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'school_id' });
+    if (upErr) return res.status(500).json({ error: upErr.message });
+    cloud.invalidateCache(schoolId);
+
+    const rc = await cloud.requestCode(add.phoneNumberId, code_method, 'fr');
+    if (!rc.success) {
+      return res.status(400).json({ error: rc.message, phone_number_id: add.phoneNumberId });
+    }
+    res.json({ success: true, phone_number_id: add.phoneNumberId, code_method });
+  } catch (error) {
+    console.error('Erreur cloud add-number:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// POST /cloud/verify — vérifie le code reçu et active le numéro pour Cloud API.
+// Body : { code }
+router.post('/cloud/verify', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const { code } = req.body || {};
+    if (!code) return res.status(400).json({ error: 'Code de vérification requis' });
+
+    const { data: row } = await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .select('phone_number_id')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    const pnid = row?.phone_number_id;
+    if (!pnid) return res.status(400).json({ error: 'Aucun numéro en attente. Recommencez l\'ajout.' });
+
+    const vc = await cloud.verifyCode(pnid, code);
+    if (!vc.success) return res.status(400).json({ error: vc.message });
+
+    // Active le numéro pour la messagerie Cloud API (PIN 2FA généré).
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    const reg = await cloud.registerNumber(pnid, pin);
+
+    await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .update({ status: 'connected', last_connected_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('school_id', schoolId);
+    cloud.invalidateCache(schoolId);
+
+    res.json({
+      success: true,
+      registered: reg.success,
+      // Le PIN n'est utile que pour une future ré-inscription — on le renvoie une fois.
+      pin: reg.success ? pin : null,
+      warning: reg.success ? null : `Numéro vérifié mais activation Cloud API : ${reg.message}`,
+    });
+  } catch (error) {
+    console.error('Erreur cloud verify:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 
