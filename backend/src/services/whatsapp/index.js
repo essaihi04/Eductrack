@@ -9,6 +9,7 @@
  */
 
 import { getSocket, phoneToJid, checkNumberExists, getStatus, startSession, logoutSession, getQrDataUrl, getPairingCode, requestPairingCode, bootstrapAllSessions } from './baileysClient.js';
+import * as cloud from './cloudApi.js';
 import {
   checkAllowed,
   waitHumanDelay,
@@ -59,6 +60,8 @@ const handleSendError = (schoolId, err) => {
  * @param {object} opts    { urgent?: bool, skipTyping?: bool, skipDelay?: bool }
  */
 export async function sendText(schoolId, phone, text, opts = {}) {
+  if (await cloud.isCloudSchool(schoolId)) return cloud.sendText(schoolId, phone, text, opts);
+
   const sock = getSocket(schoolId);
   if (!sock) return fail('Session WhatsApp non connectée');
 
@@ -84,6 +87,8 @@ export async function sendText(schoolId, phone, text, opts = {}) {
  * Envoi image depuis URL.
  */
 export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = {}) {
+  if (await cloud.isCloudSchool(schoolId)) return cloud.sendImage(schoolId, phone, imageUrl, caption, opts);
+
   const sock = getSocket(schoolId);
   if (!sock) return fail('Session WhatsApp non connectée');
 
@@ -111,6 +116,8 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = 
  * Envoi document (PDF, etc.) depuis URL.
  */
 export async function sendDocument(schoolId, phone, documentUrl, fileName, caption = '', mimetype = 'application/pdf', opts = {}) {
+  if (await cloud.isCloudSchool(schoolId)) return cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype, opts);
+
   const sock = getSocket(schoolId);
   if (!sock) return fail('Session WhatsApp non connectée');
 
@@ -140,6 +147,8 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
  * Envoi média générique depuis un buffer / chemin local (pour upload depuis backend).
  */
 export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'document', fileName, mimetype, caption } = {}, opts = {}) {
+  if (await cloud.isCloudSchool(schoolId)) return cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption }, opts);
+
   const sock = getSocket(schoolId);
   if (!sock) return fail('Session WhatsApp non connectée');
 

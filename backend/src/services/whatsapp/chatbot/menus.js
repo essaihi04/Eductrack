@@ -13,6 +13,7 @@
 import * as A from './answers.js';
 import { getSocket, phoneToJid } from '../baileysClient.js';
 import { sendText } from '../index.js';
+import * as cloud from '../cloudApi.js';
 import { simulateTyping, waitHumanDelay, recordSent, checkAllowed } from '../antiBan.js';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -131,6 +132,16 @@ export function renderMenuText(menu, ctx = {}) {
  * Dans tous les cas, l'utilisateur peut répondre par le NUMÉRO de l'option.
  */
 export async function sendMenu(schoolId, phone, menu, ctx = {}) {
+  // École Cloud API : liste cliquable native (vrais boutons), pas d'anti-ban.
+  // En cas d'échec (ex. hors fenêtre 24h), repli sur le menu texte numéroté.
+  if (await cloud.isCloudSchool(schoolId)) {
+    const r = await cloud.sendListMenu(schoolId, phone, menu, ctx);
+    if (r?.success) return true;
+    console.warn(`[chatbot] liste Cloud échouée, repli texte:`, r?.message);
+    return await sendText(schoolId, phone, renderMenuText(menu, ctx), { urgent: true })
+      .then((res) => !!res.success);
+  }
+
   const sock = getSocket(schoolId);
   if (!sock) return false;
 

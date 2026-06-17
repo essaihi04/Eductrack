@@ -20,6 +20,7 @@ import controlsPlanRoutes from './routes/controlsPlan.routes.js';
 import documentsRoutes from './routes/documents.routes.js';
 import superadminRoutes from './routes/superadmin.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
+import cloudWebhookRoutes from './routes/cloudWebhook.routes.js';
 import financeRoutes from './routes/finance.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
 import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
@@ -58,13 +59,19 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(morgan('dev'));
-app.use(express.json({ limit: '50mb' }));
+// verify : capture le corps brut pour vérifier la signature des webhooks Meta
+app.use(express.json({
+  limit: '50mb',
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Servir les fichiers statiques (logos, documents uploadés)
 app.use('/uploads', express.static(join(__dirname, '../uploads')));
 
 // Routes
+// Webhook WhatsApp Cloud API — PUBLIC (pas d'auth, appelé par Meta)
+app.use('/api/whatsapp/cloud', cloudWebhookRoutes);
 app.use('/api/auth', authRoutes);
 // IMPORTANT: sous-routes /api/admin/* spécifiques montées AVANT le routeur admin générique
 // (sinon le middleware authorize('admin') du routeur admin bloque les autres rôles)
