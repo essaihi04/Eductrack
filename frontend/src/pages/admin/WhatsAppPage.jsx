@@ -144,6 +144,17 @@ const WhatsAppPage = () => {
   const [cloudPin, setCloudPin] = useState(null);
   // Ancien flux Baileys (QR) masqué par défaut au profit du Cloud
   const [showLegacy, setShowLegacy] = useState(false);
+
+  // ===================== TAB: PLANNING (communications) =====================
+  const [comms, setComms] = useState([]);
+  const [commsLoading, setCommsLoading] = useState(false);
+  const [commForm, setCommForm] = useState({
+    title: '', body: '', type: 'normal', deadline_date: '',
+    attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false,
+  });
+  const [commClassIds, setCommClassIds] = useState([]); // [] = toute l'école
+  const [commSaving, setCommSaving] = useState(false);
+  const [commError, setCommError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -717,6 +728,66 @@ const WhatsAppPage = () => {
 
   const isCloudConnected = sessionStatus?.provider === 'cloud' && sessionStatus?.connected;
 
+  // ===================== PLANNING LOGIC =====================
+  const fetchComms = useCallback(async () => {
+    setCommsLoading(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/communications`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setComms(data.communications || []);
+    } catch (e) {
+      console.error('Erreur fetch communications:', e);
+    } finally { setCommsLoading(false); }
+  }, [apiUrl]);
+
+  useEffect(() => { if (activeTab === 'planning') fetchComms(); }, [activeTab, fetchComms]);
+
+  const submitComm = async () => {
+    if (!commForm.title) { setCommError('Titre requis'); return; }
+    if (!commForm.send_now && commForm.type !== 'urgent' && !commForm.scheduled_at) {
+      setCommError('Choisissez une date d\'envoi ou cochez « Envoyer maintenant »'); return;
+    }
+    setCommSaving(true); setCommError('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/communications`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...commForm,
+          scheduled_at: commForm.scheduled_at ? new Date(commForm.scheduled_at).toISOString() : null,
+          target: commClassIds.length ? { class_ids: commClassIds } : { all: true },
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCommForm({ title: '', body: '', type: 'normal', deadline_date: '', attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false });
+        setCommClassIds([]);
+        fetchComms();
+      } else setCommError(data.error || 'Erreur lors de la création');
+    } catch (e) {
+      console.error('Erreur création comm:', e);
+      setCommError('Erreur de connexion au serveur');
+    } finally { setCommSaving(false); }
+  };
+
+  const deleteComm = async (id) => {
+    try {
+      const token = await getAuthToken();
+      await fetch(`${apiUrl}/api/admin/communications/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      fetchComms();
+    } catch (e) { console.error('Erreur suppression comm:', e); }
+  };
+
+  const sendCommNow = async (id) => {
+    try {
+      const token = await getAuthToken();
+      await fetch(`${apiUrl}/api/admin/communications/${id}/send-now`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      setTimeout(fetchComms, 1500);
+    } catch (e) { console.error('Erreur send-now comm:', e); }
+  };
+
   // fetchQR : récupère un QR. silent=true → pas de spinner ni reset du QR affiché
   // (utilisé pour le polling auto en arrière-plan). On ne remplace l'image QR que
   // si la SOURCE a réellement changé (rotation Baileys ~20s), sinon l'image
@@ -1172,6 +1243,7 @@ const WhatsAppPage = () => {
     { key: 'teachers', label: 'Professeurs', icon: Users, desc: 'Envoyer aux profs' },
     { key: 'inbox', label: 'Messages', icon: Inbox, desc: 'Boîte de réception' },
     { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
+    { key: 'planning', label: 'Planifier', icon: Calendar, desc: 'Communications planifiées' },
     { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
   ];
 
@@ -2787,6 +2859,157 @@ const WhatsAppPage = () => {
       )}
 
       {/* ===================== TAB: CONNECTION ===================== */}
+      {activeTab === 'planning' && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {/* Formulaire de création */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+              <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-indigo-600" /> Planifier une communication
+              </h2>
+              <p className="text-xs text-gray-500">
+                Envoyée automatiquement par <strong>push (gratuit)</strong> aux parents qui ont l'app,
+                sinon par <strong>WhatsApp</strong>. Un rappel d'installation de l'app est ajouté pour les autres.
+              </p>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Titre *</label>
+                <input type="text" value={commForm.title}
+                  onChange={(e) => setCommForm({ ...commForm, title: e.target.value })}
+                  placeholder="Ex: Réunion parents-profs"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Message</label>
+                <textarea value={commForm.body} rows={4}
+                  onChange={(e) => setCommForm({ ...commForm, body: e.target.value })}
+                  placeholder="Contenu de la communication…"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">Type</label>
+                  <select value={commForm.type}
+                    onChange={(e) => setCommForm({ ...commForm, type: e.target.value })}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
+                    <option value="normal">🟢 Normal</option>
+                    <option value="deadline">🟠 Avec date limite</option>
+                    <option value="urgent">🔴 Urgent (envoi immédiat)</option>
+                  </select>
+                </div>
+                {commForm.type === 'deadline' && (
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Date limite</label>
+                    <input type="date" value={commForm.deadline_date}
+                      onChange={(e) => setCommForm({ ...commForm, deadline_date: e.target.value })}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">Lien du document (optionnel)</label>
+                  <input type="text" value={commForm.attachment_url}
+                    onChange={(e) => setCommForm({ ...commForm, attachment_url: e.target.value })}
+                    placeholder="https://…"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 block mb-1">Nom du document</label>
+                  <input type="text" value={commForm.attachment_name}
+                    onChange={(e) => setCommForm({ ...commForm, attachment_name: e.target.value })}
+                    placeholder="Ex: Convocation.pdf"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Destinataires</label>
+                <select multiple value={commClassIds}
+                  onChange={(e) => setCommClassIds(Array.from(e.target.selectedOptions, (o) => o.value))}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 h-24">
+                  {(classes || []).map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">Aucune sélection = toute l'école. (Ctrl/Cmd pour multi-sélection)</p>
+              </div>
+
+              {commForm.type !== 'urgent' && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={commForm.send_now}
+                      onChange={(e) => setCommForm({ ...commForm, send_now: e.target.checked })} />
+                    Envoyer maintenant
+                  </label>
+                  {!commForm.send_now && (
+                    <div>
+                      <label className="text-xs font-semibold text-gray-700 block mb-1">Date et heure d'envoi</label>
+                      <input type="datetime-local" value={commForm.scheduled_at}
+                        onChange={(e) => setCommForm({ ...commForm, scheduled_at: e.target.value })}
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {commError && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                  <AlertCircle className="w-4 h-4 text-red-600" /><p className="text-sm text-red-800">{commError}</p>
+                </div>
+              )}
+
+              <button onClick={submitComm} disabled={commSaving}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
+                {commSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {commForm.type === 'urgent' || commForm.send_now ? 'Envoyer' : 'Planifier'}
+              </button>
+            </div>
+
+            {/* Liste des communications */}
+            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-800">Communications</h3>
+                <button onClick={fetchComms} className="flex items-center gap-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
+                  <RefreshCw className={`w-4 h-4 ${commsLoading ? 'animate-spin' : ''}`} /> Actualiser
+                </button>
+              </div>
+              {comms.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-6">Aucune communication.</p>
+              ) : (
+                <div className="space-y-2">
+                  {comms.map((c) => {
+                    const badge = c.type === 'urgent' ? '🔴' : c.type === 'deadline' ? '🟠' : '🟢';
+                    const statusColor = c.status === 'sent' ? 'text-green-600' : c.status === 'failed' ? 'text-red-600' : c.status === 'sending' ? 'text-amber-600' : 'text-gray-500';
+                    return (
+                      <div key={c.id} className="flex items-center justify-between gap-3 p-3 border border-gray-100 rounded-lg">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{badge} {c.title}</p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(c.scheduled_at).toLocaleString('fr-FR')} ·
+                            <span className={`ml-1 font-medium ${statusColor}`}>{c.status}</span>
+                            {c.status === 'sent' && ` · ${c.sent_count} envoyé(s)${c.failed_count ? `, ${c.failed_count} échec(s)` : ''}`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {c.status === 'scheduled' && (
+                            <button onClick={() => sendCommNow(c.id)} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">Envoyer</button>
+                          )}
+                          {c.status !== 'sending' && (
+                            <button onClick={() => deleteComm(c.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'connection' && (
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-3xl mx-auto space-y-6">

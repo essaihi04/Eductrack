@@ -22,6 +22,8 @@ import superadminRoutes from './routes/superadmin.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
 import cloudWebhookRoutes from './routes/cloudWebhook.routes.js';
 import legalRoutes from './routes/legal.routes.js';
+import communicationsRoutes from './routes/communications.routes.js';
+import { startCommunicationScheduler } from './services/communicationScheduler.js';
 import financeRoutes from './routes/finance.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
 import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
@@ -79,6 +81,7 @@ app.use('/api/auth', authRoutes);
 // IMPORTANT: sous-routes /api/admin/* spécifiques montées AVANT le routeur admin générique
 // (sinon le middleware authorize('admin') du routeur admin bloque les autres rôles)
 app.use('/api/admin/whatsapp', whatsappRoutes);
+app.use('/api/admin/communications', communicationsRoutes);
 app.use('/api/admin/finance-managers', financeManagersRoutes);
 app.use('/api/admin/pedagogical-managers', pedagogicalManagersRoutes);
 app.use('/api/admin/pedagogical-directors', pedagogicalDirectorsRoutes);
@@ -126,6 +129,7 @@ app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   startDailyReportScheduler();
   startParentReportScheduler();
+  startCommunicationScheduler();
 
   // Reconnecte automatiquement toutes les sessions WhatsApp Baileys
   // pour les écoles déjà appairées (auth state présent sur disque).
