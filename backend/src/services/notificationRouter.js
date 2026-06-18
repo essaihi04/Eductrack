@@ -42,6 +42,31 @@ export async function whatsappWindowOpen(parentId) {
   return !!(data && data.length);
 }
 
+/** Date du jour en heure du Maroc (YYYY-MM-DD). */
+function todayCasa() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Casablanca' });
+}
+
+/** Le parent a-t-il cliqué « Je ne veux pas » pour le transport aujourd'hui ? */
+export async function isTransportSkippedToday(parentId) {
+  if (!parentId) return false;
+  const { data } = await supabaseAdmin
+    .from('transport_daily_skip')
+    .select('parent_id')
+    .eq('parent_id', parentId)
+    .eq('day', todayCasa())
+    .maybeSingle();
+  return !!data;
+}
+
+/** Marque le parent comme « pas de transport aujourd'hui ». */
+export async function setTransportSkipToday(parentId) {
+  if (!parentId) return;
+  await supabaseAdmin
+    .from('transport_daily_skip')
+    .upsert({ parent_id: parentId, day: todayCasa() }, { onConflict: 'parent_id,day' });
+}
+
 /** Pied de page incitatif ajouté aux WhatsApp des parents SANS app. */
 function nudgeFooter() {
   const link = process.env.APP_INSTALL_URL || process.env.PUBLIC_BASE_URL || 'https://etrack.ma';

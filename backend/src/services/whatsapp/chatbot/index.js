@@ -20,7 +20,7 @@ import { fileURLToPath } from 'url';
 import { downloadMediaMessage } from 'baileys';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
-import { setWhatsappOptOut } from '../../notificationRouter.js';
+import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
 import {
   saveProfilePhotoBuffer,
   deleteProfilePhotoByUrl,
@@ -1038,6 +1038,23 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     await markProcessed(incomingMsg?.id);
     return;
   }
+  // Porte d'entrée transport : réponse aux boutons « Voir détails » / « Je ne veux pas »
+  // (id boutons Cloud : transport_yes / transport_no ; repli texte Baileys : BUS OUI / BUS NON)
+  {
+    const t = String(text || '').trim().toLowerCase();
+    if (t === 'transport_yes' || t === 'bus oui') {
+      await sendText(parentInfo.school_id, phone, `✅ C'est noté, vous recevrez le suivi du bus aujourd'hui, *gratuitement*. 🚌`, { urgent: true });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+    if (t === 'transport_no' || t === 'bus non') {
+      await setTransportSkipToday(parentInfo.parent_id);
+      await sendText(parentInfo.school_id, phone, `Compris 👍 Vous ne recevrez pas les notifications du bus aujourd'hui.`, { urgent: true });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+  }
+
   // Réactivation des notifications WhatsApp après un STOP
   if (/^(start|démarrer|demarrer|reprendre|activer|oui je veux)$/i.test(String(text || '').trim())) {
     await setWhatsappOptOut(parentInfo.parent_id, false);

@@ -7,7 +7,15 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUsers } from './webPush.js';
 import { sendText, getStatus } from './whatsapp/index.js';
-import { parentHasApp, whatsappOptedOut } from './notificationRouter.js';
+import { parentHasApp, whatsappOptedOut, whatsappWindowOpen, isTransportSkippedToday } from './notificationRouter.js';
+import * as cloud from './whatsapp/cloudApi.js';
+
+// Porte d'entrée transport : quand activée, les SUIVIS (monté/approche/déposé)
+// ne partent en WhatsApp qu'aux parents sans app ayant une fenêtre 24h ouverte
+// (= ils ont cliqué « Voir les détails » au départ). À activer une fois le
+// template Cloud à boutons approuvé par Meta.
+const TRANSPORT_GATE = process.env.TRANSPORT_GATE_ENABLED === 'true';
+const TRANSPORT_TEMPLATE = process.env.WA_TRANSPORT_TEMPLATE || null;
 
 // Envoi via le provider Baileys (avec anti-ban intégré)
 async function rawSend(schoolId, phone, text, opts = {}) {
@@ -44,18 +52,24 @@ async function getParentWhatsAppPhone(parentId) {
  * @param {string} opts.text - corps du message
  * @param {object} [opts.recipientFilter] - infos contextuelles stockées dans recipient_filter
  */
-async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, recipientFilter = {} }) {
+async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, recipientFilter = {}, critical = false }) {
   if (!recipients || recipients.length === 0) return { ok: false, reason: 'no_recipients' };
 
   // ÉCONOMIE : on n'envoie de WhatsApp (payant) QU'AUX parents sans app —
   // ceux qui ont l'app reçoivent déjà un push gratuit pour le même événement.
-  // On exclut aussi les parents opt-out WhatsApp.
+  // On exclut aussi les opt-out, les « je ne veux pas » du jour, et — si la
+  // porte d'entrée est activée — ceux dont la fenêtre 24h n'est pas ouverte.
+  // `critical` (ex. absence) court-circuite la porte/skip.
   const candidates = recipients.filter(r => r.phone);
   const validRecipients = [];
   for (const r of candidates) {
     if (r.parent_id) {
       if (await parentHasApp(r.parent_id)) continue;     // a l'app → push suffit
       if (await whatsappOptedOut(r.parent_id)) continue; // opt-out WhatsApp
+      if (!critical) {
+        if (await isTransportSkippedToday(r.parent_id)) continue; // a cliqué « Je ne veux pas »
+        if (TRANSPORT_GATE && !(await whatsappWindowOpen(r.parent_id))) continue; // pas cliqué « Voir détails »
+      }
     }
     validRecipients.push(r);
   }
@@ -276,7 +290,8 @@ export async function notifyAbsent(studentId, note = '', opts = {}) {
     senderId: driverId || null,
     recipients: parents.map(p => ({ parent_id: p.id, phone: p.whatsapp_phone })),
     text,
-    recipientFilter: { event: 'absent', student_id: studentId, note: note || null }
+    recipientFilter: { event: 'absent', student_id: studentId, note: note || null },
+    critical: true, // une absence est toujours envoyée (sécurité)
   });
 
   if (parents.length > 0) {
@@ -311,9 +326,7 @@ export async function notifyTripStarted(tripId) {
     ? `🚀 *Tournée démarrée — ${directionLabel}*\nLe bus *${plate}* vient de démarrer la tournée. 🚌\nVotre enfant sera bientôt récupéré. Vous serez notifié(e) quand le bus approchera. 📍\nSuivez en direct dans l'application. 📱`
     : `🚀 *Retour démarré*\nLe bus *${plate}* quitte l'école pour ramener votre enfant à la maison. 🏠\nVous serez notifié(e) à l'approche de la maison. 📍\nSuivez en direct dans l'application. 📱`;
 
-  // PUSH UNIQUEMENT (gratuit). « Tournée démarrée » n'est pas un des 3
-  // événements WhatsApp essentiels → pas d'envoi WhatsApp payant.
-  // (Le texte WhatsApp est conservé ci-dessus au cas où on voudrait le réactiver.)
+  // PUSH UNIQUEMENT (gratuit) pour « Tournée démarrée ».
   void text;
   await sendPushToUsers(parentIds, {
     title: `🚀 Bus ${plate} en route`,
@@ -321,6 +334,41 @@ export async function notifyTripStarted(tripId) {
     url: '/parent/transport',
     tag: `transport-start-${tripId}`
   });
+
+  // PORTE D'ENTRÉE : si activée, on envoie aux parents SANS app un message à
+  // boutons. Le clic « Voir détails » ouvre la fenêtre 24h → tous les suivis du
+  // jour deviennent gratuits. « Je ne veux pas » → aucun suivi aujourd'hui.
+  if (TRANSPORT_GATE) {
+    await sendDepartureGate(trip.school_id, parentIds, trip.driver_id || null, directionLabel);
+  }
+}
+
+/**
+ * Envoie le message « porte d'entrée » aux parents SANS app (ni opt-out).
+ * Cloud API + template approuvé → message à boutons quick-reply.
+ * Sinon (Baileys) → repli texte « Répondez OUI / NON ».
+ */
+async function sendDepartureGate(schoolId, parentIds, senderId, label) {
+  const isCloud = await cloud.isCloudSchool(schoolId);
+  for (const pid of parentIds) {
+    try {
+      if (await parentHasApp(pid)) continue;        // a l'app → push gratuit
+      if (await whatsappOptedOut(pid)) continue;    // opt-out
+      const phone = await getParentWhatsAppPhone(pid);
+      if (!phone) continue;
+
+      if (isCloud && TRANSPORT_TEMPLATE) {
+        // Template approuvé avec boutons quick-reply « Voir détails » / « Je ne veux pas »
+        await cloud.sendTemplate(schoolId, phone, TRANSPORT_TEMPLATE, 'fr');
+      } else {
+        // Repli texte (Baileys, ou tant que le template n'est pas configuré)
+        const txt = `🚌 *Transport — ${label}*\nLe bus démarre.\n\n• Répondez *BUS OUI* pour recevoir le suivi du bus aujourd'hui (gratuit).\n• Répondez *BUS NON* pour ne pas être notifié aujourd'hui.\n\n📲 _Avec l'application, tout est automatique et gratuit._`;
+        await sendText(schoolId, phone, txt, { urgent: true });
+      }
+    } catch (e) {
+      console.error('[TransportGate] parent', pid, e.message);
+    }
+  }
 }
 
 // 🏫 Notif "bus arrivé à l'école" — fin de tournée pickup
