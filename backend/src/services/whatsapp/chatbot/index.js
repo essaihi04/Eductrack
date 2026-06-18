@@ -39,6 +39,7 @@ import { generateInvoicePdfById } from './invoicePdf.js';
 import { sendMediaBuffer, sendImage } from '../index.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
+import { generatePreview } from '../../dailyReports.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -128,6 +129,49 @@ async function sendBulletinPdfs(schoolId, phone, student, semester = null) {
   } catch (e) {
     console.error('[chatbot] sendBulletinPdfs error:', e.message);
     return 0;
+  }
+}
+
+/**
+ * Génère et envoie À LA DEMANDE le rapport de suivi du jour de l'élève
+ * (consultation). Réutilise le même moteur IA que les rapports quotidiens
+ * automatiques (generatePreview) mais SANS rien marquer comme « envoyé » :
+ * c'est une simple consultation, indépendante de l'envoi programmé.
+ */
+async function sendDailyReportNow(schoolId, phone, student, parentInfo) {
+  await sendText(
+    schoolId,
+    phone,
+    `📊 Préparation du rapport de suivi de *${student.first_name}*… _un instant._`,
+    { urgent: true }
+  );
+  try {
+    const result = await generatePreview(student.id, schoolId);
+    if (!result?.success || result?.error) {
+      await sendText(
+        schoolId,
+        phone,
+        `📊 ${result?.error || "Aucune donnée de suivi disponible aujourd'hui."}\n\n_Le rapport sera consultable dès qu'un professeur aura renseigné une séance._\n\n_Tapez *menu* pour d'autres options._`,
+        { urgent: true }
+      );
+      return;
+    }
+    const report = result.report || {};
+    let msg = '';
+    if (report.fr) msg += report.fr;
+    if (report.fr && report.ar) msg += '\n\n━━━━━━━━━━━━━━━\n\n';
+    if (report.ar) msg += report.ar;
+    if (!msg.trim()) {
+      await sendText(schoolId, phone, `📊 Rapport indisponible pour le moment. Réessayez plus tard.`, { urgent: true });
+      return;
+    }
+    await sendText(schoolId, phone, msg, { urgent: true });
+    setTimeout(() => {
+      sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+    }, 1500);
+  } catch (e) {
+    console.error('[chatbot] sendDailyReportNow error:', e.message);
+    await sendText(schoolId, phone, `⚠️ Erreur lors de la génération du rapport. Veuillez réessayer.`, { urgent: true });
   }
 }
 
@@ -725,6 +769,11 @@ async function sendSubMenu(schoolId, phone, menuId, student, parentInfo) {
 // ─────────────────────────────────────────────────────────────────────────
 
 async function executeOption(option, schoolId, phone, student, parentInfo) {
+  // Action de consultation à la demande du rapport de suivi du jour.
+  if (option.action === 'report:now') {
+    return sendDailyReportNow(schoolId, phone, student, parentInfo);
+  }
+
   // Action de navigation : "goto:menuId"
   if (typeof option.action === 'string' && option.action.startsWith('goto:')) {
     const target = option.action.split(':')[1];

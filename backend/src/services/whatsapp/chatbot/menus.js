@@ -73,6 +73,7 @@ export const PEDAGOGY_MENU = {
     { id: '5', emoji: '📆', label: 'Programme de demain',            action: A.getTodaySchedule },
     { id: '6', emoji: '📎', label: 'Documents partagés',             action: A.getRecentDocuments },
     { id: '7', emoji: '📄', label: 'Bulletins scolaires',            action: A.getBulletinSummary },
+    { id: '8', emoji: '📊', label: 'Consulter mon rapport du jour',  action: 'report:now' },
     { id: '0', emoji: '🔙', label: 'Retour au menu principal',       action: 'goto:main' },
   ],
 };
