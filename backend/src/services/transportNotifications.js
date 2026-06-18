@@ -7,6 +7,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUsers } from './webPush.js';
 import { sendText, getStatus } from './whatsapp/index.js';
+import { parentHasApp, whatsappOptedOut } from './notificationRouter.js';
 
 // Envoi via le provider Baileys (avec anti-ban intégré)
 async function rawSend(schoolId, phone, text, opts = {}) {
@@ -45,14 +46,20 @@ async function getParentWhatsAppPhone(parentId) {
  */
 async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, recipientFilter = {} }) {
   if (!recipients || recipients.length === 0) return { ok: false, reason: 'no_recipients' };
-  const validRecipients = recipients.filter(r => r.phone);
-  if (validRecipients.length === 0) return { ok: false, reason: 'no_phones' };
 
-  const sessStatus = getStatus(schoolId);
-  if (!sessStatus.connected) {
-    console.warn('[TransportNotif] Pas de session WhatsApp pour school', schoolId, 'status:', sessStatus.status);
-    return { ok: false, reason: 'no_session' };
+  // ÉCONOMIE : on n'envoie de WhatsApp (payant) QU'AUX parents sans app —
+  // ceux qui ont l'app reçoivent déjà un push gratuit pour le même événement.
+  // On exclut aussi les parents opt-out WhatsApp.
+  const candidates = recipients.filter(r => r.phone);
+  const validRecipients = [];
+  for (const r of candidates) {
+    if (r.parent_id) {
+      if (await parentHasApp(r.parent_id)) continue;     // a l'app → push suffit
+      if (await whatsappOptedOut(r.parent_id)) continue; // opt-out WhatsApp
+    }
+    validRecipients.push(r);
   }
+  if (validRecipients.length === 0) return { ok: true, sent: 0, failed: 0, skipped: candidates.length };
 
   // 1) Log message global
   const { data: msgLog, error: logErr } = await supabaseAdmin
