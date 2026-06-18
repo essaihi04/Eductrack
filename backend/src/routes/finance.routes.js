@@ -1189,6 +1189,164 @@ router.get('/dashboard/by-class', async (req, res) => {
 });
 
 // ============================================================
+// RAPPORTS FINANCIERS — synthèse exportable par période / mois / jour
+// ============================================================
+router.get('/reports/summary', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from et to requis' });
+
+    const METHODS = ['cash', 'check', 'transfer', 'card_pos', 'other'];
+    const emptyByMethod = () => METHODS.reduce((a, m) => ({ ...a, [m]: { total: 0, count: 0 } }), {});
+    const monthKey = (d) => String(d).slice(0, 7); // YYYY-MM
+    const monthLabelFromKey = (k) => {
+      const [y, m] = k.split('-');
+      return `${getMonthName(Number(m))} ${y}`;
+    };
+
+    // ---- Encaissements (paiements confirmés sur la période) ----
+    let payQ = supabaseAdmin
+      .from('payments')
+      .select(`id, receipt_number, amount, payment_date, method, reference,
+        student:profiles!payments_student_id_fkey(first_name, last_name, classes!fk_profiles_class(name))`)
+      .eq('status', 'confirmed')
+      .gte('payment_date', from)
+      .lte('payment_date', to)
+      .order('payment_date', { ascending: false });
+    if (schoolId) payQ = payQ.eq('school_id', schoolId);
+    const { data: payments, error: payErr } = await payQ;
+    if (payErr) throw payErr;
+
+    const incomeByMethod = emptyByMethod();
+    const incomeByDay = {};
+    const incomeByMonth = {};
+    let incomeTotal = 0;
+    for (const p of payments || []) {
+      const m = METHODS.includes(p.method) ? p.method : 'other';
+      const amt = Number(p.amount || 0);
+      incomeByMethod[m].total += amt;
+      incomeByMethod[m].count += 1;
+      incomeTotal += amt;
+      const d = String(p.payment_date).slice(0, 10);
+      incomeByDay[d] = (incomeByDay[d] || 0) + amt;
+      incomeByMonth[monthKey(d)] = (incomeByMonth[monthKey(d)] || 0) + amt;
+    }
+
+    // ---- Dépenses (sorties de caisse) — admin uniquement ----
+    const expenseByCategory = {};
+    const expenseByDay = {};
+    const expenseByMonth = {};
+    let expenseTotal = 0;
+    let expensesDetail = [];
+    if (isAdminRole(req)) {
+      let expQ = supabaseAdmin
+        .from('school_expenses')
+        .select('amount, expense_date, payment_method, category, description, paid_to')
+        .gte('expense_date', from)
+        .lte('expense_date', to)
+        .order('expense_date', { ascending: false });
+      if (schoolId) expQ = expQ.eq('school_id', schoolId);
+      const { data: expenses } = await expQ;
+      expensesDetail = expenses || [];
+      for (const e of expensesDetail) {
+        const amt = Number(e.amount || 0);
+        const cat = e.category || 'other';
+        if (!expenseByCategory[cat]) expenseByCategory[cat] = { total: 0, count: 0 };
+        expenseByCategory[cat].total += amt;
+        expenseByCategory[cat].count += 1;
+        expenseTotal += amt;
+        const d = String(e.expense_date).slice(0, 10);
+        expenseByDay[d] = (expenseByDay[d] || 0) + amt;
+        expenseByMonth[monthKey(d)] = (expenseByMonth[monthKey(d)] || 0) + amt;
+      }
+    }
+
+    // ---- Ventilation combinée par jour et par mois ----
+    const dayKeys = Array.from(new Set([...Object.keys(incomeByDay), ...Object.keys(expenseByDay)])).sort();
+    const byDay = dayKeys.map(d => ({
+      date: d,
+      income: incomeByDay[d] || 0,
+      expense: expenseByDay[d] || 0,
+      net: (incomeByDay[d] || 0) - (expenseByDay[d] || 0),
+    }));
+    const monthKeys = Array.from(new Set([...Object.keys(incomeByMonth), ...Object.keys(expenseByMonth)])).sort();
+    const byMonth = monthKeys.map(k => ({
+      key: k,
+      label: monthLabelFromKey(k),
+      income: incomeByMonth[k] || 0,
+      expense: expenseByMonth[k] || 0,
+      net: (incomeByMonth[k] || 0) - (expenseByMonth[k] || 0),
+    }));
+
+    // ---- Recouvrement ----
+    // Facturé sur la période (factures émises entre from et to)
+    let issuedQ = supabaseAdmin
+      .from('invoices')
+      .select('total')
+      .gte('issue_date', from)
+      .lte('issue_date', to)
+      .neq('status', 'cancelled');
+    if (schoolId) issuedQ = issuedQ.eq('school_id', schoolId);
+    const { data: issuedRows } = await issuedQ;
+    const invoicedPeriod = (issuedRows || []).reduce((s, r) => s + Number(r.total), 0);
+
+    // Reste à recouvrer GLOBAL (dette réelle) + ventilation par classe
+    let allInvQ = supabaseAdmin
+      .from('invoices')
+      .select('total, amount_paid, student:profiles!invoices_student_id_fkey(classes!fk_profiles_class(id, name))')
+      .neq('status', 'cancelled');
+    if (schoolId) allInvQ = allInvQ.eq('school_id', schoolId);
+    const { data: allInv } = await allInvQ;
+
+    const byClassMap = {};
+    let invoicedTotal = 0;
+    let paidTotal = 0;
+    let outstandingTotal = 0;
+    (allInv || []).forEach(inv => {
+      const t = Number(inv.total);
+      const p = Number(inv.amount_paid || 0);
+      invoicedTotal += t;
+      paidTotal += p;
+      outstandingTotal += (t - p);
+      const cls = inv.student?.classes;
+      const key = cls?.id || 'none';
+      if (!byClassMap[key]) byClassMap[key] = { class_name: cls?.name || 'Sans classe', invoiced: 0, paid: 0 };
+      byClassMap[key].invoiced += t;
+      byClassMap[key].paid += p;
+    });
+    const byClass = Object.values(byClassMap).map(c => ({
+      ...c,
+      remaining: c.invoiced - c.paid,
+      rate: c.invoiced > 0 ? (c.paid / c.invoiced) * 100 : 0,
+    })).sort((a, b) => a.rate - b.rate);
+
+    res.json({
+      period: { from, to },
+      income: { total: incomeTotal, count: (payments || []).length, by_method: incomeByMethod },
+      expense: { total: expenseTotal, count: expensesDetail.length, by_category: expenseByCategory },
+      net: incomeTotal - expenseTotal,
+      by_day: byDay,
+      by_month: byMonth,
+      recouvrement: {
+        invoiced_period: invoicedPeriod,
+        collected_period: incomeTotal,
+        invoiced_total: invoicedTotal,
+        paid_total: paidTotal,
+        outstanding_total: outstandingTotal,
+        rate: invoicedTotal > 0 ? (paidTotal / invoicedTotal) * 100 : 0,
+        by_class: byClass,
+      },
+      payments: (payments || []).slice(0, 1000),
+      expenses: expensesDetail.slice(0, 1000),
+    });
+  } catch (error) {
+    console.error('Erreur reports/summary:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ============================================================
 // RETARDS & RELANCES
 // ============================================================
 router.get('/overdue', async (req, res) => {

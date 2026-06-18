@@ -108,6 +108,7 @@ const Sidebar = () => {
           { section: 'Finance', isSection: true },
           { icon: Wallet, label: 'Tableau finance', path: '/finance' },
           { icon: Banknote, label: 'Caisse', path: '/finance/cash-register' },
+          { icon: BarChart3, label: 'Rapports', path: '/finance/reports' },
           { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
           { icon: Users, label: 'Élèves (finance)', path: '/finance/students' },
           { icon: FileText, label: 'Factures', path: '/finance/invoices' },
@@ -179,6 +180,7 @@ const Sidebar = () => {
     if (profile?.role === 'finance_manager') {
       return [
         { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+        { icon: BarChart3, label: 'Rapports', path: '/finance/reports' },
         { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
         { icon: Users, label: 'Élèves', path: '/finance/students' },
         { icon: FileText, label: 'Factures', path: '/finance/invoices' },

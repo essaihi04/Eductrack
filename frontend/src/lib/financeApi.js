@@ -70,6 +70,9 @@ export const financeApi = {
   // Caisse (encaissements/dépenses par période et mode)
   getCashRegister: (from, to) => request('/api/finance/cash-register', { query: { from, to } }),
 
+  // Rapports financiers (synthèse exportable par période / mois / jour)
+  getReportSummary: (from, to) => request('/api/finance/reports/summary', { query: { from, to } }),
+
   // Dashboard
   getSummary: () => request('/api/finance/dashboard/summary'),
   getCashflow: (months = 6) => request('/api/finance/dashboard/cashflow', { query: { months } }),
