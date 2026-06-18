@@ -27,6 +27,7 @@
     "@supabase/supabase-js": "^2.39.3",
     "clsx": "^2.1.0",
     "date-fns": "^3.3.1",
+    "exceljs": "^4.4.0",
     "framer-motion": "^11.0.3",
     "jspdf": "^4.1.0",
     "jspdf-autotable": "^5.0.7",

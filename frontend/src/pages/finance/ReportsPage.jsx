@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import * as XLSX from 'xlsx';
 import {
   BarChart3, TrendingUp, TrendingDown, Wallet, FileSpreadsheet, FileText,
   Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt,
@@ -49,8 +48,6 @@ const GRANULARITIES = [
   { key: 'month', label: 'Par mois' },
 ];
 
-const nfMAD = (n) => Number(n || 0).toFixed(2);
-
 const ReportsPage = () => {
   const [period, setPeriod] = useState('month');
   const [custom, setCustom] = useState({ from: todayISO(), to: todayISO() });
@@ -83,71 +80,297 @@ const ReportsPage = () => {
   const fileBase = `rapport_finance_${range.from}_${range.to}`;
   const breakdown = granularity === 'month' ? (data?.by_month || []) : (data?.by_day || []);
 
-  // ── Export Excel (multi-feuilles) ────────────────────────────────────────
-  const exportExcel = () => {
+  // ── Export Excel (multi-feuilles, tableaux colorés via ExcelJS) ──────────
+  const exportExcel = async () => {
     if (!data) return;
-    const wb = XLSX.utils.book_new();
+    const ExcelJS = (await import('exceljs')).default;
 
-    // Feuille 1 : Synthèse
-    const synth = [
-      ['Rapport financier'],
-      ['Période', `${range.from} → ${range.to}`],
-      [],
-      ['Indicateur', 'Montant (MAD)'],
-      ['Encaissements', nfMAD(data.income?.total)],
-      ['Dépenses', nfMAD(data.expense?.total)],
-      ['Résultat net', nfMAD(data.net)],
-      [],
-      ['Recouvrement', ''],
-      ['Facturé sur la période', nfMAD(data.recouvrement?.invoiced_period)],
-      ['Encaissé sur la période', nfMAD(data.recouvrement?.collected_period)],
-      ['Total facturé (global)', nfMAD(data.recouvrement?.invoiced_total)],
-      ['Total encaissé (global)', nfMAD(data.recouvrement?.paid_total)],
-      ['Reste à recouvrer (global)', nfMAD(data.recouvrement?.outstanding_total)],
-      ['Taux de recouvrement (%)', (data.recouvrement?.rate || 0).toFixed(1)],
-      [],
-      ['Encaissements par mode', 'Montant (MAD)', 'Nb'],
-      ...METHOD_ORDER.map(m => [METHOD_LABELS[m], nfMAD(data.income?.by_method?.[m]?.total), data.income?.by_method?.[m]?.count || 0]),
+    // Palette
+    const C = {
+      indigo: 'FF4F46E5', green: 'FF10B981', red: 'FFEF4444', blue: 'FF3B82F6',
+      orange: 'FFEA580C', amber: 'FFF59E0B', slate: 'FF334155',
+      zebra: 'FFF1F5F9', headText: 'FFFFFFFF', border: 'FFE2E8F0',
+    };
+    const MONEY = '#,##0.00 "MAD"';
+    const thin = { style: 'thin', color: { argb: C.border } };
+    const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Edutrack';
+    wb.created = new Date();
+
+    // Helper : construit une feuille « tableau » avec titre + en-tête coloré + zébrures
+    const buildSheet = (name, tabColor, title, columns, rows, totals) => {
+      const ws = wb.addWorksheet(name, {
+        properties: { tabColor: { argb: tabColor }, defaultRowHeight: 18 },
+        views: [{ state: 'frozen', ySplit: 3 }],
+      });
+      ws.columns = columns.map(c => ({ key: c.key, width: c.width || 18 }));
+      const ncol = columns.length;
+      const lastCol = String.fromCharCode(64 + ncol);
+
+      // Ligne 1 : titre fusionné
+      ws.mergeCells(`A1:${lastCol}1`);
+      const titleCell = ws.getCell('A1');
+      titleCell.value = title;
+      titleCell.font = { bold: true, size: 14, color: { argb: C.headText } };
+      titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tabColor } };
+      titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+      ws.getRow(1).height = 26;
+
+      // Ligne 2 : période fusionnée
+      ws.mergeCells(`A2:${lastCol}2`);
+      const subCell = ws.getCell('A2');
+      subCell.value = `Période : ${formatDate(range.from)} — ${formatDate(range.to)}`;
+      subCell.font = { italic: true, size: 10, color: { argb: C.slate } };
+      subCell.alignment = { vertical: 'middle', indent: 1 };
+      ws.getRow(2).height = 18;
+
+      // Ligne 3 : en-têtes de colonnes
+      const headerRow = ws.getRow(3);
+      columns.forEach((c, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = { bold: true, color: { argb: C.headText }, size: 11 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tabColor } };
+        cell.alignment = { vertical: 'middle', horizontal: c.money ? 'right' : 'left' };
+        cell.border = allBorders;
+      });
+      headerRow.height = 20;
+
+      // Données
+      rows.forEach((r, idx) => {
+        const row = ws.addRow(columns.map(c => r[c.key]));
+        const zebra = idx % 2 === 1;
+        columns.forEach((c, i) => {
+          const cell = row.getCell(i + 1);
+          cell.border = allBorders;
+          if (zebra) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.zebra } };
+          if (c.money) { cell.numFmt = MONEY; cell.alignment = { horizontal: 'right' }; }
+          else if (c.pct) { cell.numFmt = '0.0"%"'; cell.alignment = { horizontal: 'right' }; }
+          else cell.alignment = { horizontal: c.center ? 'center' : 'left' };
+        });
+      });
+
+      // Ligne de total (optionnelle)
+      if (totals) {
+        const row = ws.addRow(columns.map(c => totals[c.key]));
+        columns.forEach((c, i) => {
+          const cell = row.getCell(i + 1);
+          cell.font = { bold: true, color: { argb: C.headText } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.slate } };
+          cell.border = allBorders;
+          if (c.money) { cell.numFmt = MONEY; cell.alignment = { horizontal: 'right' }; }
+          else if (c.pct) { cell.numFmt = '0.0"%"'; cell.alignment = { horizontal: 'right' }; }
+          else cell.alignment = { horizontal: c.center ? 'center' : 'left' };
+        });
+        row.height = 19;
+      }
+      return ws;
+    };
+
+    // ── Feuille 1 : Synthèse (mise en page « tableau de bord ») ──
+    const ws = wb.addWorksheet('Synthèse', {
+      properties: { tabColor: { argb: C.indigo } },
+      views: [{ showGridLines: false }],
+    });
+    ws.columns = [{ width: 34 }, { width: 22 }, { width: 10 }];
+    ws.mergeCells('A1:C1');
+    const t = ws.getCell('A1');
+    t.value = 'RAPPORT FINANCIER';
+    t.font = { bold: true, size: 18, color: { argb: C.headText } };
+    t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.indigo } };
+    t.alignment = { vertical: 'middle', indent: 1 };
+    ws.getRow(1).height = 34;
+    ws.mergeCells('A2:C2');
+    const t2 = ws.getCell('A2');
+    t2.value = `Période : ${formatDate(range.from)} — ${formatDate(range.to)}   ·   Édité le ${formatDate(todayISO())}`;
+    t2.font = { italic: true, size: 10, color: { argb: C.slate } };
+    t2.alignment = { indent: 1 };
+    ws.getRow(2).height = 18;
+
+    // Bloc « cartes » indicateurs (libellé + montant coloré)
+    const kpis = [
+      ['Encaissements', data.income?.total, C.green],
+      ['Dépenses', data.expense?.total, C.red],
+      ['Résultat net', data.net, data.net >= 0 ? C.blue : C.orange],
+      ['Reste à recouvrer (global)', data.recouvrement?.outstanding_total, C.amber],
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(synth), 'Synthèse');
+    let rIdx = 4;
+    kpis.forEach(([label, val, color]) => {
+      const lc = ws.getCell(`A${rIdx}`);
+      lc.value = label;
+      lc.font = { bold: true, color: { argb: C.headText } };
+      lc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
+      lc.alignment = { vertical: 'middle', indent: 1 };
+      lc.border = allBorders;
+      const vc = ws.getCell(`B${rIdx}`);
+      vc.value = Number(val || 0);
+      vc.numFmt = MONEY;
+      vc.font = { bold: true, size: 12 };
+      vc.alignment = { horizontal: 'right' };
+      vc.border = allBorders;
+      ws.getRow(rIdx).height = 22;
+      rIdx += 1;
+    });
 
-    // Feuille 2 : Par jour
-    const dayRows = [['Date', 'Encaissements', 'Dépenses', 'Net'],
-      ...(data.by_day || []).map(r => [r.date, nfMAD(r.income), nfMAD(r.expense), nfMAD(r.net)])];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dayRows), 'Par jour');
+    // Sous-tableau recouvrement
+    rIdx += 1;
+    const recTitle = ws.getCell(`A${rIdx}`);
+    recTitle.value = 'Recouvrement';
+    recTitle.font = { bold: true, size: 12, color: { argb: C.slate } };
+    rIdx += 1;
+    const recRows = [
+      ['Facturé sur la période', data.recouvrement?.invoiced_period],
+      ['Encaissé sur la période', data.recouvrement?.collected_period],
+      ['Total facturé (global)', data.recouvrement?.invoiced_total],
+      ['Total encaissé (global)', data.recouvrement?.paid_total],
+      ['Reste à recouvrer (global)', data.recouvrement?.outstanding_total],
+    ];
+    recRows.forEach(([label, val], i) => {
+      const lc = ws.getCell(`A${rIdx}`);
+      lc.value = label;
+      lc.border = allBorders;
+      if (i % 2 === 1) lc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.zebra } };
+      const vc = ws.getCell(`B${rIdx}`);
+      vc.value = Number(val || 0);
+      vc.numFmt = MONEY;
+      vc.alignment = { horizontal: 'right' };
+      vc.border = allBorders;
+      if (i % 2 === 1) vc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.zebra } };
+      rIdx += 1;
+    });
+    const rateL = ws.getCell(`A${rIdx}`);
+    rateL.value = 'Taux de recouvrement';
+    rateL.font = { bold: true, color: { argb: C.headText } };
+    rateL.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.slate } };
+    rateL.border = allBorders;
+    const rateV = ws.getCell(`B${rIdx}`);
+    rateV.value = (data.recouvrement?.rate || 0) / 100;
+    rateV.numFmt = '0.0%';
+    rateV.font = { bold: true, color: { argb: C.headText } };
+    rateV.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.slate } };
+    rateV.alignment = { horizontal: 'right' };
+    rateV.border = allBorders;
 
-    // Feuille 3 : Par mois
-    const monthRows = [['Mois', 'Encaissements', 'Dépenses', 'Net'],
-      ...(data.by_month || []).map(r => [r.label, nfMAD(r.income), nfMAD(r.expense), nfMAD(r.net)])];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(monthRows), 'Par mois');
+    // ── Feuille : Par mode de paiement ──
+    buildSheet('Par mode', C.blue, 'Encaissements par mode de paiement',
+      [
+        { key: 'mode', header: 'Mode de paiement', width: 22 },
+        { key: 'montant', header: 'Montant', width: 18, money: true },
+        { key: 'nb', header: 'Nb', width: 10, center: true },
+      ],
+      METHOD_ORDER.map(m => ({
+        mode: METHOD_LABELS[m],
+        montant: Number(data.income?.by_method?.[m]?.total || 0),
+        nb: data.income?.by_method?.[m]?.count || 0,
+      })),
+      { mode: 'TOTAL', montant: Number(data.income?.total || 0), nb: data.income?.count || 0 },
+    );
 
-    // Feuille 4 : Encaissements détaillés
-    const payRows = [['Date', 'Reçu', 'Élève', 'Classe', 'Mode', 'Montant'],
-      ...(data.payments || []).map(p => [
-        p.payment_date, p.receipt_number,
-        p.student ? `${p.student.first_name} ${p.student.last_name}` : '—',
-        p.student?.classes?.name || '', METHOD_LABELS[p.method] || p.method, nfMAD(p.amount),
-      ])];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(payRows), 'Encaissements');
+    // ── Feuille : Par jour ──
+    buildSheet('Par jour', C.indigo, 'Ventilation par jour',
+      [
+        { key: 'date', header: 'Date', width: 14 },
+        { key: 'income', header: 'Encaissé', width: 16, money: true },
+        { key: 'expense', header: 'Dépensé', width: 16, money: true },
+        { key: 'net', header: 'Net', width: 16, money: true },
+      ],
+      (data.by_day || []).map(r => ({ date: r.date, income: r.income, expense: r.expense, net: r.net })),
+      {
+        date: 'TOTAL',
+        income: (data.by_day || []).reduce((s, r) => s + r.income, 0),
+        expense: (data.by_day || []).reduce((s, r) => s + r.expense, 0),
+        net: (data.by_day || []).reduce((s, r) => s + r.net, 0),
+      },
+    );
 
-    // Feuille 5 : Dépenses (si admin)
+    // ── Feuille : Par mois ──
+    buildSheet('Par mois', C.indigo, 'Ventilation par mois',
+      [
+        { key: 'label', header: 'Mois', width: 18 },
+        { key: 'income', header: 'Encaissé', width: 16, money: true },
+        { key: 'expense', header: 'Dépensé', width: 16, money: true },
+        { key: 'net', header: 'Net', width: 16, money: true },
+      ],
+      (data.by_month || []).map(r => ({ label: r.label, income: r.income, expense: r.expense, net: r.net })),
+      {
+        label: 'TOTAL',
+        income: (data.by_month || []).reduce((s, r) => s + r.income, 0),
+        expense: (data.by_month || []).reduce((s, r) => s + r.expense, 0),
+        net: (data.by_month || []).reduce((s, r) => s + r.net, 0),
+      },
+    );
+
+    // ── Feuille : Encaissements détaillés ──
+    buildSheet('Encaissements', C.green, 'Détail des encaissements',
+      [
+        { key: 'date', header: 'Date', width: 13 },
+        { key: 'recu', header: 'Reçu', width: 16 },
+        { key: 'eleve', header: 'Élève', width: 26 },
+        { key: 'classe', header: 'Classe', width: 16 },
+        { key: 'mode', header: 'Mode', width: 14 },
+        { key: 'montant', header: 'Montant', width: 16, money: true },
+      ],
+      (data.payments || []).map(p => ({
+        date: p.payment_date, recu: p.receipt_number,
+        eleve: p.student ? `${p.student.first_name} ${p.student.last_name}` : '—',
+        classe: p.student?.classes?.name || '', mode: METHOD_LABELS[p.method] || p.method,
+        montant: Number(p.amount || 0),
+      })),
+      { date: '', recu: '', eleve: '', classe: '', mode: 'TOTAL', montant: Number(data.income?.total || 0) },
+    );
+
+    // ── Feuille : Dépenses (si admin) ──
     if ((data.expenses || []).length > 0) {
-      const expRows = [['Date', 'Catégorie', 'Description', 'Bénéficiaire', 'Mode', 'Montant'],
-        ...data.expenses.map(e => [
-          e.expense_date, EXPENSE_CATEGORIES[e.category] || e.category, e.description || '',
-          e.paid_to || '', METHOD_LABELS[e.payment_method] || e.payment_method || '', nfMAD(e.amount),
-        ])];
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(expRows), 'Dépenses');
+      buildSheet('Dépenses', C.red, 'Détail des dépenses',
+        [
+          { key: 'date', header: 'Date', width: 13 },
+          { key: 'cat', header: 'Catégorie', width: 18 },
+          { key: 'desc', header: 'Description', width: 30 },
+          { key: 'paid', header: 'Bénéficiaire', width: 20 },
+          { key: 'mode', header: 'Mode', width: 14 },
+          { key: 'montant', header: 'Montant', width: 16, money: true },
+        ],
+        data.expenses.map(e => ({
+          date: e.expense_date, cat: EXPENSE_CATEGORIES[e.category] || e.category,
+          desc: e.description || '', paid: e.paid_to || '',
+          mode: METHOD_LABELS[e.payment_method] || e.payment_method || '', montant: Number(e.amount || 0),
+        })),
+        { date: '', cat: '', desc: '', paid: '', mode: 'TOTAL', montant: Number(data.expense?.total || 0) },
+      );
     }
 
-    // Feuille 6 : Recouvrement par classe
-    const clsRows = [['Classe', 'Facturé', 'Encaissé', 'Reste', 'Taux (%)'],
-      ...(data.recouvrement?.by_class || []).map(c => [
-        c.class_name, nfMAD(c.invoiced), nfMAD(c.paid), nfMAD(c.remaining), c.rate.toFixed(1),
-      ])];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(clsRows), 'Par classe');
+    // ── Feuille : Recouvrement par classe ──
+    buildSheet('Par classe', C.amber, 'Recouvrement par classe (global)',
+      [
+        { key: 'classe', header: 'Classe', width: 22 },
+        { key: 'invoiced', header: 'Facturé', width: 16, money: true },
+        { key: 'paid', header: 'Encaissé', width: 16, money: true },
+        { key: 'remaining', header: 'Reste', width: 16, money: true },
+        { key: 'rate', header: 'Taux', width: 10, pct: true },
+      ],
+      (data.recouvrement?.by_class || []).map(c => ({
+        classe: c.class_name, invoiced: c.invoiced, paid: c.paid, remaining: c.remaining, rate: c.rate,
+      })),
+      {
+        classe: 'TOTAL',
+        invoiced: Number(data.recouvrement?.invoiced_total || 0),
+        paid: Number(data.recouvrement?.paid_total || 0),
+        remaining: Number(data.recouvrement?.outstanding_total || 0),
+        rate: data.recouvrement?.rate || 0,
+      },
+    );
 
-    XLSX.writeFile(wb, `${fileBase}.xlsx`);
+    // Téléchargement
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileBase}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // ── Export PDF ───────────────────────────────────────────────────────────
