@@ -25,6 +25,29 @@ export async function parentHasApp(parentId) {
   return !!(data && data.length);
 }
 
+/**
+ * Le parent a-t-il une fenêtre de service WhatsApp ouverte (< 24 h) ?
+ * = il a envoyé un message entrant dans les dernières 24 h → l'envoi WhatsApp
+ * est GRATUIT (et autorisé en texte libre, même sur Cloud API).
+ */
+export async function whatsappWindowOpen(parentId) {
+  if (!parentId) return false;
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { data } = await supabaseAdmin
+    .from('whatsapp_incoming_messages')
+    .select('id')
+    .eq('parent_id', parentId)
+    .gte('created_at', since)
+    .limit(1);
+  return !!(data && data.length);
+}
+
+/** Pied de page incitatif ajouté aux WhatsApp des parents SANS app. */
+function nudgeFooter() {
+  const link = process.env.APP_INSTALL_URL || process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
+  return `\n\n━━━━━━━━━━━━━\n📲 Installez l'app pour tout voir *gratuitement* : ${link}\n💬 _Répondez à ce message pour rester en contact gratuit._`;
+}
+
 /** Le parent a-t-il refusé les notifications WhatsApp ? */
 export async function whatsappOptedOut(parentId) {
   if (!parentId) return false;
@@ -62,12 +85,14 @@ export async function setWhatsappOptOut(parentId, optedOut) {
  * @param {Function} [p.whatsappSend] envoi WhatsApp custom (ex. avec retry) → { success }
  * @returns {Promise<{ channel: 'push'|'whatsapp'|'optout', success: boolean, raw?: object }>}
  */
-export async function routeNotification({ parentId, schoolId, phone, push, whatsappText, whatsappSend }) {
+export async function routeNotification({ parentId, schoolId, phone, push, whatsappText, nudge = true }) {
+  const hasApp = await parentHasApp(parentId);
+
   // 1. App installée → push gratuit
-  if (push && await parentHasApp(parentId)) {
+  if (push && hasApp) {
     try {
       const r = await sendPushToUser(parentId, push);
-      if (r.sent > 0) return { channel: 'push', success: true };
+      if (r.sent > 0) return { channel: 'push', success: true, paid: false };
     } catch (e) {
       console.warn('[notificationRouter] push échoué, fallback WhatsApp:', e.message);
     }
@@ -75,12 +100,19 @@ export async function routeNotification({ parentId, schoolId, phone, push, whats
 
   // 2. WhatsApp sauf opt-out
   if (phone && !(await whatsappOptedOut(parentId))) {
-    const r = whatsappSend
-      ? await whatsappSend()
-      : await sendText(schoolId, phone, whatsappText);
-    return { channel: 'whatsapp', success: !!r?.success, raw: r };
+    const free = await whatsappWindowOpen(parentId); // fenêtre 24h ouverte → gratuit
+    // Nudge « installez l'app / répondez » uniquement pour les parents sans app.
+    let text = whatsappText || '';
+    if (nudge && !hasApp) text += nudgeFooter();
+    const r = await sendText(schoolId, phone, text, { urgent: false });
+    return {
+      channel: free ? 'whatsapp_free' : 'whatsapp_paid',
+      success: !!r?.success,
+      paid: !free,
+      raw: r,
+    };
   }
 
   // 3. Opt-out sans app → rien à envoyer (le contenu reste consultable dans l'app)
-  return { channel: 'optout', success: false };
+  return { channel: 'optout', success: false, paid: false };
 }

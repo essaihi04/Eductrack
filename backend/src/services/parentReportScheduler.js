@@ -343,9 +343,9 @@ async function processParent(prefs, todayIso, weekday) {
           url: '/parent',
           tag: `report-${student.id}-${todayIso}`,
         },
-        whatsappSend: () => sendReportWhatsApp(student.school_id, phone, msg),
+        whatsappText: msg,
       });
-      const delivered = routed.channel === 'push' || routed.success;
+      const waFailed = routed.channel.startsWith('whatsapp') && !routed.success;
       await supabaseAdmin.from('daily_reports').insert({
         school_id: student.school_id,
         student_id: student.id,
@@ -356,11 +356,11 @@ async function processParent(prefs, todayIso, weekday) {
         report_content_ar: report.ar || null,
         tracking_data: studentData,
         channel: routed.channel,
-        status: routed.channel === 'whatsapp' && !routed.success ? 'failed' : 'sent',
-        error_message: (routed.channel === 'whatsapp' && !routed.success) ? 'WhatsApp échoué' : null,
-        sent_at: delivered ? new Date().toISOString() : null,
+        status: waFailed ? 'failed' : 'sent',
+        error_message: waFailed ? 'WhatsApp échoué' : null,
+        sent_at: routed.success ? new Date().toISOString() : null,
       });
-      if (delivered) sent++; else failed++;
+      if (routed.success) sent++; else if (routed.channel !== 'optout') failed++;
 
     } else if (prefs.frequency === 'weekly') {
       if (prefs.weekly_day !== weekday) continue;
@@ -402,9 +402,9 @@ async function processParent(prefs, todayIso, weekday) {
           url: '/parent',
           tag: `weekly-${student.id}-${weeklyData.weekStart}`,
         },
-        whatsappSend: () => sendReportWhatsApp(student.school_id, phone, msg),
+        whatsappText: msg,
       });
-      const delivered = routed.channel === 'push' || routed.success;
+      const waFailed = routed.channel.startsWith('whatsapp') && !routed.success;
       await supabaseAdmin.from('weekly_reports').insert({
         school_id: student.school_id,
         student_id: student.id,
@@ -416,11 +416,11 @@ async function processParent(prefs, todayIso, weekday) {
         report_content_ar: report.ar || null,
         tracking_data: weeklyData.aggregateStats,
         channel: routed.channel,
-        status: routed.channel === 'whatsapp' && !routed.success ? 'failed' : 'sent',
-        error_message: (routed.channel === 'whatsapp' && !routed.success) ? 'WhatsApp échoué' : null,
-        sent_at: delivered ? new Date().toISOString() : null,
+        status: waFailed ? 'failed' : 'sent',
+        error_message: waFailed ? 'WhatsApp échoué' : null,
+        sent_at: routed.success ? new Date().toISOString() : null,
       });
-      if (delivered) sent++; else failed++;
+      if (routed.success) sent++; else if (routed.channel !== 'optout') failed++;
     }
   }
 

@@ -699,11 +699,11 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
                 url: '/parent',
                 tag: `report-${student.id}-${today}`,
               },
-              whatsappSend: () => sendReportWhatsApp(settings.school_id, phone, finalMessage),
+              whatsappText: finalMessage,
             });
 
-            const delivered = routed.channel === 'push' || routed.success;
-            if (routed.channel === 'whatsapp' && !routed.success) {
+            const waFailed = routed.channel.startsWith('whatsapp') && !routed.success;
+            if (waFailed) {
               console.warn(`[DailyReports] ❌ Échec WhatsApp à ${phone} (school=${settings.school_id})`);
             }
 
@@ -718,9 +718,9 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
               report_content_ar: report.ar || null,
               tracking_data: studentData,
               channel: routed.channel,
-              status: routed.channel === 'whatsapp' && !routed.success ? 'failed' : 'sent',
-              error_message: (routed.channel === 'whatsapp' && !routed.success) ? 'WhatsApp échoué' : null,
-              sent_at: delivered ? new Date().toISOString() : null
+              status: waFailed ? 'failed' : 'sent',
+              error_message: waFailed ? 'WhatsApp échoué' : null,
+              sent_at: routed.success ? new Date().toISOString() : null
             });
 
             return routed;
