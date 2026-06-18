@@ -311,21 +311,10 @@ export async function notifyTripStarted(tripId) {
     ? `🚀 *Tournée démarrée — ${directionLabel}*\nLe bus *${plate}* vient de démarrer la tournée. 🚌\nVotre enfant sera bientôt récupéré. Vous serez notifié(e) quand le bus approchera. 📍\nSuivez en direct dans l'application. 📱`
     : `🚀 *Retour démarré*\nLe bus *${plate}* quitte l'école pour ramener votre enfant à la maison. 🏠\nVous serez notifié(e) à l'approche de la maison. 📍\nSuivez en direct dans l'application. 📱`;
 
-  // Résoudre les numéros WhatsApp préférés
-  const recipients = await Promise.all(parentIds.map(async (pid) => ({
-    parent_id: pid,
-    phone: await getParentWhatsAppPhone(pid)
-  })));
-
-  await sendTransportWhatsApp({
-    schoolId: trip.school_id,
-    senderId: trip.driver_id || null,
-    recipients,
-    text,
-    recipientFilter: { event: 'trip_started', trip_id: tripId, direction: trip.direction }
-  });
-
-  // Push
+  // PUSH UNIQUEMENT (gratuit). « Tournée démarrée » n'est pas un des 3
+  // événements WhatsApp essentiels → pas d'envoi WhatsApp payant.
+  // (Le texte WhatsApp est conservé ci-dessus au cas où on voudrait le réactiver.)
+  void text;
   await sendPushToUsers(parentIds, {
     title: `🚀 Bus ${plate} en route`,
     body: directionLabel,
@@ -372,19 +361,9 @@ export async function notifyArrivedAtSchool(tripId) {
     if (!s) return;
     const parentIds = studentToParents[sid] || [];
     if (parentIds.length === 0) return;
-    const recipients = await Promise.all(parentIds.map(async (pid) => ({
-      parent_id: pid,
-      phone: await getParentWhatsAppPhone(pid)
-    })));
     const name = `${s.first_name} ${s.last_name}`;
-    const text = `🏫 *Arrivée à l'école*\nLe bus *${plate}* est bien arrivé à l'école avec ${name} à ${fmtTime()}. ✅\nBonne journée à votre enfant ! 📚✨`;
-    await sendTransportWhatsApp({
-      schoolId: trip.school_id,
-      senderId: trip.driver_id || null,
-      recipients,
-      text,
-      recipientFilter: { event: 'arrived_at_school', trip_id: tripId, student_id: sid }
-    });
+    // PUSH UNIQUEMENT (gratuit). « Arrivée à l'école » n'est pas un des 3
+    // événements WhatsApp essentiels → pas d'envoi WhatsApp payant.
     await sendPushToUsers(parentIds, {
       title: `🏫 ${name} arrivé(e) à l'école`,
       body: `Bus ${plate} • ${fmtTime()}`,
