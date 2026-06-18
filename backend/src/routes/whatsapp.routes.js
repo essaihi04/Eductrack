@@ -103,10 +103,13 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
   }
 });
 
-// Vérifie qu'une session WhatsApp est prête pour une école
-const isSessionReady = (schoolId) => {
+// Vérifie qu'une session WhatsApp est prête pour une école.
+// Cloud API : prête dès que l'école est mappée (provider='cloud' + phone_number_id).
+// Baileys : prête si le socket est connecté.
+const isSessionReady = async (schoolId) => {
   if (!schoolId) return false;
-  return getStatus(schoolId).connected;
+  if (getStatus(schoolId).connected) return true;
+  return await cloud.isCloudSchool(schoolId);
 };
 
 // Helper d'envoi unifié (texte / image / document)
@@ -456,7 +459,7 @@ router.post('/send', async (req, res) => {
     await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRecords);
 
     // Vérifie session Baileys
-    if (!isSessionReady(schoolId)) {
+    if (!(await isSessionReady(schoolId))) {
       await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Connectez le numéro de votre école depuis cette page.' });
     }
@@ -551,7 +554,7 @@ router.post('/send-direct', async (req, res) => {
       return res.status(400).json({ error: 'Message ou média requis' });
     }
 
-    if (!isSessionReady(schoolId)) {
+    if (!(await isSessionReady(schoolId))) {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée.' });
     }
 
@@ -1712,7 +1715,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
     }
 
     // Vérifie session Baileys connectée
-    if (!isSessionReady(schoolId)) {
+    if (!(await isSessionReady(schoolId))) {
       if (msgLog) await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
       return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école.' });
     }
@@ -1856,7 +1859,7 @@ router.post('/daily-reports/retry', async (req, res) => {
     if (!report.phone_e164) return res.json({ success: false, error: 'Pas de numéro de téléphone' });
 
     const retrySchoolId = report.school_id || getSchoolId(req);
-    if (!isSessionReady(retrySchoolId)) {
+    if (!(await isSessionReady(retrySchoolId))) {
       return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école' });
     }
 
@@ -1894,7 +1897,7 @@ router.post('/daily-reports/retry-all-failed', async (req, res) => {
 
     if (!failedReports?.length) return res.json({ success: true, sent: 0, failed: 0, total: 0, message: 'Aucun rapport échoué' });
 
-    if (!isSessionReady(schoolId)) {
+    if (!(await isSessionReady(schoolId))) {
       return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école' });
     }
 
