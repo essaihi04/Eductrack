@@ -16,6 +16,7 @@ import cron from 'node-cron';
 import OpenAI from 'openai';
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendText, getStatus } from './whatsapp/index.js';
+import { routeNotification } from './notificationRouter.js';
 import {
   collectStudentDailyData,
   calculateDailyStats,
@@ -289,10 +290,8 @@ async function processParent(prefs, todayIso, weekday) {
   for (const link of links) {
     const student = link.student;
     if (!student?.school_id) continue;
-    if (!isSessionReady(student.school_id)) {
-      console.log(`[parentReportScheduler] ❌ Session WhatsApp non connectée pour école ${student.school_id}`);
-      continue;
-    }
+    // Note : on ne bloque plus sur la session Baileys ici. Le routage décidera
+    // (push gratuit si le parent a l'app, sinon WhatsApp — Baileys OU Cloud API).
 
     // Récupère les settings école (langue, options de contenu)
     const { data: schoolSettings } = await supabaseAdmin
@@ -334,7 +333,19 @@ async function processParent(prefs, todayIso, weekday) {
       if (report.fr && report.ar) msg += '\n\n━━━━━━━━━━━━━━━\n\n';
       if (report.ar) msg += report.ar;
 
-      const result = await sendReportWhatsApp(student.school_id, phone, msg);
+      const routed = await routeNotification({
+        parentId: prefs.parent_id,
+        schoolId: student.school_id,
+        phone,
+        push: {
+          title: `📊 Suivi de ${student.first_name}`,
+          body: 'Nouveau rapport quotidien disponible. Touchez pour l\'ouvrir.',
+          url: '/parent',
+          tag: `report-${student.id}-${todayIso}`,
+        },
+        whatsappSend: () => sendReportWhatsApp(student.school_id, phone, msg),
+      });
+      const delivered = routed.channel === 'push' || routed.success;
       await supabaseAdmin.from('daily_reports').insert({
         school_id: student.school_id,
         student_id: student.id,
@@ -344,11 +355,12 @@ async function processParent(prefs, todayIso, weekday) {
         report_content_fr: report.fr || null,
         report_content_ar: report.ar || null,
         tracking_data: studentData,
-        status: result.success ? 'sent' : 'failed',
-        error_message: result.success ? null : `Failed after ${result.attempt} attempts`,
-        sent_at: result.success ? new Date().toISOString() : null,
+        channel: routed.channel,
+        status: routed.channel === 'whatsapp' && !routed.success ? 'failed' : 'sent',
+        error_message: (routed.channel === 'whatsapp' && !routed.success) ? 'WhatsApp échoué' : null,
+        sent_at: delivered ? new Date().toISOString() : null,
       });
-      if (result.success) sent++; else failed++;
+      if (delivered) sent++; else failed++;
 
     } else if (prefs.frequency === 'weekly') {
       if (prefs.weekly_day !== weekday) continue;
@@ -380,7 +392,19 @@ async function processParent(prefs, todayIso, weekday) {
       if (report.fr && report.ar) msg += '\n\n━━━━━━━━━━━━━━━\n\n';
       if (report.ar) msg += report.ar;
 
-      const result = await sendReportWhatsApp(student.school_id, phone, msg);
+      const routed = await routeNotification({
+        parentId: prefs.parent_id,
+        schoolId: student.school_id,
+        phone,
+        push: {
+          title: `📅 Bilan hebdo de ${student.first_name}`,
+          body: 'Nouveau rapport hebdomadaire disponible. Touchez pour l\'ouvrir.',
+          url: '/parent',
+          tag: `weekly-${student.id}-${weeklyData.weekStart}`,
+        },
+        whatsappSend: () => sendReportWhatsApp(student.school_id, phone, msg),
+      });
+      const delivered = routed.channel === 'push' || routed.success;
       await supabaseAdmin.from('weekly_reports').insert({
         school_id: student.school_id,
         student_id: student.id,
@@ -391,11 +415,12 @@ async function processParent(prefs, todayIso, weekday) {
         report_content_fr: report.fr || null,
         report_content_ar: report.ar || null,
         tracking_data: weeklyData.aggregateStats,
-        status: result.success ? 'sent' : 'failed',
-        error_message: result.success ? null : `Failed after ${result.attempt} attempts`,
-        sent_at: result.success ? new Date().toISOString() : null,
+        channel: routed.channel,
+        status: routed.channel === 'whatsapp' && !routed.success ? 'failed' : 'sent',
+        error_message: (routed.channel === 'whatsapp' && !routed.success) ? 'WhatsApp échoué' : null,
+        sent_at: delivered ? new Date().toISOString() : null,
       });
-      if (result.success) sent++; else failed++;
+      if (delivered) sent++; else failed++;
     }
   }
 

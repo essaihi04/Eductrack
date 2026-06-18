@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import { downloadMediaMessage } from 'baileys';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
+import { setWhatsappOptOut } from '../../notificationRouter.js';
 import {
   saveProfilePhotoBuffer,
   deleteProfilePhotoByUrl,
@@ -1026,8 +1027,21 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   }
   if (cmd === 'stop') {
     State.resetState(phone);
-    await sendText(parentInfo.school_id, phone, `✅ Vous ne recevrez plus de notifications WhatsApp.\n\nPour réactiver, contactez ${parentInfo.school_name}.`, { urgent: true });
-    // TODO: marquer parent_contacts.opted_out = true
+    // Persiste l'opt-out WhatsApp → le routeur ne lui enverra plus de WhatsApp.
+    await setWhatsappOptOut(parentInfo.parent_id, true);
+    await sendText(
+      parentInfo.school_id,
+      phone,
+      `✅ C'est noté, vous ne recevrez plus de messages sur WhatsApp.\n\n📲 Vous pouvez toujours tout consulter dans l'application ${parentInfo.school_name}.\n\nPour réactiver WhatsApp, écrivez *START* ou contactez l'école.`,
+      { urgent: true }
+    );
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+  // Réactivation des notifications WhatsApp après un STOP
+  if (/^(start|démarrer|demarrer|reprendre|activer|oui je veux)$/i.test(String(text || '').trim())) {
+    await setWhatsappOptOut(parentInfo.parent_id, false);
+    await sendText(parentInfo.school_id, phone, `✅ Vos notifications WhatsApp sont réactivées. Tapez *menu* pour commencer.`, { urgent: true });
     await markProcessed(incomingMsg?.id);
     return;
   }

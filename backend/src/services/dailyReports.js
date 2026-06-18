@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import cron from 'node-cron';
 import { sendText, getStatus } from './whatsapp/index.js';
 import { getEstablishmentConfig } from './establishmentHeader.js';
+import { routeNotification } from './notificationRouter.js';
 
 // DeepSeek client (OpenAI-compatible API)
 const deepseek = new OpenAI({
@@ -686,10 +687,24 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
 
         tasks.push(
           queue.add(async () => {
-            const result = await sendReportWhatsApp(settings.school_id, phone, finalMessage);
+            // Routage : push gratuit si le parent a l'app, sinon WhatsApp
+            // (sauf opt-out). Réduit le coût des envois proactifs.
+            const routed = await routeNotification({
+              parentId,
+              schoolId: settings.school_id,
+              phone,
+              push: {
+                title: `📊 Suivi de ${student.first_name}`,
+                body: 'Nouveau rapport quotidien disponible. Touchez pour l\'ouvrir.',
+                url: '/parent',
+                tag: `report-${student.id}-${today}`,
+              },
+              whatsappSend: () => sendReportWhatsApp(settings.school_id, phone, finalMessage),
+            });
 
-            if (!result.success) {
-              console.warn(`[DailyReports] ❌ Échec envoi à ${phone} (school=${settings.school_id}) — raison: ${result.error || `Failed after ${result.attempt} attempts`}`);
+            const delivered = routed.channel === 'push' || routed.success;
+            if (routed.channel === 'whatsapp' && !routed.success) {
+              console.warn(`[DailyReports] ❌ Échec WhatsApp à ${phone} (school=${settings.school_id})`);
             }
 
             // Log to database
@@ -702,12 +717,13 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
               report_content_fr: report.fr || null,
               report_content_ar: report.ar || null,
               tracking_data: studentData,
-              status: result.success ? 'sent' : 'failed',
-              error_message: result.success ? null : (result.error || `Failed after ${result.attempt} attempts`),
-              sent_at: result.success ? new Date().toISOString() : null
+              channel: routed.channel,
+              status: routed.channel === 'whatsapp' && !routed.success ? 'failed' : 'sent',
+              error_message: (routed.channel === 'whatsapp' && !routed.success) ? 'WhatsApp échoué' : null,
+              sent_at: delivered ? new Date().toISOString() : null
             });
 
-            return result;
+            return routed;
           })
         );
       }
