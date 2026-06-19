@@ -53,6 +53,9 @@ import FinanceStudentsPage from './pages/finance/FinanceStudentsPage';
 import ExpensesPage from './pages/finance/ExpensesPage';
 import CashRegisterPage from './pages/finance/CashRegisterPage';
 import ReportsPage from './pages/finance/ReportsPage';
+import ChartOfAccountsPage from './pages/finance/ChartOfAccountsPage';
+import BudgetPage from './pages/finance/BudgetPage';
+import PrevisionnelMatrixPage from './pages/finance/PrevisionnelMatrixPage';
 import TransportDashboard from './pages/transport/TransportDashboard';
 import BusesPage from './pages/transport/BusesPage';
 import BusDetailPage from './pages/transport/BusDetailPage';
@@ -144,6 +147,9 @@ function App() {
             <Route path="finance/expenses" element={<ExpensesPage />} />
             <Route path="finance/cash-register" element={<CashRegisterPage />} />
             <Route path="finance/reports" element={<ReportsPage />} />
+            <Route path="finance/chart" element={<ChartOfAccountsPage />} />
+            <Route path="finance/budget" element={<BudgetPage />} />
+            <Route path="finance/previsionnel" element={<PrevisionnelMatrixPage />} />
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />

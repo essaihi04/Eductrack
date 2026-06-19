@@ -89,6 +89,20 @@ export const financeApi = {
   // Students finance view
   listStudents: (filters) => request('/api/finance/students', { query: filters }),
 
+  // ── Comptabilité de gestion (Phase 1) ──────────────────────────────────
+  // Plan comptable
+  getChart: () => request('/api/finance/chart'),
+  createAccount: (data) => request('/api/finance/chart', { method: 'POST', body: data }),
+  updateAccount: (id, data) => request(`/api/finance/chart/${id}`, { method: 'PUT', body: data }),
+  deleteAccount: (id) => request(`/api/finance/chart/${id}`, { method: 'DELETE' }),
+  syncDefaultAccounts: () => request('/api/finance/chart/sync-defaults', { method: 'POST' }),
+  // Budget prévisionnel
+  getBudget: (academicYear) => request('/api/finance/budget', { query: { academic_year: academicYear } }),
+  saveBudget: (academicYear, rows) => request('/api/finance/budget', { method: 'PUT', body: { academic_year: academicYear, rows } }),
+  copyBudgetPreviousYear: (academicYear) => request('/api/finance/budget/copy-previous-year', { method: 'POST', body: { academic_year: academicYear } }),
+  // Matrice annuelle Prévisionnel / Réel
+  getAnnualMatrix: (academicYear) => request('/api/finance/reports/annual-matrix', { query: { academic_year: academicYear } }),
+
   // Finance managers (admin only)
   listManagers: () => request('/api/admin/finance-managers'),
   createManager: (data) => request('/api/admin/finance-managers', { method: 'POST', body: data }),

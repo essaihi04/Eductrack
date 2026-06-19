@@ -2,18 +2,34 @@ import { useState, useEffect } from 'react';
 import { TrendingDown, Plus, Trash2, RefreshCw, X } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, EXPENSE_CATEGORIES } from '../../lib/financeApi';
 
+const blankForm = () => ({
+  account_id: '', description: '', amount: 0,
+  expense_date: new Date().toISOString().split('T')[0],
+  paid_to: '', payment_method: 'transfer', reference: '', notes: ''
+});
+
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState([]);
+  const [accounts, setAccounts] = useState([]);     // lignes de dépense du plan comptable
+  const [sections, setSections] = useState([]);     // sections de dépense
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ from: '', to: '', category: '' });
+  const [filters, setFilters] = useState({ from: '', to: '', account_id: '' });
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    category: 'salaries', description: '', amount: 0,
-    expense_date: new Date().toISOString().split('T')[0],
-    paid_to: '', payment_method: 'transfer', reference: '', notes: ''
-  });
+  const [form, setForm] = useState(blankForm());
 
-  useEffect(() => { load(); }, [filters.from, filters.to, filters.category]);
+  useEffect(() => { loadChart(); }, []);
+  useEffect(() => { load(); }, [filters.from, filters.to, filters.account_id]);
+
+  const loadChart = async () => {
+    try {
+      const data = await financeApi.getChart();
+      const all = data.accounts || [];
+      const lines = all.filter(a => a.kind === 'expense' && a.node_type === 'line' && a.is_active);
+      setSections(all.filter(a => a.kind === 'expense' && a.node_type === 'section'));
+      setAccounts(lines);
+      setForm(f => ({ ...f, account_id: f.account_id || lines[0]?.id || '' }));
+    } catch (e) { console.error(e); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -24,30 +40,41 @@ export default function ExpensesPage() {
     finally { setLoading(false); }
   };
 
+  const accById = Object.fromEntries(accounts.map(a => [a.id, a]));
+  const labelFor = (e) => accById[e.account_id]?.name || EXPENSE_CATEGORIES[e.category] || e.category || '—';
+
+  // Options groupées par section
+  const groupedOptions = sections.map(sec => ({
+    section: sec,
+    lines: accounts.filter(a => a.parent_id === sec.id),
+  })).filter(g => g.lines.length > 0);
+  const orphanLines = accounts.filter(a => !sections.some(s => s.id === a.parent_id));
+
   const save = async () => {
     try {
       await financeApi.createExpense(form);
       setShowForm(false);
-      setForm({
-        category: 'salaries', description: '', amount: 0,
-        expense_date: new Date().toISOString().split('T')[0],
-        paid_to: '', payment_method: 'transfer', reference: '', notes: ''
-      });
+      setForm({ ...blankForm(), account_id: accounts[0]?.id || '' });
       load();
     } catch (e) { alert('Erreur: ' + e.message); }
   };
 
   const remove = async (id) => {
     if (!confirm('Supprimer cette dépense ?')) return;
-    try {
-      await financeApi.deleteExpense(id);
-      load();
-    } catch (e) { alert('Erreur: ' + e.message); }
+    try { await financeApi.deleteExpense(id); load(); }
+    catch (e) { alert('Erreur: ' + e.message); }
   };
 
   const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const byCategory = {};
-  expenses.forEach(e => { byCategory[e.category] = (byCategory[e.category] || 0) + Number(e.amount); });
+  const byAccount = {};
+  expenses.forEach(e => {
+    const key = e.account_id || `cat:${e.category}`;
+    byAccount[key] = (byAccount[key] || 0) + Number(e.amount);
+  });
+  const repartition = Object.entries(byAccount).map(([key, amt]) => {
+    const name = key.startsWith('cat:') ? (EXPENSE_CATEGORIES[key.slice(4)] || key.slice(4)) : (accById[key]?.name || '—');
+    return { name, amt };
+  }).sort((a, b) => b.amt - a.amt);
 
   return (
     <div className="p-6 space-y-6">
@@ -63,21 +90,30 @@ export default function ExpensesPage() {
         </button>
       </div>
 
-      {/* Repartition */}
+      {/* Repartition par poste */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        {Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([cat, amt]) => (
-          <div key={cat} className="bg-white rounded-lg border border-gray-200 p-3">
-            <p className="text-xs text-gray-500">{EXPENSE_CATEGORIES[cat] || cat}</p>
-            <p className="text-lg font-bold text-gray-800">{formatMAD(amt)}</p>
+        {repartition.slice(0, 6).map((r, i) => (
+          <div key={i} className="bg-white rounded-lg border border-gray-200 p-3">
+            <p className="text-xs text-gray-500 truncate" title={r.name}>{r.name}</p>
+            <p className="text-lg font-bold text-gray-800">{formatMAD(r.amt)}</p>
           </div>
         ))}
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap gap-3">
-        <select value={filters.category} onChange={e => setFilters({ ...filters, category: e.target.value })}
+        <select value={filters.account_id} onChange={e => setFilters({ ...filters, account_id: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-lg">
-          <option value="">Toutes catégories</option>
-          {Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          <option value="">Tous les postes</option>
+          {groupedOptions.map(g => (
+            <optgroup key={g.section.id} label={g.section.name}>
+              {g.lines.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </optgroup>
+          ))}
+          {orphanLines.length > 0 && (
+            <optgroup label="Autres">
+              {orphanLines.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </optgroup>
+          )}
         </select>
         <input type="date" value={filters.from} onChange={e => setFilters({ ...filters, from: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-lg" />
@@ -93,7 +129,7 @@ export default function ExpensesPage() {
           <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
             <tr>
               <th className="px-4 py-3 text-left">Date</th>
-              <th className="px-4 py-3 text-left">Catégorie</th>
+              <th className="px-4 py-3 text-left">Poste</th>
               <th className="px-4 py-3 text-left">Description</th>
               <th className="px-4 py-3 text-left">Bénéficiaire</th>
               <th className="px-4 py-3 text-left">Mode</th>
@@ -107,9 +143,7 @@ export default function ExpensesPage() {
               <tr key={e.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-600">{formatDate(e.expense_date)}</td>
                 <td className="px-4 py-3">
-                  <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-50 text-red-700">
-                    {EXPENSE_CATEGORIES[e.category] || e.category}
-                  </span>
+                  <span className="inline-block px-2 py-0.5 text-xs rounded-full bg-red-50 text-red-700">{labelFor(e)}</span>
                 </td>
                 <td className="px-4 py-3 text-gray-800">{e.description}</td>
                 <td className="px-4 py-3 text-gray-600">{e.paid_to || '—'}</td>
@@ -134,11 +168,20 @@ export default function ExpensesPage() {
               <button onClick={() => setShowForm(false)}><X className="w-5 h-5" /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Catégorie *</label>
-                <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Poste *</label>
+                <select value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                  {Object.entries(EXPENSE_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  {groupedOptions.map(g => (
+                    <optgroup key={g.section.id} label={g.section.name}>
+                      {g.lines.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </optgroup>
+                  ))}
+                  {orphanLines.length > 0 && (
+                    <optgroup label="Autres">
+                      {orphanLines.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </div>
               <div>
@@ -180,7 +223,7 @@ export default function ExpensesPage() {
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-300 rounded-lg">Annuler</button>
-              <button onClick={save} disabled={!form.description || !form.amount}
+              <button onClick={save} disabled={!form.description || !form.amount || !form.account_id}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50">
                 Enregistrer
               </button>

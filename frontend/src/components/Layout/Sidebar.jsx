@@ -31,6 +31,9 @@ import {
   UserCog,
   Wallet,
   Banknote,
+  LayoutGrid,
+  CalendarRange,
+  ListTree,
   ShieldCheck,
   Bus,
   MapPin,
@@ -107,6 +110,8 @@ const Sidebar = () => {
         ...(isPedagogical ? [] : [
           { section: 'Finance', isSection: true },
           { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+          { icon: LayoutGrid, label: 'Prévisionnel/Réel', path: '/finance/previsionnel' },
+          { icon: CalendarRange, label: 'Budget', path: '/finance/budget' },
           { icon: Banknote, label: 'Caisse', path: '/finance/cash-register' },
           { icon: BarChart3, label: 'Rapports', path: '/finance/reports' },
           { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
@@ -115,6 +120,7 @@ const Sidebar = () => {
           { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
           { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
           { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
+          { icon: ListTree, label: 'Plan comptable', path: '/finance/chart' },
         ]),
         // Section Équipe
         // - Resp. financiers + Direct. pédagogiques : réservés aux admins complets
@@ -180,12 +186,15 @@ const Sidebar = () => {
     if (profile?.role === 'finance_manager') {
       return [
         { icon: Wallet, label: 'Tableau finance', path: '/finance' },
+        { icon: LayoutGrid, label: 'Prévisionnel/Réel', path: '/finance/previsionnel' },
+        { icon: CalendarRange, label: 'Budget', path: '/finance/budget' },
         { icon: BarChart3, label: 'Rapports', path: '/finance/reports' },
         { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
         { icon: Users, label: 'Élèves', path: '/finance/students' },
         { icon: FileText, label: 'Factures', path: '/finance/invoices' },
         { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
         { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
+        { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }

@@ -1387,13 +1387,14 @@ router.get('/expenses', async (req, res) => {
   try {
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Accès admin requis' });
     const schoolId = getSchoolId(req);
-    const { from, to, category } = req.query;
+    const { from, to, category, account_id } = req.query;
 
     let q = supabaseAdmin.from('school_expenses').select('*').order('expense_date', { ascending: false }).limit(500);
     if (schoolId) q = q.eq('school_id', schoolId);
     if (from) q = q.gte('expense_date', from);
     if (to) q = q.lte('expense_date', to);
     if (category) q = q.eq('category', category);
+    if (account_id) q = q.eq('account_id', account_id);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -1408,14 +1409,16 @@ router.post('/expenses', async (req, res) => {
   try {
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Accès admin requis' });
     const schoolId = getSchoolId(req);
-    const { category, description, amount, expense_date, paid_to, payment_method, reference, notes } = req.body;
-    if (!category || !description || !amount) return res.status(400).json({ error: 'Champs requis manquants' });
+    const { account_id, category, description, amount, expense_date, paid_to, payment_method, reference, notes } = req.body;
+    if (!description || !amount) return res.status(400).json({ error: 'Champs requis manquants' });
 
     const { data, error } = await supabaseAdmin
       .from('school_expenses')
       .insert({
         school_id: schoolId,
-        category, description,
+        account_id: account_id || null,
+        category: category || 'other',
+        description,
         amount: Number(amount),
         expense_date: expense_date || new Date().toISOString().split('T')[0],
         paid_to, payment_method, reference, notes,
