@@ -301,6 +301,17 @@ router.get('/reports/annual-matrix', async (req, res) => {
       (actualExp[accId] = actualExp[accId] || {})[m] = (actualExp[accId][m] || 0) + Number(e.amount || 0);
     });
 
+    // Union avec le grand livre (paie comptabilisée, et plus tard prêts/impôts)
+    const { data: ledger } = await supabaseAdmin
+      .from('finance_ledger_entry')
+      .select('account_id, month, amount')
+      .eq('school_id', schoolId)
+      .eq('academic_year', academicYear);
+    (ledger || []).forEach((l) => {
+      if (!l.account_id || !l.month) return;
+      (actualExp[l.account_id] = actualExp[l.account_id] || {})[l.month] = (actualExp[l.account_id][l.month] || 0) + Number(l.amount || 0);
+    });
+
     // --- Assemblage ---
     const revenueLineAccounts = (accounts || []).filter((a) => a.kind === 'revenue' && a.node_type === 'line' && a.is_active);
     const expenseSections = (accounts || []).filter((a) => a.kind === 'expense' && a.node_type === 'section');

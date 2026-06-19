@@ -120,6 +120,7 @@ const Sidebar = () => {
           { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
           { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
           { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
+          { icon: UserCog, label: 'Paie', path: '/finance/payroll' },
           { icon: ListTree, label: 'Plan comptable', path: '/finance/chart' },
         ]),
         // Section Équipe
@@ -195,6 +196,7 @@ const Sidebar = () => {
         { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
         { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
         { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
+        { icon: UserCog, label: 'Paie', path: '/finance/payroll' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }

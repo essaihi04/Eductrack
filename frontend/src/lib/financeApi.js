@@ -103,6 +103,21 @@ export const financeApi = {
   // Matrice annuelle Prévisionnel / Réel
   getAnnualMatrix: (academicYear) => request('/api/finance/reports/annual-matrix', { query: { academic_year: academicYear } }),
 
+  // ── Paie (Phase 2) ─────────────────────────────────────────────────────
+  listEmployees: () => request('/api/finance/payroll/employees'),
+  createEmployee: (data) => request('/api/finance/payroll/employees', { method: 'POST', body: data }),
+  updateEmployee: (id, data) => request(`/api/finance/payroll/employees/${id}`, { method: 'PUT', body: data }),
+  deleteEmployee: (id) => request(`/api/finance/payroll/employees/${id}`, { method: 'DELETE' }),
+  listPayrollRuns: (academicYear) => request('/api/finance/payroll/runs', { query: { academic_year: academicYear } }),
+  getPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}`),
+  createPayrollRun: (year, month) => request('/api/finance/payroll/runs', { method: 'POST', body: { year, month } }),
+  savePayrollLines: (id, lines) => request(`/api/finance/payroll/runs/${id}/lines`, { method: 'PUT', body: { lines } }),
+  addPayrollLine: (id, data) => request(`/api/finance/payroll/runs/${id}/lines`, { method: 'POST', body: data }),
+  deletePayrollLine: (id, lineId) => request(`/api/finance/payroll/runs/${id}/lines/${lineId}`, { method: 'DELETE' }),
+  postPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}/post`, { method: 'POST' }),
+  unpostPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}/unpost`, { method: 'POST' }),
+  deletePayrollRun: (id) => request(`/api/finance/payroll/runs/${id}`, { method: 'DELETE' }),
+
   // Finance managers (admin only)
   listManagers: () => request('/api/admin/finance-managers'),
   createManager: (data) => request('/api/admin/finance-managers', { method: 'POST', body: data }),
