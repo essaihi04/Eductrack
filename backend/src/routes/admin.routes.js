@@ -326,6 +326,27 @@ const applySchoolFilter = (query, req, column = 'school_id') => {
   return query;
 };
 
+// Découpe un tableau en lots de `size` éléments.
+const chunkArray = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+// Exécute une requête PostgREST filtrée par .in(col, ids) en plusieurs lots.
+// Évite UND_ERR_HEADERS_OVERFLOW : avec une longue liste d'UUID, supabase-js
+// place tous les IDs dans l'URL et dépasse la limite d'en-têtes de Node (16 Ko).
+// `buildQuery(idsChunk)` doit renvoyer la requête Supabase pour un sous-ensemble.
+const selectByIdsInChunks = async (buildQuery, ids, size = 100) => {
+  const results = [];
+  for (const part of chunkArray(ids, size)) {
+    const { data, error } = await buildQuery(part);
+    if (error) throw error;
+    if (data) results.push(...data);
+  }
+  return results;
+};
+
 // ==================== ÉLÈVES ====================
 
 // Récupérer le parent d'un élève
@@ -473,21 +494,27 @@ router.get('/parents', async (req, res) => {
       return res.json([]);
     }
 
-    // Étapes séquentielles (et non Promise.all) pour pouvoir isoler laquelle échoue.
+    // Requêtes découpées en lots : une longue liste de parentIds dans une seule
+    // requête .in() ferait exploser la taille des en-têtes (UND_ERR_HEADERS_OVERFLOW).
+    // Chaque parent_id n'appartient qu'à un seul lot, donc l'ordre par parent est préservé.
     step = 'links';
-    const { data: links, error: linksError } = await supabaseAdmin
-      .from('parent_students')
-      .select('parent_id, student_id, relationship, student:profiles!parent_students_student_id_fkey(id, first_name, last_name, class_id, classes:classes!fk_profiles_class(name, level, filiere))')
-      .in('parent_id', parentIds);
-    if (linksError) throw linksError;
+    const links = await selectByIdsInChunks(
+      (ids) => supabaseAdmin
+        .from('parent_students')
+        .select('parent_id, student_id, relationship, student:profiles!parent_students_student_id_fkey(id, first_name, last_name, class_id, classes:classes!fk_profiles_class(name, level, filiere))')
+        .in('parent_id', ids),
+      parentIds
+    );
 
     step = 'contacts';
-    const { data: contacts, error: contactsError } = await supabaseAdmin
-      .from('parent_contacts')
-      .select('id, parent_id, phone_e164, channel, is_primary, consent_status, created_at, label')
-      .in('parent_id', parentIds)
-      .order('is_primary', { ascending: false });
-    if (contactsError) throw contactsError;
+    const contacts = await selectByIdsInChunks(
+      (ids) => supabaseAdmin
+        .from('parent_contacts')
+        .select('id, parent_id, phone_e164, channel, is_primary, consent_status, created_at, label')
+        .in('parent_id', ids)
+        .order('is_primary', { ascending: false }),
+      parentIds
+    );
 
     const linksByParent = new Map();
     (links || []).forEach(l => {
