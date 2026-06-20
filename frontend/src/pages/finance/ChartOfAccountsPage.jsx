@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { ListTree, Plus, Trash2, RefreshCw, RotateCcw, Lock } from 'lucide-react';
+import { ListTree, Trash2, RotateCcw, Lock } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
+import { PageHeader, Button } from '../../components/finance/ui';
 
 const STREAMS = [
   { v: '', l: '—' },
@@ -112,21 +113,15 @@ export default function ChartOfAccountsPage() {
   );
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <ListTree className="w-6 h-6 text-indigo-600" /> Plan comptable
-          </h1>
-          <p className="text-sm text-gray-500">Postes de recettes et de dépenses — renommez, ajoutez ou désactivez selon votre école.</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={sync} disabled={saving} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
+    <div className="p-6 space-y-5">
+      <PageHeader icon={ListTree} title="Plan comptable" color="purple"
+        subtitle="Postes de recettes et de dépenses — renommez, ajoutez ou désactivez selon votre école."
+        onRefresh={load} loading={loading}
+        actions={
+          <Button variant="secondary" onClick={sync} disabled={saving}>
             <RotateCcw className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} /> Restaurer les défauts
-          </button>
-          <button onClick={load} className="p-2 border border-gray-300 rounded-lg"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
-        </div>
-      </div>
+          </Button>
+        } />
       {loading ? <p className="text-gray-400">Chargement…</p> : (
         <div className="grid lg:grid-cols-2 gap-6">
           {renderKind('revenue', 'Recettes', 'bg-green-50 text-green-800')}

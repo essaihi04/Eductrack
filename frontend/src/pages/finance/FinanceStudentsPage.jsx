@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Users, Search, RefreshCw, AlertCircle, CheckCircle2, XCircle, FileText, Plus, X, Save, CreditCard, Wallet } from 'lucide-react';
-import { financeApi, formatMAD, formatDate, CATEGORY_LABELS, RECURRENCE_LABELS, METHOD_LABELS } from '../../lib/financeApi';
-import { supabase } from '../../lib/supabase';
+import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, CreditCard, Wallet } from 'lucide-react';
+import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS, METHOD_LABELS } from '../../lib/financeApi';
+import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
 
 export default function FinanceStudentsPage() {
   const [students, setStudents] = useState([]);
@@ -46,16 +46,56 @@ export default function FinanceStudentsPage() {
     ? students.filter(s => `${s.first_name} ${s.last_name}`.toLowerCase().includes(filters.search.toLowerCase()))
     : students;
 
-  return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-          <Users className="w-6 h-6" /> Élèves — Finance
-        </h1>
-        <p className="text-sm text-gray-500">{filtered.length} élève(s)</p>
-      </div>
+  const totals = filtered.reduce((acc, s) => ({
+    invoiced: acc.invoiced + Number(s.total_invoiced || 0),
+    paid: acc.paid + Number(s.total_paid || 0),
+    due: acc.due + Number(s.total_due || 0),
+    overdue: acc.overdue + (s.overdue_count > 0 ? 1 : 0),
+  }), { invoiced: 0, paid: 0, due: 0, overdue: 0 });
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap items-center gap-3">
+  const columns = [
+    { key: 'student', header: 'Élève', render: (s) => (
+      <button onClick={(e) => { e.stopPropagation(); setPayStudent(s); }} className="text-left font-medium hover:text-blue-600 hover:underline">
+        {s.first_name} {s.last_name}
+      </button>
+    ) },
+    { key: 'class', header: 'Classe', render: (s) => <span className="text-gray-600">{s.classes?.name || '—'}</span> },
+    { key: 'plan', header: 'Plan', align: 'right', render: (s) => s.has_plan
+      ? <CheckCircle2 className="w-4 h-4 text-green-500 inline" />
+      : <XCircle className="w-4 h-4 text-gray-300 inline" /> },
+    { key: 'invoiced', header: 'Facturé', align: 'right', render: (s) => <Money value={s.total_invoiced} /> },
+    { key: 'paid', header: 'Payé', align: 'right', render: (s) => <Money value={s.total_paid} tone="green" /> },
+    { key: 'due', header: 'Dû', align: 'right', render: (s) => <span className={`tabular-nums font-medium ${s.total_due > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{formatMAD(s.total_due)}</span> },
+    { key: 'overdue', header: 'Retards', align: 'right', render: (s) => s.overdue_count > 0
+      ? <Badge tone="red"><AlertCircle className="w-3 h-3 inline -mt-0.5" /> {s.overdue_count}</Badge>
+      : <span className="text-gray-300">—</span> },
+    { key: 'actions', header: 'Actions', align: 'right', render: (s) => (
+      <div className="flex justify-end gap-1.5">
+        <button onClick={(e) => { e.stopPropagation(); setPayStudent(s); }}
+          className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-green-50 text-green-700 rounded-lg hover:bg-green-100">
+          <Wallet className="w-3.5 h-3.5" /> Paiements
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); setSelectedStudent(s); }}
+          className="px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
+          Plan de frais
+        </button>
+      </div>
+    ) },
+  ];
+
+  return (
+    <div className="p-6 space-y-5">
+      <PageHeader icon={Users} title="Élèves — Finance" color="green"
+        subtitle={`${filtered.length} élève(s)`} onRefresh={load} loading={loading} />
+
+      <KpiGrid cols={4}>
+        <KpiCard label="Total facturé" value={formatMAD(totals.invoiced)} tone="blue" />
+        <KpiCard label="Encaissé" value={formatMAD(totals.paid)} tone="green" />
+        <KpiCard label="Restant dû" value={formatMAD(totals.due)} tone="orange" />
+        <KpiCard label="Élèves en retard" value={totals.overdue} tone="red" icon={AlertCircle} />
+      </KpiGrid>
+
+      <FilterBar>
         <div className="flex-1 min-w-[200px] relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="Rechercher un élève..." value={filters.search}
@@ -67,71 +107,9 @@ export default function FinanceStudentsPage() {
           <option value="">Toutes classes</option>
           {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <button onClick={load} className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
+      </FilterBar>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-3 text-left">Élève</th>
-                <th className="px-4 py-3 text-left">Classe</th>
-                <th className="px-4 py-3 text-center">Plan</th>
-                <th className="px-4 py-3 text-right">Facturé</th>
-                <th className="px-4 py-3 text-right">Payé</th>
-                <th className="px-4 py-3 text-right">Dû</th>
-                <th className="px-4 py-3 text-center">Retards</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filtered.length === 0 && <tr><td colSpan="8" className="px-4 py-8 text-center text-gray-400">Aucun élève</td></tr>}
-              {filtered.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">
-                    <button onClick={() => setPayStudent(s)} className="text-left hover:text-blue-600 hover:underline">
-                      {s.first_name} {s.last_name}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{s.classes?.name || '—'}</td>
-                  <td className="px-4 py-3 text-center">
-                    {s.has_plan
-                      ? <CheckCircle2 className="w-4 h-4 text-green-500 inline" />
-                      : <XCircle className="w-4 h-4 text-gray-300 inline" />}
-                  </td>
-                  <td className="px-4 py-3 text-right">{formatMAD(s.total_invoiced)}</td>
-                  <td className="px-4 py-3 text-right text-green-600">{formatMAD(s.total_paid)}</td>
-                  <td className={`px-4 py-3 text-right font-medium ${s.total_due > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
-                    {formatMAD(s.total_due)}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {s.overdue_count > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">
-                        <AlertCircle className="w-3 h-3" /> {s.overdue_count}
-                      </span>
-                    ) : <span className="text-gray-300">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-1.5">
-                      <button onClick={() => setPayStudent(s)}
-                        className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-green-50 text-green-700 rounded-lg hover:bg-green-100">
-                        <Wallet className="w-3.5 h-3.5" /> Paiements
-                      </button>
-                      <button onClick={() => setSelectedStudent(s)}
-                        className="px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
-                        Plan de frais
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable columns={columns} rows={filtered} empty="Aucun élève" />
 
       {selectedStudent && (
         <StudentFeePlanModal
@@ -226,19 +204,24 @@ function MonthlyPaymentsModal({ student, onClose, onPaid }) {
   const summary = data?.summary;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <CreditCard className="w-5 h-5" /> Paiements mensuels
-            </h2>
-            <p className="text-sm text-gray-500">{student.first_name} {student.last_name} · {student.classes?.name || '—'}</p>
+    <Drawer open onClose={onClose} width="max-w-2xl" title="Paiements mensuels"
+      footer={
+        <div className="flex items-center justify-between gap-2 w-full">
+          <div className="text-sm">
+            {selected.length > 0 && (
+              <span className="text-gray-600">{selected.length} mois · <span className="font-bold text-green-700">{formatMAD(selectedTotal)}</span></span>
+            )}
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose}>Fermer</Button>
+            <Button color="green" icon={Wallet} onClick={submit} disabled={selected.length === 0 || saving}>
+              {saving ? 'Encaissement...' : 'Encaisser'}
+            </Button>
+          </div>
         </div>
-
-        <div className="p-6 space-y-4">
+      }>
+        <p className="text-sm text-gray-500 -mt-1 flex items-center gap-2"><CreditCard className="w-4 h-4" /> {student.first_name} {student.last_name} · {student.classes?.name || '—'}</p>
+        <div className="space-y-4">
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium text-gray-700">Année scolaire</label>
             <input type="text" value={academicYear} onChange={e => setAcademicYear(e.target.value)}
@@ -344,23 +327,7 @@ function MonthlyPaymentsModal({ student, onClose, onPaid }) {
             </>
           )}
         </div>
-
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-2">
-          <div className="text-sm">
-            {selected.length > 0 && (
-              <span className="text-gray-600">{selected.length} mois sélectionné(s) · <span className="font-bold text-green-700">{formatMAD(selectedTotal)}</span></span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Fermer</button>
-            <button onClick={submit} disabled={selected.length === 0 || saving}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-              <Wallet className="w-4 h-4" /> {saving ? 'Encaissement...' : 'Encaisser'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 
@@ -503,18 +470,16 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Plan de frais</h2>
-            <p className="text-sm text-gray-500">{student.first_name} {student.last_name} · {student.classes?.name}</p>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-
-        {loading ? <p className="p-6 text-gray-500">Chargement...</p> : (
-          <div className="p-6 space-y-4">
+    <Drawer open onClose={onClose} width="max-w-3xl" title="Plan de frais"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Annuler</Button>
+          <Button color="green" icon={Save} onClick={save}>Enregistrer</Button>
+        </>
+      }>
+        <p className="text-sm text-gray-500 -mt-1">{student.first_name} {student.last_name} · {student.classes?.name}</p>
+        {loading ? <p className="text-gray-500">Chargement...</p> : (
+          <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Année scolaire</label>
@@ -652,14 +617,6 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
             </div>
           </div>
         )}
-
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Annuler</button>
-          <button onClick={save} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <Save className="w-4 h-4" /> Enregistrer
-          </button>
-        </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }

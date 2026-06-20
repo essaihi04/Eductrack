@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import { CalendarRange, Save, Copy } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
+import { PageHeader, Button } from '../../components/finance/ui';
 
 const MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 const SHORT = { 1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin', 7: 'Juil', 8: 'Août', 9: 'Sept', 10: 'Oct', 11: 'Nov', 12: 'Déc' };
@@ -96,25 +97,17 @@ export default function BudgetPage() {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <CalendarRange className="w-6 h-6 text-indigo-600" /> Budget prévisionnel
-          </h1>
-          <p className="text-sm text-gray-500">Montants prévus par poste et par mois (année scolaire Sept → Août).</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select value={year} onChange={e => setYear(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg">
-            {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <button onClick={copyPrev} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
-            <Copy className="w-4 h-4" /> Copier N-1
-          </button>
-          <button onClick={save} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-            <Save className="w-4 h-4" /> Enregistrer
-          </button>
-        </div>
-      </div>
+      <PageHeader icon={CalendarRange} title="Budget prévisionnel" color="purple"
+        subtitle="Montants prévus par poste et par mois (année scolaire Sept → Août)."
+        actions={
+          <>
+            <select value={year} onChange={e => setYear(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg">
+              {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <Button variant="secondary" icon={Copy} onClick={copyPrev}>Copier N-1</Button>
+            <Button color="purple" icon={Save} onClick={save} disabled={saving}>Enregistrer</Button>
+          </>
+        } />
 
       {loading ? <p className="text-gray-400">Chargement…</p> : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-auto">

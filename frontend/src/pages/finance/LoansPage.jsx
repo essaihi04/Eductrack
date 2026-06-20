@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Landmark, Plus, Trash2, ArrowLeft, Check, RotateCcw } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
+import { PageHeader, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
 
 function ExpenseAccountSelect({ accounts, value, onChange }) {
   const sections = accounts.filter(a => a.kind === 'expense' && a.node_type === 'section');
@@ -81,52 +82,57 @@ export default function LoansPage() {
     );
   }
 
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Landmark className="w-6 h-6 text-indigo-600" /> Prêts & leasing</h1>
-          <p className="text-sm text-gray-500">Échéanciers amortis ; le paiement alimente la matrice.</p>
-        </div>
-        <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><Plus className="w-4 h-4" /> Nouveau</button>
-      </div>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600 text-xs uppercase"><tr><th className="px-4 py-3 text-left">Nom</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Poste</th><th className="px-4 py-3 text-right">Capital</th><th className="px-4 py-3 text-right">Taux</th><th className="px-4 py-3 text-center">Durée</th><th></th></tr></thead>
-          <tbody className="divide-y divide-gray-100">
-            {loans.length === 0 && <tr><td colSpan="7" className="px-4 py-8 text-center text-gray-400">Aucun prêt</td></tr>}
-            {loans.map(l => (
-              <tr key={l.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => open(l.id)}>
-                <td className="px-4 py-3 font-medium text-gray-800">{l.name}</td>
-                <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full ${l.loan_type === 'leasing' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>{l.loan_type === 'leasing' ? 'Leasing' : 'Prêt'}</span></td>
-                <td className="px-4 py-3 text-gray-600">{accName(l.account_id)}</td>
-                <td className="px-4 py-3 text-right text-gray-700">{formatMAD(l.principal)}</td>
-                <td className="px-4 py-3 text-right text-gray-600">{Number(l.annual_rate)}%</td>
-                <td className="px-4 py-3 text-center text-gray-600">{l.term_months} mois</td>
-                <td className="px-4 py-3"><button onClick={(e) => { e.stopPropagation(); remove(l.id); }} className="p-1.5 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+  const columns = [
+    { key: 'name', header: 'Nom', render: (l) => <span className="font-medium text-gray-800">{l.name}</span> },
+    { key: 'type', header: 'Type', render: (l) => <Badge tone={l.loan_type === 'leasing' ? 'amber' : 'blue'}>{l.loan_type === 'leasing' ? 'Leasing' : 'Prêt'}</Badge> },
+    { key: 'account', header: 'Poste', render: (l) => <span className="text-gray-600">{accName(l.account_id)}</span> },
+    { key: 'principal', header: 'Capital', align: 'right', render: (l) => <Money value={l.principal} /> },
+    { key: 'rate', header: 'Taux', align: 'right', render: (l) => <span className="text-gray-600 tabular-nums">{Number(l.annual_rate)}%</span> },
+    { key: 'term', header: 'Durée', align: 'right', render: (l) => <span className="text-gray-600">{l.term_months} mois</span> },
+    { key: 'actions', header: '', align: 'right', render: (l) => (
+      <button onClick={(e) => { e.stopPropagation(); remove(l.id); }} className="p-1.5 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
+    ) },
+  ];
 
-      {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-3">
-            <h2 className="text-lg font-semibold">Nouveau prêt / leasing</h2>
-            <div><label className="block text-xs font-medium text-gray-700 mb-1">Nom *</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" placeholder="ex. Prêt Daman Oxygen" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Type</label><select value={form.loan_type} onChange={e => setForm({ ...form, loan_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg"><option value="loan">Prêt</option><option value="leasing">Leasing</option></select></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Poste comptable</label><ExpenseAccountSelect accounts={accounts} value={form.account_id} onChange={v => setForm({ ...form, account_id: v })} /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Capital</label><input type="number" step="0.01" value={form.principal} onChange={e => setForm({ ...form, principal: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Taux annuel %</label><input type="number" step="0.01" value={form.annual_rate} onChange={e => setForm({ ...form, annual_rate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">1re échéance</label><input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Durée (mois)</label><input type="number" value={form.term_months} onChange={e => setForm({ ...form, term_months: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-            </div>
-            <div className="flex justify-end gap-2"><button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-300 rounded-lg">Annuler</button><button onClick={save} disabled={!form.name} className="px-4 py-2 bg-indigo-600 text-white rounded-lg disabled:opacity-50">Créer + échéancier</button></div>
-          </div>
+  return (
+    <div className="p-6 space-y-5">
+      <PageHeader icon={Landmark} title="Prêts & leasing" color="purple"
+        subtitle="Échéanciers amortis ; le paiement alimente la matrice."
+        actions={<Button color="purple" icon={Plus} onClick={() => setShowForm(true)}>Nouveau</Button>} />
+
+      <DataTable columns={columns} rows={loans} empty="Aucun prêt" onRowClick={(l) => open(l.id)} />
+
+      <Drawer open={showForm} onClose={() => setShowForm(false)} title="Nouveau prêt / leasing"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>
+            <Button color="purple" onClick={save} disabled={!form.name}>Créer + échéancier</Button>
+          </>
+        }>
+        <Field label="Nom" required>
+          <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" placeholder="ex. Prêt Daman Oxygen" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Type">
+            <select value={form.loan_type} onChange={e => setForm({ ...form, loan_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg"><option value="loan">Prêt</option><option value="leasing">Leasing</option></select>
+          </Field>
+          <Field label="Poste comptable">
+            <ExpenseAccountSelect accounts={accounts} value={form.account_id} onChange={v => setForm({ ...form, account_id: v })} />
+          </Field>
+          <Field label="Capital">
+            <input type="number" step="0.01" value={form.principal} onChange={e => setForm({ ...form, principal: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="Taux annuel %">
+            <input type="number" step="0.01" value={form.annual_rate} onChange={e => setForm({ ...form, annual_rate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="1re échéance">
+            <input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="Durée (mois)">
+            <input type="number" value={form.term_months} onChange={e => setForm({ ...form, term_months: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
         </div>
-      )}
+      </Drawer>
     </div>
   );
 }

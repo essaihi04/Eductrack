@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Copy, Save, X, Layers, Calendar, Users, Check, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Edit2, Copy, Save, Layers, Calendar, Users, Check, Sparkles } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
-import { supabase } from '../../lib/supabase';
+import { PageHeader, EmptyState, Drawer, Button } from '../../components/finance/ui';
 
 const defaultItem = () => ({
   category: 'tuition',
@@ -186,27 +186,17 @@ export default function FeeTemplatesPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <Layers className="w-6 h-6" /> Modèles de frais
-          </h1>
-          <p className="text-sm text-gray-500">Créez des modèles réutilisables puis appliquez-les aux classes</p>
-        </div>
-        <button onClick={startNew} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-          <Plus className="w-4 h-4" /> Nouveau modèle
-        </button>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={Layers} title="Modèles de frais" color="green"
+        subtitle="Créez des modèles réutilisables puis appliquez-les aux classes"
+        actions={<Button color="green" icon={Plus} onClick={startNew}>Nouveau modèle</Button>} />
 
       {loading && <p className="text-sm text-gray-500">Chargement...</p>}
 
       {!loading && templates.length === 0 && (
-        <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
-          <Layers className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-          <p className="text-gray-600">Aucun modèle de frais</p>
-          <p className="text-sm text-gray-400 mt-1">Créez votre premier modèle pour commencer la facturation</p>
-        </div>
+        <EmptyState icon={Layers} title="Aucun modèle de frais"
+          hint="Créez votre premier modèle pour commencer la facturation"
+          action={<Button color="green" icon={Plus} onClick={startNew}>Nouveau modèle</Button>} />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -352,16 +342,17 @@ export default function FeeTemplatesPage() {
         })}
       </div>
 
-      {/* Modal de formulaire */}
+      {/* Formulaire (tiroir latéral large) */}
       {showForm && editing && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{editing.id ? 'Modifier' : 'Nouveau'} modèle</h2>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-            </div>
-
-            <div className="p-6 space-y-4">
+        <Drawer open={showForm} onClose={() => setShowForm(false)} width="max-w-3xl"
+          title={`${editing.id ? 'Modifier' : 'Nouveau'} modèle`}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>
+              <Button color="green" icon={Save} onClick={save} disabled={!editing.name || !editing.academic_year}>Enregistrer</Button>
+            </>
+          }>
+            <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Nom *</label>
@@ -448,16 +439,7 @@ export default function FeeTemplatesPage() {
                 </div>
               </div>
             </div>
-
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex justify-end gap-2">
-              <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Annuler</button>
-              <button onClick={save} disabled={!editing.name || !editing.academic_year}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                <Save className="w-4 h-4" /> Enregistrer
-              </button>
-            </div>
-          </div>
-        </div>
+        </Drawer>
       )}
     </div>
   );

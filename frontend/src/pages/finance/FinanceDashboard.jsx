@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { TrendingUp, TrendingDown, AlertCircle, DollarSign, FileText, CreditCard, ArrowRight, Calendar } from 'lucide-react';
+import { TrendingUp, AlertCircle, DollarSign, FileText, CreditCard, Calendar } from 'lucide-react';
 import { financeApi, formatMAD } from '../../lib/financeApi';
+import { PageHeader, KpiGrid, KpiCard } from '../../components/finance/ui';
 
 export default function FinanceDashboard() {
   const [summary, setSummary] = useState(null);
@@ -34,47 +35,24 @@ export default function FinanceDashboard() {
   const maxCashflow = Math.max(1, ...cashflow.flatMap(c => [c.collected, c.issued]));
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Tableau de bord Finance</h1>
-          <p className="text-sm text-gray-500">Vue d'ensemble de la trésorerie et des recouvrements</p>
-        </div>
-        <button onClick={load} className="px-4 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
-          Actualiser
-        </button>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={DollarSign} title="Tableau de bord Finance" color="blue"
+        subtitle="Vue d'ensemble de la trésorerie et des recouvrements"
+        onRefresh={load} loading={loading} />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard
-          icon={<DollarSign className="w-5 h-5" />}
-          label="Encaissé ce mois"
-          value={loading ? '—' : formatMAD(summary?.collectedThisMonth)}
-          color="green"
-        />
-        <KpiCard
-          icon={<FileText className="w-5 h-5" />}
-          label="Facturé ce mois"
+      <KpiGrid cols={4}>
+        <KpiCard icon={DollarSign} label="Encaissé ce mois" tone="green"
+          value={loading ? '—' : formatMAD(summary?.collectedThisMonth)} />
+        <KpiCard icon={FileText} label="Facturé ce mois" tone="blue"
           value={loading ? '—' : formatMAD(summary?.issuedThisMonth)}
-          color="blue"
-          sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%` : ''}
-        />
-        <KpiCard
-          icon={<TrendingUp className="w-5 h-5" />}
-          label="Dû total"
-          value={loading ? '—' : formatMAD(summary?.totalDue)}
-          color="orange"
-        />
-        <KpiCard
-          icon={<AlertCircle className="w-5 h-5" />}
-          label="En retard"
+          sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%` : ''} />
+        <KpiCard icon={TrendingUp} label="Dû total" tone="orange"
+          value={loading ? '—' : formatMAD(summary?.totalDue)} />
+        <KpiCard icon={AlertCircle} label="En retard" tone="red"
           value={loading ? '—' : formatMAD(summary?.totalOverdue)}
-          color="red"
           sub={summary ? `${summary.overdueCount} facture(s)` : ''}
-          href="/finance/overdue"
-        />
-      </div>
+          href="/finance/overdue" />
+      </KpiGrid>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cashflow chart */}
@@ -144,29 +122,6 @@ export default function FinanceDashboard() {
       </div>
     </div>
   );
-}
-
-function KpiCard({ icon, label, value, color, sub, href }) {
-  const colors = {
-    green: 'bg-green-50 text-green-700 border-green-100',
-    blue: 'bg-blue-50 text-blue-700 border-blue-100',
-    orange: 'bg-orange-50 text-orange-700 border-orange-100',
-    red: 'bg-red-50 text-red-700 border-red-100'
-  };
-  const card = (
-    <div className={`rounded-xl border ${colors[color]} p-5 shadow-sm hover:shadow-md transition-shadow`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          {icon}
-          <span>{label}</span>
-        </div>
-        {href && <ArrowRight className="w-4 h-4 opacity-60" />}
-      </div>
-      <p className="text-2xl font-bold mt-2">{value}</p>
-      {sub && <p className="text-xs mt-1 opacity-70">{sub}</p>}
-    </div>
-  );
-  return href ? <Link to={href}>{card}</Link> : card;
 }
 
 function QuickAction({ to, icon, label, color }) {

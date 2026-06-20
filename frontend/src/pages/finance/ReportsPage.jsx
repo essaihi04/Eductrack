@@ -4,6 +4,7 @@ import {
   Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt,
 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS, EXPENSE_CATEGORIES } from '../../lib/financeApi';
+import { PageHeader, KpiGrid, KpiCard, Card, Button } from '../../components/finance/ui';
 
 // Bornes de période (jour / semaine / mois / trimestre / année / personnalisé)
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -465,30 +466,22 @@ const ReportsPage = () => {
   const maxBar = Math.max(1, ...breakdown.flatMap(r => [r.income, r.expense]));
 
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto">
-      <div className="rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white p-6 shadow-lg mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><BarChart3 className="w-7 h-7" /> Rapports financiers</h1>
-          <p className="text-white/80 text-sm">Synthèse recettes / dépenses / recouvrement — exportable par période, mois ou jour</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={exportExcel} disabled={!data}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50 text-sm font-medium transition">
-            <FileSpreadsheet className="w-4 h-4" /> Excel
-          </button>
-          <button onClick={exportPDF} disabled={!data}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-indigo-700 hover:bg-white/90 disabled:opacity-50 text-sm font-medium transition">
-            <FileText className="w-4 h-4" /> PDF
-          </button>
-        </div>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={BarChart3} title="Rapports financiers" color="blue"
+        subtitle="Synthèse recettes / dépenses / recouvrement — exportable par période, mois ou jour"
+        actions={
+          <>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcel} disabled={!data}>Excel</Button>
+            <Button color="blue" icon={FileText} onClick={exportPDF} disabled={!data}>PDF</Button>
+          </>
+        } />
 
       {/* Filtres période + granularité */}
-      <div className="flex flex-wrap items-center gap-2 mb-5">
+      <div className="flex flex-wrap items-center gap-2">
         {PERIODS.map((p) => (
           <button key={p.key} onClick={() => setPeriod(p.key)}
             className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-              period === p.key ? 'bg-indigo-600 text-white shadow' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+              period === p.key ? 'bg-blue-600 text-white' : 'bg-card border border-gray-200 text-gray-700 hover:bg-gray-50'
             }`}>
             {p.label}
           </button>
@@ -512,16 +505,15 @@ const ReportsPage = () => {
       ) : data ? (
         <>
           {/* Totaux */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-6">
-            <TotalCard label="Encaissements" value={formatMAD(data.income?.total)} sub={`${data.income?.count || 0} paiement(s)`} icon={TrendingUp} color="from-green-500 to-emerald-600" />
-            <TotalCard label="Dépenses" value={formatMAD(data.expense?.total)} sub={`${data.expense?.count || 0} sortie(s)`} icon={TrendingDown} color="from-rose-500 to-red-600" />
-            <TotalCard label="Résultat net" value={formatMAD(data.net)} sub="encaissé − dépensé" icon={Wallet} color={data.net >= 0 ? 'from-blue-500 to-indigo-600' : 'from-orange-500 to-red-600'} />
-            <TotalCard label="Reste à recouvrer" value={formatMAD(data.recouvrement?.outstanding_total)} sub={`Taux ${(data.recouvrement?.rate || 0).toFixed(0)}%`} icon={Receipt} color="from-amber-500 to-orange-600" />
-          </div>
+          <KpiGrid cols={4}>
+            <KpiCard label="Encaissements" value={formatMAD(data.income?.total)} tone="green" icon={TrendingUp} sub={`${data.income?.count || 0} paiement(s)`} />
+            <KpiCard label="Dépenses" value={formatMAD(data.expense?.total)} tone="red" icon={TrendingDown} sub={`${data.expense?.count || 0} sortie(s)`} />
+            <KpiCard label="Résultat net" value={formatMAD(data.net)} tone={data.net >= 0 ? 'blue' : 'orange'} icon={Wallet} sub="encaissé − dépensé" />
+            <KpiCard label="Reste à recouvrer" value={formatMAD(data.recouvrement?.outstanding_total)} tone="orange" icon={Receipt} sub={`Taux ${(data.recouvrement?.rate || 0).toFixed(0)}%`} />
+          </KpiGrid>
 
           {/* Répartition par mode */}
-          <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 mb-6">
-            <h2 className="font-semibold text-gray-900 mb-4">Encaissements par mode de paiement</h2>
+          <Card title="Encaissements par mode de paiement">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {METHOD_ORDER.map((m) => {
                 const Icon = METHOD_ICONS[m];
@@ -535,23 +527,23 @@ const ReportsPage = () => {
                     <p className="text-lg font-bold text-gray-900">{formatMAD(info.total)}</p>
                     <p className="text-xs text-gray-500">{info.count} · {pct}%</p>
                     <div className="h-1.5 bg-gray-200 rounded-full mt-2 overflow-hidden">
-                      <div className="h-full bg-indigo-500" style={{ width: `${pct}%` }} />
+                      <div className="h-full bg-blue-500" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
+          </Card>
 
           {/* Ventilation jour / mois */}
-          <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5 mb-6">
+          <div className="rounded-xl border border-gray-200 bg-card shadow-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Ventilation {granularity === 'month' ? 'par mois' : 'par jour'}</h2>
               <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                 {GRANULARITIES.map(g => (
                   <button key={g.key} onClick={() => setGranularity(g.key)}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition ${
-                      granularity === g.key ? 'bg-white shadow text-indigo-700' : 'text-gray-500 hover:text-gray-700'
+                      granularity === g.key ? 'bg-card shadow-sm text-blue-700' : 'text-gray-500 hover:text-gray-700'
                     }`}>
                     {g.label}
                   </button>
@@ -625,16 +617,5 @@ const ReportsPage = () => {
     </div>
   );
 };
-
-const TotalCard = ({ label, value, sub, icon: Icon, color }) => (
-  <div className={`rounded-xl bg-gradient-to-br ${color} text-white p-5 shadow-sm`}>
-    <div className="flex items-center justify-between">
-      <span className="text-sm text-white/80">{label}</span>
-      <Icon className="w-5 h-5 text-white/80" />
-    </div>
-    <p className="text-2xl font-bold mt-2">{value}</p>
-    <p className="text-xs text-white/70 mt-1">{sub}</p>
-  </div>
-);
 
 export default ReportsPage;

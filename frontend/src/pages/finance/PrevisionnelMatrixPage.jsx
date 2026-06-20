@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
-import { LayoutGrid, Download, Printer, RefreshCw } from 'lucide-react';
+import { LayoutGrid, Download, Printer } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
+import { PageHeader, Button } from '../../components/finance/ui';
 
 const SHORT = { 1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin', 7: 'Juil', 8: 'Août', 9: 'Sept', 10: 'Oct', 11: 'Nov', 12: 'Déc' };
 
@@ -85,21 +86,19 @@ export default function PrevisionnelMatrixPage() {
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <LayoutGrid className="w-6 h-6 text-indigo-600" /> Prévisionnel / Réel
-          </h1>
-          <p className="text-sm text-gray-500">Tableau de gestion annuel — Réel (mois passés) vs Prévisionnel (mois à venir).</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select value={year} onChange={(e) => setYear(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg">
-            {yearOptions().map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-          <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"><Download className="w-4 h-4" /> Excel/CSV</button>
-          <button onClick={() => window.print()} className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"><Printer className="w-4 h-4" /> Imprimer</button>
-          <button onClick={load} className="p-2 border border-gray-300 rounded-lg"><RefreshCw className="w-4 h-4" /></button>
-        </div>
+      <div className="print:hidden">
+        <PageHeader icon={LayoutGrid} title="Prévisionnel / Réel" color="blue"
+          subtitle="Tableau de gestion annuel — Réel (mois passés) vs Prévisionnel (mois à venir)."
+          onRefresh={load}
+          actions={
+            <>
+              <select value={year} onChange={(e) => setYear(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg">
+                {yearOptions().map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <Button variant="secondary" icon={Download} onClick={exportCSV}>Excel/CSV</Button>
+              <Button variant="secondary" icon={Printer} onClick={() => window.print()}>Imprimer</Button>
+            </>
+          } />
       </div>
 
       <div className="flex gap-4 text-xs text-gray-500 print:hidden">

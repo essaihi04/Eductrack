@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { AlertCircle, MessageSquare, RefreshCw, CheckSquare, Square, Eye, X } from 'lucide-react';
+import { AlertCircle, MessageSquare, CheckSquare, Square, Eye } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { PageHeader, KpiGrid, KpiCard, DataTable, Money, Badge, Drawer, Button } from '../../components/finance/ui';
 
 export default function OverduePage() {
   const { school } = useAuth();
@@ -74,7 +75,6 @@ export default function OverduePage() {
         const message = buildMessage(student, invs);
 
         try {
-          // Récupérer le numéro WhatsApp officiel du parent (table parent_contacts via recipients-list)
           const recRes = await fetch(`${apiUrl}/api/admin/whatsapp/recipients-list?class_ids=${student?.class_id}`, {
             headers: { Authorization: `Bearer ${session?.access_token}` }
           });
@@ -89,7 +89,6 @@ export default function OverduePage() {
             continue;
           }
 
-          // Envoyer à tous les parents enregistrés (mère + père si dispo)
           const phones = parentsOfStudent.map(p => p.phone_whatsapp);
           const sendRes = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
             method: 'POST',
@@ -126,122 +125,73 @@ export default function OverduePage() {
 
   const totalOverdue = overdue.reduce((s, o) => s + Number(o.remaining), 0);
   const selectedTotal = overdue.filter(o => selected.has(o.id)).reduce((s, o) => s + Number(o.remaining), 0);
+  const studentsCount = new Set(overdue.map(o => o.student_id)).size;
+
+  const columns = [
+    { key: 'check', header: (
+      <button onClick={selectAll}>
+        {selected.size === overdue.length && overdue.length > 0
+          ? <CheckSquare className="w-4 h-4 text-green-600" />
+          : <Square className="w-4 h-4 text-gray-400" />}
+      </button>
+    ), render: (o) => (
+      <button onClick={(e) => { e.stopPropagation(); toggle(o.id); }}>
+        {selected.has(o.id) ? <CheckSquare className="w-4 h-4 text-green-600" /> : <Square className="w-4 h-4 text-gray-400" />}
+      </button>
+    ) },
+    { key: 'number', header: 'N°', render: (o) => <span className="font-mono text-xs text-gray-700">{o.invoice_number}</span> },
+    { key: 'student', header: 'Élève', render: (o) => <span className="font-medium">{o.student?.first_name} {o.student?.last_name}</span> },
+    { key: 'class', header: 'Classe', render: (o) => <span className="text-gray-600">{o.student?.classes?.name || '—'}</span> },
+    { key: 'period', header: 'Période', render: (o) => <span className="text-gray-600">{o.period_label || '—'}</span> },
+    { key: 'due', header: 'Échéance', render: (o) => <span className="text-gray-600">{formatDate(o.due_date)}</span> },
+    { key: 'days', header: 'Retard', align: 'right', render: (o) => (
+      <Badge tone={o.days_overdue > 30 ? 'red' : o.days_overdue > 7 ? 'orange' : 'yellow'}>{o.days_overdue}j</Badge>
+    ) },
+    { key: 'remaining', header: 'Dû', align: 'right', render: (o) => <Money value={o.remaining} tone="red" /> },
+  ];
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <AlertCircle className="w-6 h-6 text-red-600" /> Factures en retard
-          </h1>
-          <p className="text-sm text-gray-500">{overdue.length} facture(s) · {formatMAD(totalOverdue)} à recouvrer</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={load} className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          {selected.size > 0 && (
-            <>
-              <button onClick={() => setPreviewMessage(buildPreview())}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 border border-blue-200">
-                <Eye className="w-4 h-4" /> Aperçu du message
-              </button>
-              <button onClick={sendReminders} disabled={sendingReminders}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                <MessageSquare className="w-4 h-4" /> Relancer {selected.size} ({formatMAD(selectedTotal)})
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={AlertCircle} title="Factures en retard" color="red"
+        subtitle={`${overdue.length} facture(s) à recouvrer`}
+        onRefresh={load} loading={loading}
+        actions={selected.size > 0 && (
+          <>
+            <Button variant="secondary" icon={Eye} onClick={() => setPreviewMessage(buildPreview())}>Aperçu</Button>
+            <Button color="green" icon={MessageSquare} onClick={sendReminders} disabled={sendingReminders}>
+              Relancer {selected.size} ({formatMAD(selectedTotal)})
+            </Button>
+          </>
+        )} />
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-3 w-10">
-                  <button onClick={selectAll}>
-                    {selected.size === overdue.length && overdue.length > 0
-                      ? <CheckSquare className="w-4 h-4 text-green-600" />
-                      : <Square className="w-4 h-4 text-gray-400" />}
-                  </button>
-                </th>
-                <th className="px-4 py-3 text-left">N°</th>
-                <th className="px-4 py-3 text-left">Élève</th>
-                <th className="px-4 py-3 text-left">Classe</th>
-                <th className="px-4 py-3 text-left">Période</th>
-                <th className="px-4 py-3 text-left">Échéance</th>
-                <th className="px-4 py-3 text-center">Retard</th>
-                <th className="px-4 py-3 text-right">Dû</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {overdue.length === 0 && (
-                <tr><td colSpan="8" className="px-4 py-12 text-center text-gray-400">
-                  🎉 Aucune facture en retard
-                </td></tr>
-              )}
-              {overdue.map(o => (
-                <tr key={o.id} className={`hover:bg-gray-50 ${selected.has(o.id) ? 'bg-red-50/30' : ''}`}>
-                  <td className="px-4 py-3">
-                    <button onClick={() => toggle(o.id)}>
-                      {selected.has(o.id) ? <CheckSquare className="w-4 h-4 text-green-600" /> : <Square className="w-4 h-4 text-gray-400" />}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{o.invoice_number}</td>
-                  <td className="px-4 py-3 font-medium">{o.student?.first_name} {o.student?.last_name}</td>
-                  <td className="px-4 py-3 text-gray-600">{o.student?.classes?.name || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{o.period_label || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{formatDate(o.due_date)}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
-                      o.days_overdue > 30 ? 'bg-red-200 text-red-800' : o.days_overdue > 7 ? 'bg-orange-200 text-orange-800' : 'bg-yellow-200 text-yellow-800'
-                    }`}>
-                      {o.days_overdue}j
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right font-bold text-red-600">{formatMAD(o.remaining)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <KpiGrid cols={3}>
+        <KpiCard label="Total à recouvrer" value={formatMAD(totalOverdue)} tone="red" icon={AlertCircle} />
+        <KpiCard label="Factures en retard" value={overdue.length} />
+        <KpiCard label="Élèves concernés" value={studentsCount} />
+      </KpiGrid>
 
-      {previewMessage && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-green-600" /> Aperçu de la relance WhatsApp
-                </h2>
-                <p className="text-xs text-gray-500 mt-1">Exemple pour le 1er élève sélectionné · Envoyé via WhatsApp au numéro enregistré du parent</p>
-              </div>
-              <button onClick={() => setPreviewMessage(null)} className="p-1 hover:bg-gray-100 rounded">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <div className="bg-[#e7ffdb] p-4 rounded-2xl rounded-tl-sm border border-green-200 whitespace-pre-wrap text-sm text-gray-800 font-sans">
-                {previewMessage}
-              </div>
-              <p className="text-xs text-gray-500 mt-3">
-                📱 Canal : WhatsApp officiel de l'école (Cloud API Meta)<br/>
-                👤 Destinataires : numéros WhatsApp des parents enregistrés dans <strong>Admin → Parents</strong>
-              </p>
-            </div>
-            <div className="border-t border-gray-200 px-6 py-3 flex justify-end gap-2">
-              <button onClick={() => setPreviewMessage(null)} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Fermer</button>
-              <button onClick={() => { setPreviewMessage(null); sendReminders(); }} disabled={sendingReminders}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                Envoyer maintenant
-              </button>
-            </div>
-          </div>
+      <DataTable columns={columns} rows={overdue}
+        empty="🎉 Aucune facture en retard"
+        rowKey={(o) => o.id} />
+
+      <Drawer open={!!previewMessage} onClose={() => setPreviewMessage(null)}
+        title="Aperçu de la relance WhatsApp" width="max-w-lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPreviewMessage(null)}>Fermer</Button>
+            <Button color="green" icon={MessageSquare} disabled={sendingReminders}
+              onClick={() => { setPreviewMessage(null); sendReminders(); }}>Envoyer maintenant</Button>
+          </>
+        }>
+        <p className="text-xs text-gray-500">Exemple pour le 1er élève sélectionné · envoyé au numéro WhatsApp enregistré du parent.</p>
+        <div className="bg-[#e7ffdb] p-4 rounded-2xl rounded-tl-sm border border-green-200 whitespace-pre-wrap text-sm text-gray-800">
+          {previewMessage}
         </div>
-      )}
+        <p className="text-xs text-gray-500">
+          📱 Canal : WhatsApp officiel de l'école (Cloud API Meta)<br/>
+          👤 Destinataires : numéros WhatsApp des parents enregistrés dans <strong>Admin → Parents</strong>
+        </p>
+      </Drawer>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Building2, Upload, Trash2, ArrowLeft, Check, RotateCcw, Plus, Wand2 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
+import { PageHeader } from '../../components/finance/ui';
 
 function expenseGroups(accounts) {
   const sections = accounts.filter(a => a.kind === 'expense' && a.node_type === 'section');
@@ -22,14 +23,12 @@ export default function BankImportPage() {
   const [accounts, setAccounts] = useState([]);
   useEffect(() => { financeApi.getChart().then(d => setAccounts(d.accounts || [])).catch(() => {}); }, []);
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Building2 className="w-6 h-6 text-indigo-600" /> Relevés bancaires</h1>
-        <p className="text-sm text-gray-500">Importez le relevé (PDF), affectez chaque ligne à un poste et comptabilisez. Les débits alimentent les dépenses du Prévisionnel/Réel.</p>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={Building2} title="Relevés bancaires" color="purple"
+        subtitle="Importez le relevé (PDF), affectez chaque ligne à un poste et comptabilisez. Les débits alimentent les dépenses du Prévisionnel/Réel." />
       <div className="flex gap-2 border-b border-gray-200">
         {[['statements', 'Relevés'], ['rules', 'Règles de catégorisation']].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === k ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}>{l}</button>
+          <button key={k} onClick={() => setTab(k)} className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === k ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500'}`}>{l}</button>
         ))}
       </div>
       {tab === 'statements' ? <StatementsTab accounts={accounts} /> : <RulesTab accounts={accounts} />}
@@ -69,7 +68,7 @@ function StatementsTab({ accounts }) {
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Du</label><input type="date" value={meta.period_start} onChange={e => setMeta({ ...meta, period_start: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg" /></div>
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Au</label><input type="date" value={meta.period_end} onChange={e => setMeta({ ...meta, period_end: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg" /></div>
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Relevé PDF</label><input ref={fileRef} type="file" accept="application/pdf" className="text-sm" /></div>
-        <button onClick={doUpload} disabled={uploading} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"><Upload className="w-4 h-4" /> {uploading ? 'Import…' : 'Importer'}</button>
+        <button onClick={doUpload} disabled={uploading} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"><Upload className="w-4 h-4" /> {uploading ? 'Import…' : 'Importer'}</button>
       </div>
       <p className="text-xs text-gray-400">L'extraction PDF est automatique mais à vérifier (formats de relevés variés). Vous pouvez corriger chaque ligne.</p>
 
@@ -174,7 +173,7 @@ function RulesTab({ accounts }) {
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Poste</label>
           <AccountSelect accounts={accounts} value={form.account_id} onChange={v => setForm({ ...form, account_id: v })} className="!text-sm !py-2" />
         </div>
-        <button onClick={add} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><Plus className="w-4 h-4" /> Ajouter</button>
+        <button onClick={add} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><Plus className="w-4 h-4" /> Ajouter</button>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">

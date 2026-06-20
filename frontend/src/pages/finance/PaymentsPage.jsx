@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { CreditCard, Search, RefreshCw, Ban, Printer, Receipt } from 'lucide-react';
+import { CreditCard, Search, Ban, Printer } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
+import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge } from '../../components/finance/ui';
 
 export default function PaymentsPage() {
   const { profile } = useAuth();
@@ -102,19 +103,53 @@ export default function PaymentsPage() {
     : payments;
 
   const total = filteredBySearch.reduce((s, p) => s + Number(p.amount), 0);
+  const avg = filteredBySearch.length ? total / filteredBySearch.length : 0;
+
+  const columns = [
+    { key: 'receipt', header: 'N° Reçu', render: (p) => <span className="font-mono text-xs text-gray-700">{p.receipt_number}</span> },
+    { key: 'date', header: 'Date', render: (p) => <span className="text-gray-600">{formatDate(p.payment_date)}</span> },
+    { key: 'student', header: 'Élève', render: (p) => (
+      <div>
+        <span className="font-medium text-gray-800">{p.student?.first_name} {p.student?.last_name}</span>
+        <div className="text-xs text-gray-500">{p.student?.classes?.name}</div>
+      </div>
+    ) },
+    { key: 'invoice', header: 'Facture', render: (p) => p.invoice ? (
+      <div>
+        <span className="font-mono text-xs">{p.invoice.invoice_number}</span>
+        {p.invoice.period_label && <div className="text-xs text-gray-500">{p.invoice.period_label}</div>}
+      </div>
+    ) : <span className="text-gray-400">—</span> },
+    { key: 'method', header: 'Mode', render: (p) => <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge> },
+    { key: 'reference', header: 'Référence', render: (p) => <span className="text-gray-500 text-xs">{p.reference || '—'}</span> },
+    { key: 'amount', header: 'Montant', align: 'right', render: (p) => <Money value={p.amount} tone="green" /> },
+    { key: 'actions', header: 'Actions', align: 'right', render: (p) => (
+      <div className="flex justify-end gap-1">
+        <button onClick={() => printReceipt(p)} className="p-1.5 hover:bg-blue-50 rounded" title="Imprimer reçu">
+          <Printer className="w-4 h-4 text-blue-500" />
+        </button>
+        {isAdmin && (
+          <button onClick={() => cancelPayment(p.id)} className="p-1.5 hover:bg-red-50 rounded" title="Annuler">
+            <Ban className="w-4 h-4 text-red-500" />
+          </button>
+        )}
+      </div>
+    ) },
+  ];
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <CreditCard className="w-6 h-6" /> Paiements
-          </h1>
-          <p className="text-sm text-gray-500">{filteredBySearch.length} paiement(s) · {formatMAD(total)}</p>
-        </div>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={CreditCard} title="Paiements" color="green"
+        subtitle={`${filteredBySearch.length} paiement(s) encaissé(s)`}
+        onRefresh={load} loading={loading} />
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap items-center gap-3">
+      <KpiGrid cols={3}>
+        <KpiCard label="Total encaissé" value={formatMAD(total)} tone="green" />
+        <KpiCard label="Nombre de reçus" value={filteredBySearch.length} />
+        <KpiCard label="Paiement moyen" value={formatMAD(avg)} />
+      </KpiGrid>
+
+      <FilterBar>
         <div className="flex-1 min-w-[200px] relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="Rechercher reçu, élève..." value={filters.search}
@@ -130,62 +165,9 @@ export default function PaymentsPage() {
           className="px-3 py-2 border border-gray-300 rounded-lg" />
         <input type="date" value={filters.to} onChange={e => setFilters({ ...filters, to: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-lg" />
-        <button onClick={load} className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
+      </FilterBar>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-3 text-left">N° Reçu</th>
-                <th className="px-4 py-3 text-left">Date</th>
-                <th className="px-4 py-3 text-left">Élève</th>
-                <th className="px-4 py-3 text-left">Facture</th>
-                <th className="px-4 py-3 text-left">Mode</th>
-                <th className="px-4 py-3 text-left">Référence</th>
-                <th className="px-4 py-3 text-right">Montant</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredBySearch.length === 0 && <tr><td colSpan="8" className="px-4 py-8 text-center text-gray-400">Aucun paiement</td></tr>}
-              {filteredBySearch.map(p => (
-                <tr key={p.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{p.receipt_number}</td>
-                  <td className="px-4 py-3 text-gray-600">{formatDate(p.payment_date)}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{p.student?.first_name} {p.student?.last_name}<br/><span className="text-xs text-gray-500">{p.student?.classes?.name}</span></td>
-                  <td className="px-4 py-3 text-gray-600">
-                    {p.invoice ? (
-                      <>
-                        <span className="font-mono text-xs">{p.invoice.invoice_number}</span>
-                        {p.invoice.period_label && <div className="text-xs text-gray-500">{p.invoice.period_label}</div>}
-                      </>
-                    ) : <span className="text-gray-400">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{METHOD_LABELS[p.method] || p.method}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{p.reference || '—'}</td>
-                  <td className="px-4 py-3 text-right font-bold text-green-600">{formatMAD(p.amount)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      <button onClick={() => printReceipt(p)} className="p-1.5 hover:bg-blue-50 rounded" title="Imprimer reçu">
-                        <Printer className="w-4 h-4 text-blue-500" />
-                      </button>
-                      {isAdmin && (
-                        <button onClick={() => cancelPayment(p.id)} className="p-1.5 hover:bg-red-50 rounded" title="Annuler">
-                          <Ban className="w-4 h-4 text-red-500" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <DataTable columns={columns} rows={filteredBySearch} empty="Aucun paiement" />
     </div>
   );
 }

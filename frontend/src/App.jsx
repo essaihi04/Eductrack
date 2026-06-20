@@ -44,6 +44,7 @@ import WhatsAppPage from './pages/admin/WhatsAppPage';
 import FinanceManagersPage from './pages/admin/FinanceManagersPage';
 import PedagogicalDirectorsPage from './pages/admin/PedagogicalDirectorsPage';
 import PedagogicalManagersPage from './pages/admin/PedagogicalManagersPage';
+import FinanceShell from './pages/finance/FinanceShell';
 import FinanceDashboard from './pages/finance/FinanceDashboard';
 import FeeTemplatesPage from './pages/finance/FeeTemplatesPage';
 import InvoicesPage from './pages/finance/InvoicesPage';
@@ -142,22 +143,24 @@ function App() {
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
-            <Route path="finance" element={<FinanceDashboard />} />
-            <Route path="finance/fee-templates" element={<FeeTemplatesPage />} />
-            <Route path="finance/invoices" element={<InvoicesPage />} />
-            <Route path="finance/payments" element={<PaymentsPage />} />
-            <Route path="finance/overdue" element={<OverduePage />} />
-            <Route path="finance/students" element={<FinanceStudentsPage />} />
-            <Route path="finance/expenses" element={<ExpensesPage />} />
-            <Route path="finance/cash-register" element={<CashRegisterPage />} />
-            <Route path="finance/reports" element={<ReportsPage />} />
-            <Route path="finance/chart" element={<ChartOfAccountsPage />} />
-            <Route path="finance/budget" element={<BudgetPage />} />
-            <Route path="finance/previsionnel" element={<PrevisionnelMatrixPage />} />
-            <Route path="finance/payroll" element={<PayrollPage />} />
-            <Route path="finance/loans" element={<LoansPage />} />
-            <Route path="finance/taxes" element={<TaxesPage />} />
-            <Route path="finance/bank" element={<BankImportPage />} />
+            <Route path="finance" element={<FinanceShell />}>
+              <Route index element={<FinanceDashboard />} />
+              <Route path="fee-templates" element={<FeeTemplatesPage />} />
+              <Route path="invoices" element={<InvoicesPage />} />
+              <Route path="payments" element={<PaymentsPage />} />
+              <Route path="overdue" element={<OverduePage />} />
+              <Route path="students" element={<FinanceStudentsPage />} />
+              <Route path="expenses" element={<ExpensesPage />} />
+              <Route path="cash-register" element={<CashRegisterPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="chart" element={<ChartOfAccountsPage />} />
+              <Route path="budget" element={<BudgetPage />} />
+              <Route path="previsionnel" element={<PrevisionnelMatrixPage />} />
+              <Route path="payroll" element={<PayrollPage />} />
+              <Route path="loans" element={<LoansPage />} />
+              <Route path="taxes" element={<TaxesPage />} />
+              <Route path="bank" element={<BankImportPage />} />
+            </Route>
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />

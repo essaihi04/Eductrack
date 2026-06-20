@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { FileText, Search, RefreshCw, Plus, Download, Ban, Eye, Zap, Filter, Printer } from 'lucide-react';
+import { FileText, Search, Ban, Eye, Zap, Printer } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, STATUS_LABELS, STATUS_COLORS, METHOD_LABELS } from '../../lib/financeApi';
-import { supabase } from '../../lib/supabase';
+import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
+
+const STATUS_TONE = { draft: 'gray', issued: 'blue', partial: 'yellow', paid: 'green', overdue: 'red', cancelled: 'gray' };
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState([]);
@@ -97,45 +98,49 @@ export default function InvoicesPage() {
     due: acc.due + Number(i.amount_due || 0)
   }), { total: 0, paid: 0, due: 0 });
 
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            <FileText className="w-6 h-6" /> Factures
-          </h1>
-          <p className="text-sm text-gray-500">{filteredBySearch.length} facture(s) · {formatMAD(totals.total)} total</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowGenerate(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <Zap className="w-4 h-4" /> Génération mensuelle
+  const columns = [
+    { key: 'number', header: 'N°', render: (i) => <span className="font-mono text-xs text-gray-700">{i.invoice_number}</span> },
+    { key: 'student', header: 'Élève', render: (i) => <span className="font-medium text-gray-800">{i.student?.first_name} {i.student?.last_name}</span> },
+    { key: 'class', header: 'Classe', render: (i) => <span className="text-gray-600">{i.student?.classes?.name || '—'}</span> },
+    { key: 'period', header: 'Période', render: (i) => <span className="text-gray-600">{i.period_label || '—'}</span> },
+    { key: 'total', header: 'Total', align: 'right', render: (i) => <Money value={i.total} /> },
+    { key: 'paid', header: 'Payé', align: 'right', render: (i) => <Money value={i.amount_paid} tone="green" /> },
+    { key: 'due', header: 'Reste', align: 'right', render: (i) => <span className="text-orange-600 font-medium tabular-nums">{formatMAD(i.amount_due)}</span> },
+    { key: 'due_date', header: 'Échéance', render: (i) => <span className="text-gray-600">{formatDate(i.due_date)}</span> },
+    { key: 'status', header: 'Statut', render: (i) => <Badge tone={STATUS_TONE[i.status] || 'gray'}>{STATUS_LABELS[i.status] || i.status}</Badge> },
+    { key: 'actions', header: 'Actions', align: 'right', render: (i) => (
+      <div className="flex justify-end gap-1">
+        <button onClick={(e) => { e.stopPropagation(); viewDetail(i.id); }} className="p-1.5 hover:bg-gray-100 rounded" title="Voir">
+          <Eye className="w-4 h-4 text-gray-500" />
+        </button>
+        {i.status !== 'cancelled' && i.status !== 'paid' && (
+          <button onClick={(e) => { e.stopPropagation(); cancelInvoice(i.id); }} className="p-1.5 hover:bg-red-50 rounded" title="Annuler">
+            <Ban className="w-4 h-4 text-red-500" />
           </button>
-        </div>
+        )}
       </div>
+    ) },
+  ];
 
-      {/* Totals */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-          <p className="text-xs text-blue-700 font-medium">Total facturé</p>
-          <p className="text-xl font-bold text-blue-900">{formatMAD(totals.total)}</p>
-        </div>
-        <div className="bg-green-50 rounded-xl p-4 border border-green-100">
-          <p className="text-xs text-green-700 font-medium">Encaissé</p>
-          <p className="text-xl font-bold text-green-900">{formatMAD(totals.paid)}</p>
-        </div>
-        <div className="bg-orange-50 rounded-xl p-4 border border-orange-100">
-          <p className="text-xs text-orange-700 font-medium">Restant</p>
-          <p className="text-xl font-bold text-orange-900">{formatMAD(totals.due)}</p>
-        </div>
-      </div>
+  return (
+    <div className="p-6 space-y-5">
+      <PageHeader icon={FileText} title="Factures" color="green"
+        subtitle={`${filteredBySearch.length} facture(s)`}
+        onRefresh={load} loading={loading}
+        actions={<Button color="green" icon={Zap} onClick={() => setShowGenerate(true)}>Génération mensuelle</Button>} />
 
-      {/* Filters */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap items-center gap-3">
+      <KpiGrid cols={3}>
+        <KpiCard label="Total facturé" value={formatMAD(totals.total)} tone="blue" />
+        <KpiCard label="Encaissé" value={formatMAD(totals.paid)} tone="green" />
+        <KpiCard label="Restant dû" value={formatMAD(totals.due)} tone="orange" />
+      </KpiGrid>
+
+      <FilterBar>
         <div className="flex-1 min-w-[200px] relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="Rechercher..." value={filters.search}
             onChange={e => setFilters({ ...filters, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg" />
         </div>
         <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-lg">
@@ -151,129 +156,49 @@ export default function InvoicesPage() {
           className="px-3 py-2 border border-gray-300 rounded-lg" title="Du" />
         <input type="date" value={filters.to} onChange={e => setFilters({ ...filters, to: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-lg" title="Au" />
-        <button onClick={load} className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
+      </FilterBar>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-3 text-left">N°</th>
-                <th className="px-4 py-3 text-left">Élève</th>
-                <th className="px-4 py-3 text-left">Classe</th>
-                <th className="px-4 py-3 text-left">Période</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-right">Payé</th>
-                <th className="px-4 py-3 text-right">Reste</th>
-                <th className="px-4 py-3 text-left">Échéance</th>
-                <th className="px-4 py-3 text-left">Statut</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredBySearch.length === 0 && (
-                <tr><td colSpan="10" className="px-4 py-8 text-center text-gray-400">Aucune facture</td></tr>
-              )}
-              {filteredBySearch.map(inv => (
-                <tr key={inv.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{inv.invoice_number}</td>
-                  <td className="px-4 py-3">
-                    <span className="font-medium text-gray-800">
-                      {inv.student?.first_name} {inv.student?.last_name}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{inv.student?.classes?.name || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{inv.period_label || '—'}</td>
-                  <td className="px-4 py-3 text-right font-medium">{formatMAD(inv.total)}</td>
-                  <td className="px-4 py-3 text-right text-green-600">{formatMAD(inv.amount_paid)}</td>
-                  <td className="px-4 py-3 text-right text-orange-600 font-medium">{formatMAD(inv.amount_due)}</td>
-                  <td className="px-4 py-3 text-gray-600">{formatDate(inv.due_date)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-block px-2 py-0.5 text-xs rounded-full ${STATUS_COLORS[inv.status] || 'bg-gray-100'}`}>
-                      {STATUS_LABELS[inv.status] || inv.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      <button onClick={() => viewDetail(inv.id)} className="p-1.5 hover:bg-gray-100 rounded" title="Voir">
-                        <Eye className="w-4 h-4 text-gray-500" />
-                      </button>
-                      {inv.status !== 'cancelled' && inv.status !== 'paid' && (
-                        <button onClick={() => cancelInvoice(inv.id)} className="p-1.5 hover:bg-red-50 rounded" title="Annuler">
-                          <Ban className="w-4 h-4 text-red-500" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+      <DataTable columns={columns} rows={filteredBySearch} empty="Aucune facture" onRowClick={(i) => viewDetail(i.id)} />
+
+      <Drawer open={showGenerate} onClose={() => setShowGenerate(false)} title="Génération mensuelle"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowGenerate(false)}>Annuler</Button>
+            <Button color="green" icon={Zap} onClick={generateMonthly} disabled={generating}>{generating ? 'Génération...' : 'Générer'}</Button>
+          </>
+        }>
+        <p className="text-sm text-gray-600">Génère automatiquement les factures pour tous les élèves ayant un plan actif.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Année scolaire">
+            <input type="text" value={genForm.academic_year} onChange={e => setGenForm({ ...genForm, academic_year: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="Jour d'échéance">
+            <input type="number" min="1" max="28" value={genForm.due_day} onChange={e => setGenForm({ ...genForm, due_day: Number(e.target.value) })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="Mois">
+            <select value={genForm.month} onChange={e => setGenForm({ ...genForm, month: Number(e.target.value) })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              {['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'].map((n, i) => (
+                <option key={i} value={i + 1}>{n}</option>
               ))}
-            </tbody>
-          </table>
+            </select>
+          </Field>
+          <Field label="Année">
+            <input type="number" value={genForm.year} onChange={e => setGenForm({ ...genForm, year: Number(e.target.value) })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
         </div>
-      </div>
+        <Field label="Classe (optionnel, sinon toutes)">
+          <select value={genForm.class_id} onChange={e => setGenForm({ ...genForm, class_id: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+            <option value="">Toutes les classes</option>
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+      </Drawer>
 
-      {/* Modal génération mensuelle */}
-      {showGenerate && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Zap className="w-5 h-5 text-blue-600" /> Génération mensuelle
-            </h2>
-            <p className="text-sm text-gray-600">
-              Génère automatiquement les factures pour tous les élèves ayant un plan actif.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Année scolaire</label>
-                <input type="text" value={genForm.academic_year} onChange={e => setGenForm({ ...genForm, academic_year: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Jour d'échéance</label>
-                <input type="number" min="1" max="28" value={genForm.due_day} onChange={e => setGenForm({ ...genForm, due_day: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Mois</label>
-                <select value={genForm.month} onChange={e => setGenForm({ ...genForm, month: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                  {['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'].map((n, i) => (
-                    <option key={i} value={i + 1}>{n}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Année</label>
-                <input type="number" value={genForm.year} onChange={e => setGenForm({ ...genForm, year: Number(e.target.value) })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Classe (optionnel, sinon toutes)</label>
-              <select value={genForm.class_id} onChange={e => setGenForm({ ...genForm, class_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                <option value="">Toutes les classes</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setShowGenerate(false)} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-                Annuler
-              </button>
-              <button onClick={generateMonthly} disabled={generating}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                <Zap className="w-4 h-4" /> {generating ? 'Génération...' : 'Générer'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal détail facture */}
       {selectedInvoice && (
         <InvoiceDetailModal invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} onRefresh={load} />
       )}
@@ -411,21 +336,11 @@ function InvoiceDetailModal({ invoice, onClose, onRefresh }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Facture {invoice.invoice_number}</h2>
-            <p className="text-sm text-gray-500">{invoice.student?.first_name} {invoice.student?.last_name}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={printInvoice} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100" title="Imprimer">
-              <Printer className="w-4 h-4" /> Imprimer
-            </button>
-            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">✕</button>
-          </div>
-        </div>
-        <div className="p-6 space-y-4">
+    <Drawer open onClose={onClose} width="max-w-2xl"
+      title={`Facture ${invoice.invoice_number}`}
+      footer={<Button variant="secondary" icon={Printer} onClick={printInvoice}>Imprimer</Button>}>
+        <p className="text-sm text-gray-500 -mt-1">{invoice.student?.first_name} {invoice.student?.last_name}</p>
+        <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">Émise le:</span> {formatDate(invoice.issue_date)}</div>
             <div><span className="text-gray-500">Échéance:</span> {formatDate(invoice.due_date)}</div>
@@ -540,7 +455,6 @@ function InvoiceDetailModal({ invoice, onClose, onRefresh }) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }

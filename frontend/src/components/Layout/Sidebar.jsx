@@ -50,6 +50,11 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
+import { FINANCE_SIDEBAR_POLES, poleForPath } from '../../pages/finance/financeNav';
+
+const FINANCE_MENU = FINANCE_SIDEBAR_POLES.map((p) => ({
+  icon: p.icon, label: p.label, path: p.path, poleKey: p.key,
+}));
 
 const Sidebar = () => {
   const location = useLocation();
@@ -112,22 +117,7 @@ const Sidebar = () => {
         // Section Finance — masquée pour le directeur pédagogique
         ...(isPedagogical ? [] : [
           { section: 'Finance', isSection: true },
-          { icon: Wallet, label: 'Tableau finance', path: '/finance' },
-          { icon: LayoutGrid, label: 'Prévisionnel/Réel', path: '/finance/previsionnel' },
-          { icon: CalendarRange, label: 'Budget', path: '/finance/budget' },
-          { icon: Banknote, label: 'Caisse', path: '/finance/cash-register' },
-          { icon: BarChart3, label: 'Rapports', path: '/finance/reports' },
-          { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
-          { icon: Users, label: 'Élèves (finance)', path: '/finance/students' },
-          { icon: FileText, label: 'Factures', path: '/finance/invoices' },
-          { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
-          { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
-          { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
-          { icon: UserCog, label: 'Paie', path: '/finance/payroll' },
-          { icon: Landmark, label: 'Prêts & leasing', path: '/finance/loans' },
-          { icon: Scale, label: 'Impôts & taxes', path: '/finance/taxes' },
-          { icon: Building2, label: 'Relevés bancaires', path: '/finance/bank' },
-          { icon: ListTree, label: 'Plan comptable', path: '/finance/chart' },
+          ...FINANCE_MENU,
         ]),
         // Section Équipe
         // - Resp. financiers + Direct. pédagogiques : réservés aux admins complets
@@ -192,20 +182,7 @@ const Sidebar = () => {
 
     if (profile?.role === 'finance_manager') {
       return [
-        { icon: Wallet, label: 'Tableau finance', path: '/finance' },
-        { icon: LayoutGrid, label: 'Prévisionnel/Réel', path: '/finance/previsionnel' },
-        { icon: CalendarRange, label: 'Budget', path: '/finance/budget' },
-        { icon: BarChart3, label: 'Rapports', path: '/finance/reports' },
-        { icon: Layers, label: 'Modèles de frais', path: '/finance/fee-templates' },
-        { icon: Users, label: 'Élèves', path: '/finance/students' },
-        { icon: FileText, label: 'Factures', path: '/finance/invoices' },
-        { icon: CreditCard, label: 'Paiements', path: '/finance/payments' },
-        { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
-        { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
-        { icon: UserCog, label: 'Paie', path: '/finance/payroll' },
-        { icon: Landmark, label: 'Prêts & leasing', path: '/finance/loans' },
-        { icon: Scale, label: 'Impôts & taxes', path: '/finance/taxes' },
-        { icon: Building2, label: 'Relevés bancaires', path: '/finance/bank' },
+        ...FINANCE_MENU,
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }
@@ -290,7 +267,9 @@ const Sidebar = () => {
             );
           }
           const Icon = item.icon;
-          const isActive = location.pathname === item.path;
+          const isActive = item.poleKey
+            ? location.pathname.startsWith('/finance') && poleForPath(location.pathname).key === item.poleKey
+            : location.pathname === item.path;
 
           return (
             <Link

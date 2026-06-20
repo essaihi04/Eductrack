@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Wallet, Users, Plus, Trash2, X, Check, RotateCcw, ArrowLeft, Save } from 'lucide-react';
+import { Wallet, Users, Plus, Trash2, Check, RotateCcw, ArrowLeft, Save } from 'lucide-react';
 import { financeApi, formatMAD } from '../../lib/financeApi';
+import { PageHeader, Drawer, Button, Field } from '../../components/finance/ui';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -17,17 +18,13 @@ const calYearFor = (acad, month) => { const [a, b] = acad.split('-').map(Number)
 export default function PayrollPage() {
   const [tab, setTab] = useState('payroll');
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-          <Wallet className="w-6 h-6 text-indigo-600" /> Paie
-        </h1>
-        <p className="text-sm text-gray-500">Salaires, CNSS + AMO et IR — alimentent la Masse salariale du Prévisionnel/Réel.</p>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHeader icon={Wallet} title="Paie" color="purple"
+        subtitle="Salaires, CNSS + AMO et IR — alimentent la Masse salariale du Prévisionnel/Réel." />
       <div className="flex gap-2 border-b border-gray-200">
         {[['payroll', 'Bulletins de paie'], ['employees', 'Employés']].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === k ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500'}`}>{l}</button>
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === k ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500'}`}>{l}</button>
         ))}
       </div>
       {tab === 'employees' ? <EmployeesTab /> : <PayrollTab />}
@@ -61,7 +58,7 @@ function EmployeesTab() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <p className="text-sm text-gray-500 flex items-center gap-1"><Users className="w-4 h-4" /> {list.length} employé(s)</p>
-        <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><Plus className="w-4 h-4" /> Nouvel employé</button>
+        <Button color="purple" icon={Plus} onClick={openNew}>Nouvel employé</Button>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
@@ -84,26 +81,34 @@ function EmployeesTab() {
         </table>
       </div>
 
-      {showForm && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 space-y-3">
-            <div className="flex justify-between items-center"><h2 className="text-lg font-semibold">{edit ? 'Modifier' : 'Nouvel'} employé</h2><button onClick={() => setShowForm(false)}><X className="w-5 h-5" /></button></div>
-            <div><label className="block text-xs font-medium text-gray-700 mb-1">Nom complet *</label><input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Fonction</label><input value={form.role_label || ''} onChange={e => setForm({ ...form, role_label: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
-                <select value={form.employment_type} onChange={e => setForm({ ...form, employment_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                  <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
-                </select>
-              </div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Salaire de base</label><input type="number" step="0.01" value={form.base_salary} onChange={e => setForm({ ...form, base_salary: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">N° CNSS</label><input value={form.cnss_number || ''} onChange={e => setForm({ ...form, cnss_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></div>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} /> Actif</label>
-            <div className="flex justify-end gap-2"><button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-300 rounded-lg">Annuler</button><button onClick={save} disabled={!form.full_name} className="px-4 py-2 bg-indigo-600 text-white rounded-lg disabled:opacity-50">Enregistrer</button></div>
-          </div>
+      <Drawer open={showForm} onClose={() => setShowForm(false)} title={`${edit ? 'Modifier' : 'Nouvel'} employé`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>
+            <Button color="purple" onClick={save} disabled={!form.full_name}>Enregistrer</Button>
+          </>
+        }>
+        <Field label="Nom complet" required>
+          <input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Fonction">
+            <input value={form.role_label || ''} onChange={e => setForm({ ...form, role_label: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="Type">
+            <select value={form.employment_type} onChange={e => setForm({ ...form, employment_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
+            </select>
+          </Field>
+          <Field label="Salaire de base">
+            <input type="number" step="0.01" value={form.base_salary} onChange={e => setForm({ ...form, base_salary: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="N° CNSS">
+            <input value={form.cnss_number || ''} onChange={e => setForm({ ...form, cnss_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
         </div>
-      )}
+        <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} /> Actif</label>
+      </Drawer>
     </div>
   );
 }
@@ -194,7 +199,7 @@ function PayrollTab() {
           <select value={newMonth} onChange={e => setNewMonth(Number(e.target.value))} className="px-3 py-2 border border-gray-300 rounded-lg">
             {ORDER.map(m => <option key={m} value={m}>{MONTHS[m - 1]} {calYearFor(year, m)}</option>)}
           </select>
-          <button onClick={createRun} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"><Plus className="w-4 h-4" /> Bulletin du mois</button>
+          <button onClick={createRun} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"><Plus className="w-4 h-4" /> Bulletin du mois</button>
         </div>
       </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
