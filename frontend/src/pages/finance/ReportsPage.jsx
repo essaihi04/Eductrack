@@ -92,9 +92,11 @@ const ReportsPage = () => {
       orange: 'FFEA580C', amber: 'FFF59E0B', slate: 'FF334155',
       zebra: 'FFF1F5F9', headText: 'FFFFFFFF', border: 'FFE2E8F0',
     };
-    const MONEY = '#,##0.00 "MAD"';
+    const MONEY = '#,##0.00 "MAD";[Red]-#,##0.00 "MAD"';
     const thin = { style: 'thin', color: { argb: C.border } };
     const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
+    // Couleurs des barres de données (mini-graphes en cellule)
+    const BAR = { green: 'FF9FE1CB', red: 'FFF7C1C1', blue: 'FFB5D4F4', amber: 'FFFAC775' };
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Edutrack';
@@ -167,6 +169,36 @@ const ReportsPage = () => {
         });
         row.height = 19;
       }
+
+      // Filtre automatique sur la ligne d'en-tête
+      ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: ncol } };
+
+      // Mises en forme conditionnelles : barres de données (mini-graphes) + échelles de couleur
+      const firstData = 4;
+      const lastData = 3 + rows.length;
+      if (lastData >= firstData) {
+        columns.forEach((c, i) => {
+          const col = String.fromCharCode(65 + i);
+          const ref = `${col}${firstData}:${col}${lastData}`;
+          if (c.bar) {
+            ws.addConditionalFormatting({ ref, rules: [{
+              type: 'dataBar',
+              cfvo: [{ type: 'num', value: 0 }, { type: 'max' }],
+              color: { argb: c.barColor || BAR.blue },
+            }] });
+          }
+          if (c.scale) {
+            const stops = c.scale === 'rate'
+              ? [{ type: 'num', value: 0 }, { type: 'num', value: 50 }, { type: 'num', value: 100 }]
+              : [{ type: 'min' }, { type: 'percentile', value: 50 }, { type: 'max' }];
+            ws.addConditionalFormatting({ ref, rules: [{
+              type: 'colorScale',
+              cfvo: stops,
+              color: [{ argb: 'FFF8696B' }, { argb: 'FFFFEB84' }, { argb: 'FF63BE7B' }],
+            }] });
+          }
+        });
+      }
       return ws;
     };
 
@@ -214,6 +246,11 @@ const ReportsPage = () => {
       ws.getRow(rIdx).height = 22;
       rIdx += 1;
     });
+    // Barre de données comparant les indicateurs (mini-graphe)
+    ws.addConditionalFormatting({
+      ref: `B4:B${rIdx - 1}`,
+      rules: [{ type: 'dataBar', cfvo: [{ type: 'num', value: 0 }, { type: 'max' }], color: { argb: BAR.blue } }],
+    });
 
     // Sous-tableau recouvrement
     rIdx += 1;
@@ -258,7 +295,7 @@ const ReportsPage = () => {
     buildSheet('Par mode', C.blue, 'Encaissements par mode de paiement',
       [
         { key: 'mode', header: 'Mode de paiement', width: 22 },
-        { key: 'montant', header: 'Montant', width: 18, money: true },
+        { key: 'montant', header: 'Montant', width: 20, money: true, bar: true, barColor: BAR.green },
         { key: 'nb', header: 'Nb', width: 10, center: true },
       ],
       METHOD_ORDER.map(m => ({
@@ -273,9 +310,9 @@ const ReportsPage = () => {
     buildSheet('Par jour', C.indigo, 'Ventilation par jour',
       [
         { key: 'date', header: 'Date', width: 14 },
-        { key: 'income', header: 'Encaissé', width: 16, money: true },
-        { key: 'expense', header: 'Dépensé', width: 16, money: true },
-        { key: 'net', header: 'Net', width: 16, money: true },
+        { key: 'income', header: 'Encaissé', width: 18, money: true, bar: true, barColor: BAR.green },
+        { key: 'expense', header: 'Dépensé', width: 18, money: true, bar: true, barColor: BAR.red },
+        { key: 'net', header: 'Net', width: 16, money: true, scale: true },
       ],
       (data.by_day || []).map(r => ({ date: r.date, income: r.income, expense: r.expense, net: r.net })),
       {
@@ -290,9 +327,9 @@ const ReportsPage = () => {
     buildSheet('Par mois', C.indigo, 'Ventilation par mois',
       [
         { key: 'label', header: 'Mois', width: 18 },
-        { key: 'income', header: 'Encaissé', width: 16, money: true },
-        { key: 'expense', header: 'Dépensé', width: 16, money: true },
-        { key: 'net', header: 'Net', width: 16, money: true },
+        { key: 'income', header: 'Encaissé', width: 18, money: true, bar: true, barColor: BAR.green },
+        { key: 'expense', header: 'Dépensé', width: 18, money: true, bar: true, barColor: BAR.red },
+        { key: 'net', header: 'Net', width: 16, money: true, scale: true },
       ],
       (data.by_month || []).map(r => ({ label: r.label, income: r.income, expense: r.expense, net: r.net })),
       {
@@ -311,7 +348,7 @@ const ReportsPage = () => {
         { key: 'eleve', header: 'Élève', width: 26 },
         { key: 'classe', header: 'Classe', width: 16 },
         { key: 'mode', header: 'Mode', width: 14 },
-        { key: 'montant', header: 'Montant', width: 16, money: true },
+        { key: 'montant', header: 'Montant', width: 18, money: true, bar: true, barColor: BAR.green },
       ],
       (data.payments || []).map(p => ({
         date: p.payment_date, recu: p.receipt_number,
@@ -331,7 +368,7 @@ const ReportsPage = () => {
           { key: 'desc', header: 'Description', width: 30 },
           { key: 'paid', header: 'Bénéficiaire', width: 20 },
           { key: 'mode', header: 'Mode', width: 14 },
-          { key: 'montant', header: 'Montant', width: 16, money: true },
+          { key: 'montant', header: 'Montant', width: 18, money: true, bar: true, barColor: BAR.red },
         ],
         data.expenses.map(e => ({
           date: e.expense_date, cat: EXPENSE_CATEGORIES[e.category] || e.category,
@@ -346,10 +383,10 @@ const ReportsPage = () => {
     buildSheet('Par classe', C.amber, 'Recouvrement par classe (global)',
       [
         { key: 'classe', header: 'Classe', width: 22 },
-        { key: 'invoiced', header: 'Facturé', width: 16, money: true },
-        { key: 'paid', header: 'Encaissé', width: 16, money: true },
-        { key: 'remaining', header: 'Reste', width: 16, money: true },
-        { key: 'rate', header: 'Taux', width: 10, pct: true },
+        { key: 'invoiced', header: 'Facturé', width: 18, money: true, bar: true, barColor: BAR.blue },
+        { key: 'paid', header: 'Encaissé', width: 18, money: true, bar: true, barColor: BAR.green },
+        { key: 'remaining', header: 'Reste', width: 18, money: true, bar: true, barColor: BAR.red },
+        { key: 'rate', header: 'Taux', width: 12, pct: true, scale: 'rate' },
       ],
       (data.recouvrement?.by_class || []).map(c => ({
         classe: c.class_name, invoiced: c.invoiced, paid: c.paid, remaining: c.remaining, rate: c.rate,
