@@ -12,6 +12,14 @@ ALTER TABLE whatsapp_school_sessions
 ALTER TABLE whatsapp_school_sessions
   ADD COLUMN IF NOT EXISTS phone_number_id TEXT;
 
+-- Élargit la contrainte CHECK du provider pour autoriser 'cloud'
+-- (l'ancienne ne connaissait que 'baileys' / 'wasender').
+ALTER TABLE whatsapp_school_sessions
+  DROP CONSTRAINT IF EXISTS whatsapp_school_sessions_provider_check;
+ALTER TABLE whatsapp_school_sessions
+  ADD CONSTRAINT whatsapp_school_sessions_provider_check
+  CHECK (provider IN ('baileys', 'wasender', 'cloud'));
+
 -- Lookup rapide phone_number_id → school_id (routage du webhook entrant)
 CREATE INDEX IF NOT EXISTS idx_whatsapp_school_sessions_phone_number_id
   ON whatsapp_school_sessions(phone_number_id);
