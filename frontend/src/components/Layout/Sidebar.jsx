@@ -34,6 +34,9 @@ import {
   LayoutGrid,
   CalendarRange,
   ListTree,
+  Landmark,
+  Scale,
+  Building2,
   ShieldCheck,
   Bus,
   MapPin,
@@ -121,6 +124,9 @@ const Sidebar = () => {
           { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
           { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
           { icon: UserCog, label: 'Paie', path: '/finance/payroll' },
+          { icon: Landmark, label: 'Prêts & leasing', path: '/finance/loans' },
+          { icon: Scale, label: 'Impôts & taxes', path: '/finance/taxes' },
+          { icon: Building2, label: 'Relevés bancaires', path: '/finance/bank' },
           { icon: ListTree, label: 'Plan comptable', path: '/finance/chart' },
         ]),
         // Section Équipe
@@ -197,6 +203,9 @@ const Sidebar = () => {
         { icon: AlertCircle, label: 'Retards', path: '/finance/overdue' },
         { icon: TrendingDown, label: 'Dépenses', path: '/finance/expenses' },
         { icon: UserCog, label: 'Paie', path: '/finance/payroll' },
+        { icon: Landmark, label: 'Prêts & leasing', path: '/finance/loans' },
+        { icon: Scale, label: 'Impôts & taxes', path: '/finance/taxes' },
+        { icon: Building2, label: 'Relevés bancaires', path: '/finance/bank' },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }

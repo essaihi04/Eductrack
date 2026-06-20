@@ -27,6 +27,8 @@ import { startCommunicationScheduler } from './services/communicationScheduler.j
 import financeRoutes from './routes/finance.routes.js';
 import financeAccountingRoutes from './routes/financeAccounting.routes.js';
 import financePayrollRoutes from './routes/financePayroll.routes.js';
+import financeLoansTaxesRoutes from './routes/financeLoansTaxes.routes.js';
+import financeBankRoutes from './routes/financeBank.routes.js';
 import financeManagersRoutes from './routes/financeManagers.routes.js';
 import pedagogicalDirectorsRoutes from './routes/pedagogicalDirectors.routes.js';
 import pedagogicalManagersRoutes from './routes/pedagogicalManagers.routes.js';
@@ -106,6 +108,8 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/finance', financeAccountingRoutes);
 app.use('/api/finance', financePayrollRoutes);
+app.use('/api/finance', financeLoansTaxesRoutes);
+app.use('/api/finance', financeBankRoutes);
 app.use('/api/transport', transportRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/parent', parentRoutes);

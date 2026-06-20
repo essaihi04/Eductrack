@@ -33,6 +33,15 @@ async function request(path, { method = 'GET', body, query } = {}) {
   return data;
 }
 
+async function uploadRequest(path, formData) {
+  const token = await getToken();
+  const res = await fetch(`${apiUrl}${path}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
+  const text = await res.text();
+  let data; try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok) throw new Error(data.error || data.details || `HTTP ${res.status}`);
+  return data;
+}
+
 export const financeApi = {
   // Classes (lecture pour module finance)
   listClasses: () => request('/api/finance/classes'),
@@ -117,6 +126,39 @@ export const financeApi = {
   postPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}/post`, { method: 'POST' }),
   unpostPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}/unpost`, { method: 'POST' }),
   deletePayrollRun: (id) => request(`/api/finance/payroll/runs/${id}`, { method: 'DELETE' }),
+
+  // ── Prêts / leasing (Phase 3) ──────────────────────────────────────────
+  listLoans: () => request('/api/finance/loans'),
+  getLoan: (id) => request(`/api/finance/loans/${id}`),
+  createLoan: (data) => request('/api/finance/loans', { method: 'POST', body: data }),
+  deleteLoan: (id) => request(`/api/finance/loans/${id}`, { method: 'DELETE' }),
+  payLoanSchedule: (id, sid) => request(`/api/finance/loans/${id}/schedule/${sid}/pay`, { method: 'POST' }),
+  unpayLoanSchedule: (id, sid) => request(`/api/finance/loans/${id}/schedule/${sid}/unpay`, { method: 'POST' }),
+
+  // ── Impôts & taxes (Phase 3) ───────────────────────────────────────────
+  listTaxes: () => request('/api/finance/taxes'),
+  createTax: (data) => request('/api/finance/taxes', { method: 'POST', body: data }),
+  deleteTax: (id) => request(`/api/finance/taxes/${id}`, { method: 'DELETE' }),
+  payTax: (id) => request(`/api/finance/taxes/${id}/pay`, { method: 'POST' }),
+  unpayTax: (id) => request(`/api/finance/taxes/${id}/unpay`, { method: 'POST' }),
+
+  // ── Import relevé bancaire (Phase 4) ───────────────────────────────────
+  listStatements: () => request('/api/finance/bank/statements'),
+  getStatement: (id) => request(`/api/finance/bank/statements/${id}`),
+  uploadStatement: (formData) => uploadRequest('/api/finance/bank/statements', formData),
+  deleteStatement: (id) => request(`/api/finance/bank/statements/${id}`, { method: 'DELETE' }),
+  applyBankRules: (id) => request(`/api/finance/bank/statements/${id}/apply-rules`, { method: 'POST' }),
+  postAllBankTxns: (id) => request(`/api/finance/bank/statements/${id}/post-all`, { method: 'POST' }),
+  updateBankTxn: (id, data) => request(`/api/finance/bank/transactions/${id}`, { method: 'PUT', body: data }),
+  postBankTxn: (id) => request(`/api/finance/bank/transactions/${id}/post`, { method: 'POST' }),
+  unpostBankTxn: (id) => request(`/api/finance/bank/transactions/${id}/unpost`, { method: 'POST' }),
+  listBankRules: () => request('/api/finance/bank/rules'),
+  createBankRule: (data) => request('/api/finance/bank/rules', { method: 'POST', body: data }),
+  updateBankRule: (id, data) => request(`/api/finance/bank/rules/${id}`, { method: 'PUT', body: data }),
+  deleteBankRule: (id) => request(`/api/finance/bank/rules/${id}`, { method: 'DELETE' }),
+  // Clôture mensuelle
+  getMonthClose: (academicYear) => request('/api/finance/month-close', { query: { academic_year: academicYear } }),
+  setMonthClose: (academic_year, month, status) => request('/api/finance/month-close', { method: 'POST', body: { academic_year, month, status } }),
 
   // Finance managers (admin only)
   listManagers: () => request('/api/admin/finance-managers'),

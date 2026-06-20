@@ -1,0 +1,293 @@
+/**
+ * Comptabilité de gestion — Phase 4 : Import relevé bancaire + rapprochement.
+ *  - Upload d'un relevé PDF -> extraction du texte (pdf-parse v2) -> lignes
+ *    candidates (date, libellé, montant) que l'admin revoit.
+ *  - Règles de catégorisation (mot-clé -> compte) appliquées automatiquement.
+ *  - Une transaction « débit » postée écrit dans finance_ledger_entry
+ *    (source_type='expense') -> alimente le réel des dépenses de la matrice.
+ *  - Clôture mensuelle (finance_month_close).
+ *
+ * Monté sur /api/finance (chemins /bank/*, /month-close).
+ */
+import express from 'express';
+import multer from 'multer';
+import { supabaseAdmin } from '../config/supabase.js';
+import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
+
+const router = express.Router();
+router.use(authenticate);
+router.use(requireFinanceAccess);
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+
+const getSchoolId = (req) => {
+  if (req.user.role === 'super_admin') return req.query.school_id || req.body.school_id || null;
+  return req.user.school_id || null;
+};
+const num = (v) => Number(v) || 0;
+const ymFromDate = (dateStr) => {
+  const d = new Date(dateStr); const year = d.getFullYear(); const month = d.getMonth() + 1;
+  return { year, month, academic_year: month >= 9 ? `${year}-${year + 1}` : `${year - 1}-${year}` };
+};
+
+// ── Extraction PDF -> transactions candidates (best effort) ───────────────
+async function extractTransactionsFromPdf(buffer) {
+  let text = '';
+  try {
+    const { PDFParse } = await import('pdf-parse');
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const result = await parser.getText();
+    text = result?.text || '';
+  } catch (e) {
+    console.warn('[bank] extraction PDF échouée:', e.message);
+    return [];
+  }
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const dateRe = /(\d{2})[\/\-.](\d{2})[\/\-.](\d{2,4})/;
+  // montant : 1 234,56 / 1.234,56 / 1234.56
+  const amountRe = /(\d{1,3}(?:[ .]\d{3})*[.,]\d{2})(?!\d)/g;
+  const out = [];
+  for (const line of lines) {
+    const dm = line.match(dateRe);
+    if (!dm) continue;
+    const amounts = [...line.matchAll(amountRe)].map((m) => m[1]);
+    if (amounts.length === 0) continue;
+    const raw = amounts[amounts.length - 1];
+    const amount = Number(raw.replace(/[ .]/g, (c) => (c === ' ' ? '' : '')).replace(/\.(?=\d{3}\b)/g, '').replace(',', '.')) || Number(raw.replace(/\s/g, '').replace(/\.(\d{3})/g, '$1').replace(',', '.')) || 0;
+    let [, dd, mm, yy] = dm; if (yy.length === 2) yy = '20' + yy;
+    const label = line.replace(dateRe, '').replace(amountRe, '').replace(/\s{2,}/g, ' ').trim().slice(0, 180);
+    out.push({ txn_date: `${yy}-${mm}-${dd}`, label: label || 'Opération', amount: Math.abs(amount), direction: 'debit' });
+  }
+  return out;
+}
+
+async function applyRulesTo(schoolId, transactions) {
+  const { data: rules } = await supabaseAdmin.from('bank_categorization_rule')
+    .select('*').eq('school_id', schoolId).eq('is_active', true).order('priority');
+  if (!rules || rules.length === 0) return transactions;
+  return transactions.map((t) => {
+    if (t.account_id || t.status === 'posted' || t.status === 'ignored') return t;
+    const lbl = (t.label || '').toLowerCase();
+    for (const r of rules) {
+      if (r.direction && r.direction !== t.direction) continue;
+      let hit = false;
+      try {
+        hit = r.match_type === 'regex' ? new RegExp(r.pattern, 'i').test(t.label || '') : lbl.includes((r.pattern || '').toLowerCase());
+      } catch { hit = false; }
+      if (hit && r.account_id) return { ...t, account_id: r.account_id, status: 'categorized' };
+    }
+    return t;
+  });
+}
+
+// ============================================================
+// RELEVÉS
+// ============================================================
+router.get('/bank/statements', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data, error } = await supabaseAdmin.from('bank_statement').select('*').eq('school_id', schoolId).order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ statements: data || [] });
+  } catch (e) { console.error('GET statements:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.get('/bank/statements/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: statement } = await supabaseAdmin.from('bank_statement').select('*').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (!statement) return res.status(404).json({ error: 'Relevé introuvable' });
+    const { data: transactions } = await supabaseAdmin.from('bank_transaction').select('*').eq('statement_id', statement.id).order('txn_date');
+    res.json({ statement, transactions: transactions || [] });
+  } catch (e) { console.error('GET statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/bank/statements', upload.single('file'), async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { account_label, period_start, period_end, opening_balance, closing_balance } = req.body;
+    const { data: statement, error } = await supabaseAdmin.from('bank_statement').insert({
+      school_id: schoolId, account_label: account_label || 'Banque',
+      period_start: period_start || null, period_end: period_end || null,
+      opening_balance: opening_balance != null ? num(opening_balance) : null,
+      closing_balance: closing_balance != null ? num(closing_balance) : null,
+      source_filename: req.file?.originalname || null, imported_by: req.user.id,
+    }).select().single();
+    if (error) throw error;
+
+    let candidates = [];
+    if (req.file?.buffer) candidates = await extractTransactionsFromPdf(req.file.buffer);
+    candidates = await applyRulesTo(schoolId, candidates);
+    let inserted = [];
+    if (candidates.length) {
+      const rows = candidates.map((t) => ({ ...t, school_id: schoolId, statement_id: statement.id }));
+      const { data } = await supabaseAdmin.from('bank_transaction').insert(rows).select();
+      inserted = data || [];
+    }
+    res.status(201).json({ statement, transactions: inserted, parsed: candidates.length });
+  } catch (e) { console.error('POST statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.delete('/bank/statements/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: txns } = await supabaseAdmin.from('bank_transaction').select('id').eq('statement_id', req.params.id).eq('school_id', schoolId);
+    for (const t of (txns || [])) await supabaseAdmin.from('finance_ledger_entry').delete().eq('source_type', 'expense').eq('source_id', t.id);
+    await supabaseAdmin.from('bank_statement').delete().eq('id', req.params.id).eq('school_id', schoolId);
+    res.json({ success: true });
+  } catch (e) { console.error('DELETE statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/bank/statements/:id/apply-rules', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: txns } = await supabaseAdmin.from('bank_transaction').select('*').eq('statement_id', req.params.id).eq('school_id', schoolId);
+    const updated = await applyRulesTo(schoolId, txns || []);
+    let count = 0;
+    for (const t of updated) {
+      const orig = (txns || []).find((x) => x.id === t.id);
+      if (orig && (orig.account_id !== t.account_id || orig.status !== t.status)) {
+        await supabaseAdmin.from('bank_transaction').update({ account_id: t.account_id, status: t.status }).eq('id', t.id);
+        count += 1;
+      }
+    }
+    res.json({ success: true, updated: count });
+  } catch (e) { console.error('apply-rules:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// ============================================================
+// TRANSACTIONS
+// ============================================================
+router.put('/bank/transactions/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const patch = {};
+    for (const f of ['account_id', 'direction', 'status', 'label', 'amount', 'txn_date', 'matched_payment_id']) {
+      if (req.body[f] !== undefined) patch[f] = f === 'amount' ? num(req.body[f]) : req.body[f];
+    }
+    const { data, error } = await supabaseAdmin.from('bank_transaction').update(patch).eq('id', req.params.id).eq('school_id', schoolId).select().single();
+    if (error) throw error;
+    res.json({ transaction: data });
+  } catch (e) { console.error('PUT transaction:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+async function postTxn(schoolId, t) {
+  await supabaseAdmin.from('finance_ledger_entry').delete().eq('source_type', 'expense').eq('source_id', t.id);
+  if (t.direction !== 'debit' || !t.account_id || num(t.amount) === 0 || !t.txn_date) return false;
+  const { year, month, academic_year } = ymFromDate(t.txn_date);
+  await supabaseAdmin.from('finance_ledger_entry').insert({
+    school_id: schoolId, account_id: t.account_id, academic_year, year, month,
+    amount: num(t.amount), source_type: 'expense', source_id: t.id, cash_or_bank: 'bank',
+    label: (t.label || 'Banque').slice(0, 180), entry_date: t.txn_date,
+  });
+  return true;
+}
+
+router.post('/bank/transactions/:id/post', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: t } = await supabaseAdmin.from('bank_transaction').select('*').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (!t) return res.status(404).json({ error: 'Transaction introuvable' });
+    if (t.direction !== 'debit') return res.status(400).json({ error: 'Seuls les débits se comptabilisent en dépense.' });
+    if (!t.account_id) return res.status(400).json({ error: 'Affectez un poste avant de comptabiliser.' });
+    await postTxn(schoolId, t);
+    await supabaseAdmin.from('bank_transaction').update({ status: 'posted' }).eq('id', t.id);
+    res.json({ success: true });
+  } catch (e) { console.error('post txn:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/bank/transactions/:id/unpost', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    await supabaseAdmin.from('finance_ledger_entry').delete().eq('source_type', 'expense').eq('source_id', req.params.id);
+    await supabaseAdmin.from('bank_transaction').update({ status: 'categorized' }).eq('id', req.params.id).eq('school_id', schoolId);
+    res.json({ success: true });
+  } catch (e) { console.error('unpost txn:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/bank/statements/:id/post-all', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: txns } = await supabaseAdmin.from('bank_transaction').select('*')
+      .eq('statement_id', req.params.id).eq('school_id', schoolId).eq('direction', 'debit').not('account_id', 'is', null).neq('status', 'ignored');
+    let count = 0;
+    for (const t of (txns || [])) {
+      if (await postTxn(schoolId, t)) { await supabaseAdmin.from('bank_transaction').update({ status: 'posted' }).eq('id', t.id); count += 1; }
+    }
+    res.json({ success: true, posted: count });
+  } catch (e) { console.error('post-all:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// ============================================================
+// RÈGLES DE CATÉGORISATION
+// ============================================================
+router.get('/bank/rules', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data, error } = await supabaseAdmin.from('bank_categorization_rule').select('*').eq('school_id', schoolId).order('priority');
+    if (error) throw error;
+    res.json({ rules: data || [] });
+  } catch (e) { console.error('GET rules:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/bank/rules', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { pattern, match_type = 'contains', direction = 'debit', account_id, priority = 100 } = req.body;
+    if (!pattern || !account_id) return res.status(400).json({ error: 'pattern, account_id requis' });
+    const { data, error } = await supabaseAdmin.from('bank_categorization_rule')
+      .insert({ school_id: schoolId, pattern, match_type, direction, account_id, priority }).select().single();
+    if (error) throw error;
+    res.status(201).json({ rule: data });
+  } catch (e) { console.error('POST rule:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.put('/bank/rules/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const patch = {};
+    for (const f of ['pattern', 'match_type', 'direction', 'account_id', 'priority', 'is_active']) if (req.body[f] !== undefined) patch[f] = req.body[f];
+    const { data, error } = await supabaseAdmin.from('bank_categorization_rule').update(patch).eq('id', req.params.id).eq('school_id', schoolId).select().single();
+    if (error) throw error;
+    res.json({ rule: data });
+  } catch (e) { console.error('PUT rule:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.delete('/bank/rules/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    await supabaseAdmin.from('bank_categorization_rule').delete().eq('id', req.params.id).eq('school_id', schoolId);
+    res.json({ success: true });
+  } catch (e) { console.error('DELETE rule:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// ============================================================
+// CLÔTURE MENSUELLE
+// ============================================================
+router.get('/month-close', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    let q = supabaseAdmin.from('finance_month_close').select('*').eq('school_id', schoolId);
+    if (req.query.academic_year) q = q.eq('academic_year', req.query.academic_year);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json({ closes: data || [] });
+  } catch (e) { console.error('GET month-close:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/month-close', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { academic_year, month, status = 'closed' } = req.body;
+    if (!academic_year || !month) return res.status(400).json({ error: 'academic_year, month requis' });
+    if (status === 'open') {
+      await supabaseAdmin.from('finance_month_close').delete().eq('school_id', schoolId).eq('academic_year', academic_year).eq('month', month);
+      return res.json({ success: true, status: 'open' });
+    }
+    const { error } = await supabaseAdmin.from('finance_month_close')
+      .upsert({ school_id: schoolId, academic_year, month, status: 'closed', closed_at: new Date().toISOString(), closed_by: req.user.id }, { onConflict: 'school_id,academic_year,month' });
+    if (error) throw error;
+    res.json({ success: true, status: 'closed' });
+  } catch (e) { console.error('POST month-close:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+export default router;
