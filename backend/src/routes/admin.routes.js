@@ -435,6 +435,7 @@ router.get('/students', async (req, res) => {
 
 // Lister les parents avec enfants + classes + contacts
 router.get('/parents', async (req, res) => {
+  let step = 'init';
   try {
     let parentsQuery = supabaseAdmin
       .from('profiles')
@@ -443,6 +444,7 @@ router.get('/parents', async (req, res) => {
       .order('created_at', { ascending: false });
     parentsQuery = applySchoolFilter(parentsQuery, req);
     // Filtre de scope : ne garder que les parents ayant au moins un enfant dans les classes assignées
+    step = 'getScopedClassIds';
     const scopedClassIds = await getScopedClassIds(req);
     if (scopedClassIds !== null) {
       if (scopedClassIds.length === 0) return res.json([]);
@@ -461,6 +463,7 @@ router.get('/parents', async (req, res) => {
       if (allowedParentIds.length === 0) return res.json([]);
       parentsQuery = parentsQuery.in('id', allowedParentIds);
     }
+    step = 'parents';
     const { data: parents, error: parentsError } = await parentsQuery;
 
     if (parentsError) throw parentsError;
@@ -470,19 +473,20 @@ router.get('/parents', async (req, res) => {
       return res.json([]);
     }
 
-    const [{ data: links, error: linksError }, { data: contacts, error: contactsError }] = await Promise.all([
-      supabaseAdmin
-        .from('parent_students')
-        .select('parent_id, student_id, relationship, student:profiles!parent_students_student_id_fkey(id, first_name, last_name, class_id, classes:classes!fk_profiles_class(name, level, filiere))')
-        .in('parent_id', parentIds),
-      supabaseAdmin
-        .from('parent_contacts')
-        .select('id, parent_id, phone_e164, channel, is_primary, consent_status, created_at, label')
-        .in('parent_id', parentIds)
-        .order('is_primary', { ascending: false })
-    ]);
-
+    // Étapes séquentielles (et non Promise.all) pour pouvoir isoler laquelle échoue.
+    step = 'links';
+    const { data: links, error: linksError } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id, student_id, relationship, student:profiles!parent_students_student_id_fkey(id, first_name, last_name, class_id, classes:classes!fk_profiles_class(name, level, filiere))')
+      .in('parent_id', parentIds);
     if (linksError) throw linksError;
+
+    step = 'contacts';
+    const { data: contacts, error: contactsError } = await supabaseAdmin
+      .from('parent_contacts')
+      .select('id, parent_id, phone_e164, channel, is_primary, consent_status, created_at, label')
+      .in('parent_id', parentIds)
+      .order('is_primary', { ascending: false });
     if (contactsError) throw contactsError;
 
     const linksByParent = new Map();
@@ -523,14 +527,15 @@ router.get('/parents', async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    // error.cause contient la vraie raison d'un "fetch failed" (DNS, timeout, refus…)
-    console.error('Erreur /parents:', error, 'cause:', error?.cause);
-    const causeMsg = error?.cause
-      ? `${error.cause.code || error.cause.name || ''} ${error.cause.message || ''}`.trim()
-      : '';
+    // Diagnostic : on remonte l'étape en échec + tout le détail de l'erreur
+    // (supabase-js efface error.cause, mais garde message/details/hint/code).
+    console.error(`Erreur /parents @ step=${step}:`, error);
     res.status(500).json({
-      error: error.message || 'Erreur serveur',
-      cause: causeMsg || undefined
+      step,
+      error: error?.message || String(error),
+      details: error?.details || undefined,
+      hint: error?.hint || undefined,
+      code: error?.code || undefined
     });
   }
 });
