@@ -29,7 +29,7 @@ async function request(path, { method = 'GET', body, query } = {}) {
   const text = await res.text();
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data.error || data.details || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(data.details || data.error || `HTTP ${res.status}`);
   return data;
 }
 

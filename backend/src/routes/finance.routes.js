@@ -1430,7 +1430,7 @@ router.post('/expenses', async (req, res) => {
     res.json({ success: true, expense: data });
   } catch (error) {
     console.error('Erreur create expense:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: 'Erreur serveur', details: error.message, code: error.code, hint: error.hint });
   }
 });
 
