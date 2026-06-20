@@ -523,8 +523,15 @@ router.get('/parents', async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    console.error('Erreur /parents:', error);
-    res.status(500).json({ error: error.message || 'Erreur serveur' });
+    // error.cause contient la vraie raison d'un "fetch failed" (DNS, timeout, refus…)
+    console.error('Erreur /parents:', error, 'cause:', error?.cause);
+    const causeMsg = error?.cause
+      ? `${error.cause.code || error.cause.name || ''} ${error.cause.message || ''}`.trim()
+      : '';
+    res.status(500).json({
+      error: error.message || 'Erreur serveur',
+      cause: causeMsg || undefined
+    });
   }
 });
 
