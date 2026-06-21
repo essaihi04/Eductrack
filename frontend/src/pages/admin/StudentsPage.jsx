@@ -3,7 +3,7 @@ import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw,
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
-  DetailDrawer, FieldRow, Avatar, AddPersonCard,
+  DetailDrawer, FieldRow, Avatar,
 } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
@@ -894,7 +894,6 @@ L'administration de ${schoolName}`;
                   if (viewMode === 'grid') {
                     return (
                       <CardGrid min={180}>
-                        {isAdmin && <AddPersonCard onClick={() => setShowForm(true)} />}
                         {list.map((student) => (
                           <StudentCard
                             key={student.id}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   X, Search, LayoutGrid, List, Check, CheckCheck, Clock, Bell,
-  MessageCircle, UserCheck, UserX, Users, GraduationCap, Plus,
+  MessageCircle, UserCheck, UserX, Users, GraduationCap,
 } from 'lucide-react';
 
 // ── Kit UI Annuaire ──────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ function initials(name = '') {
 
 // Avatar : photo en priorité si fournie, repli sur initiales colorées
 // (ton stable par nom) si pas de photo OU si l'URL est cassée / introuvable.
-const AV_SIZES = { sm: 'w-8 h-8 text-xs', md: 'w-11 h-11 text-sm', lg: 'w-16 h-16 text-lg', xl: 'w-20 h-20 text-2xl' };
+const AV_SIZES = { sm: 'w-8 h-8 text-xs', md: 'w-11 h-11 text-sm', lg: 'w-16 h-16 text-lg', xl: 'w-20 h-20 text-2xl', '2xl': 'w-24 h-24 text-3xl' };
 export function Avatar({ name = '', src, tone, size = 'md', className = '' }) {
   const [broken, setBroken] = useState(false);
   const t = TONES[tone] || TONES[toneFor(name)];
@@ -329,8 +329,9 @@ export function ClassCard({ name, section, subtitle, count, boys, girls, actions
   );
 }
 
-// Carte Élève : en-tête pastel en dégradé + vague, gros avatar à anneau blanc
-// qui déborde, nom coloré et pastille de statut. Effet de survol (élévation).
+// Carte Élève : grande photo mise en avant dans un anneau dégradé, sur un halo
+// pastel doux (pas de bandeau qui masque la photo). Nom coloré + pastille de
+// statut. Photo toujours pleinement visible. Effet de survol (élévation + zoom).
 export function StudentCard({
   name, className: classLabel, photo, status, selected, selectable, onToggleSelect, onClick, menu,
 }) {
@@ -339,55 +340,36 @@ export function StudentCard({
   return (
     <div
       onClick={onClick}
-      className={`group relative bg-card rounded-2xl overflow-hidden border transition-all duration-200 ${
+      className={`group relative flex flex-col items-center text-center overflow-hidden rounded-2xl border bg-card px-3 pt-6 pb-4 transition-all duration-200 ${
         selected ? 'border-blue-400 ring-2 ring-blue-200' : 'border-border hover:border-transparent'
       } ${onClick ? 'cursor-pointer' : ''} hover:-translate-y-1 hover:shadow-xl`}
     >
-      {/* En-tête pastel + vague décorative */}
-      <div className={`relative h-16 bg-gradient-to-br ${t.grad}`}>
-        <svg className="absolute -bottom-px left-0 w-full" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M0,40 L0,22 Q100,42 200,22 T400,22 L400,40 Z" style={{ fill: 'hsl(var(--card))' }} />
-        </svg>
-        {selectable && (
-          <input
-            type="checkbox"
-            checked={!!selected}
-            onChange={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
-            onClick={(e) => e.stopPropagation()}
-            className="absolute top-2 left-2 w-4 h-4 accent-blue-600 z-10 cursor-pointer"
-            aria-label="Sélectionner"
-          />
-        )}
-        {menu && <div className="absolute top-1.5 right-1.5 z-10">{menu}</div>}
-      </div>
+      {/* Halo pastel décoratif en fond (n'intercepte pas les clics) */}
+      <div className={`pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${t.grad} opacity-50`} />
 
-      {/* Avatar débordant à anneau blanc */}
-      <div className="flex flex-col items-center text-center px-3 pb-4 -mt-11">
-        <div className="rounded-full ring-4 ring-white shadow-md transition-transform duration-200 group-hover:scale-105">
-          <Avatar name={name} src={photo} tone={accent} size="xl" />
+      {selectable && (
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-2.5 left-2.5 z-20 w-4 h-4 accent-blue-600 cursor-pointer"
+          aria-label="Sélectionner"
+        />
+      )}
+      {menu && <div className="absolute top-2 right-2 z-20">{menu}</div>}
+
+      {/* Photo en avant-plan, anneau dégradé (toujours visible) */}
+      <div className={`relative z-10 rounded-full p-[3px] bg-gradient-to-br ${t.grad} shadow-md transition-transform duration-200 group-hover:scale-105`}>
+        <div className="rounded-full ring-2 ring-white">
+          <Avatar name={name} src={photo} tone={accent} size="2xl" />
         </div>
-        <div className={`font-semibold text-sm mt-2.5 truncate w-full ${t.text}`}>{name}</div>
-        {classLabel && <div className="text-xs text-muted-foreground mt-0.5">{classLabel}</div>}
-        {status && <div className="mt-1.5">{status}</div>}
       </div>
-    </div>
-  );
-}
 
-// Tuile « Ajouter ou importer » : 1re carte de la grille (même esprit que la
-// StudentCard, mais en pointillés et cliquable pour créer/importer).
-export function AddPersonCard({ label = 'Ajouter ou importer', onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex flex-col items-center justify-center gap-3 min-h-[180px] w-full rounded-2xl border-2 border-dashed border-gray-300 bg-card text-muted-foreground transition-all duration-200 hover:border-blue-400 hover:bg-blue-50/40 hover:-translate-y-1 hover:shadow-lg"
-    >
-      <span className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-300 to-amber-400 text-white flex items-center justify-center shadow-md transition-transform duration-200 group-hover:scale-105">
-        <Plus className="w-8 h-8" />
-      </span>
-      <span className="text-sm font-medium text-foreground">{label}</span>
-    </button>
+      <div className={`relative z-10 font-semibold text-sm mt-3 truncate w-full ${t.text}`}>{name}</div>
+      {classLabel && <div className="relative z-10 text-xs text-muted-foreground mt-0.5">{classLabel}</div>}
+      {status && <div className="relative z-10 mt-2">{status}</div>}
+    </div>
   );
 }
 
