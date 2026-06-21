@@ -977,9 +977,9 @@ const TeachersPage = () => {
               </div>
             </div>
           )}
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
             {teachers.length === 0 ? (
-              <p className="text-center py-8 text-muted-foreground">Aucun professeur</p>
+              <p className="text-center py-8 text-muted-foreground lg:col-span-2">Aucun professeur</p>
             ) : (
               teachers
                 .filter(teacher => {
@@ -1007,8 +1007,8 @@ const TeachersPage = () => {
                   return true;
                 })
                 .map((teacher) => (
-                <div key={teacher.id} className="border rounded-lg overflow-hidden">
-                  <div className="flex items-center gap-3 p-4 bg-muted/50 hover:bg-muted">
+                <div key={teacher.id} className={`border rounded-lg overflow-hidden bg-card self-start ${expandedTeacher === teacher.id ? 'lg:col-span-2' : ''}`}>
+                  <div className="flex items-center gap-3 p-4 bg-muted/50 hover:bg-muted cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
                     <input
                       type="checkbox"
                       checked={selectedTeachers.has(teacher.id)}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
-import { GenderSplit, Avatar } from '../../components/directory/ui';
+import { GenderSplit, Avatar, ClassCard, DetailDrawer } from '../../components/directory/ui';
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1561,78 +1561,37 @@ const ClassesPage = () => {
     const studentCount = cls.student_count ?? cls.studentCount ?? 0;
 
     return (
-      <div key={cls.id} className="border rounded-lg overflow-hidden bg-background">
-        <div className="flex items-center justify-between p-3 hover:bg-muted/50 cursor-pointer"
-          onClick={() => setExpandedClass(isExpanded ? null : cls.id)}>
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <Avatar name={cls.name} size="sm" />
-            <div className="min-w-0 flex-1">
-            <p className="font-medium text-sm">{cls.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {getLevelLabel(cls.level) || cls.level}
-              {cls.filiere && ` · ${getFiliereLabel(cls.filiere)}`}
-              {cls.academic_year && ` · ${cls.academic_year}`}
-            </p>
-            {classTeachers[cls.id]?.length > 0 && (
-              <p className="text-xs text-green-700 dark:text-green-400 mt-0.5 truncate">
-                {classTeachers[cls.id].map(ct =>
-                  ct.profiles ? `${ct.profiles.first_name} ${ct.profiles.last_name}` : ''
-                ).filter(Boolean).join(' · ')}
-              </p>
-            )}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-            <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
-              {studentCount} élève(s)
-            </span>
-            {(cls.boys_count != null || cls.girls_count != null) && (
-              <GenderSplit boys={cls.boys_count || 0} girls={cls.girls_count || 0} className="text-xs" />
-            )}
-            <span className="text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded">
-              {classTeachers[cls.id]?.length || 0} prof(s)
-            </span>
-            {massarCoverage[cls.id]?.withSecret > 0 && (
-              <span
-                className="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded flex items-center gap-1"
-                title="Codes Massar importés pour cette classe"
-              >
-                🆔 {massarCoverage[cls.id].withSecret}/{massarCoverage[cls.id].total}
-              </span>
-            )}
-            <button onClick={() => openMassarModalForClass(cls)} className="p-1 text-purple-600 hover:bg-purple-100 rounded"
-              title={massarCoverage[cls.id]?.withSecret > 0 ? 'Réimporter / mettre à jour les codes Massar' : 'Importer les codes Massar (InfoEleve)'}>
-              <CreditCard className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => openMassarEditForClass(cls)} className="p-1 text-purple-600 hover:bg-purple-100 rounded"
-              title="Voir / modifier manuellement les codes Massar des élèves">
-              <ListChecks className="w-3.5 h-3.5" />
-            </button>
-            {massarCoverage[cls.id]?.withSecret > 0 && (
-              <button onClick={() => quickSendMassar(cls)} disabled={quickSendingClassId === cls.id}
-                className="p-1 text-purple-600 hover:bg-purple-100 rounded disabled:opacity-50" title="Envoyer les codes Massar aux parents (WhatsApp)">
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button onClick={() => navigate(`/classes/${cls.id}/timetable`)} className="p-1 text-indigo-600 hover:bg-indigo-100 rounded" title="Emploi du temps">
-              <Calendar className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => openEditClass(cls)} className="p-1 text-blue-600 hover:bg-blue-100 rounded" title="Modifier">
-              <Edit2 className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => deleteClass(cls.id)} disabled={deletingClassId === cls.id}
-              className="p-1 text-red-500 hover:bg-red-100 rounded" title="Supprimer">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-            <div onClick={() => setExpandedClass(isExpanded ? null : cls.id)} className="cursor-pointer p-0.5">
-              {isExpanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
-            </div>
-          </div>
-        </div>
+      <ClassCard
+        key={cls.id}
+        name={cls.name}
+        subtitle={[getLevelLabel(cls.level) || cls.level, cls.filiere && getFiliereLabel(cls.filiere), cls.academic_year].filter(Boolean).join(' · ')}
+        count={studentCount}
+        boys={cls.boys_count}
+        girls={cls.girls_count}
+        onClick={() => setExpandedClass(cls.id)}
+        actions={[
+          { icon: CreditCard, label: massarCoverage[cls.id]?.withSecret > 0 ? 'Réimporter les codes Massar' : 'Importer les codes Massar', tone: 'purple', onClick: () => openMassarModalForClass(cls) },
+          { icon: ListChecks, label: 'Voir / modifier les codes Massar', tone: 'purple', onClick: () => openMassarEditForClass(cls) },
+          ...(massarCoverage[cls.id]?.withSecret > 0
+            ? [{ icon: Send, label: 'Envoyer les codes Massar (WhatsApp)', tone: 'purple', onClick: () => quickSendMassar(cls) }]
+            : []),
+          { icon: Calendar, label: 'Emploi du temps', tone: 'blue', onClick: () => navigate(`/classes/${cls.id}/timetable`) },
+          { icon: Edit2, label: 'Modifier', tone: 'blue', onClick: () => { openEditClass(cls); setExpandedClass(cls.id); } },
+          { icon: Trash2, label: 'Supprimer', tone: 'red', onClick: () => deleteClass(cls.id) },
+        ]}
+      />
+    );
+  };
 
+  // Contenu de gestion d'une classe, affiché dans le drawer (clic sur une carte).
+  const renderClassDrawerBody = (cls) => {
+    if (!cls) return null;
+    const isEditing = editingClassId === cls.id;
+    return (
+      <div className="space-y-4">
         {/* Edit form */}
         {isEditing && (
-          <div className="border-t px-3 py-2 bg-blue-50/50 dark:bg-blue-950/20">
+          <div className="border rounded-lg px-3 py-2 bg-blue-50/50 dark:bg-blue-950/20">
             <form onSubmit={handleEditClass} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
               <input type="text" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="Nom" className="px-2 py-1.5 border rounded text-sm bg-background" />
@@ -1675,10 +1634,7 @@ const ClassesPage = () => {
           </div>
         )}
 
-        {/* Expanded details */}
-        {isExpanded && (
-          <div className="p-4 border-t space-y-4">
-            {/* ── Professeurs ── */}
+        {/* ── Professeurs ── */}
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h4 className="font-medium text-sm">Professeurs</h4>
@@ -1758,14 +1714,24 @@ const ClassesPage = () => {
                 Format: إسم التلميذ (Nom), رقم التلميذ (Code Massar). L'email sera généré automatiquement : <strong>codemassar@{profile?.school?.name ? profile.school.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '') + '.ma' : 'nomecole.ma'}</strong>
               </p>
             </div>
-          </div>
-        )}
       </div>
     );
   };
 
+  const activeClass = classes.find(c => c.id === expandedClass) || null;
+
   return (
     <div className="p-8 space-y-6">
+      {/* Drawer de gestion d'une classe */}
+      <DetailDrawer
+        open={!!expandedClass}
+        onClose={() => { setExpandedClass(null); setEditingClassId(null); }}
+        title={activeClass?.name || ''}
+        width={520}
+      >
+        {renderClassDrawerBody(activeClass)}
+      </DetailDrawer>
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -2482,7 +2448,7 @@ const ClassesPage = () => {
                                         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5 pl-2 border-l-2 border-purple-300">
                                           {filInfo.label} ({filClasses.length})
                                         </p>
-                                        <div className="space-y-1.5 ml-2">
+                                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 ml-2">
                                           {filClasses.map(cls => renderClassCard(cls))}
                                         </div>
                                       </div>
@@ -2500,7 +2466,7 @@ const ClassesPage = () => {
                                         <p className="text-xs font-medium text-orange-500 uppercase tracking-wide mb-1.5 pl-2 border-l-2 border-orange-300">
                                           Filière non reconnue ({filClasses.length}) — {getFiliereLabel(filKey) || filKey}
                                         </p>
-                                        <div className="space-y-1.5 ml-2">
+                                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 ml-2">
                                           {filClasses.map(cls => renderClassCard(cls))}
                                         </div>
                                       </div>
@@ -2508,7 +2474,7 @@ const ClassesPage = () => {
                                 </>
                               ) : (
                                 // No filieres: directly list classes
-                                <div className="space-y-1.5">
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                                   {Object.values(lvlFilieres).flat().map(cls => renderClassCard(cls))}
                                 </div>
                               )}
@@ -2519,7 +2485,7 @@ const ClassesPage = () => {
                                   <p className="text-xs font-medium text-orange-500 uppercase tracking-wide mb-1.5 pl-2 border-l-2 border-orange-300">
                                     Sans filière ({lvlFilieres['_none'].length})
                                   </p>
-                                  <div className="space-y-1.5 ml-2">
+                                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 ml-2">
                                     {lvlFilieres['_none'].map(cls => renderClassCard(cls))}
                                   </div>
                                 </div>
@@ -2538,7 +2504,7 @@ const ClassesPage = () => {
                         return (
                           <div key={lvlKey} className="border-b last:border-b-0 px-6 py-3">
                             <p className="text-xs font-medium text-orange-500 mb-1.5">{lvlKey || 'Sans niveau'} ({allClasses.length})</p>
-                            <div className="space-y-1.5">
+                            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                               {allClasses.map(cls => renderClassCard(cls))}
                             </div>
                           </div>
@@ -2565,7 +2531,7 @@ const ClassesPage = () => {
                 {expandedGroups['uncategorized'] !== false ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
               </div>
               {expandedGroups['uncategorized'] !== false && (
-                <div className="border-t px-4 pb-4 pt-2 space-y-1.5">
+                <div className="border-t px-4 pb-4 pt-2 grid grid-cols-2 lg:grid-cols-3 gap-2">
                   {uncategorized.map(cls => renderClassCard(cls))}
                 </div>
               )}

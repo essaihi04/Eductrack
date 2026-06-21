@@ -1485,7 +1485,7 @@ const ParentsPage = () => {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
           {filteredParents.map(parent => {
             const isExpanded = expandedParent === parent.id;
             const childrenList = parent.children || [];
@@ -1493,7 +1493,7 @@ const ParentsPage = () => {
             const primaryContact = contactsList.find(c => c.is_primary);
 
             return (
-              <Card key={parent.id} className="overflow-hidden">
+              <Card key={parent.id} className={`overflow-hidden self-start ${isExpanded ? 'lg:col-span-2' : ''}`}>
                 {/* Parent Row */}
                 <div
                   className="flex items-center gap-4 p-4 cursor-pointer hover:bg-accent/50 transition-colors"

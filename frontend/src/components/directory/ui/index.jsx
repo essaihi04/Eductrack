@@ -310,7 +310,7 @@ export function FieldRow({ label, value, mono }) {
 // Supabase brut), pour rester découplés de la logique métier des pages.
 
 // Carte Classe : avatar coloré, effectif, split G/F, barre d'actions rapides.
-export function ClassCard({ name, section, count, boys, girls, actions = [], menu, onClick }) {
+export function ClassCard({ name, section, subtitle, count, boys, girls, actions = [], menu, onClick }) {
   const accent = toneFor(`${name}${section || ''}`);
   return (
     <EntityCard accent={accent} onClick={onClick}
@@ -320,8 +320,9 @@ export function ClassCard({ name, section, count, boys, girls, actions = [], men
           {menu}
         </div>
       }>
-      <div className="font-medium text-foreground">{name}{section ? ` · ${section}` : ''}</div>
-      {count != null && <div className="text-xs text-muted-foreground">{count} élèves</div>}
+      <div className="font-medium text-foreground truncate">{name}{section ? ` · ${section}` : ''}</div>
+      {subtitle && <div className="text-xs text-muted-foreground truncate">{subtitle}</div>}
+      {count != null && <div className="text-xs text-muted-foreground mt-0.5">{count} élèves</div>}
       {(boys != null || girls != null) && <GenderSplit boys={boys || 0} girls={girls || 0} className="mt-2" />}
       {actions.length > 0 && <div className="mt-3"><ActionIconBar actions={actions} /></div>}
     </EntityCard>
