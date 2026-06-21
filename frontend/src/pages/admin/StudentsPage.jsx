@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -31,13 +31,32 @@ const StudentsPage = () => {
   const [parentModalIndex, setParentModalIndex] = useState(0);
   const [parentForm, setParentForm] = useState({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
   const [parentSaving, setParentSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    firstName: '',
-    lastName: '',
-    classId: ''
-  });
+  const emptyForm = {
+    // Identifiants (accès élève)
+    email: '', password: '',
+    // Informations élève
+    firstName: '', lastName: '', firstNameAr: '', lastNameAr: '',
+    gender: 'M', phone: '', cin: '',
+    dateOfBirth: '', birthPlace: '', level: '', classId: '',
+    registrationNumber: '', entryDate: '', massarCode: '',
+    dossierStatus: 'complet',
+    // Scolarité antérieure
+    previousSchool: '', previousClass: '',
+    // Médical
+    hasHealthIssue: false, healthNotes: '',
+    // Autorisations
+    photoAuthorized: true,
+    // Domicile
+    homeAddress: '', quartier: '', homePhone: '',
+    // Parents
+    parent1: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' },
+    parent2: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'mere', maritalStatus: '' },
+  };
+  const [formData, setFormData] = useState(emptyForm);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const photoInputRef = useRef(null);
   const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
   const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
   const [sendCredentialsFiliere, setSendCredentialsFiliere] = useState('');
@@ -326,38 +345,287 @@ const StudentsPage = () => {
     }
   };
 
-  const handleSubmit = async (e) => {
+  // Sélection / aperçu de la photo de l'élève (upload réel après création)
+  const handlePhotoSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setPhotoPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const resetForm = () => {
+    setFormData(emptyForm);
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  // Construit la liste des parents (Parent 1, Parent 2) valides pour /add-parents.
+  // Un parent n'est enregistré que s'il a un nom + un téléphone (contrainte backend).
+  const buildParentContacts = (p) => {
+    const fullName = `${(p.lastName || '').trim()} ${(p.firstName || '').trim()}`.trim();
+    if (!fullName || !(p.phone || '').trim()) return null;
+    return {
+      name: fullName,
+      phone: p.phone.trim(),
+      relationship: p.relationship || null,
+      cin: p.cin || null,
+      profession: p.profession || null,
+      maritalStatus: p.maritalStatus || null,
+      email: p.email || null,
+    };
+  };
+
+  const handleSubmit = async (e, { thenPrint = false } = {}) => {
     e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
     try {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
+      const authHeaders = { 'Authorization': `Bearer ${token}` };
 
+      // Identifiants : générés si non saisis
+      const email = (formData.email || '').trim() ||
+        `${(formData.registrationNumber || formData.massarCode || `el${Date.now()}`).toString().trim().replace(/\s+/g, '')}@student.edu`;
+      const password = (formData.password || '').trim() || generatePassword(formData.firstName);
+
+      // 1) Créer l'élève avec tous les champs de la fiche
+      const { parent1, parent2, ...studentFields } = formData;
       const res = await fetch(`${apiUrl}/api/admin/students`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(formData)
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...studentFields, email, password }),
       });
-
-      if (res.ok) {
-        const newStudent = await res.json();
-        
-        // Stocker le mot de passe dans localStorage
-        if (newStudent.password) {
-          const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
-          storedPasswords[newStudent.id] = newStudent.password;
-          localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
-        }
-        
-        setStudents([...students, newStudent]);
-        setFormData({ email: '', password: '', firstName: '', lastName: '', classId: '' });
-        setShowForm(false);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Création de l\'élève impossible');
       }
+      let newStudent = await res.json();
+
+      // Mémoriser le mot de passe localement (comme l'existant)
+      if (newStudent.password) {
+        const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
+        storedPasswords[newStudent.id] = newStudent.password;
+        localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
+      }
+
+      // 2) Upload de la photo si fournie
+      if (photoFile) {
+        try {
+          const fd = new FormData();
+          fd.append('photo', photoFile);
+          const pr = await fetch(`${apiUrl}/api/admin/students/${newStudent.id}/photo`, {
+            method: 'POST', headers: authHeaders, body: fd,
+          });
+          if (pr.ok) {
+            const { avatar_url } = await pr.json();
+            newStudent = { ...newStudent, avatar_url };
+          }
+        } catch (err) { console.error('Upload photo échoué:', err); }
+      }
+
+      // 3) Parents (Parent 1, Parent 2) — chacun comme son propre profil
+      const parentContacts = [buildParentContacts(parent1), buildParentContacts(parent2)].filter(Boolean);
+      const savedParents = [];
+      for (const c of parentContacts) {
+        try {
+          const ar = await fetch(`${apiUrl}/api/admin/students/${newStudent.id}/add-parents`, {
+            method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contacts: [c] }),
+          });
+          if (ar.ok) {
+            savedParents.push({
+              first_name: c.name.split(' ').slice(1).join(' '),
+              last_name: c.name.split(' ')[0],
+              relationship: c.relationship, email: c.email, phone: c.phone,
+              cin: c.cin, profession: c.profession, marital_status: c.maritalStatus,
+            });
+          }
+        } catch (err) { console.error('Ajout parent échoué:', err); }
+      }
+      newStudent = { ...newStudent, parents: savedParents };
+
+      setStudents([...students, newStudent]);
+      resetForm();
+      setShowForm(false);
+
+      if (thenPrint) printInscriptionFiche(newStudent);
+      // Rafraîchir pour récupérer parents/champs normalisés côté serveur
+      fetchData();
     } catch (error) {
       console.error('Error adding student:', error);
+      alert('Erreur : ' + (error.message || 'ajout impossible'));
+    } finally {
+      setSubmitting(false);
     }
+  };
+
+  // ── Fiche d'inscription récapitulative (impression → « Enregistrer en PDF ») ──
+  const academicYear = () => {
+    const d = new Date();
+    const y = d.getFullYear();
+    return d.getMonth() >= 8 ? `${y}/${y + 1}` : `${y - 1}/${y}`;
+  };
+
+  const printInscriptionFiche = (student) => {
+    const w = window.open('', '_blank');
+    if (!w) { alert('Veuillez autoriser les pop-ups pour télécharger la fiche.'); return; }
+    const apiBase = apiUrl;
+    const school = profile?.school || {};
+    const resolveAsset = (u) => !u ? null : (u.startsWith('http') ? u : `${apiBase}${u.startsWith('/') ? '' : '/'}${u}`);
+    const logoSrc = resolveAsset(school.logo_url);
+    const photoSrc = resolveAsset(student.avatar_url);
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const val = (v) => (v === null || v === undefined || v === '') ? '—' : esc(v);
+    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '—';
+    const genderLabel = student.gender === 'M' ? 'Garçon' : student.gender === 'F' ? 'Fille' : '—';
+    const classLabel = classes.find((c) => c.id === student.class_id)?.name || '';
+    const level = student.level || classes.find((c) => c.id === student.class_id)?.level || '';
+    const parents = student.parents || [];
+    const yesNo = (b) => `<span class="opt ${b === true ? 'on' : ''}">Oui</span> <span class="opt ${b === false ? 'on' : ''}">Non</span>`;
+    const checkbox = (on) => `<span class="cb">${on ? '☑' : '☐'}</span>`;
+
+    const parentBlock = (p, idx) => `
+      <div class="party">
+        <div class="row"><div class="lbl">Nom : <b>${val(p?.last_name)}</b></div><div class="lbl ar" dir="rtl">الاسم العائلي</div></div>
+        <div class="row"><div class="lbl">Prénom : <b>${val(p?.first_name)}</b></div><div class="lbl ar" dir="rtl">الاسم الشخصي</div></div>
+        <div class="grid2">
+          <div>Relation : ${val(p?.relationship)}</div>
+          <div>Situation familiale : ${val(p?.marital_status)}</div>
+          <div>CIN : ${val(p?.cin)}</div>
+          <div>Profession : ${val(p?.profession)}</div>
+          <div>Téléphone : ${val(p?.phone)}</div>
+          <div>Email : ${val(p?.email)}</div>
+        </div>
+      </div>`;
+
+    const html = `
+    <html lang="fr"><head><meta charset="utf-8"><title>Fiche d'inscription ${esc(student.first_name)} ${esc(student.last_name)}</title>
+    <style>
+      *{box-sizing:border-box}
+      body{font-family:Arial,'Noto Sans Arabic',sans-serif;color:#1f2937;margin:0;padding:24px 34px}
+      .header{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:14px}
+      .header .logo{width:74px;height:74px;object-fit:contain}
+      .header .title{text-align:center;flex:1}
+      .header .title h1{margin:0;font-size:1.15em;color:#1e40af}
+      .header .title h2{margin:2px 0 0;font-size:1.4em;color:#111827}
+      .header .photo{width:84px;height:104px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9}
+      .sec{margin:12px 0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden}
+      .sec > .h{background:#eff6ff;color:#1e40af;font-weight:bold;padding:6px 10px;font-size:.9em;border-bottom:1px solid #e5e7eb}
+      .sec > .b{padding:8px 10px;font-size:.86em}
+      .grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px}
+      .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 18px}
+      .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:2px 0}
+      .ar{color:#374151;font-size:.95em}
+      .party{padding:6px 0;border-bottom:1px dashed #e5e7eb}
+      .party:last-child{border-bottom:none}
+      .lbl b{font-weight:700}
+      .opt{display:inline-block;border:1px solid #9ca3af;border-radius:10px;padding:1px 10px;margin-left:4px;font-size:.9em}
+      .opt.on{background:#1e40af;color:#fff;border-color:#1e40af;font-weight:bold}
+      .cb{font-size:1.1em;margin-right:4px}
+      .foot{margin-top:16px;border-top:1px solid #d1d5db;padding-top:6px;font-size:.72em;color:#6b7280;display:flex;justify-content:space-between}
+      .page2{page-break-before:always;padding-top:10px}
+      .page2 h2{color:#1e40af;text-align:center;letter-spacing:1px}
+      .engage p{font-size:.9em;line-height:1.5}
+      .sign{margin-top:50px;text-align:right;font-size:.9em}
+      .dots{border-bottom:1px dotted #555;display:inline-block;min-width:280px}
+      @media print{body{padding:14px 22px}}
+    </style></head><body>
+
+      <div class="header">
+        ${logoSrc ? `<img src="${logoSrc}" class="logo" alt="logo"/>` : '<div style="width:74px"></div>'}
+        <div class="title">
+          <h1>${val(school.name) === '—' ? 'Établissement' : esc(school.name)}</h1>
+          <h2>Fiche d'inscription</h2>
+          <div style="color:#6b7280">${academicYear()}</div>
+        </div>
+        ${photoSrc ? `<img src="${photoSrc}" class="photo" alt="photo"/>` : '<div class="photo"></div>'}
+      </div>
+
+      <div class="sec">
+        <div class="h">1 — Cadre réservé à l'administration</div>
+        <div class="b">
+          <div class="grid3">
+            <div>N° matricule : <b>${val(student.registration_number)}</b></div>
+            <div>Date d'entrée : ${fmtDate(student.entry_date)}</div>
+            <div>Niveau : <b>${val(level)}</b>${classLabel ? ` (${esc(classLabel)})` : ''}</div>
+          </div>
+          <div style="margin-top:6px">${checkbox(student.dossier_status === 'complet')} Dossier complet
+            &nbsp;&nbsp; ${checkbox(student.dossier_status === 'incomplet')} Dossier incomplet</div>
+          <hr style="border:none;border-top:1px solid #eee;margin:8px 0"/>
+          <div class="row"><div>Nom de l'enfant : <b>${val(student.last_name)}</b></div><div class="ar" dir="rtl">الاسم العائلي : <b>${val(student.last_name_ar)}</b></div></div>
+          <div class="row"><div>Prénom de l'enfant : <b>${val(student.first_name)}</b></div><div class="ar" dir="rtl">الاسم الشخصي : <b>${val(student.first_name_ar)}</b></div></div>
+          <div class="grid3" style="margin-top:4px">
+            <div>Né(e) le : ${fmtDate(student.date_of_birth)}</div>
+            <div>à : ${val(student.birth_place)}</div>
+            <div>Sexe : ${genderLabel}</div>
+          </div>
+          ${student.massar_code ? `<div style="margin-top:4px">Code Massar : <b>${val(student.massar_code)}</b></div>` : ''}
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">2 — Renseignements familiaux</div>
+        <div class="b">
+          ${parents.length ? parents.slice(0, 2).map(parentBlock).join('') : '<div style="color:#9ca3af">Aucun parent renseigné</div>'}
+          <div class="grid3" style="margin-top:6px">
+            <div>Tél. domicile : ${val(student.home_phone)}</div>
+            <div>Quartier : ${val(student.quartier)}</div>
+            <div>Adresse : ${val(student.home_address)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">3 — Scolarité antérieure</div>
+        <div class="b grid2">
+          <div>Établissement fréquenté l'année précédente : ${val(student.previous_school)}</div>
+          <div>Classe : ${val(student.previous_class)}</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">4 — Renseignements médicaux</div>
+        <div class="b">
+          <div>Votre enfant a-t-il un problème de santé ? ${yesNo(student.has_health_issue === true ? true : student.has_health_issue === false ? false : null)}</div>
+          ${student.health_notes ? `<div style="margin-top:4px">Précisions : ${val(student.health_notes)}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">5 — Autorisations école</div>
+        <div class="b">
+          <div>L'école est autorisée à utiliser la photo de l'enfant ? ${yesNo(student.photo_authorized === true ? true : student.photo_authorized === false ? false : null)}</div>
+        </div>
+      </div>
+
+      <div class="foot"><span>${val(school.name) === '—' ? '' : esc(school.name)}</span><span>1/2 · ${new Date().toLocaleString('fr-FR')}</span></div>
+
+      <div class="page2 engage">
+        <h2>ENGAGEMENT</h2>
+        <p>Je soussigné(e), M. ou Mme <span class="dots"></span></p>
+        <p>Parent(s) de l'élève <b>${esc(student.last_name)} ${esc(student.first_name)}</b> en classe de <b>${val(level)}</b>.</p>
+        <p>— Certifie avoir pris connaissance du règlement de l'Établissement et l'accepter dans sa totalité.<br/>
+           — L'établissement décline sa responsabilité avant et après les horaires d'ouverture et de fermeture des portes.<br/>
+           — Les frais réglés à l'inscription ne sont remboursés en aucun cas.</p>
+        <h3 style="color:#1e40af">Autorisation parentale</h3>
+        <p>Enfant inscrit : Crèche – Maternelle – Primaire<br/>
+           Entre 12h00 et 13h15 mon enfant restera à l'école : ${yesNo(null)}</p>
+        <p>Enfant inscrit : Collège – Lycée : ${yesNo(null)}</p>
+        <div class="sign">
+          Signature du parent précédée de la mention « Lu et Approuvé »<br/><br/>
+          <span class="dots"></span>
+        </div>
+        <div class="foot"><span>${val(school.name) === '—' ? '' : esc(school.name)}</span><span>2/2 · ${new Date().toLocaleString('fr-FR')}</span></div>
+      </div>
+
+    </body></html>`;
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 600);
   };
 
   const deleteStudent = async (id) => {
@@ -801,73 +1069,168 @@ L'administration de ${schoolName}`;
         </CardContent>
       </Card>
 
-      {isAdmin && showForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Ajouter un nouvel élève</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                  className="px-3 py-2 border rounded"
-                />
-                <input
-                  type="password"
-                  placeholder="Mot de passe"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  required
-                  className="px-3 py-2 border rounded"
-                />
-                <input
-                  type="text"
-                  placeholder="Prénom"
-                  value={formData.firstName}
-                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  required
-                  className="px-3 py-2 border rounded"
-                />
-                <input
-                  type="text"
-                  placeholder="Nom"
-                  value={formData.lastName}
-                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  required
-                  className="px-3 py-2 border rounded"
-                />
+      {isAdmin && showForm && (() => {
+        const inputCls = 'w-full px-3 py-2 border rounded text-sm';
+        const setF = (field) => (e) => setFormData(f => ({ ...f, [field]: e.target.value }));
+        const setP = (pk, field) => (e) => setFormData(f => ({ ...f, [pk]: { ...f[pk], [field]: e.target.value } }));
+        const Label = ({ children }) => <label className="block text-xs font-medium text-gray-600 mb-1">{children}</label>;
+        const parentForm = (pk, titre) => {
+          const p = formData[pk];
+          return (
+            <div className="border rounded-lg p-3 bg-amber-50/40">
+              <p className="text-sm font-semibold text-gray-700 mb-2">{titre}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div><Label>Nom</Label><input className={inputCls} value={p.lastName} onChange={setP(pk, 'lastName')} /></div>
+                <div><Label>Prénom</Label><input className={inputCls} value={p.firstName} onChange={setP(pk, 'firstName')} /></div>
+                <div><Label>Téléphone (06/07…)</Label><input className={inputCls} value={p.phone} onChange={setP(pk, 'phone')} placeholder="0650-123456" /></div>
+                <div><Label>Email</Label><input className={inputCls} value={p.email} onChange={setP(pk, 'email')} /></div>
+                <div><Label>CIN</Label><input className={inputCls} value={p.cin} onChange={setP(pk, 'cin')} /></div>
+                <div><Label>Profession</Label><input className={inputCls} value={p.profession} onChange={setP(pk, 'profession')} /></div>
+                <div>
+                  <Label>Relation</Label>
+                  <select className={inputCls} value={p.relationship} onChange={setP(pk, 'relationship')}>
+                    <option value="pere">Père</option>
+                    <option value="mere">Mère</option>
+                    <option value="tuteur">Tuteur</option>
+                  </select>
+                </div>
+                <div><Label>Situation familiale</Label><input className={inputCls} value={p.maritalStatus} onChange={setP(pk, 'maritalStatus')} placeholder="Marié(e), …" /></div>
               </div>
-              <select
-                value={formData.classId}
-                onChange={(e) => setFormData({ ...formData, classId: e.target.value })}
-                className="w-full px-3 py-2 border rounded"
-              >
-                <option value="">Sélectionner une classe (optionnel)</option>
-                {classes.map(cls => (
-                  <option key={cls.id} value={cls.id}>{cls.name}</option>
-                ))}
-              </select>
-              <div className="flex gap-2">
-                <button type="submit" className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
-                  Ajouter
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
-                >
-                  Annuler
-                </button>
+            </div>
+          );
+        };
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => !submitting && setShowForm(false)}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl z-10">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-blue-600" />
+                  <h3 className="font-semibold">Fiche d'inscription — Nouvel élève · {academicYear()}</h3>
+                </div>
+                <button onClick={() => !submitting && setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
               </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+
+              <form onSubmit={handleSubmit} className="p-4 space-y-5 max-h-[78vh] overflow-y-auto">
+                {/* ── Informations élève ── */}
+                <section className="space-y-3">
+                  <h4 className="text-sm font-bold text-blue-700">👦 Informations élève</h4>
+                  <div className="flex gap-4 items-start">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-28 h-28 rounded-full border-2 border-blue-100 overflow-hidden bg-gray-100 flex items-center justify-center">
+                        {photoPreview
+                          ? <img src={photoPreview} alt="aperçu" className="w-full h-full object-cover" />
+                          : <Camera className="w-8 h-8 text-gray-400" />}
+                      </div>
+                      <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
+                      <button type="button" onClick={() => photoInputRef.current?.click()}
+                        className="text-xs px-3 py-1.5 bg-teal-500 text-white rounded-lg hover:bg-teal-600">Sélectionner</button>
+                    </div>
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div><Label>Nom de famille *</Label><input required className={inputCls} value={formData.lastName} onChange={setF('lastName')} /></div>
+                      <div><Label>Prénom *</Label><input required className={inputCls} value={formData.firstName} onChange={setF('firstName')} /></div>
+                      <div><Label>الاسم العائلي (Nom ar)</Label><input dir="rtl" className={inputCls} value={formData.lastNameAr} onChange={setF('lastNameAr')} /></div>
+                      <div><Label>الاسم الشخصي (Prénom ar)</Label><input dir="rtl" className={inputCls} value={formData.firstNameAr} onChange={setF('firstNameAr')} /></div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <Label>Sexe</Label>
+                      <select className={inputCls} value={formData.gender} onChange={setF('gender')}>
+                        <option value="M">Garçon</option>
+                        <option value="F">Fille</option>
+                      </select>
+                    </div>
+                    <div><Label>Date de naissance</Label><input type="date" className={inputCls} value={formData.dateOfBirth} onChange={setF('dateOfBirth')} /></div>
+                    <div><Label>Lieu de naissance</Label><input className={inputCls} value={formData.birthPlace} onChange={setF('birthPlace')} /></div>
+                    <div><Label>Téléphone</Label><input className={inputCls} value={formData.phone} onChange={setF('phone')} /></div>
+                    <div><Label>CIN</Label><input className={inputCls} value={formData.cin} onChange={setF('cin')} /></div>
+                    <div><Label>Code Massar</Label><input className={inputCls} value={formData.massarCode} onChange={setF('massarCode')} /></div>
+                    <div><Label>N° matricule</Label><input className={inputCls} value={formData.registrationNumber} onChange={setF('registrationNumber')} placeholder="2025_000091" /></div>
+                    <div><Label>Date d'entrée</Label><input type="date" className={inputCls} value={formData.entryDate} onChange={setF('entryDate')} /></div>
+                    <div><Label>Niveau</Label><input className={inputCls} value={formData.level} onChange={setF('level')} placeholder="1APIC" /></div>
+                    <div>
+                      <Label>Classe</Label>
+                      <select className={inputCls} value={formData.classId} onChange={setF('classId')}>
+                        <option value="">Sélectionner une classe (optionnel)</option>
+                        {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Dossier</Label>
+                      <select className={inputCls} value={formData.dossierStatus} onChange={setF('dossierStatus')}>
+                        <option value="complet">Complet</option>
+                        <option value="incomplet">Incomplet</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                {/* ── Informations parents ── */}
+                <section className="space-y-3">
+                  <h4 className="text-sm font-bold text-blue-700">👪 Informations parents</h4>
+                  {parentForm('parent1', 'Parent 1')}
+                  {parentForm('parent2', 'Parent 2')}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div><Label>Téléphone domicile</Label><input className={inputCls} value={formData.homePhone} onChange={setF('homePhone')} /></div>
+                    <div><Label>Adresse</Label><input className={inputCls} value={formData.homeAddress} onChange={setF('homeAddress')} /></div>
+                    <div><Label>Quartier (الحي)</Label><input className={inputCls} value={formData.quartier} onChange={setF('quartier')} /></div>
+                  </div>
+                  <p className="text-xs text-gray-500">Un parent n'est enregistré que s'il a un <b>nom + un téléphone</b>.</p>
+                </section>
+
+                {/* ── Scolarité antérieure ── */}
+                <section className="space-y-2">
+                  <h4 className="text-sm font-bold text-blue-700">🏫 Scolarité antérieure</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div><Label>Établissement fréquenté l'an dernier</Label><input className={inputCls} value={formData.previousSchool} onChange={setF('previousSchool')} /></div>
+                    <div><Label>Classe</Label><input className={inputCls} value={formData.previousClass} onChange={setF('previousClass')} /></div>
+                  </div>
+                </section>
+
+                {/* ── Médical & autorisations ── */}
+                <section className="space-y-2">
+                  <h4 className="text-sm font-bold text-blue-700">🩺 Médical & autorisations</h4>
+                  <div className="flex flex-wrap items-center gap-6">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={formData.hasHealthIssue} onChange={(e) => setFormData(f => ({ ...f, hasHealthIssue: e.target.checked }))} />
+                      Problème de santé
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={formData.photoAuthorized} onChange={(e) => setFormData(f => ({ ...f, photoAuthorized: e.target.checked }))} />
+                      Autorisation d'utiliser la photo
+                    </label>
+                  </div>
+                  {formData.hasHealthIssue && (
+                    <div><Label>Précisions médicales</Label><input className={inputCls} value={formData.healthNotes} onChange={setF('healthNotes')} /></div>
+                  )}
+                </section>
+
+                {/* ── Identifiants (optionnel) ── */}
+                <section className="space-y-2">
+                  <h4 className="text-sm font-bold text-blue-700">🔑 Identifiants d'accès (auto-générés si vides)</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div><Label>Email</Label><input type="email" className={inputCls} value={formData.email} onChange={setF('email')} placeholder="auto" /></div>
+                    <div><Label>Mot de passe</Label><input className={inputCls} value={formData.password} onChange={setF('password')} placeholder="auto (Prénom+année)" /></div>
+                  </div>
+                </section>
+
+                <div className="flex flex-wrap gap-2 pt-2 border-t">
+                  <button type="submit" disabled={submitting} className="flex-1 min-w-[140px] px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                    {submitting ? 'Enregistrement…' : 'Valider'}
+                  </button>
+                  <button type="button" disabled={submitting} onClick={(e) => handleSubmit(e, { thenPrint: true })}
+                    className="flex-1 min-w-[180px] px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                    <FileText className="w-4 h-4" /> Valider + télécharger la fiche
+                  </button>
+                  <button type="button" disabled={submitting} onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                    Annuler
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       <Card>
         <CardContent className="pt-4">
@@ -956,10 +1319,23 @@ L'administration de ${schoolName}`;
 
             <div>
               <FieldRow label="Classe" value={classes.find((c) => c.id === activeStudent.class_id)?.name || (activeStudent.class_id ? 'Assignée' : 'Non assigné')} />
+              {activeStudent.level && <FieldRow label="Niveau" value={activeStudent.level} />}
+              {activeStudent.registration_number && <FieldRow label="N° matricule" value={activeStudent.registration_number} mono />}
               <FieldRow label="Code MASSAR" value={activeStudent.massar_code} mono />
               <FieldRow label="Genre" value={activeStudent.gender === 'M' ? 'Garçon' : activeStudent.gender === 'F' ? 'Fille' : '—'} />
+              {(activeStudent.first_name_ar || activeStudent.last_name_ar) && (
+                <FieldRow label="Nom (ar)" value={`${activeStudent.last_name_ar || ''} ${activeStudent.first_name_ar || ''}`.trim()} />
+              )}
+              {activeStudent.date_of_birth && <FieldRow label="Naissance" value={`${new Date(activeStudent.date_of_birth).toLocaleDateString('fr-FR')}${activeStudent.birth_place ? ` · ${activeStudent.birth_place}` : ''}`} />}
               <FieldRow label="Email" value={activeStudent.email} />
             </div>
+
+            <button
+              onClick={() => printInscriptionFiche(activeStudent)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Download className="w-4 h-4" /> Télécharger la fiche d'inscription
+            </button>
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-gray-700 block">Mot de passe</label>

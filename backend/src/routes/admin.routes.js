@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
 import { getSemesterBounds } from '../services/bulletins/calculator.js';
+import { profilePhotoUpload, PROFILE_PHOTO_WEB_PATH } from '../utils/profilePhoto.js';
 
 const router = express.Router();
 
@@ -425,7 +426,7 @@ router.get('/students', async (req, res) => {
       const chunk = studentIds.slice(i, i + CHUNK);
       const { data: links, error: linksError } = await supabaseAdmin
         .from('parent_students')
-        .select('student_id, relationship, parent:profiles!parent_students_parent_id_fkey(id, first_name, last_name)')
+        .select('student_id, relationship, parent:profiles!parent_students_parent_id_fkey(id, first_name, last_name, email, phone, cin, profession, marital_status, address)')
         .in('student_id', chunk);
       if (linksError) throw linksError;
       (links || []).forEach(l => {
@@ -436,6 +437,12 @@ router.get('/students', async (req, res) => {
           first_name: l.parent.first_name,
           last_name: l.parent.last_name,
           relationship: l.relationship || null,
+          email: l.parent.email || null,
+          phone: l.parent.phone || null,
+          cin: l.parent.cin || null,
+          profession: l.parent.profession || null,
+          marital_status: l.parent.marital_status || null,
+          address: l.parent.address || null,
         });
       });
     }
@@ -998,7 +1005,13 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
       const name = (c.name || '').trim();
       if (!phone || !name || seenPhones.has(phone)) continue;
       seenPhones.add(phone);
-      contacts.push({ phone, name, relationship: c.relationship || null });
+      contacts.push({
+        phone, name, relationship: c.relationship || null,
+        // Champs « fiche d'inscription » (optionnels)
+        cin: c.cin || null, profession: c.profession || null,
+        maritalStatus: c.maritalStatus || null, email: c.email || null,
+        address: c.address || null,
+      });
     }
     if (contacts.length === 0) {
       return res.status(400).json({ error: 'Aucun parent valide (nom + téléphone marocain requis)' });
@@ -1028,6 +1041,22 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
       parentId = parent.id;
       createdParent = true;
       parentCredentials = { email: parent.generatedEmail, password: parent.password };
+    }
+
+    // Enrichir le profil parent avec les infos de la fiche d'inscription
+    // (CIN, profession, situation familiale, adresse) — sans écraser par du vide.
+    const parentExtra = {
+      cin: primary.cin, profession: primary.profession,
+      marital_status: primary.maritalStatus, address: primary.address,
+    };
+    const parentUpdate = {};
+    for (const [k, v] of Object.entries(parentExtra)) {
+      if (v !== undefined && v !== null && String(v).trim() !== '') parentUpdate[k] = v;
+    }
+    if (Object.keys(parentUpdate).length > 0) {
+      const { error: parentUpdErr } = await supabaseAdmin
+        .from('profiles').update(parentUpdate).eq('id', parentId);
+      if (parentUpdErr) throw parentUpdErr;
     }
 
     // Upsert de TOUS les contacts (1er = principal), avec libellé Père/Mère.
@@ -2184,7 +2213,16 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
 // Créer un élève
 router.post('/students', async (req, res) => {
   try {
-    const { email, password, firstName, lastName, classId } = req.body;
+    const {
+      email, password, firstName, lastName, classId,
+      // Champs « fiche d'inscription » (tous optionnels)
+      firstNameAr, lastNameAr, gender, phone, cin,
+      dateOfBirth, birthPlace, level, registrationNumber, entryDate,
+      dossierStatus, massarCode,
+      previousSchool, previousClass,
+      hasHealthIssue, healthNotes, photoAuthorized,
+      homeAddress, quartier, homePhone,
+    } = req.body;
 
     // Créer l'utilisateur dans Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -2196,18 +2234,35 @@ router.post('/students', async (req, res) => {
 
     if (authError) throw authError;
 
-    // Créer le profil
+    // Créer le profil — on n'écrit que les champs réellement fournis
+    const profileData = {
+      id: authData.user.id,
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      role: 'student',
+      class_id: classId || null,
+      school_id: getSchoolId(req),
+    };
+    const optional = {
+      first_name_ar: firstNameAr, last_name_ar: lastNameAr,
+      gender, phone, cin,
+      date_of_birth: dateOfBirth, birth_place: birthPlace,
+      level, registration_number: registrationNumber, entry_date: entryDate,
+      dossier_status: dossierStatus, massar_code: massarCode,
+      previous_school: previousSchool, previous_class: previousClass,
+      has_health_issue: typeof hasHealthIssue === 'boolean' ? hasHealthIssue : undefined,
+      health_notes: healthNotes,
+      photo_authorized: typeof photoAuthorized === 'boolean' ? photoAuthorized : undefined,
+      home_address: homeAddress, quartier, home_phone: homePhone,
+    };
+    for (const [k, v] of Object.entries(optional)) {
+      if (v !== undefined && v !== null && v !== '') profileData[k] = v;
+    }
+
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
-      .insert({
-        id: authData.user.id,
-        email,
-        first_name: firstName,
-        last_name: lastName,
-        role: 'student',
-        class_id: classId || null,
-        school_id: getSchoolId(req)
-      })
+      .insert(profileData)
       .select()
       .single();
 
@@ -2217,6 +2272,37 @@ router.post('/students', async (req, res) => {
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Upload de la photo d'un élève par l'admin (fiche d'inscription)
+router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: 'Aucune image fournie' });
+
+    // Vérifier que l'élève existe et appartient à l'école de l'admin
+    let check = supabaseAdmin
+      .from('profiles')
+      .select('id, school_id')
+      .eq('id', id)
+      .eq('role', 'student');
+    check = applySchoolFilter(check, req);
+    const { data: student, error: checkErr } = await check.single();
+    if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
+
+    const avatar_url = `${PROFILE_PHOTO_WEB_PATH}/${req.file.filename}`;
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update({ avatar_url })
+      .eq('id', id)
+      .select('id, avatar_url')
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('Erreur upload photo élève (admin):', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
   }
 });
 
