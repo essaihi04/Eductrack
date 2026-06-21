@@ -1395,79 +1395,46 @@ const ParentsPage = () => {
         )}
       </div>
 
-      {/* Statistiques de couverture (globales ou pour la classe filtrée) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-        <div className="rounded-lg border bg-card px-3 py-2">
-          <p className="text-xs text-muted-foreground">Élèves{filterClass ? ` · ${filterClass}` : ''}</p>
-          <p className="text-xl font-bold">{stats.total}</p>
-        </div>
-        <div className="rounded-lg border bg-card px-3 py-2">
-          <p className="text-xs text-muted-foreground">Avec parent</p>
-          <p className="text-xl font-bold text-green-600">{stats.withParent} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withParent)}%</span></p>
-        </div>
-        <div className="rounded-lg border bg-card px-3 py-2">
-          <p className="text-xs text-muted-foreground">Sans parent</p>
-          <p className="text-xl font-bold text-red-500">{stats.withoutParent} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withoutParent)}%</span></p>
-        </div>
-        <div className="rounded-lg border bg-card px-3 py-2">
-          <p className="text-xs text-muted-foreground">Avec numéro</p>
-          <p className="text-xl font-bold text-green-600">{stats.withPhone} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withPhone)}%</span></p>
-        </div>
-        <div className="rounded-lg border bg-card px-3 py-2">
-          <p className="text-xs text-muted-foreground">Sans numéro</p>
-          <p className="text-xl font-bold text-amber-500">{stats.withoutPhone} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withoutPhone)}%</span></p>
-        </div>
-      </div>
-
-      {/* Répartition des parents par nombre d'enfants */}
-      {distribTotal > 0 && (() => {
-        const buckets = [
+      {/* Tableau de bord : couverture parents + répartition par nombre d'enfants (1 seule ligne) */}
+      {(() => {
+        const buckets = distribTotal > 0 ? [
           { key: 'one', label: '1 enfant', value: childrenDistribution.one, color: 'bg-sky-500', text: 'text-sky-600' },
           { key: 'two', label: '2 enfants', value: childrenDistribution.two, color: 'bg-violet-500', text: 'text-violet-600' },
           { key: 'three', label: '3 enfants', value: childrenDistribution.three, color: 'bg-amber-500', text: 'text-amber-600' },
           { key: 'fourPlus', label: '4 enfants et +', value: childrenDistribution.fourPlus, color: 'bg-rose-500', text: 'text-rose-600' },
-        ];
-        const dpct = (n) => Math.round((n / distribTotal) * 100);
+        ] : [];
+        const dpct = (n) => distribTotal ? Math.round((n / distribTotal) * 100) : 0;
         return (
-          <Card>
-            <CardContent className="p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Répartition des parents par nombre d'enfants</p>
-                <p className="text-xs text-muted-foreground">{distribTotal} parent(s) avec enfant{filterFiliere ? ` · ${filiereLabel(filterFiliere)}` : ''}{filterClass ? ` · ${filterClass}` : ''}</p>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+              <div className="rounded-lg border bg-card px-3 py-2">
+                <p className="text-xs text-muted-foreground">Élèves{filterClass ? ` · ${filterClass}` : ''}</p>
+                <p className="text-xl font-bold">{stats.total}</p>
               </div>
-
-              {/* Tuiles */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {buckets.map(b => (
-                  <div key={b.key} className="rounded-lg border bg-card p-3">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block w-2.5 h-2.5 rounded-full ${b.color}`} />
-                      <p className="text-xs text-muted-foreground">{b.label}</p>
-                    </div>
-                    <p className={`text-2xl font-bold ${b.text}`}>{b.value}</p>
-                    <p className="text-xs text-muted-foreground">{dpct(b.value)}%</p>
+              <div className="rounded-lg border bg-card px-3 py-2">
+                <p className="text-xs text-muted-foreground">Avec parent</p>
+                <p className="text-xl font-bold text-green-600">{stats.withParent} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withParent)}%</span></p>
+              </div>
+              <div className="rounded-lg border bg-card px-3 py-2">
+                <p className="text-xs text-muted-foreground">Sans parent</p>
+                <p className="text-xl font-bold text-red-500">{stats.withoutParent} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withoutParent)}%</span></p>
+              </div>
+              {buckets.map(b => (
+                <div key={b.key} className="rounded-lg border bg-card px-3 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`inline-block w-2 h-2 rounded-full ${b.color}`} />
+                    <p className="text-xs text-muted-foreground">{b.label}</p>
                   </div>
-                ))}
-              </div>
-
-              {/* Barre proportionnelle segmentée */}
-              <div className="w-full h-3 rounded-full overflow-hidden flex bg-muted">
-                {buckets.map(b => b.value > 0 && (
-                  <div
-                    key={b.key}
-                    className={b.color}
-                    style={{ width: `${dpct(b.value)}%` }}
-                    title={`${b.label} : ${b.value} (${dpct(b.value)}%)`}
-                  />
-                ))}
-              </div>
-              {childrenDistribution.zero > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  + {childrenDistribution.zero} parent(s) sans enfant associé (non comptés dans la répartition).
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                  <p className={`text-xl font-bold ${b.text}`}>{b.value} <span className="text-xs font-normal text-muted-foreground">{dpct(b.value)}%</span></p>
+                </div>
+              ))}
+            </div>
+            {childrenDistribution.zero > 0 && (
+              <p className="text-xs text-muted-foreground">
+                + {childrenDistribution.zero} parent(s) sans enfant associé (non comptés dans la répartition).
+              </p>
+            )}
+          </div>
         );
       })()}
 
