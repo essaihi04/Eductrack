@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   X, Search, LayoutGrid, List, Check, CheckCheck, Clock, Bell,
-  MessageCircle, UserCheck, UserX, Users, GraduationCap,
+  MessageCircle, UserCheck, UserX, Users, GraduationCap, Plus,
 } from 'lucide-react';
 
 // ── Kit UI Annuaire ──────────────────────────────────────────────────────────
@@ -15,14 +15,14 @@ import {
 // Palette de tons : chaque ton = fond clair + texte foncé + accent.
 // Classes Tailwind écrites en toutes lettres pour le JIT (pas d'interpolation).
 const TONES = {
-  blue:   { soft: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-500',   text: 'text-blue-600',   border: 'border-blue-400' },
-  green:  { soft: 'bg-green-100 text-green-700',    dot: 'bg-green-500',  text: 'text-green-600',  border: 'border-green-400' },
-  amber:  { soft: 'bg-amber-100 text-amber-700',    dot: 'bg-amber-500',  text: 'text-amber-600',  border: 'border-amber-400' },
-  red:    { soft: 'bg-red-100 text-red-700',        dot: 'bg-red-500',    text: 'text-red-600',    border: 'border-red-400' },
-  purple: { soft: 'bg-purple-100 text-purple-700',  dot: 'bg-purple-500', text: 'text-purple-600', border: 'border-purple-400' },
-  pink:   { soft: 'bg-pink-100 text-pink-700',      dot: 'bg-pink-500',   text: 'text-pink-600',   border: 'border-pink-400' },
-  teal:   { soft: 'bg-teal-100 text-teal-700',      dot: 'bg-teal-500',   text: 'text-teal-600',   border: 'border-teal-400' },
-  gray:   { soft: 'bg-gray-100 text-gray-600',      dot: 'bg-gray-400',   text: 'text-gray-500',   border: 'border-gray-300' },
+  blue:   { soft: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-500',   text: 'text-blue-600',   border: 'border-blue-400',   grad: 'from-sky-200 to-blue-100',      ring: 'ring-blue-300' },
+  green:  { soft: 'bg-green-100 text-green-700',    dot: 'bg-green-500',  text: 'text-green-600',  border: 'border-green-400',  grad: 'from-emerald-200 to-green-100', ring: 'ring-green-300' },
+  amber:  { soft: 'bg-amber-100 text-amber-700',    dot: 'bg-amber-500',  text: 'text-amber-600',  border: 'border-amber-400',  grad: 'from-amber-200 to-yellow-100',  ring: 'ring-amber-300' },
+  red:    { soft: 'bg-red-100 text-red-700',        dot: 'bg-red-500',    text: 'text-red-600',    border: 'border-red-400',    grad: 'from-rose-200 to-red-100',      ring: 'ring-red-300' },
+  purple: { soft: 'bg-purple-100 text-purple-700',  dot: 'bg-purple-500', text: 'text-purple-600', border: 'border-purple-400', grad: 'from-violet-200 to-purple-100', ring: 'ring-purple-300' },
+  pink:   { soft: 'bg-pink-100 text-pink-700',      dot: 'bg-pink-500',   text: 'text-pink-600',   border: 'border-pink-400',   grad: 'from-pink-200 to-rose-100',     ring: 'ring-pink-300' },
+  teal:   { soft: 'bg-teal-100 text-teal-700',      dot: 'bg-teal-500',   text: 'text-teal-600',   border: 'border-teal-400',   grad: 'from-teal-200 to-cyan-100',     ring: 'ring-teal-300' },
+  gray:   { soft: 'bg-gray-100 text-gray-600',      dot: 'bg-gray-400',   text: 'text-gray-500',   border: 'border-gray-300',   grad: 'from-gray-200 to-gray-100',     ring: 'ring-gray-300' },
 };
 const TONE_CYCLE = ['blue', 'teal', 'purple', 'amber', 'pink', 'green'];
 
@@ -47,7 +47,7 @@ function initials(name = '') {
 
 // Avatar : photo en priorité si fournie, repli sur initiales colorées
 // (ton stable par nom) si pas de photo OU si l'URL est cassée / introuvable.
-const AV_SIZES = { sm: 'w-8 h-8 text-xs', md: 'w-11 h-11 text-sm', lg: 'w-16 h-16 text-lg' };
+const AV_SIZES = { sm: 'w-8 h-8 text-xs', md: 'w-11 h-11 text-sm', lg: 'w-16 h-16 text-lg', xl: 'w-20 h-20 text-2xl' };
 export function Avatar({ name = '', src, tone, size = 'md', className = '' }) {
   const [broken, setBroken] = useState(false);
   const t = TONES[tone] || TONES[toneFor(name)];
@@ -329,22 +329,65 @@ export function ClassCard({ name, section, subtitle, count, boys, girls, actions
   );
 }
 
-// Carte Élève : avatar, nom, classe, pastille de statut, sélection.
+// Carte Élève : en-tête pastel en dégradé + vague, gros avatar à anneau blanc
+// qui déborde, nom coloré et pastille de statut. Effet de survol (élévation).
 export function StudentCard({
   name, className: classLabel, photo, status, selected, selectable, onToggleSelect, onClick, menu,
 }) {
+  const accent = toneFor(name);
+  const t = TONES[accent] || TONES.gray;
   return (
-    <EntityCard selected={selected} selectable={selectable} onToggleSelect={onToggleSelect} onClick={onClick}
-      header={
-        <div className="flex flex-col items-center text-center">
-          {menu && <div className="self-end -mt-1">{menu}</div>}
-          <Avatar name={name} src={photo} size="lg" />
-          <div className="font-medium text-sm mt-2 text-foreground truncate w-full">{name}</div>
-          {classLabel && <div className="text-xs text-muted-foreground mb-1">{classLabel}</div>}
-          {status}
+    <div
+      onClick={onClick}
+      className={`group relative bg-card rounded-2xl overflow-hidden border transition-all duration-200 ${
+        selected ? 'border-blue-400 ring-2 ring-blue-200' : 'border-border hover:border-transparent'
+      } ${onClick ? 'cursor-pointer' : ''} hover:-translate-y-1 hover:shadow-xl`}
+    >
+      {/* En-tête pastel + vague décorative */}
+      <div className={`relative h-16 bg-gradient-to-br ${t.grad}`}>
+        <svg className="absolute -bottom-px left-0 w-full" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0,40 L0,22 Q100,42 200,22 T400,22 L400,40 Z" style={{ fill: 'hsl(var(--card))' }} />
+        </svg>
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-2 left-2 w-4 h-4 accent-blue-600 z-10 cursor-pointer"
+            aria-label="Sélectionner"
+          />
+        )}
+        {menu && <div className="absolute top-1.5 right-1.5 z-10">{menu}</div>}
+      </div>
+
+      {/* Avatar débordant à anneau blanc */}
+      <div className="flex flex-col items-center text-center px-3 pb-4 -mt-11">
+        <div className="rounded-full ring-4 ring-white shadow-md transition-transform duration-200 group-hover:scale-105">
+          <Avatar name={name} src={photo} tone={accent} size="xl" />
         </div>
-      }
-    />
+        <div className={`font-semibold text-sm mt-2.5 truncate w-full ${t.text}`}>{name}</div>
+        {classLabel && <div className="text-xs text-muted-foreground mt-0.5">{classLabel}</div>}
+        {status && <div className="mt-1.5">{status}</div>}
+      </div>
+    </div>
+  );
+}
+
+// Tuile « Ajouter ou importer » : 1re carte de la grille (même esprit que la
+// StudentCard, mais en pointillés et cliquable pour créer/importer).
+export function AddPersonCard({ label = 'Ajouter ou importer', onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex flex-col items-center justify-center gap-3 min-h-[180px] w-full rounded-2xl border-2 border-dashed border-gray-300 bg-card text-muted-foreground transition-all duration-200 hover:border-blue-400 hover:bg-blue-50/40 hover:-translate-y-1 hover:shadow-lg"
+    >
+      <span className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-300 to-amber-400 text-white flex items-center justify-center shadow-md transition-transform duration-200 group-hover:scale-105">
+        <Plus className="w-8 h-8" />
+      </span>
+      <span className="text-sm font-medium text-foreground">{label}</span>
+    </button>
   );
 }
 
