@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
   DetailDrawer, FieldRow, Avatar,
@@ -730,22 +730,73 @@ L'administration de ${schoolName}`;
             </select>
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm text-gray-600">
-              Affichage: <span className="font-semibold">{getFilteredStudents().length}</span> / <span className="font-semibold">{students.length}</span> élève(s)
-              {(() => {
-                const without = students.filter(s => !(s.parents?.length > 0)).length;
-                return without > 0 ? <span className="ml-2 text-amber-600 font-medium">• {without} sans parent</span> : null;
-              })()}
+            <div className="flex flex-wrap items-center gap-3">
+              {isAdmin && getFilteredStudents().length > 0 && (
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-blue-600"
+                >
+                  {isAllSelected() ? (
+                    <CheckSquare className="w-5 h-5 text-blue-600" />
+                  ) : isSomeSelected() ? (
+                    <div className="w-5 h-5 border-2 border-blue-600 bg-blue-100 rounded relative">
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-3 h-3 bg-blue-600 rounded-sm" />
+                      </div>
+                    </div>
+                  ) : (
+                    <Square className="w-5 h-5 text-gray-400" />
+                  )}
+                  {isAllSelected() ? 'Désélectionner tout' : 'Sélectionner tout'}
+                  <span className="text-gray-500 font-normal">({selectedStudents.size} / {getFilteredStudents().length})</span>
+                </button>
+              )}
+              <div className="text-sm text-gray-600">
+                Affichage: <span className="font-semibold">{getFilteredStudents().length}</span> / <span className="font-semibold">{students.length}</span> élève(s)
+                {(() => {
+                  const without = students.filter(s => !(s.parents?.length > 0)).length;
+                  return without > 0 ? <span className="ml-2 text-amber-600 font-medium">• {without} sans parent</span> : null;
+                })()}
+              </div>
             </div>
-            {isAdmin && filters.parentStatus === 'without' && getFilteredStudents().length > 0 && (
-              <button
-                onClick={() => openParentModal(getFilteredStudents())}
-                className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
-              >
-                <UserPlus className="w-4 h-4" />
-                Ajouter les parents ({getFilteredStudents().length})
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {isAdmin && selectedStudents.size > 0 && (
+                <>
+                  <button
+                    onClick={() => openParentModal(students.filter(s => selectedStudents.has(s.id)))}
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
+                    title="Ajouter les parents des élèves sélectionnés"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Parents ({selectedStudents.size})
+                  </button>
+                  <button
+                    onClick={sendBulkCredentialsToParents}
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                    title="Envoyer les identifiants aux parents via WhatsApp"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    WhatsApp ({selectedStudents.size})
+                  </button>
+                  <button
+                    onClick={deleteSelectedStudents}
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Supprimer ({selectedStudents.size})
+                  </button>
+                </>
+              )}
+              {isAdmin && filters.parentStatus === 'without' && getFilteredStudents().length > 0 && (
+                <button
+                  onClick={() => openParentModal(getFilteredStudents())}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Ajouter les parents ({getFilteredStudents().length})
+                </button>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -819,42 +870,7 @@ L'administration de ${schoolName}`;
       )}
 
       <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <CardTitle>Liste des élèves</CardTitle>
-              <CardDescription className="hidden sm:block">Cliquez sur une ligne pour voir les identifiants</CardDescription>
-            </div>
-            {isAdmin && selectedStudents.size > 0 && (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <button
-                  onClick={() => openParentModal(students.filter(s => selectedStudents.has(s.id)))}
-                  className="flex items-center justify-center gap-2 px-3 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
-                  title="Ajouter les parents des élèves sélectionnés"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  Parents ({selectedStudents.size})
-                </button>
-                <button
-                  onClick={sendBulkCredentialsToParents}
-                  className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
-                  title="Envoyer les identifiants aux parents via WhatsApp"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  WhatsApp ({selectedStudents.size})
-                </button>
-                <button
-                  onClick={deleteSelectedStudents}
-                  className="flex items-center justify-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Supprimer ({selectedStudents.size})
-                </button>
-              </div>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4">
           <div className="space-y-3">
             {getFilteredStudents().length === 0 ? (
               <p className="text-center py-8 text-muted-foreground">
@@ -862,34 +878,6 @@ L'administration de ${schoolName}`;
               </p>
             ) : (
               <div>
-                {/* Checkbox pour sélectionner tous (admin uniquement) */}
-                {isAdmin && (
-                  <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded mb-3">
-                    <button
-                      onClick={toggleSelectAll}
-                      className="p-1 hover:bg-gray-200 rounded"
-                    >
-                      {isAllSelected() ? (
-                        <CheckSquare className="w-5 h-5 text-blue-600" />
-                      ) : isSomeSelected() ? (
-                        <div className="w-5 h-5 border-2 border-blue-600 bg-blue-100 rounded relative">
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-3 h-3 bg-blue-600 rounded-sm" />
-                          </div>
-                        </div>
-                      ) : (
-                        <Square className="w-5 h-5 text-gray-400" />
-                      )}
-                    </button>
-                    <span className="text-sm font-medium text-gray-700">
-                      {isAllSelected() ? 'Désélectionner tout' : 'Sélectionner tout'}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      ({selectedStudents.size} / {getFilteredStudents().length})
-                    </span>
-                  </div>
-                )}
-
                 {/* Bascule grille / liste */}
                 <div className="flex items-center justify-end mb-3">
                   <GridListToggle value={viewMode} onChange={setViewMode} />
