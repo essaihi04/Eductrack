@@ -2741,7 +2741,7 @@ router.get('/classes', async (req, res) => {
     for (let from = 0; ; from += PAGE) {
       let studentsQuery = supabaseAdmin
         .from('profiles')
-        .select('id, class_id')
+        .select('id, class_id, gender')
         .eq('role', 'student')
         .in('class_id', classIds)
         .range(from, from + PAGE - 1);
@@ -2754,16 +2754,26 @@ router.get('/classes', async (req, res) => {
       if (!pageData || pageData.length < PAGE) break; // dernière page atteinte
     }
 
-    const studentCountByClass = (studentsData || []).reduce((acc, student) => {
+    const statsByClass = (studentsData || []).reduce((acc, student) => {
       if (!student.class_id) return acc;
-      acc[student.class_id] = (acc[student.class_id] || 0) + 1;
+      const s = acc[student.class_id] || { total: 0, boys: 0, girls: 0 };
+      s.total += 1;
+      const g = String(student.gender || '').trim().toUpperCase();
+      if (g === 'M') s.boys += 1;
+      else if (g === 'F') s.girls += 1;
+      acc[student.class_id] = s;
       return acc;
     }, {});
 
-    const classesWithCount = data.map(cls => ({
-      ...cls,
-      student_count: studentCountByClass[cls.id] || 0
-    }));
+    const classesWithCount = data.map(cls => {
+      const s = statsByClass[cls.id] || { total: 0, boys: 0, girls: 0 };
+      return {
+        ...cls,
+        student_count: s.total,
+        boys_count: s.boys,
+        girls_count: s.girls,
+      };
+    });
 
     res.json(classesWithCount);
   } catch (error) {
@@ -3423,7 +3433,39 @@ router.get('/teachers', async (req, res) => {
     const { data, error } = await query;
 
     if (error) throw error;
-    res.json(data);
+
+    // Charge horaire hebdomadaire par prof = somme des créneaux de l'emploi
+    // du temps (end_time - start_time), tous niveaux/classes confondus.
+    const teacherIds = (data || []).map(t => t.id);
+    const hoursByTeacher = {};
+    if (teacherIds.length > 0) {
+      const toMin = (t) => {
+        const [h, m] = String(t || '').split(':');
+        return (parseInt(h, 10) || 0) * 60 + (parseInt(m, 10) || 0);
+      };
+      const CHUNK = 200;
+      for (let i = 0; i < teacherIds.length; i += CHUNK) {
+        const chunk = teacherIds.slice(i, i + CHUNK);
+        const { data: slots, error: slotsErr } = await supabaseAdmin
+          .from('class_timetable')
+          .select('teacher_id, start_time, end_time')
+          .in('teacher_id', chunk);
+        if (slotsErr) throw slotsErr;
+        (slots || []).forEach(s => {
+          if (!s.teacher_id) return;
+          const dur = toMin(s.end_time) - toMin(s.start_time);
+          if (dur > 0) hoursByTeacher[s.teacher_id] = (hoursByTeacher[s.teacher_id] || 0) + dur;
+        });
+      }
+    }
+
+    const withHours = (data || []).map(t => ({
+      ...t,
+      // arrondi à 0,5 h près pour un affichage lisible
+      weekly_hours: Math.round(((hoursByTeacher[t.id] || 0) / 60) * 2) / 2,
+    }));
+
+    res.json(withHours);
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur serveur' });

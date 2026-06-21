@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
+import {
+  CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
+  DetailDrawer, FieldRow, Avatar,
+} from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 
@@ -13,6 +17,8 @@ const StudentsPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [selectedStudents, setSelectedStudents] = useState(new Set());
+  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
+  const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer
   const [filters, setFilters] = useState({
     className: '',
     level: '',
@@ -902,159 +908,146 @@ L'administration de ${schoolName}`;
                   </div>
                 )}
 
-                {getFilteredStudents().map((student) => {
-                  const hasParent = student.parents?.length > 0;
-                  return (
-                  <div key={student.id} className={`border rounded-lg overflow-hidden mb-2 ${hasParent ? '' : 'border-amber-300'}`}>
-                    <div className={`p-4 transition-colors ${hasParent ? 'bg-gray-50 hover:bg-gray-100' : 'bg-amber-50 hover:bg-amber-100/70'}`}>
-                      <div className="flex items-center gap-2">
-                        {/* Checkbox de sélection (admin uniquement) */}
-                        {isAdmin && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleStudentSelection(student.id); }}
-                            className="p-1 hover:bg-gray-200 rounded flex-shrink-0"
-                          >
-                            {selectedStudents.has(student.id) ? (
-                              <CheckSquare className="w-5 h-5 text-blue-600" />
-                            ) : (
-                              <Square className="w-5 h-5 text-gray-400" />
-                            )}
-                          </button>
-                        )}
-
-                        {/* Informations de l'élève */}
-                        <div
-                          className="flex-1 min-w-0 cursor-pointer"
-                          onClick={() => togglePasswordVisibility(student.id)}
-                        >
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</p>
-                            {hasParent ? (
-                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1" title={student.parents.map(p => `${p.first_name} ${p.last_name}${p.relationship ? ` (${p.relationship})` : ''}`).join(', ')}>
-                                <Users className="w-3 h-3" /> {student.parents.length} parent{student.parents.length > 1 ? 's' : ''}
-                              </span>
-                            ) : (
-                              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" /> Sans parent
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-gray-500 truncate">{student.email}</p>
-                          <p className="text-xs text-gray-400">{student.class_id ? 'Classe assignée' : 'Non assigné'}</p>
-                        </div>
-
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          {isAdmin && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); openParentModal([student]); }}
-                              className={`p-1.5 rounded transition-colors ${hasParent ? 'hover:bg-gray-200' : 'hover:bg-amber-200'}`}
-                              title={hasParent ? 'Ajouter un autre parent' : 'Ajouter les parents'}
-                            >
-                              <UserPlus className={`w-4 h-4 ${hasParent ? 'text-gray-500' : 'text-amber-600'}`} />
-                            </button>
-                          )}
-                          <span
-                            className="text-xs text-gray-500 cursor-pointer hover:text-gray-700 px-1"
-                            onClick={() => togglePasswordVisibility(student.id)}
-                          >
-                            {visiblePasswords[student.id] ? '▼' : '▶'}
-                          </span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); resetPassword(student.id); }}
-                            className="p-1.5 hover:bg-blue-500/20 rounded transition-colors"
-                            title="Réinitialiser le mot de passe"
-                          >
-                            <RefreshCw className="w-4 h-4 text-blue-600" />
-                          </button>
-                          {isAdmin && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); deleteStudent(student.id); }}
-                              className="p-1.5 hover:bg-red-500/20 rounded transition-colors"
-                              title="Supprimer"
-                            >
-                              <Trash2 className="w-4 h-4 text-red-500" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                  {visiblePasswords[student.id] && (
-                    <div className="p-4 bg-blue-50 border-t border-gray-200 space-y-3">
-                      <div>
-                        <label className="text-xs font-semibold text-gray-700 block mb-1">Email</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={student.email}
-                            readOnly
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                          />
-                          <button
-                            onClick={() => copyToClipboard(student.email)}
-                            className="p-2 hover:bg-blue-200 rounded transition-colors"
-                            title="Copier"
-                          >
-                            <Copy className="w-4 h-4 text-blue-600" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="text-xs font-semibold text-gray-700 block mb-1">Mot de passe</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type={visiblePasswords[`pwd_${student.id}`] ? 'text' : 'password'}
-                            value={student.password || ''}
-                            readOnly
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                          />
-                          <button
-                            onClick={() => setVisiblePasswords(prev => ({
-                              ...prev,
-                              [`pwd_${student.id}`]: !prev[`pwd_${student.id}`]
-                            }))}
-                            className="p-2 hover:bg-blue-200 rounded transition-colors"
-                            title={visiblePasswords[`pwd_${student.id}`] ? 'Masquer' : 'Afficher'}
-                          >
-                            {visiblePasswords[`pwd_${student.id}`] ? (
-                              <EyeOff className="w-4 h-4 text-blue-600" />
-                            ) : (
-                              <Eye className="w-4 h-4 text-blue-600" />
-                            )}
-                          </button>
-                          <button
-                            onClick={() => copyToClipboard(student.password || '')}
-                            className="p-2 hover:bg-blue-200 rounded transition-colors"
-                            title="Copier"
-                          >
-                            <Copy className="w-4 h-4 text-blue-600" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-gray-600 bg-yellow-50 p-2 rounded">
-                        ⚠️ Conservez ces identifiants en sécurité. L'élève doit les utiliser pour sa première connexion.
-                      </p>
-
-                      {/* Bouton WhatsApp pour envoyer au parent */}
-                      <button
-                        onClick={() => sendCredentialsToParent(student)}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                      >
-                        <MessageCircle className="w-4 h-4" />
-                        Envoyer au parent via WhatsApp
-                      </button>
-                    </div>
-                  )}
+                {/* Bascule grille / liste */}
+                <div className="flex items-center justify-end mb-3">
+                  <GridListToggle value={viewMode} onChange={setViewMode} />
                 </div>
-                );
-                })}
+
+                {(() => {
+                  const list = getFilteredStudents();
+                  const classMap = Object.fromEntries(classes.map((c) => [c.id, c.name]));
+                  const classLabel = (s) => classMap[s.class_id] || (s.class_id ? 'Classe assignée' : 'Non assigné');
+                  const parentStatus = (s) => (s.parents?.length > 0
+                    ? <StatusPill tone="green" icon={Users}>{s.parents.length} parent{s.parents.length > 1 ? 's' : ''}</StatusPill>
+                    : <StatusPill tone="amber" icon={AlertTriangle}>Sans parent</StatusPill>);
+
+                  if (viewMode === 'grid') {
+                    return (
+                      <CardGrid>
+                        {list.map((student) => (
+                          <StudentCard
+                            key={student.id}
+                            name={`${student.first_name} ${student.last_name}`}
+                            photo={student.avatar_url}
+                            classLabel={classLabel(student)}
+                            status={parentStatus(student)}
+                            selectable={isAdmin}
+                            selected={selectedStudents.has(student.id)}
+                            onToggleSelect={() => toggleStudentSelection(student.id)}
+                            onClick={() => setActiveStudent(student)}
+                          />
+                        ))}
+                      </CardGrid>
+                    );
+                  }
+
+                  return (
+                    <div>
+                      {list.map((student) => (
+                        <StudentRow
+                          key={student.id}
+                          name={`${student.first_name} ${student.last_name}`}
+                          photo={student.avatar_url}
+                          classLabel={classLabel(student)}
+                          sub={student.email}
+                          status={parentStatus(student)}
+                          selectable={isAdmin}
+                          selected={selectedStudents.has(student.id)}
+                          onToggleSelect={() => toggleStudentSelection(student.id)}
+                          onClick={() => setActiveStudent(student)}
+                        />
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
         </CardContent>
       </Card>
+
+      {/* Fiche élève (drawer master-detail) */}
+      <DetailDrawer
+        open={!!activeStudent}
+        onClose={() => setActiveStudent(null)}
+        title={activeStudent ? `${activeStudent.first_name} ${activeStudent.last_name}` : ''}
+      >
+        {activeStudent && (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center text-center gap-2">
+              <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`} src={activeStudent.avatar_url} size="lg" />
+              <div className="font-medium">{activeStudent.first_name} {activeStudent.last_name}</div>
+              {activeStudent.parents?.length > 0 ? (
+                <StatusPill tone="green" icon={Users}>{activeStudent.parents.length} parent{activeStudent.parents.length > 1 ? 's' : ''}</StatusPill>
+              ) : (
+                <StatusPill tone="amber" icon={AlertTriangle}>Sans parent</StatusPill>
+              )}
+            </div>
+
+            <div>
+              <FieldRow label="Classe" value={classes.find((c) => c.id === activeStudent.class_id)?.name || (activeStudent.class_id ? 'Assignée' : 'Non assigné')} />
+              <FieldRow label="Code MASSAR" value={activeStudent.massar_code} mono />
+              <FieldRow label="Genre" value={activeStudent.gender === 'M' ? 'Garçon' : activeStudent.gender === 'F' ? 'Fille' : '—'} />
+              <FieldRow label="Email" value={activeStudent.email} />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-gray-700 block">Mot de passe</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type={visiblePasswords[`pwd_${activeStudent.id}`] ? 'text' : 'password'}
+                  value={activeStudent.password || ''}
+                  readOnly
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
+                />
+                <button
+                  onClick={() => setVisiblePasswords((prev) => ({ ...prev, [`pwd_${activeStudent.id}`]: !prev[`pwd_${activeStudent.id}`] }))}
+                  className="p-2 hover:bg-blue-100 rounded"
+                  title={visiblePasswords[`pwd_${activeStudent.id}`] ? 'Masquer' : 'Afficher'}
+                >
+                  {visiblePasswords[`pwd_${activeStudent.id}`] ? <EyeOff className="w-4 h-4 text-blue-600" /> : <Eye className="w-4 h-4 text-blue-600" />}
+                </button>
+                <button onClick={() => copyToClipboard(activeStudent.password || '')} className="p-2 hover:bg-blue-100 rounded" title="Copier">
+                  <Copy className="w-4 h-4 text-blue-600" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => sendCredentialsToParent(activeStudent)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <MessageCircle className="w-4 h-4" /> Envoyer au parent via WhatsApp
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => openParentModal([activeStudent])}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
+                >
+                  <UserPlus className="w-4 h-4" /> {activeStudent.parents?.length ? 'Ajouter un autre parent' : 'Ajouter les parents'}
+                </button>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => resetPassword(activeStudent.id)}
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" /> Réinitialiser
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => { deleteStudent(activeStudent.id); setActiveStudent(null); }}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" /> Supprimer
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
 
       {/* Modale d'ajout de parents */}
       {parentModalQueue.length > 0 && (() => {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send, Edit2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { Avatar, StatusPill, toneFor } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
@@ -1015,13 +1016,23 @@ const TeachersPage = () => {
                       onClick={(e) => e.stopPropagation()}
                       className="w-4 h-4 rounded text-blue-600 cursor-pointer"
                     />
-                    <div className="flex-1 cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
-                      <p className="font-medium">{teacher.first_name} {teacher.last_name}</p>
-                      <p className="text-sm text-muted-foreground">{teacher.email}</p>
+                    <Avatar name={`${teacher.first_name} ${teacher.last_name}`} src={teacher.avatar_url} size="md" />
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
+                      <p className="font-medium truncate">{teacher.first_name} {teacher.last_name}</p>
+                      <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                        {teacherSubjects[teacher.id]?.[0] && (
+                          <StatusPill tone={toneFor(`${teacher.first_name} ${teacher.last_name}`)}>
+                            {teacherSubjects[teacher.id][0].subjects?.name || teacherSubjects[teacher.id][0].name || 'Matière'}
+                            {teacherSubjects[teacher.id].length > 1 ? ` +${teacherSubjects[teacher.id].length - 1}` : ''}
+                          </StatusPill>
+                        )}
+                        <span className="text-xs text-muted-foreground truncate">{teacher.email}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
-                      <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                        {teacherSubjects[teacher.id]?.length || 0} matière(s)
+                    <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
+                      <span className="text-xs text-muted-foreground hidden sm:inline">
+                        {teacherSubjects[teacher.id]?.length || 0} matière(s) · {teacherClasses[teacher.id]?.length || 0} classe(s)
+                        {teacher.weekly_hours ? ` · ${teacher.weekly_hours}h/sem` : ''}
                       </span>
                       {expandedTeacher === teacher.id ? (
                         <ChevronUp className="w-5 h-5" />

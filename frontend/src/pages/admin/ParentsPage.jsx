@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronUp, Link2, Unlink, Star, FileSpreadsheet, Download, Edit2, Key, Send, Copy, CheckCheck } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { Avatar, ChannelBadge } from '../../components/directory/ui';
 import * as XLSX from 'xlsx';
 
 // Libellés lisibles des filières (lycée). Sert au filtre « Filière » de la page Parents.
@@ -1507,9 +1508,8 @@ const ParentsPage = () => {
                       className="w-4 h-4 shrink-0"
                     />
                   )}
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-white font-bold text-sm shrink-0">
-                    {(parent.first_name?.[0] || '').toUpperCase()}{(parent.last_name?.[0] || '').toUpperCase()}
-                  </div>
+                  <Avatar name={`${parent.first_name} ${parent.last_name}`} src={parent.avatar_url} size="md" />
+
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold truncate">
                       {parent.first_name} {parent.last_name}
@@ -1528,6 +1528,9 @@ const ParentsPage = () => {
                       )}
                       {childrenList.length > 0 && (
                         <span>{childrenList.length} enfant(s)</span>
+                      )}
+                      {primaryContact && (
+                        <ChannelBadge channel={primaryContact.channel === 'whatsapp' ? 'whatsapp' : 'push'} />
                       )}
                       {parent.classes?.length > 0 && (
                         <span className="flex gap-1">

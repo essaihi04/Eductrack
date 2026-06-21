@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { GenderSplit, Avatar } from '../../components/directory/ui';
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1563,7 +1564,9 @@ const ClassesPage = () => {
       <div key={cls.id} className="border rounded-lg overflow-hidden bg-background">
         <div className="flex items-center justify-between p-3 hover:bg-muted/50 cursor-pointer"
           onClick={() => setExpandedClass(isExpanded ? null : cls.id)}>
-          <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <Avatar name={cls.name} size="sm" />
+            <div className="min-w-0 flex-1">
             <p className="font-medium text-sm">{cls.name}</p>
             <p className="text-xs text-muted-foreground">
               {getLevelLabel(cls.level) || cls.level}
@@ -1577,11 +1580,15 @@ const ClassesPage = () => {
                 ).filter(Boolean).join(' · ')}
               </p>
             )}
+            </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
             <span className="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
               {studentCount} élève(s)
             </span>
+            {(cls.boys_count != null || cls.girls_count != null) && (
+              <GenderSplit boys={cls.boys_count || 0} girls={cls.girls_count || 0} className="text-xs" />
+            )}
             <span className="text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded">
               {classTeachers[cls.id]?.length || 0} prof(s)
             </span>
