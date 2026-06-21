@@ -567,16 +567,16 @@ L'administration de ${schoolName}`;
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <button
               onClick={() => setShowSendCredentialsModal(true)}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
             >
-              <Send className="w-5 h-5" />
-              Envoyer identifiants WhatsApp
+              <Send className="w-4 h-4" />
+              Identifiants WhatsApp
             </button>
             <button
               onClick={() => setShowForm(!showForm)}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-4 h-4" />
               Ajouter un élève
             </button>
           </div>
@@ -678,76 +678,58 @@ L'administration de ${schoolName}`;
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Filtres</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Rechercher par nom</label>
-              <input
-                type="text"
-                placeholder="Nom ou prénom..."
-                value={filters.searchName}
-                onChange={(e) => setFilters({ ...filters, searchName: e.target.value })}
-                className="w-full px-3 py-2 border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Rechercher par email</label>
-              <input
-                type="text"
-                placeholder="Adresse email..."
-                value={filters.searchEmail}
-                onChange={(e) => setFilters({ ...filters, searchEmail: e.target.value })}
-                className="w-full px-3 py-2 border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Classe</label>
-              <select
-                value={filters.className}
-                onChange={(e) => setFilters({ ...filters, className: e.target.value })}
-                className="w-full px-3 py-2 border rounded text-sm"
-              >
-                <option value="">Toutes les classes</option>
-                <option value="unassigned">Élèves non assignés</option>
-                {classes.map(cls => (
-                  <option key={cls.id} value={cls.id}>
-                    {cls.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Niveau</label>
-              <select
-                value={filters.level}
-                onChange={(e) => setFilters({ ...filters, level: e.target.value })}
-                className="w-full px-3 py-2 border rounded text-sm"
-              >
-                <option value="">Tous les niveaux</option>
-                {getAvailableLevels().map(level => (
-                  <option key={level} value={level}>
-                    {level}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Statut parent</label>
-              <select
-                value={filters.parentStatus}
-                onChange={(e) => setFilters({ ...filters, parentStatus: e.target.value })}
-                className="w-full px-3 py-2 border rounded text-sm"
-              >
-                <option value="">Tous</option>
-                <option value="without">⚠ Sans parent</option>
-                <option value="with">👪 Avec parent</option>
-              </select>
-            </div>
+        <CardContent className="py-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <input
+              type="text"
+              placeholder="Rechercher par nom..."
+              value={filters.searchName}
+              onChange={(e) => setFilters({ ...filters, searchName: e.target.value })}
+              className="w-full px-3 py-1.5 border rounded text-sm"
+            />
+            <input
+              type="text"
+              placeholder="Rechercher par email..."
+              value={filters.searchEmail}
+              onChange={(e) => setFilters({ ...filters, searchEmail: e.target.value })}
+              className="w-full px-3 py-1.5 border rounded text-sm"
+            />
+            <select
+              value={filters.className}
+              onChange={(e) => setFilters({ ...filters, className: e.target.value })}
+              className="w-full px-3 py-1.5 border rounded text-sm"
+            >
+              <option value="">Toutes les classes</option>
+              <option value="unassigned">Élèves non assignés</option>
+              {classes.map(cls => (
+                <option key={cls.id} value={cls.id}>
+                  {cls.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.level}
+              onChange={(e) => setFilters({ ...filters, level: e.target.value })}
+              className="w-full px-3 py-1.5 border rounded text-sm"
+            >
+              <option value="">Tous les niveaux</option>
+              {getAvailableLevels().map(level => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filters.parentStatus}
+              onChange={(e) => setFilters({ ...filters, parentStatus: e.target.value })}
+              className="w-full px-3 py-1.5 border rounded text-sm"
+            >
+              <option value="">Tous (parent)</option>
+              <option value="without">⚠ Sans parent</option>
+              <option value="with">👪 Avec parent</option>
+            </select>
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div className="text-sm text-gray-600">
               Affichage: <span className="font-semibold">{getFilteredStudents().length}</span> / <span className="font-semibold">{students.length}</span> élève(s)
               {(() => {

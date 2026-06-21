@@ -525,26 +525,26 @@ const TeachersPage = () => {
           <h1 className="text-3xl font-bold">Gestion des Professeurs</h1>
           <p className="text-muted-foreground mt-2">Total: {teachers.length} professeurs</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowSendCredentialsModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700"
           >
-            <Send className="w-5 h-5" />
-            Envoyer identifiants WhatsApp
+            <Send className="w-4 h-4" />
+            Identifiants WhatsApp
           </button>
           <button
             onClick={() => { setShowImport(!showImport); setShowForm(false); }}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
-            <Upload className="w-5 h-5" />
+            <Upload className="w-4 h-4" />
             Importer Excel
           </button>
           <button
             onClick={() => { setShowForm(!showForm); setShowImport(false); }}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4" />
             Ajouter un professeur
           </button>
         </div>
@@ -935,46 +935,36 @@ const TeachersPage = () => {
         <CardContent>
           {/* Filtres */}
           {teachers.length > 0 && (
-            <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-gray-600 block mb-1">Matière</label>
-                  <select
-                    value={subjectFilter}
-                    onChange={(e) => setSubjectFilter(e.target.value)}
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Toutes les matières</option>
-                    {subjects.map(subject => (
-                      <option key={subject.id} value={subject.id}>{subject.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-600 block mb-1">Classe</label>
-                  <select
-                    value={classFilter}
-                    onChange={(e) => setClassFilter(e.target.value)}
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Toutes les classes</option>
-                    {classes.map(cls => (
-                      <option key={cls.id} value={cls.id}>{cls.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-end">
-                  <button
-                    onClick={() => {
-                      setSubjectFilter('');
-                      setClassFilter('');
-                    }}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-100"
-                  >
-                    Réinitialiser
-                  </button>
-                </div>
-              </div>
+            <div className="mb-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+              <select
+                value={subjectFilter}
+                onChange={(e) => setSubjectFilter(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Toutes les matières</option>
+                {subjects.map(subject => (
+                  <option key={subject.id} value={subject.id}>{subject.name}</option>
+                ))}
+              </select>
+              <select
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Toutes les classes</option>
+                {classes.map(cls => (
+                  <option key={cls.id} value={cls.id}>{cls.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => {
+                  setSubjectFilter('');
+                  setClassFilter('');
+                }}
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-100"
+              >
+                Réinitialiser
+              </button>
             </div>
           )}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">

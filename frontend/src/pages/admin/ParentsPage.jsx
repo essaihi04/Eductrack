@@ -983,10 +983,10 @@ const ParentsPage = () => {
           <h1 className="text-3xl font-bold">Parents</h1>
           <p className="text-muted-foreground">{parents.length} parent(s) enregistré(s)</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => { setBulkMode(!bulkMode); setSelectedParents(new Set()); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${bulkMode ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors ${bulkMode ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}
           >
             <CheckCheck className="w-4 h-4" />
             {bulkMode ? `${selectedParents.size} sélectionné(s)` : 'Sélection multiple'}
@@ -995,7 +995,7 @@ const ParentsPage = () => {
             <>
               <button
                 onClick={toggleSelectAll}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200"
               >
                 <CheckCheck className="w-4 h-4" />
                 {filteredParents.length > 0 && filteredParents.every(p => selectedParents.has(p.id))
@@ -1005,7 +1005,7 @@ const ParentsPage = () => {
               <button
                 onClick={() => handleBulkSend('selected')}
                 disabled={bulkSending || selectedParents.size === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
               >
                 <Send className="w-4 h-4" />
                 {bulkSending ? 'Envoi…' : `Envoyer ID (${selectedParents.size})`}
@@ -1013,7 +1013,7 @@ const ParentsPage = () => {
               <button
                 onClick={handleBulkDelete}
                 disabled={bulkSending || selectedParents.size === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
                 <Trash2 className="w-4 h-4" />
                 {bulkSending ? '...' : `Supprimer (${selectedParents.size})`}
@@ -1023,7 +1023,7 @@ const ParentsPage = () => {
           <button
             onClick={() => handleBulkSend('all')}
             disabled={bulkSending}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
             title="Régénérer + envoyer les identifiants à tous les parents"
           >
             <Send className="w-4 h-4" />
@@ -1031,14 +1031,14 @@ const ParentsPage = () => {
           </button>
           <button
             onClick={() => setShowImport(!showImport)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
           >
             <FileSpreadsheet className="w-4 h-4" />
             Importer Excel
           </button>
           <button
             onClick={() => setShowCreateForm(!showCreateForm)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-colors"
           >
             <Plus className="w-4 h-4" />
             Ajouter un parent
@@ -1358,22 +1358,22 @@ const ParentsPage = () => {
       )}
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Rechercher par nom ou téléphone..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border rounded-lg bg-background"
+            className="w-full pl-9 pr-3 py-1.5 text-sm border rounded-lg bg-background"
           />
         </div>
         {filiereOptions.length > 0 && (
           <select
             value={filterFiliere}
             onChange={e => setFilterFiliere(e.target.value)}
-            className="px-3 py-2 border rounded-lg bg-background"
+            className="px-3 py-1.5 text-sm border rounded-lg bg-background"
           >
             <option value="">Toutes les filières</option>
             {filiereOptions.map(f => (
@@ -1385,7 +1385,7 @@ const ParentsPage = () => {
           <select
             value={filterClass}
             onChange={e => setFilterClass(e.target.value)}
-            className="px-3 py-2 border rounded-lg bg-background"
+            className="px-3 py-1.5 text-sm border rounded-lg bg-background"
           >
             <option value="">Toutes les classes</option>
             {classOptions.map(c => (
@@ -1396,30 +1396,26 @@ const ParentsPage = () => {
       </div>
 
       {/* Statistiques de couverture (globales ou pour la classe filtrée) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className="rounded-lg border bg-card p-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <div className="rounded-lg border bg-card px-3 py-2">
           <p className="text-xs text-muted-foreground">Élèves{filterClass ? ` · ${filterClass}` : ''}</p>
-          <p className="text-2xl font-bold">{stats.total}</p>
+          <p className="text-xl font-bold">{stats.total}</p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card px-3 py-2">
           <p className="text-xs text-muted-foreground">Avec parent</p>
-          <p className="text-2xl font-bold text-green-600">{stats.withParent}</p>
-          <p className="text-xs text-muted-foreground">{pct(stats.withParent)}%</p>
+          <p className="text-xl font-bold text-green-600">{stats.withParent} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withParent)}%</span></p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card px-3 py-2">
           <p className="text-xs text-muted-foreground">Sans parent</p>
-          <p className="text-2xl font-bold text-red-500">{stats.withoutParent}</p>
-          <p className="text-xs text-muted-foreground">{pct(stats.withoutParent)}%</p>
+          <p className="text-xl font-bold text-red-500">{stats.withoutParent} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withoutParent)}%</span></p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card px-3 py-2">
           <p className="text-xs text-muted-foreground">Avec numéro</p>
-          <p className="text-2xl font-bold text-green-600">{stats.withPhone}</p>
-          <p className="text-xs text-muted-foreground">{pct(stats.withPhone)}%</p>
+          <p className="text-xl font-bold text-green-600">{stats.withPhone} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withPhone)}%</span></p>
         </div>
-        <div className="rounded-lg border bg-card p-3">
+        <div className="rounded-lg border bg-card px-3 py-2">
           <p className="text-xs text-muted-foreground">Sans numéro</p>
-          <p className="text-2xl font-bold text-amber-500">{stats.withoutPhone}</p>
-          <p className="text-xs text-muted-foreground">{pct(stats.withoutPhone)}%</p>
+          <p className="text-xl font-bold text-amber-500">{stats.withoutPhone} <span className="text-xs font-normal text-muted-foreground">{pct(stats.withoutPhone)}%</span></p>
         </div>
       </div>
 

@@ -1758,7 +1758,7 @@ const ClassesPage = () => {
                   bulkDeleteClasses(classes.filter((c) => c.academic_year === yr), `année ${yr}`);
                   e.target.value = '';
                 }}
-                className="px-3 py-2 border border-red-200 text-red-700 rounded-lg text-sm bg-white"
+                className="px-3 py-1.5 border border-red-200 text-red-700 rounded-lg text-sm bg-white"
                 title="Supprimer toutes les classes d'une année scolaire"
               >
                 <option value="">🗑️ Supprimer une année…</option>
@@ -1768,24 +1768,24 @@ const ClassesPage = () => {
           })()}
           <button
             onClick={() => setShowBulkImport(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
-            <FileSpreadsheet className="w-5 h-5" />
-            Importer des classes (Excel)
+            <FileSpreadsheet className="w-4 h-4" />
+            Importer classes (Excel)
           </button>
           <button
             onClick={() => setShowMassarImport(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
             title="Importer les codes Massar (InfoEleve) et les envoyer aux parents"
           >
-            <FileSpreadsheet className="w-5 h-5" />
+            <FileSpreadsheet className="w-4 h-4" />
             Codes Massar
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4" />
             Ajouter une classe
           </button>
         </div>
