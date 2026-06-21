@@ -31,6 +31,16 @@ const StudentsPage = () => {
   const [parentModalIndex, setParentModalIndex] = useState(0);
   const [parentForm, setParentForm] = useState({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
   const [parentSaving, setParentSaving] = useState(false);
+  const DOC_KEYS = [
+    ['livret_famille', 'Livret de famille'],
+    ['carnet_vaccination', 'Carnet de vaccination'],
+    ['cin_pere', 'CIN du père'],
+    ['cin_mere', 'CIN de la mère'],
+    ['photos_4', '4 Photos'],
+    ['cert_scolarite', 'Certificat de scolarité'],
+    ['resultats_en_cours', 'Résultats en cours'],
+    ['cert_massar', 'Certificat MASSAR'],
+  ];
   const emptyForm = {
     // Identifiants (accès élève)
     email: '', password: '',
@@ -48,11 +58,19 @@ const StudentsPage = () => {
     photoAuthorized: true,
     // Domicile
     homeAddress: '', quartier: '', homePhone: '',
-    // Parents
+    // v2 — Informations supplémentaires
+    nationality: '', country: '', reinscriptionDate: '', originSchool: '',
+    isStaffChild: false, isPartnerGroup: false, isExpat: false,
+    hadAccompaniment: false, hasTransport: false,
+    // v2 — Documents du dossier + signature
+    inscriptionDocuments: {}, inscriptionSignature: '',
+    // Parents (saisie inline en création)
     parent1: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' },
     parent2: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'mere', maritalStatus: '' },
   };
   const [formData, setFormData] = useState(emptyForm);
+  const [editingStudent, setEditingStudent] = useState(null); // élève en cours d'édition (null = création)
+  const [attachParent, setAttachParent] = useState({ open: false, lastName: '', firstName: '', phone: '', email: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' });
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -357,9 +375,84 @@ const StudentsPage = () => {
 
   const resetForm = () => {
     setFormData(emptyForm);
+    setEditingStudent(null);
+    setAttachParent({ open: false, lastName: '', firstName: '', phone: '', email: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' });
     setPhotoFile(null);
     setPhotoPreview(null);
     if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
+  // Pré-remplit le formulaire à partir d'un élève existant (mode édition).
+  const studentToForm = (s) => ({
+    ...emptyForm,
+    email: s.email || '', password: '',
+    firstName: s.first_name || '', lastName: s.last_name || '',
+    firstNameAr: s.first_name_ar || '', lastNameAr: s.last_name_ar || '',
+    gender: s.gender || 'M', phone: s.phone || '', cin: s.cin || '',
+    dateOfBirth: s.date_of_birth ? String(s.date_of_birth).slice(0, 10) : '',
+    birthPlace: s.birth_place || '', level: s.level || '', classId: s.class_id || '',
+    registrationNumber: s.registration_number || '', massarCode: s.massar_code || '',
+    entryDate: s.entry_date ? String(s.entry_date).slice(0, 10) : '',
+    dossierStatus: s.dossier_status || 'complet',
+    previousSchool: s.previous_school || '', previousClass: s.previous_class || '',
+    hasHealthIssue: !!s.has_health_issue, healthNotes: s.health_notes || '',
+    photoAuthorized: s.photo_authorized !== false,
+    homeAddress: s.home_address || '', quartier: s.quartier || '', homePhone: s.home_phone || '',
+    nationality: s.nationality || '', country: s.country || '',
+    reinscriptionDate: s.reinscription_date ? String(s.reinscription_date).slice(0, 10) : '',
+    originSchool: s.origin_school || '',
+    isStaffChild: !!s.is_staff_child, isPartnerGroup: !!s.is_partner_group,
+    isExpat: !!s.is_expat, hadAccompaniment: !!s.had_accompaniment, hasTransport: !!s.has_transport,
+    inscriptionDocuments: s.inscription_documents || {},
+    inscriptionSignature: s.inscription_signature || '',
+  });
+
+  const openEdit = (student) => {
+    setEditingStudent(student);
+    setFormData(studentToForm(student));
+    setPhotoFile(null);
+    setPhotoPreview(student.avatar_url ? resolveAvatar(student.avatar_url) : null);
+    setActiveStudent(null);
+    setShowForm(true);
+  };
+
+  const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
+
+  // Détacher un parent d'un élève (supprime le lien, garde le profil parent).
+  const detachParent = async (studentId, parentId) => {
+    if (!confirm('Détacher ce parent de l\'élève ?')) return;
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const res = await fetch(`${apiUrl}/api/admin/students/${studentId}/parents/${parentId}`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${session?.access_token}` },
+      });
+      if (!res.ok) throw new Error('Échec du détachement');
+      // Mise à jour locale
+      const upd = (s) => s.id === studentId ? { ...s, parents: (s.parents || []).filter(p => p.id !== parentId) } : s;
+      setStudents(prev => prev.map(upd));
+      setEditingStudent(prev => prev ? upd(prev) : prev);
+    } catch (err) { alert('Erreur : ' + err.message); }
+  };
+
+  // Rattacher un parent à l'élève en cours d'édition (réutilise add-parents).
+  const attachParentToStudent = async () => {
+    const p = attachParent;
+    const fullName = `${(p.lastName || '').trim()} ${(p.firstName || '').trim()}`.trim();
+    if (!fullName || !(p.phone || '').trim()) { alert('Nom + téléphone requis.'); return; }
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const res = await fetch(`${apiUrl}/api/admin/students/${editingStudent.id}/add-parents`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contacts: [{ name: fullName, phone: p.phone.trim(), relationship: p.relationship, cin: p.cin, profession: p.profession, maritalStatus: p.maritalStatus, email: p.email }] }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Échec du rattachement'); }
+      const newParent = { id: `tmp_${Date.now()}`, first_name: p.firstName, last_name: p.lastName, relationship: p.relationship, phone: p.phone, email: p.email, cin: p.cin, profession: p.profession };
+      const upd = (s) => s.id === editingStudent.id ? { ...s, parents: [...(s.parents || []), newParent] } : s;
+      setStudents(prev => prev.map(upd));
+      setEditingStudent(prev => prev ? upd(prev) : prev);
+      setAttachParent({ open: false, lastName: '', firstName: '', phone: '', email: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' });
+      fetchData();
+    } catch (err) { alert('Erreur : ' + err.message); }
   };
 
   // Construit la liste des parents (Parent 1, Parent 2) valides pour /add-parents.
@@ -387,77 +480,96 @@ const StudentsPage = () => {
       const token = session?.access_token;
       const authHeaders = { 'Authorization': `Bearer ${token}` };
 
-      // Identifiants : générés si non saisis
-      const email = (formData.email || '').trim() ||
-        `${(formData.registrationNumber || formData.massarCode || `el${Date.now()}`).toString().trim().replace(/\s+/g, '')}@student.edu`;
-      const password = (formData.password || '').trim() || generatePassword(formData.firstName);
-
-      // 1) Créer l'élève avec tous les champs de la fiche
       const { parent1, parent2, ...studentFields } = formData;
-      const res = await fetch(`${apiUrl}/api/admin/students`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...studentFields, email, password }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Création de l\'élève impossible');
-      }
-      let newStudent = await res.json();
+      let savedStudent;
 
-      // Mémoriser le mot de passe localement (comme l'existant)
-      if (newStudent.password) {
-        const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
-        storedPasswords[newStudent.id] = newStudent.password;
-        localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
-      }
+      if (editingStudent) {
+        // ── MODE ÉDITION : PUT (pas d'auth/mot de passe) ──
+        const res = await fetch(`${apiUrl}/api/admin/students/${editingStudent.id}`, {
+          method: 'PUT',
+          headers: { ...authHeaders, 'Content-Type': 'application/json' },
+          body: JSON.stringify(studentFields),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Modification impossible');
+        }
+        savedStudent = await res.json();
+        savedStudent = { ...savedStudent, parents: editingStudent.parents || [], password: editingStudent.password };
 
-      // 2) Upload de la photo si fournie
-      if (photoFile) {
-        try {
-          const fd = new FormData();
-          fd.append('photo', photoFile);
-          const pr = await fetch(`${apiUrl}/api/admin/students/${newStudent.id}/photo`, {
-            method: 'POST', headers: authHeaders, body: fd,
-          });
-          if (pr.ok) {
-            const { avatar_url } = await pr.json();
-            newStudent = { ...newStudent, avatar_url };
-          }
-        } catch (err) { console.error('Upload photo échoué:', err); }
-      }
+        // Photo : upload seulement si une nouvelle a été choisie
+        if (photoFile) {
+          try {
+            const fd = new FormData();
+            fd.append('photo', photoFile);
+            const pr = await fetch(`${apiUrl}/api/admin/students/${editingStudent.id}/photo`, { method: 'POST', headers: authHeaders, body: fd });
+            if (pr.ok) { const { avatar_url } = await pr.json(); savedStudent = { ...savedStudent, avatar_url }; }
+          } catch (err) { console.error('Upload photo échoué:', err); }
+        }
+        setStudents(prev => prev.map(s => s.id === savedStudent.id ? { ...s, ...savedStudent } : s));
+      } else {
+        // ── MODE CRÉATION : POST + photo + parents ──
+        const email = (formData.email || '').trim() ||
+          `${(formData.registrationNumber || formData.massarCode || `el${Date.now()}`).toString().trim().replace(/\s+/g, '')}@student.edu`;
+        const password = (formData.password || '').trim() || generatePassword(formData.firstName);
 
-      // 3) Parents (Parent 1, Parent 2) — chacun comme son propre profil
-      const parentContacts = [buildParentContacts(parent1), buildParentContacts(parent2)].filter(Boolean);
-      const savedParents = [];
-      for (const c of parentContacts) {
-        try {
-          const ar = await fetch(`${apiUrl}/api/admin/students/${newStudent.id}/add-parents`, {
-            method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contacts: [c] }),
-          });
-          if (ar.ok) {
-            savedParents.push({
-              first_name: c.name.split(' ').slice(1).join(' '),
-              last_name: c.name.split(' ')[0],
-              relationship: c.relationship, email: c.email, phone: c.phone,
-              cin: c.cin, profession: c.profession, marital_status: c.maritalStatus,
+        const res = await fetch(`${apiUrl}/api/admin/students`, {
+          method: 'POST',
+          headers: { ...authHeaders, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...studentFields, email, password }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Création de l\'élève impossible');
+        }
+        savedStudent = await res.json();
+
+        if (savedStudent.password) {
+          const storedPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
+          storedPasswords[savedStudent.id] = savedStudent.password;
+          localStorage.setItem('studentPasswords', JSON.stringify(storedPasswords));
+        }
+
+        if (photoFile) {
+          try {
+            const fd = new FormData();
+            fd.append('photo', photoFile);
+            const pr = await fetch(`${apiUrl}/api/admin/students/${savedStudent.id}/photo`, { method: 'POST', headers: authHeaders, body: fd });
+            if (pr.ok) { const { avatar_url } = await pr.json(); savedStudent = { ...savedStudent, avatar_url }; }
+          } catch (err) { console.error('Upload photo échoué:', err); }
+        }
+
+        const parentContacts = [buildParentContacts(parent1), buildParentContacts(parent2)].filter(Boolean);
+        const savedParents = [];
+        for (const c of parentContacts) {
+          try {
+            const ar = await fetch(`${apiUrl}/api/admin/students/${savedStudent.id}/add-parents`, {
+              method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contacts: [c] }),
             });
-          }
-        } catch (err) { console.error('Ajout parent échoué:', err); }
+            if (ar.ok) {
+              savedParents.push({
+                first_name: c.name.split(' ').slice(1).join(' '),
+                last_name: c.name.split(' ')[0],
+                relationship: c.relationship, email: c.email, phone: c.phone,
+                cin: c.cin, profession: c.profession, marital_status: c.maritalStatus,
+              });
+            }
+          } catch (err) { console.error('Ajout parent échoué:', err); }
+        }
+        savedStudent = { ...savedStudent, parents: savedParents };
+        setStudents([...students, savedStudent]);
       }
-      newStudent = { ...newStudent, parents: savedParents };
 
-      setStudents([...students, newStudent]);
       resetForm();
       setShowForm(false);
 
-      if (thenPrint) printInscriptionFiche(newStudent);
+      if (thenPrint) printInscriptionFiche(savedStudent);
       // Rafraîchir pour récupérer parents/champs normalisés côté serveur
       fetchData();
     } catch (error) {
-      console.error('Error adding student:', error);
-      alert('Erreur : ' + (error.message || 'ajout impossible'));
+      console.error('Error saving student:', error);
+      alert('Erreur : ' + (error.message || 'enregistrement impossible'));
     } finally {
       setSubmitting(false);
     }
@@ -599,6 +711,28 @@ const StudentsPage = () => {
         <div class="h">5 — Autorisations école</div>
         <div class="b">
           <div>L'école est autorisée à utiliser la photo de l'enfant ? ${yesNo(student.photo_authorized === true ? true : student.photo_authorized === false ? false : null)}</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">6 — Documents du dossier</div>
+        <div class="b grid2">
+          ${DOC_KEYS.map(([k, lbl]) => `<div>${checkbox(!!(student.inscription_documents || {})[k])} ${lbl}</div>`).join('')}
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="h">7 — Informations supplémentaires</div>
+        <div class="b">
+          <div class="grid3">
+            <div>Nationalité : ${val(student.nationality)}</div>
+            <div>Pays : ${val(student.country)}</div>
+            <div>Date de réinscription : ${fmtDate(student.reinscription_date)}</div>
+            <div>Établissement d'origine : ${val(student.origin_school)}</div>
+            <div>Transport scolaire : ${student.has_transport ? 'Oui' : 'Non'}</div>
+            <div>Enfant du personnel : ${student.is_staff_child ? 'Oui' : 'Non'}</div>
+          </div>
+          ${student.inscription_signature ? `<div style="margin-top:6px">Signature électronique : <b>${val(student.inscription_signature)}</b></div>` : ''}
         </div>
       </div>
 
@@ -841,7 +975,7 @@ L'administration de ${schoolName}`;
               Identifiants WhatsApp
             </button>
             <button
-              onClick={() => setShowForm(!showForm)}
+              onClick={() => { resetForm(); setShowForm(true); }}
               className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               <Plus className="w-4 h-4" />
@@ -1100,14 +1234,16 @@ L'administration de ${schoolName}`;
           );
         };
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => !submitting && setShowForm(false)}>
+          <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => { if (!submitting) { resetForm(); setShowForm(false); } }}>
             <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl z-10">
                 <div className="flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-blue-600" />
-                  <h3 className="font-semibold">Fiche d'inscription — Nouvel élève · {academicYear()}</h3>
+                  {editingStudent ? <Edit2 className="w-5 h-5 text-blue-600" /> : <UserPlus className="w-5 h-5 text-blue-600" />}
+                  <h3 className="font-semibold">
+                    {editingStudent ? `Modifier l'élève — ${editingStudent.first_name} ${editingStudent.last_name}` : 'Fiche d\'inscription — Nouvel élève'} · {academicYear()}
+                  </h3>
                 </div>
-                <button onClick={() => !submitting && setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+                <button onClick={() => { if (!submitting) { resetForm(); setShowForm(false); } }} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
               </div>
 
               <form onSubmit={handleSubmit} className="p-4 space-y-5 max-h-[78vh] overflow-y-auto">
@@ -1123,7 +1259,7 @@ L'administration de ${schoolName}`;
                       </div>
                       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelect} className="hidden" />
                       <button type="button" onClick={() => photoInputRef.current?.click()}
-                        className="text-xs px-3 py-1.5 bg-teal-500 text-white rounded-lg hover:bg-teal-600">Sélectionner</button>
+                        className="text-xs px-3 py-1.5 bg-teal-500 text-white rounded-lg hover:bg-teal-600">{editingStudent ? 'Changer' : 'Sélectionner'}</button>
                     </div>
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div><Label>Nom de famille *</Label><input required className={inputCls} value={formData.lastName} onChange={setF('lastName')} /></div>
@@ -1168,14 +1304,65 @@ L'administration de ${schoolName}`;
                 {/* ── Informations parents ── */}
                 <section className="space-y-3">
                   <h4 className="text-sm font-bold text-blue-700">👪 Informations parents</h4>
-                  {parentForm('parent1', 'Parent 1')}
-                  {parentForm('parent2', 'Parent 2')}
+
+                  {editingStudent ? (
+                    /* Édition : parents liés en cartes + Détacher + Rattacher */
+                    <div className="space-y-2">
+                      {(editingStudent.parents || []).length === 0 && (
+                        <p className="text-sm text-gray-400">Aucun parent lié.</p>
+                      )}
+                      {(editingStudent.parents || []).map((p) => (
+                        <div key={p.id} className="flex items-center justify-between border rounded-lg p-3 bg-amber-50/40">
+                          <div className="text-sm">
+                            <p className="font-medium">{p.last_name} {p.first_name} {p.relationship ? <span className="text-gray-400">· {p.relationship}</span> : null}</p>
+                            <p className="text-xs text-gray-500">{[p.phone, p.email, p.cin && `CIN ${p.cin}`].filter(Boolean).join(' · ') || '—'}</p>
+                          </div>
+                          <button type="button" onClick={() => detachParent(editingStudent.id, p.id)}
+                            className="text-xs px-3 py-1.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50">Détacher</button>
+                        </div>
+                      ))}
+
+                      {attachParent.open ? (
+                        <div className="border rounded-lg p-3 bg-blue-50/40 space-y-2">
+                          <p className="text-sm font-semibold text-gray-700">Rattacher un parent</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input className={inputCls} placeholder="Nom" value={attachParent.lastName} onChange={(e) => setAttachParent(a => ({ ...a, lastName: e.target.value }))} />
+                            <input className={inputCls} placeholder="Prénom" value={attachParent.firstName} onChange={(e) => setAttachParent(a => ({ ...a, firstName: e.target.value }))} />
+                            <input className={inputCls} placeholder="Téléphone (06/07…)" value={attachParent.phone} onChange={(e) => setAttachParent(a => ({ ...a, phone: e.target.value }))} />
+                            <input className={inputCls} placeholder="Email" value={attachParent.email} onChange={(e) => setAttachParent(a => ({ ...a, email: e.target.value }))} />
+                            <input className={inputCls} placeholder="CIN" value={attachParent.cin} onChange={(e) => setAttachParent(a => ({ ...a, cin: e.target.value }))} />
+                            <input className={inputCls} placeholder="Profession" value={attachParent.profession} onChange={(e) => setAttachParent(a => ({ ...a, profession: e.target.value }))} />
+                            <select className={inputCls} value={attachParent.relationship} onChange={(e) => setAttachParent(a => ({ ...a, relationship: e.target.value }))}>
+                              <option value="pere">Père</option><option value="mere">Mère</option><option value="tuteur">Tuteur</option>
+                            </select>
+                            <input className={inputCls} placeholder="Situation familiale" value={attachParent.maritalStatus} onChange={(e) => setAttachParent(a => ({ ...a, maritalStatus: e.target.value }))} />
+                          </div>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={attachParentToStudent} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">Rattacher</button>
+                            <button type="button" onClick={() => setAttachParent(a => ({ ...a, open: false }))} className="px-3 py-1.5 bg-gray-200 rounded-lg text-sm">Annuler</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" onClick={() => setAttachParent(a => ({ ...a, open: true }))}
+                          className="flex items-center gap-1.5 text-sm px-3 py-1.5 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50">
+                          <UserPlus className="w-4 h-4" /> Rattacher un parent
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    /* Création : saisie inline Parent 1 / Parent 2 */
+                    <>
+                      {parentForm('parent1', 'Parent 1')}
+                      {parentForm('parent2', 'Parent 2')}
+                      <p className="text-xs text-gray-500">Un parent n'est enregistré que s'il a un <b>nom + un téléphone</b>.</p>
+                    </>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div><Label>Téléphone domicile</Label><input className={inputCls} value={formData.homePhone} onChange={setF('homePhone')} /></div>
                     <div><Label>Adresse</Label><input className={inputCls} value={formData.homeAddress} onChange={setF('homeAddress')} /></div>
                     <div><Label>Quartier (الحي)</Label><input className={inputCls} value={formData.quartier} onChange={setF('quartier')} /></div>
                   </div>
-                  <p className="text-xs text-gray-500">Un parent n'est enregistré que s'il a un <b>nom + un téléphone</b>.</p>
                 </section>
 
                 {/* ── Scolarité antérieure ── */}
@@ -1185,6 +1372,46 @@ L'administration de ${schoolName}`;
                     <div><Label>Établissement fréquenté l'an dernier</Label><input className={inputCls} value={formData.previousSchool} onChange={setF('previousSchool')} /></div>
                     <div><Label>Classe</Label><input className={inputCls} value={formData.previousClass} onChange={setF('previousClass')} /></div>
                   </div>
+                </section>
+
+                {/* ── Informations supplémentaires ── */}
+                <section className="space-y-2">
+                  <h4 className="text-sm font-bold text-blue-700">ℹ️ Informations supplémentaires</h4>
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                    {[
+                      ['isStaffChild', 'Enfant du personnel'],
+                      ['isPartnerGroup', 'Groupe partenaire'],
+                      ['isExpat', 'Expatrié'],
+                      ['hadAccompaniment', 'Déjà accompagné'],
+                      ['hasTransport', 'Transport scolaire'],
+                    ].map(([key, lbl]) => (
+                      <label key={key} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={!!formData[key]} onChange={(e) => setFormData(f => ({ ...f, [key]: e.target.checked }))} />
+                        {lbl}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <div><Label>Nationalité</Label><input className={inputCls} value={formData.nationality} onChange={setF('nationality')} /></div>
+                    <div><Label>Pays</Label><input className={inputCls} value={formData.country} onChange={setF('country')} placeholder="Morocco" /></div>
+                    <div><Label>Date de réinscription</Label><input type="date" className={inputCls} value={formData.reinscriptionDate} onChange={setF('reinscriptionDate')} /></div>
+                    <div><Label>Établissement d'origine</Label><input className={inputCls} value={formData.originSchool} onChange={setF('originSchool')} /></div>
+                  </div>
+                </section>
+
+                {/* ── Documents inscriptions ── */}
+                <section className="space-y-2">
+                  <h4 className="text-sm font-bold text-blue-700">📄 Documents du dossier</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+                    {DOC_KEYS.map(([key, lbl]) => (
+                      <label key={key} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={!!formData.inscriptionDocuments?.[key]}
+                          onChange={(e) => setFormData(f => ({ ...f, inscriptionDocuments: { ...f.inscriptionDocuments, [key]: e.target.checked } }))} />
+                        {lbl}
+                      </label>
+                    ))}
+                  </div>
+                  <div><Label>Signature électronique</Label><input className={inputCls} value={formData.inscriptionSignature} onChange={setF('inscriptionSignature')} placeholder="Nom du signataire" /></div>
                 </section>
 
                 {/* ── Médical & autorisations ── */}
@@ -1205,24 +1432,26 @@ L'administration de ${schoolName}`;
                   )}
                 </section>
 
-                {/* ── Identifiants (optionnel) ── */}
-                <section className="space-y-2">
-                  <h4 className="text-sm font-bold text-blue-700">🔑 Identifiants d'accès (auto-générés si vides)</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div><Label>Email</Label><input type="email" className={inputCls} value={formData.email} onChange={setF('email')} placeholder="auto" /></div>
-                    <div><Label>Mot de passe</Label><input className={inputCls} value={formData.password} onChange={setF('password')} placeholder="auto (Prénom+année)" /></div>
-                  </div>
-                </section>
+                {/* ── Identifiants (création uniquement) ── */}
+                {!editingStudent && (
+                  <section className="space-y-2">
+                    <h4 className="text-sm font-bold text-blue-700">🔑 Identifiants d'accès (auto-générés si vides)</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div><Label>Email</Label><input type="email" className={inputCls} value={formData.email} onChange={setF('email')} placeholder="auto" /></div>
+                      <div><Label>Mot de passe</Label><input className={inputCls} value={formData.password} onChange={setF('password')} placeholder="auto (Prénom+année)" /></div>
+                    </div>
+                  </section>
+                )}
 
                 <div className="flex flex-wrap gap-2 pt-2 border-t">
                   <button type="submit" disabled={submitting} className="flex-1 min-w-[140px] px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-                    {submitting ? 'Enregistrement…' : 'Valider'}
+                    {submitting ? 'Enregistrement…' : (editingStudent ? 'Enregistrer' : 'Valider')}
                   </button>
                   <button type="button" disabled={submitting} onClick={(e) => handleSubmit(e, { thenPrint: true })}
                     className="flex-1 min-w-[180px] px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                    <FileText className="w-4 h-4" /> Valider + télécharger la fiche
+                    <FileText className="w-4 h-4" /> {editingStudent ? 'Enregistrer + fiche' : 'Valider + télécharger la fiche'}
                   </button>
-                  <button type="button" disabled={submitting} onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
+                  <button type="button" disabled={submitting} onClick={() => { resetForm(); setShowForm(false); }} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
                     Annuler
                   </button>
                 </div>
@@ -1329,6 +1558,15 @@ L'administration de ${schoolName}`;
               {activeStudent.date_of_birth && <FieldRow label="Naissance" value={`${new Date(activeStudent.date_of_birth).toLocaleDateString('fr-FR')}${activeStudent.birth_place ? ` · ${activeStudent.birth_place}` : ''}`} />}
               <FieldRow label="Email" value={activeStudent.email} />
             </div>
+
+            {isAdmin && (
+              <button
+                onClick={() => openEdit(activeStudent)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                <Edit2 className="w-4 h-4" /> Modifier l'élève
+              </button>
+            )}
 
             <button
               onClick={() => printInscriptionFiche(activeStudent)}

@@ -426,7 +426,7 @@ router.get('/students', async (req, res) => {
       const chunk = studentIds.slice(i, i + CHUNK);
       const { data: links, error: linksError } = await supabaseAdmin
         .from('parent_students')
-        .select('student_id, relationship, parent:profiles!parent_students_parent_id_fkey(id, first_name, last_name, email, phone, cin, profession, marital_status, address)')
+        .select('student_id, relationship, is_emergency_contact, is_pickup_authorized, parent:profiles!parent_students_parent_id_fkey(id, first_name, last_name, email, phone, cin, profession, marital_status, address, first_name_ar, last_name_ar, professional_phone, professional_address, matricule, is_vip, is_payment_responsible)')
         .in('student_id', chunk);
       if (linksError) throw linksError;
       (links || []).forEach(l => {
@@ -443,6 +443,15 @@ router.get('/students', async (req, res) => {
           profession: l.parent.profession || null,
           marital_status: l.parent.marital_status || null,
           address: l.parent.address || null,
+          first_name_ar: l.parent.first_name_ar || null,
+          last_name_ar: l.parent.last_name_ar || null,
+          professional_phone: l.parent.professional_phone || null,
+          professional_address: l.parent.professional_address || null,
+          matricule: l.parent.matricule || null,
+          is_vip: l.parent.is_vip ?? null,
+          is_payment_responsible: l.parent.is_payment_responsible ?? null,
+          is_emergency_contact: l.is_emergency_contact ?? null,
+          is_pickup_authorized: l.is_pickup_authorized ?? null,
         });
       });
     }
@@ -1011,6 +1020,15 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
         cin: c.cin || null, profession: c.profession || null,
         maritalStatus: c.maritalStatus || null, email: c.email || null,
         address: c.address || null,
+        // v2 — contact parent enrichi + flags du lien
+        firstNameAr: c.firstNameAr || null, lastNameAr: c.lastNameAr || null,
+        professionalPhone: c.professionalPhone || null,
+        professionalAddress: c.professionalAddress || null,
+        matricule: c.matricule || null,
+        isVip: typeof c.isVip === 'boolean' ? c.isVip : null,
+        isPaymentResponsible: typeof c.isPaymentResponsible === 'boolean' ? c.isPaymentResponsible : null,
+        isEmergencyContact: typeof c.isEmergencyContact === 'boolean' ? c.isEmergencyContact : null,
+        isPickupAuthorized: typeof c.isPickupAuthorized === 'boolean' ? c.isPickupAuthorized : null,
       });
     }
     if (contacts.length === 0) {
@@ -1044,14 +1062,22 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
     }
 
     // Enrichir le profil parent avec les infos de la fiche d'inscription
-    // (CIN, profession, situation familiale, adresse) — sans écraser par du vide.
+    // (CIN, profession, situation familiale, adresse, tél pro, matricule, VIP…)
+    // — sans écraser par du vide.
     const parentExtra = {
       cin: primary.cin, profession: primary.profession,
       marital_status: primary.maritalStatus, address: primary.address,
+      first_name_ar: primary.firstNameAr, last_name_ar: primary.lastNameAr,
+      professional_phone: primary.professionalPhone,
+      professional_address: primary.professionalAddress,
+      matricule: primary.matricule,
+      is_vip: primary.isVip, is_payment_responsible: primary.isPaymentResponsible,
     };
     const parentUpdate = {};
     for (const [k, v] of Object.entries(parentExtra)) {
-      if (v !== undefined && v !== null && String(v).trim() !== '') parentUpdate[k] = v;
+      if (v === null || v === undefined) continue;
+      if (typeof v === 'boolean') { parentUpdate[k] = v; continue; }
+      if (String(v).trim() !== '') parentUpdate[k] = v;
     }
     if (Object.keys(parentUpdate).length > 0) {
       const { error: parentUpdErr } = await supabaseAdmin
@@ -1075,11 +1101,14 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
       if (upsertContactError) throw upsertContactError;
     }
 
-    // Lien parent ↔ élève
+    // Lien parent ↔ élève (+ rôles : contact d'urgence, autorisé à récupérer)
+    const linkRow = { parent_id: parentId, student_id: studentId, relationship: primary.relationship || null };
+    if (typeof primary.isEmergencyContact === 'boolean') linkRow.is_emergency_contact = primary.isEmergencyContact;
+    if (typeof primary.isPickupAuthorized === 'boolean') linkRow.is_pickup_authorized = primary.isPickupAuthorized;
     const { error: linkError } = await supabaseAdmin
       .from('parent_students')
       .upsert(
-        { parent_id: parentId, student_id: studentId, relationship: primary.relationship || null },
+        linkRow,
         { onConflict: 'parent_id,student_id' }
       );
     if (linkError) throw linkError;
@@ -2210,18 +2239,44 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
   }
 });
 
+// Mappe les champs « fiche d'inscription » d'un body (camelCase) vers les
+// colonnes profiles (snake_case). Partagé par POST (création) et PUT (édition).
+// Ne retourne que les clés réellement fournies (≠ undefined/null/'').
+const mapStudentOptionalFields = (body = {}) => {
+  const b = body;
+  const bool = (v) => (typeof v === 'boolean' ? v : undefined);
+  const optional = {
+    first_name_ar: b.firstNameAr, last_name_ar: b.lastNameAr,
+    gender: b.gender, phone: b.phone, cin: b.cin,
+    date_of_birth: b.dateOfBirth, birth_place: b.birthPlace,
+    level: b.level, registration_number: b.registrationNumber, entry_date: b.entryDate,
+    dossier_status: b.dossierStatus, massar_code: b.massarCode,
+    previous_school: b.previousSchool, previous_class: b.previousClass,
+    has_health_issue: bool(b.hasHealthIssue), health_notes: b.healthNotes,
+    photo_authorized: bool(b.photoAuthorized),
+    home_address: b.homeAddress, quartier: b.quartier, home_phone: b.homePhone,
+    // v2 — informations supplémentaires
+    nationality: b.nationality, country: b.country,
+    is_staff_child: bool(b.isStaffChild), is_partner_group: bool(b.isPartnerGroup),
+    is_expat: bool(b.isExpat), had_accompaniment: bool(b.hadAccompaniment),
+    has_transport: bool(b.hasTransport),
+    reinscription_date: b.reinscriptionDate, origin_school: b.originSchool,
+    // v2 — documents du dossier + signature
+    inscription_documents: b.inscriptionDocuments,
+    inscription_signature: b.inscriptionSignature,
+  };
+  const out = {};
+  for (const [k, v] of Object.entries(optional)) {
+    if (v !== undefined && v !== null && v !== '') out[k] = v;
+  }
+  return out;
+};
+
 // Créer un élève
 router.post('/students', async (req, res) => {
   try {
     const {
       email, password, firstName, lastName, classId,
-      // Champs « fiche d'inscription » (tous optionnels)
-      firstNameAr, lastNameAr, gender, phone, cin,
-      dateOfBirth, birthPlace, level, registrationNumber, entryDate,
-      dossierStatus, massarCode,
-      previousSchool, previousClass,
-      hasHealthIssue, healthNotes, photoAuthorized,
-      homeAddress, quartier, homePhone,
     } = req.body;
 
     // Créer l'utilisateur dans Auth
@@ -2243,22 +2298,8 @@ router.post('/students', async (req, res) => {
       role: 'student',
       class_id: classId || null,
       school_id: getSchoolId(req),
+      ...mapStudentOptionalFields(req.body),
     };
-    const optional = {
-      first_name_ar: firstNameAr, last_name_ar: lastNameAr,
-      gender, phone, cin,
-      date_of_birth: dateOfBirth, birth_place: birthPlace,
-      level, registration_number: registrationNumber, entry_date: entryDate,
-      dossier_status: dossierStatus, massar_code: massarCode,
-      previous_school: previousSchool, previous_class: previousClass,
-      has_health_issue: typeof hasHealthIssue === 'boolean' ? hasHealthIssue : undefined,
-      health_notes: healthNotes,
-      photo_authorized: typeof photoAuthorized === 'boolean' ? photoAuthorized : undefined,
-      home_address: homeAddress, quartier, home_phone: homePhone,
-    };
-    for (const [k, v] of Object.entries(optional)) {
-      if (v !== undefined && v !== null && v !== '') profileData[k] = v;
-    }
 
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
@@ -2271,6 +2312,72 @@ router.post('/students', async (req, res) => {
     res.status(201).json({ ...profile, password });
   } catch (error) {
     console.error('Erreur:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Modifier un élève (fiche d'inscription) — édition des champs profil
+router.put('/students/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Vérifier l'existence + périmètre école
+    let check = supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .eq('role', 'student');
+    check = applySchoolFilter(check, req);
+    const { data: existing, error: checkErr } = await check.single();
+    if (checkErr || !existing) return res.status(404).json({ error: 'Élève introuvable' });
+
+    const updateData = mapStudentOptionalFields(req.body);
+    // Champs de base éditables (hors auth)
+    if (typeof req.body.firstName === 'string' && req.body.firstName.trim()) updateData.first_name = req.body.firstName.trim();
+    if (typeof req.body.lastName === 'string' && req.body.lastName.trim()) updateData.last_name = req.body.lastName.trim();
+    if (req.body.classId !== undefined) updateData.class_id = req.body.classId || null;
+    updateData.updated_at = new Date().toISOString();
+
+    const { data: profile, error: updateErr } = await supabaseAdmin
+      .from('profiles')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (updateErr) throw updateErr;
+
+    res.json(profile);
+  } catch (error) {
+    console.error('Erreur PUT /students/:id:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Détacher un parent d'un élève (supprime le lien, garde le profil parent)
+router.delete('/students/:studentId/parents/:parentId', async (req, res) => {
+  try {
+    const { studentId, parentId } = req.params;
+
+    // Vérifier le périmètre école de l'élève
+    let check = supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', studentId)
+      .eq('role', 'student');
+    check = applySchoolFilter(check, req);
+    const { data: student, error: checkErr } = await check.single();
+    if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
+
+    const { error } = await supabaseAdmin
+      .from('parent_students')
+      .delete()
+      .eq('student_id', studentId)
+      .eq('parent_id', parentId);
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur DELETE detach parent:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
