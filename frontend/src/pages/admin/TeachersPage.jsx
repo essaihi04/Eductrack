@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send, Edit2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
-import { Avatar, StatusPill, toneFor } from '../../components/directory/ui';
+import { Avatar, StatusPill, toneFor, TeacherCard, DetailDrawer } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
@@ -1007,43 +1007,34 @@ const TeachersPage = () => {
                   return true;
                 })
                 .map((teacher) => (
-                <div key={teacher.id} className={`border rounded-lg overflow-hidden bg-card self-start ${expandedTeacher === teacher.id ? 'lg:col-span-2' : ''}`}>
-                  <div className="flex items-center gap-3 p-4 bg-muted/50 hover:bg-muted cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
-                    <input
-                      type="checkbox"
-                      checked={selectedTeachers.has(teacher.id)}
-                      onChange={() => toggleTeacherSelection(teacher.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-4 h-4 rounded text-blue-600 cursor-pointer"
-                    />
-                    <Avatar name={`${teacher.first_name} ${teacher.last_name}`} src={teacher.avatar_url} size="md" />
-                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
-                      <p className="font-medium truncate">{teacher.first_name} {teacher.last_name}</p>
-                      <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                        {teacherSubjects[teacher.id]?.[0] && (
-                          <StatusPill tone={toneFor(`${teacher.first_name} ${teacher.last_name}`)}>
-                            {teacherSubjects[teacher.id][0].subjects?.name || teacherSubjects[teacher.id][0].name || 'Matière'}
-                            {teacherSubjects[teacher.id].length > 1 ? ` +${teacherSubjects[teacher.id].length - 1}` : ''}
-                          </StatusPill>
-                        )}
-                        <span className="text-xs text-muted-foreground truncate">{teacher.email}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => setExpandedTeacher(expandedTeacher === teacher.id ? null : teacher.id)}>
-                      <span className="text-xs text-muted-foreground hidden sm:inline">
-                        {teacherSubjects[teacher.id]?.length || 0} matière(s) · {teacherClasses[teacher.id]?.length || 0} classe(s)
-                        {teacher.weekly_hours ? ` · ${teacher.weekly_hours}h/sem` : ''}
-                      </span>
-                      {expandedTeacher === teacher.id ? (
-                        <ChevronUp className="w-5 h-5" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5" />
-                      )}
-                    </div>
-                  </div>
-
-                  {expandedTeacher === teacher.id && (
-                    <div className="p-4 border-t space-y-3">
+                <div key={teacher.id} className="contents">
+                  <TeacherCard
+                    name={`${teacher.first_name} ${teacher.last_name}`}
+                    photo={teacher.avatar_url}
+                    subject={teacherSubjects[teacher.id]?.[0]
+                      ? ((teacherSubjects[teacher.id][0].subjects?.name || teacherSubjects[teacher.id][0].name || 'Matière')
+                        + (teacherSubjects[teacher.id].length > 1 ? ` +${teacherSubjects[teacher.id].length - 1}` : ''))
+                      : null}
+                    classesCount={teacherClasses[teacher.id]?.length}
+                    hours={teacher.weekly_hours || null}
+                    onClick={() => setExpandedTeacher(teacher.id)}
+                    menu={
+                      <input
+                        type="checkbox"
+                        checked={selectedTeachers.has(teacher.id)}
+                        onChange={() => toggleTeacherSelection(teacher.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-4 h-4 rounded text-blue-600 cursor-pointer"
+                      />
+                    }
+                  />
+                  <DetailDrawer
+                    open={expandedTeacher === teacher.id}
+                    onClose={() => setExpandedTeacher(null)}
+                    title={`${teacher.first_name} ${teacher.last_name}`}
+                    width={440}
+                  >
+                    <div className="space-y-3">
                       {/* Informations du professeur */}
                       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-3">
@@ -1195,7 +1186,7 @@ const TeachersPage = () => {
                         </button>
                       </div>
                     </div>
-                  )}
+                  </DetailDrawer>
                 </div>
               ))
             )}

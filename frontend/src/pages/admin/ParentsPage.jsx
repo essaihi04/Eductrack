@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronUp, Link2, Unlink, Star, FileSpreadsheet, Download, Edit2, Key, Send, Copy, CheckCheck } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
-import { Avatar, ChannelBadge } from '../../components/directory/ui';
+import { Avatar, ChannelBadge, ParentCard, DetailDrawer } from '../../components/directory/ui';
 import * as XLSX from 'xlsx';
 
 // Libellés lisibles des filières (lycée). Sert au filtre « Filière » de la page Parents.
@@ -1493,13 +1493,14 @@ const ParentsPage = () => {
             const primaryContact = contactsList.find(c => c.is_primary);
 
             return (
-              <Card key={parent.id} className={`overflow-hidden self-start ${isExpanded ? 'lg:col-span-2' : ''}`}>
-                {/* Parent Row */}
-                <div
-                  className="flex items-center gap-4 p-4 cursor-pointer hover:bg-accent/50 transition-colors"
-                  onClick={() => setExpandedParent(isExpanded ? null : parent.id)}
-                >
-                  {bulkMode && (
+              <div key={parent.id} className="contents">
+                <ParentCard
+                  name={`${parent.first_name} ${parent.last_name}`}
+                  photo={parent.avatar_url}
+                  children={childrenList.length > 0 ? `${childrenList.length} enfant(s)` : null}
+                  channel={primaryContact ? (primaryContact.channel === 'whatsapp' ? 'whatsapp' : 'push') : null}
+                  onClick={() => setExpandedParent(parent.id)}
+                  menu={bulkMode ? (
                     <input
                       type="checkbox"
                       checked={selectedParents.has(parent.id)}
@@ -1507,13 +1508,16 @@ const ParentsPage = () => {
                       onClick={(e) => e.stopPropagation()}
                       className="w-4 h-4 shrink-0"
                     />
-                  )}
-                  <Avatar name={`${parent.first_name} ${parent.last_name}`} src={parent.avatar_url} size="md" />
-
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">
-                      {parent.first_name} {parent.last_name}
-                    </p>
+                  ) : null}
+                />
+                <DetailDrawer
+                  open={isExpanded}
+                  onClose={() => { setExpandedParent(null); setEditingParent(null); }}
+                  title={`${parent.first_name} ${parent.last_name}`}
+                  width={460}
+                >
+                  <div className="space-y-4">
+                    {/* Coordonnées + statut */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
                       {primaryContact && (
                         <span className="flex items-center gap-1">
@@ -1526,47 +1530,36 @@ const ParentsPage = () => {
                       ) : (
                         <span className="text-xs text-orange-600">⚠️ Pas de login</span>
                       )}
-                      {childrenList.length > 0 && (
-                        <span>{childrenList.length} enfant(s)</span>
-                      )}
                       {primaryContact && (
                         <ChannelBadge channel={primaryContact.channel === 'whatsapp' ? 'whatsapp' : 'push'} />
                       )}
-                      {parent.classes?.length > 0 && (
-                        <span className="flex gap-1">
-                          {parent.classes.map(c => (
-                            <span key={c.name} className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{c.name}</span>
-                          ))}
-                        </span>
-                      )}
+                      {parent.classes?.length > 0 && parent.classes.map(c => (
+                        <span key={c.name} className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{c.name}</span>
+                      ))}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
-                    <button
-                      onClick={() => handleCreateCredentials(parent, false)}
-                      disabled={generatingCreds === parent.id}
-                      className="p-1.5 text-purple-600 hover:bg-purple-100 rounded transition-colors disabled:opacity-50"
-                      title="Créer / Réinitialiser le login"
-                    >
-                      <Key className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => openEditParent(parent)}
-                      className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                      title="Modifier"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteParent(parent.id, `${parent.first_name} ${parent.last_name}`)}
-                      className="p-1.5 text-red-500 hover:bg-red-100 rounded transition-colors"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                    {isExpanded ? <ChevronUp className="w-5 h-5 text-muted-foreground" /> : <ChevronDown className="w-5 h-5 text-muted-foreground" />}
-                  </div>
-                </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 flex-wrap">
+                      <button
+                        onClick={() => handleCreateCredentials(parent, false)}
+                        disabled={generatingCreds === parent.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-50 disabled:opacity-50"
+                      >
+                        <Key className="w-4 h-4" /> Login
+                      </button>
+                      <button
+                        onClick={() => openEditParent(parent)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50"
+                      >
+                        <Edit2 className="w-4 h-4" /> Modifier
+                      </button>
+                      <button
+                        onClick={() => handleDeleteParent(parent.id, `${parent.first_name} ${parent.last_name}`)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-lg hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" /> Supprimer
+                      </button>
+                    </div>
 
                 {/* Edit Form */}
                 {editingParent === parent.id && (
@@ -1910,7 +1903,9 @@ const ParentsPage = () => {
                     </div>
                   </div>
                 )}
-              </Card>
+                  </div>
+                </DetailDrawer>
+              </div>
             );
           })}
         </div>
