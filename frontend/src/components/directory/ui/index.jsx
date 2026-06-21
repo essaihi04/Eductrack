@@ -45,10 +45,48 @@ function initials(name = '') {
     .toUpperCase();
 }
 
-// Avatar : photo en priorité si fournie, repli sur initiales colorées
-// (ton stable par nom) si pas de photo OU si l'URL est cassée / introuvable.
+// Avatar illustré par défaut (pas de photo) : garçon, fille ou neutre selon le
+// genre. Dessin SVG simple (tête + épaules) avec fond dégradé adapté.
+export function DefaultAvatarSvg({ gender }) {
+  const g = String(gender || '').toUpperCase();
+  if (g === 'M') {
+    return (
+      <svg viewBox="0 0 100 100" className="w-full h-full" aria-hidden="true">
+        <defs><linearGradient id="avb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#bae6fd"/><stop offset="1" stopColor="#7dd3fc"/></linearGradient></defs>
+        <rect width="100" height="100" fill="url(#avb)"/>
+        <path d="M18 100c0-19 14-30 32-30s32 11 32 30z" fill="#2563eb"/>
+        <circle cx="50" cy="44" r="20" fill="#f4c9a4"/>
+        <path d="M30 42c0-14 9-22 20-22s20 8 20 22c0-6-4-9-8-9-2-3-6-4-12-4s-12 3-12 9c-4 0-8 2-8 4z" fill="#4b3621"/>
+      </svg>
+    );
+  }
+  if (g === 'F') {
+    return (
+      <svg viewBox="0 0 100 100" className="w-full h-full" aria-hidden="true">
+        <defs><linearGradient id="avg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#fbcfe8"/><stop offset="1" stopColor="#f9a8d4"/></linearGradient></defs>
+        <rect width="100" height="100" fill="url(#avg)"/>
+        <path d="M18 100c0-19 14-30 32-30s32 11 32 30z" fill="#db2777"/>
+        <path d="M26 50c0-22 8-32 24-32s24 10 24 32c0 8-3 16-3 16l-6-20c-2 6-26 6-30 0l-6 20s-3-8-3-16z" fill="#5b3a1a"/>
+        <circle cx="50" cy="46" r="19" fill="#f4c9a4"/>
+        <path d="M31 48c0-16 7-26 19-26s19 10 19 26c0-10-6-14-19-14s-19 4-19 14z" fill="#5b3a1a"/>
+      </svg>
+    );
+  }
+  // Neutre / inconnu
+  return (
+    <svg viewBox="0 0 100 100" className="w-full h-full" aria-hidden="true">
+      <defs><linearGradient id="avn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#e5e7eb"/><stop offset="1" stopColor="#cbd5e1"/></linearGradient></defs>
+      <rect width="100" height="100" fill="url(#avn)"/>
+      <path d="M20 100c0-18 13-29 30-29s30 11 30 29z" fill="#94a3b8"/>
+      <circle cx="50" cy="42" r="19" fill="#cbd5e1"/>
+    </svg>
+  );
+}
+
+// Avatar : photo en priorité si fournie, sinon avatar illustré selon le genre
+// (garçon / fille / neutre) si pas de photo OU si l'URL est cassée / introuvable.
 const AV_SIZES = { sm: 'w-8 h-8 text-xs', md: 'w-11 h-11 text-sm', lg: 'w-16 h-16 text-lg', xl: 'w-20 h-20 text-2xl', '2xl': 'w-24 h-24 text-3xl' };
-export function Avatar({ name = '', src, tone, size = 'md', className = '' }) {
+export function Avatar({ name = '', src, tone, size = 'md', gender, className = '' }) {
   const [broken, setBroken] = useState(false);
   const t = TONES[tone] || TONES[toneFor(name)];
   const showPhoto = src && !broken;
@@ -61,6 +99,19 @@ export function Avatar({ name = '', src, tone, size = 'md', className = '' }) {
         className={`${AV_SIZES[size]} rounded-full object-cover bg-gray-100 flex-shrink-0 ${className}`}
         loading="lazy"
       />
+    );
+  }
+  // Pas de photo : avatar illustré (garçon/fille/neutre) si un genre est fourni
+  // — sinon repli sur les initiales colorées (enseignants, parents…).
+  if (gender !== undefined && gender !== null) {
+    return (
+      <div
+        className={`${AV_SIZES[size]} rounded-full overflow-hidden flex-shrink-0 bg-gray-100 ${className}`}
+        title={name || undefined}
+        aria-hidden="true"
+      >
+        <DefaultAvatarSvg gender={gender} />
+      </div>
     );
   }
   return (
@@ -333,7 +384,7 @@ export function ClassCard({ name, section, subtitle, count, boys, girls, actions
 // pastel doux (pas de bandeau qui masque la photo). Nom coloré + pastille de
 // statut. Photo toujours pleinement visible. Effet de survol (élévation + zoom).
 export function StudentCard({
-  name, className: classLabel, photo, status, selected, selectable, onToggleSelect, onClick, menu,
+  name, className: classLabel, photo, gender, status, selected, selectable, onToggleSelect, onClick, menu,
 }) {
   const accent = toneFor(name);
   const t = TONES[accent] || TONES.gray;
@@ -362,7 +413,7 @@ export function StudentCard({
       {/* Photo en avant-plan, anneau dégradé (toujours visible) */}
       <div className={`relative z-10 rounded-full p-[3px] bg-gradient-to-br ${t.grad} shadow-md transition-transform duration-200 group-hover:scale-105`}>
         <div className="rounded-full ring-2 ring-white">
-          <Avatar name={name} src={photo} tone={accent} size="2xl" />
+          <Avatar name={name} src={photo} tone={accent} size="2xl" gender={gender} />
         </div>
       </div>
 
@@ -375,7 +426,7 @@ export function StudentCard({
 
 // Ligne Élève (vue liste) : variante dense de la carte.
 export function StudentRow({
-  name, className: classLabel, sub, photo, status, right, selected, selectable, onToggleSelect, onClick,
+  name, className: classLabel, sub, photo, gender, status, right, selected, selectable, onToggleSelect, onClick,
 }) {
   return (
     <div
@@ -390,7 +441,7 @@ export function StudentRow({
           onClick={(e) => e.stopPropagation()}
           className="w-4 h-4 accent-blue-600 flex-shrink-0" aria-label="Sélectionner" />
       )}
-      <Avatar name={name} src={photo} size="sm" />
+      <Avatar name={name} src={photo} size="sm" gender={gender} />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-foreground truncate">{name}</div>
         <div className="text-xs text-muted-foreground truncate">{[classLabel, sub].filter(Boolean).join(' · ')}</div>

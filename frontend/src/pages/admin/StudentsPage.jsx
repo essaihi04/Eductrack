@@ -1491,6 +1491,7 @@ L'administration de ${schoolName}`;
                             key={student.id}
                             name={`${student.first_name} ${student.last_name}`}
                             photo={student.avatar_url}
+                            gender={student.gender || ''}
                             classLabel={classLabel(student)}
                             status={parentStatus(student)}
                             selectable={isAdmin}
@@ -1510,6 +1511,7 @@ L'administration de ${schoolName}`;
                           key={student.id}
                           name={`${student.first_name} ${student.last_name}`}
                           photo={student.avatar_url}
+                          gender={student.gender || ''}
                           classLabel={classLabel(student)}
                           sub={student.email}
                           status={parentStatus(student)}
@@ -1537,7 +1539,7 @@ L'administration de ${schoolName}`;
         {activeStudent && (
           <div className="space-y-4">
             <div className="flex flex-col items-center text-center gap-2">
-              <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`} src={activeStudent.avatar_url} size="lg" />
+              <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`} src={activeStudent.avatar_url} size="lg" gender={activeStudent.gender || ''} />
               <div className="font-medium">{activeStudent.first_name} {activeStudent.last_name}</div>
               {activeStudent.parents?.length > 0 ? (
                 <StatusPill tone="green" icon={Users}>{activeStudent.parents.length} parent{activeStudent.parents.length > 1 ? 's' : ''}</StatusPill>
