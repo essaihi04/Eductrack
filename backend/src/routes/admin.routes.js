@@ -2269,6 +2269,11 @@ const mapStudentOptionalFields = (body = {}) => {
   for (const [k, v] of Object.entries(optional)) {
     if (v !== undefined && v !== null && v !== '') out[k] = v;
   }
+  // Localisation domicile (utilisée par le transport ; aussi captée via le
+  // chatbot WhatsApp). On accepte une saisie manuelle côté admin.
+  const lat = Number(b.homeLat), lng = Number(b.homeLng);
+  if (b.homeLat !== undefined && b.homeLat !== null && b.homeLat !== '' && Number.isFinite(lat)) out.home_lat = lat;
+  if (b.homeLng !== undefined && b.homeLng !== null && b.homeLng !== '' && Number.isFinite(lng)) out.home_lng = lng;
   return out;
 };
 

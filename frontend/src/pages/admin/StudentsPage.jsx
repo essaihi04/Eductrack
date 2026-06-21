@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -24,7 +24,8 @@ const StudentsPage = () => {
     level: '',
     searchName: '',
     searchEmail: '',
-    parentStatus: '' // '', 'with', 'without'
+    parentStatus: '', // '', 'with', 'without'
+    locationStatus: '' // '', 'with', 'without'
   });
   // Modale d'ajout de parents (file d'attente pour traiter plusieurs élèves)
   const [parentModalQueue, setParentModalQueue] = useState([]);
@@ -56,8 +57,8 @@ const StudentsPage = () => {
     hasHealthIssue: false, healthNotes: '',
     // Autorisations
     photoAuthorized: true,
-    // Domicile
-    homeAddress: '', quartier: '', homePhone: '',
+    // Domicile + localisation (transport / chatbot WhatsApp)
+    homeAddress: '', quartier: '', homePhone: '', homeLat: '', homeLng: '',
     // v2 — Informations supplémentaires
     nationality: '', country: '', reinscriptionDate: '', originSchool: '',
     isStaffChild: false, isPartnerGroup: false, isExpat: false,
@@ -82,6 +83,10 @@ const StudentsPage = () => {
   const [sendingCredentials, setSendingCredentials] = useState(false);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+  // L'élève a-t-il une localisation domicile (captée via le chatbot WhatsApp
+  // ou saisie à la main) ? Utilisée par le transport.
+  const hasLocation = (s) => s?.home_lat != null && s?.home_lng != null;
 
   const togglePasswordVisibility = (studentId) => {
     setVisiblePasswords(prev => ({
@@ -219,6 +224,11 @@ const StudentsPage = () => {
       // Filtre par statut parent
       if (filters.parentStatus === 'without' && (student.parents?.length > 0)) return false;
       if (filters.parentStatus === 'with' && !(student.parents?.length > 0)) return false;
+
+      // Filtre par localisation (transport)
+      const located = student.home_lat != null && student.home_lng != null;
+      if (filters.locationStatus === 'with' && !located) return false;
+      if (filters.locationStatus === 'without' && located) return false;
 
       return true;
     });
@@ -398,6 +408,7 @@ const StudentsPage = () => {
     hasHealthIssue: !!s.has_health_issue, healthNotes: s.health_notes || '',
     photoAuthorized: s.photo_authorized !== false,
     homeAddress: s.home_address || '', quartier: s.quartier || '', homePhone: s.home_phone || '',
+    homeLat: s.home_lat ?? '', homeLng: s.home_lng ?? '',
     nationality: s.nationality || '', country: s.country || '',
     reinscriptionDate: s.reinscription_date ? String(s.reinscription_date).slice(0, 10) : '',
     originSchool: s.origin_school || '',
@@ -1130,6 +1141,15 @@ L'administration de ${schoolName}`;
               <option value="without">⚠ Sans parent</option>
               <option value="with">👪 Avec parent</option>
             </select>
+            <select
+              value={filters.locationStatus}
+              onChange={(e) => setFilters({ ...filters, locationStatus: e.target.value })}
+              className="w-full px-3 py-1.5 border rounded text-sm"
+            >
+              <option value="">Tous (localisation)</option>
+              <option value="with">📍 Localisé</option>
+              <option value="without">❌ Sans localisation</option>
+            </select>
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-3">
@@ -1363,6 +1383,27 @@ L'administration de ${schoolName}`;
                     <div><Label>Adresse</Label><input className={inputCls} value={formData.homeAddress} onChange={setF('homeAddress')} /></div>
                     <div><Label>Quartier (الحي)</Label><input className={inputCls} value={formData.quartier} onChange={setF('quartier')} /></div>
                   </div>
+
+                  {/* Localisation domicile (transport) — souvent renseignée par le parent via WhatsApp */}
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
+                      <MapPin className="w-4 h-4" /> Localisation du domicile (transport)
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div><Label>Latitude</Label><input className={inputCls} value={formData.homeLat} onChange={setF('homeLat')} placeholder="33.5731" /></div>
+                      <div><Label>Longitude</Label><input className={inputCls} value={formData.homeLng} onChange={setF('homeLng')} placeholder="-7.5898" /></div>
+                      <div className="flex items-end">
+                        {formData.homeLat && formData.homeLng ? (
+                          <a href={`https://www.google.com/maps?q=${formData.homeLat},${formData.homeLng}`} target="_blank" rel="noreferrer"
+                            className="text-xs px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5" /> Voir sur la carte
+                          </a>
+                        ) : (
+                          <span className="text-xs text-gray-400">Aucune position — le parent peut l'envoyer via WhatsApp.</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </section>
 
                 {/* ── Scolarité antérieure ── */}
@@ -1482,6 +1523,14 @@ L'administration de ${schoolName}`;
                   const parentStatus = (s) => (s.parents?.length > 0
                     ? <StatusPill tone="green" icon={Users}>{s.parents.length} parent{s.parents.length > 1 ? 's' : ''}</StatusPill>
                     : <StatusPill tone="amber" icon={AlertTriangle}>Sans parent</StatusPill>);
+                  const locationStatus = (s) => (hasLocation(s)
+                    ? <StatusPill tone="blue" icon={MapPin}>Localisé</StatusPill>
+                    : <StatusPill tone="gray" icon={MapPinOff}>Sans localisation</StatusPill>);
+                  const cardStatus = (s) => (
+                    <div className="flex flex-wrap items-center justify-center gap-1">
+                      {parentStatus(s)}{locationStatus(s)}
+                    </div>
+                  );
 
                   if (viewMode === 'grid') {
                     return (
@@ -1493,7 +1542,7 @@ L'administration de ${schoolName}`;
                             photo={student.avatar_url}
                             gender={student.gender || ''}
                             classLabel={classLabel(student)}
-                            status={parentStatus(student)}
+                            status={cardStatus(student)}
                             selectable={isAdmin}
                             selected={selectedStudents.has(student.id)}
                             onToggleSelect={() => toggleStudentSelection(student.id)}
@@ -1514,7 +1563,7 @@ L'administration de ${schoolName}`;
                           gender={student.gender || ''}
                           classLabel={classLabel(student)}
                           sub={student.email}
-                          status={parentStatus(student)}
+                          status={cardStatus(student)}
                           selectable={isAdmin}
                           selected={selectedStudents.has(student.id)}
                           onToggleSelect={() => toggleStudentSelection(student.id)}
@@ -1541,11 +1590,16 @@ L'administration de ${schoolName}`;
             <div className="flex flex-col items-center text-center gap-2">
               <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`} src={activeStudent.avatar_url} size="lg" gender={activeStudent.gender || ''} />
               <div className="font-medium">{activeStudent.first_name} {activeStudent.last_name}</div>
-              {activeStudent.parents?.length > 0 ? (
-                <StatusPill tone="green" icon={Users}>{activeStudent.parents.length} parent{activeStudent.parents.length > 1 ? 's' : ''}</StatusPill>
-              ) : (
-                <StatusPill tone="amber" icon={AlertTriangle}>Sans parent</StatusPill>
-              )}
+              <div className="flex flex-wrap items-center justify-center gap-1.5">
+                {activeStudent.parents?.length > 0 ? (
+                  <StatusPill tone="green" icon={Users}>{activeStudent.parents.length} parent{activeStudent.parents.length > 1 ? 's' : ''}</StatusPill>
+                ) : (
+                  <StatusPill tone="amber" icon={AlertTriangle}>Sans parent</StatusPill>
+                )}
+                {hasLocation(activeStudent)
+                  ? <StatusPill tone="blue" icon={MapPin}>Localisé</StatusPill>
+                  : <StatusPill tone="gray" icon={MapPinOff}>Sans localisation</StatusPill>}
+              </div>
             </div>
 
             <div>
@@ -1558,6 +1612,10 @@ L'administration de ${schoolName}`;
                 <FieldRow label="Nom (ar)" value={`${activeStudent.last_name_ar || ''} ${activeStudent.first_name_ar || ''}`.trim()} />
               )}
               {activeStudent.date_of_birth && <FieldRow label="Naissance" value={`${new Date(activeStudent.date_of_birth).toLocaleDateString('fr-FR')}${activeStudent.birth_place ? ` · ${activeStudent.birth_place}` : ''}`} />}
+              {activeStudent.home_address && <FieldRow label="Adresse" value={activeStudent.home_address} />}
+              <FieldRow label="Localisation" value={hasLocation(activeStudent)
+                ? `${Number(activeStudent.home_lat).toFixed(5)}, ${Number(activeStudent.home_lng).toFixed(5)}`
+                : 'Non renseignée'} />
               <FieldRow label="Email" value={activeStudent.email} />
             </div>
 
@@ -1568,6 +1626,16 @@ L'administration de ${schoolName}`;
               >
                 <Edit2 className="w-4 h-4" /> Modifier l'élève
               </button>
+            )}
+
+            {hasLocation(activeStudent) && (
+              <a
+                href={`https://www.google.com/maps?q=${activeStudent.home_lat},${activeStudent.home_lng}`}
+                target="_blank" rel="noreferrer"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                <MapPin className="w-4 h-4" /> Voir la localisation sur la carte
+              </a>
             )}
 
             <button
