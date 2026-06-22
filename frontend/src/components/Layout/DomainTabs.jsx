@@ -20,17 +20,11 @@ export default function DomainTabs() {
 
   const { domain, group } = match;
   const groups = visibleGroups(domain, role);
-  const DomainIcon = domain.icon;
   const hasGroups = groups.length > 1;
 
   return (
     <div className="-mx-4 md:-mx-8 mb-4 md:mb-6 bg-card border-b border-border">
       <div className="px-4 md:px-6 pt-6 md:pt-8">
-        {/* Titre du domaine */}
-        <div className="flex items-center gap-2 mb-3">
-          <DomainIcon className="w-5 h-5 text-primary" />
-          <h1 className="text-lg font-bold text-gray-800">{domain.label}</h1>
-        </div>
         {/* Niveau 1 : groupes du domaine (si plus d'un groupe) */}
         {hasGroups && (
           <nav className="flex items-center gap-1 overflow-x-auto">
