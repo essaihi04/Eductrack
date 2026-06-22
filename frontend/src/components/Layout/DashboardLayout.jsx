@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MobileNav from './MobileNav';
+import DomainTabs from './DomainTabs';
 import NotificationsBell from '../NotificationsBell';
 
 const DashboardLayout = () => {
@@ -99,6 +100,7 @@ const DashboardLayout = () => {
 
       {/* Main content */}
       <main className={`${!(isLandscape && isTrackingPage) ? 'md:ml-64' : ''} ${isLandscape && isTrackingPage ? 'pt-0' : 'pt-14 md:pt-0'} ${!(isLandscape && isTrackingPage) ? 'pb-20 md:pb-0' : 'pb-0'} ${isLandscape && isTrackingPage ? 'p-2' : 'p-4 md:p-8'}`}>
+        {!(isLandscape && isTrackingPage) && <DomainTabs />}
         <div className="flex justify-between items-start">
           <div className="flex-1 min-w-0">
             <Outlet />

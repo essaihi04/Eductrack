@@ -51,6 +51,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
 import { FINANCE_SIDEBAR_POLES, poleForPath } from '../../pages/finance/financeNav';
+import { adminSidebarDomains, domainForPath } from '../../pages/admin/adminNav';
 
 const FINANCE_MENU = FINANCE_SIDEBAR_POLES.map((p) => ({
   icon: p.icon, label: p.label, path: p.path, poleKey: p.key,
@@ -94,61 +95,18 @@ const Sidebar = () => {
 
     if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager') {
       const isPedagogical = profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
-      const isManager = profile?.role === 'pedagogical_manager';
+      const domains = adminSidebarDomains(profile.role).map((d) => ({
+        icon: d.icon, label: d.label, path: d.path, domainKey: d.key,
+      }));
+      // 6 entrées max : Tableau de bord + Finance (1 entrée) + domaines repliés.
+      // Les sous-onglets de chaque domaine s'ouvrent dans le contenu (DomainTabs).
       return [
         ...commonItems,
-        { section: 'Pédagogique', isSection: true },
-        { icon: ShieldCheck, label: 'Approbations', path: '/approvals' },
-        { icon: BarChart3, label: 'Comportement', path: '/behavior' },
-        { icon: Users, label: 'Élèves', path: '/students' },
-        { icon: UserCircle, label: 'Professeurs', path: '/teachers' },
-        { icon: TrendingUp, label: 'Suivi des profs', path: '/teacher-tracking' },
-        { icon: GraduationCap, label: 'Classes', path: '/classes' },
-        { icon: BookOpen, label: 'Matières', path: '/subjects' },
-        { icon: FileText, label: 'Cahier de texte', path: '/cahier-de-texte' },
-        { icon: Users2, label: 'Parents', path: '/parents' },
-        { section: 'Bulletins', isSection: true },
-        { icon: FileText, label: 'Bulletins', path: '/admin/bulletins' },
-        { icon: BookOpen, label: 'Coefficients', path: '/admin/coefficients' },
-        { icon: GraduationCap, label: 'Notes d\'examens', path: '/admin/exam-notes' },
-        { icon: ClipboardList, label: 'Notes des profs', path: '/admin/class-notes' },
-        { icon: Calendar, label: 'Config. année', path: '/admin/school-year-config' },
-        { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
-        // Section Finance — masquée pour le directeur pédagogique
+        // Finance — une seule entrée ; les pôles s'ouvrent dans FinanceShell.
         ...(isPedagogical ? [] : [
-          { section: 'Finance', isSection: true },
-          ...FINANCE_MENU,
+          { icon: Wallet, label: 'Finance', path: '/finance', financeRoot: true },
         ]),
-        // Section Équipe
-        // - Resp. financiers + Direct. pédagogiques : réservés aux admins complets
-        // - Resp. pédagogiques : visible par admins + directeur pédagogique (pas le manager lui-même)
-        ...(isManager ? [] : [
-          { section: 'Équipe', isSection: true },
-          ...(isPedagogical ? [] : [
-            { icon: UserCog, label: 'Resp. financiers', path: '/admin/finance-managers' },
-            { icon: UserCog, label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors' },
-          ]),
-          { icon: UserCog, label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers' },
-          ...(isPedagogical ? [] : [
-            { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
-          ]),
-        ]),
-        // Section Vie scolaire
-        { section: 'Vie scolaire', isSection: true },
-        { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
-        { icon: ImageIcon, label: 'Cahier de vie', path: '/school-life/cahier-de-vie' },
-        { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
-        { icon: BarChart2, label: 'Sondages', path: '/school-life/sondages' },
-        { icon: AlertTriangle, label: 'Signalements', path: '/school-life/signalements' },
-        // Section Transport — masquée pour le pedagogical_manager
-        ...(isManager ? [] : [
-          { section: 'Transport', isSection: true },
-          { icon: LayoutDashboard, label: 'Tableau transport', path: '/transport' },
-          { icon: MapPin, label: 'Suivi en direct', path: '/transport/live' },
-          { icon: Bus, label: 'Bus & élèves', path: '/transport/buses' },
-          { icon: UserCircle, label: 'Chauffeurs', path: '/transport/drivers' },
-          { icon: UserCog, label: 'Resp. transport', path: '/transport/managers' },
-        ]),
+        ...domains,
       ];
     }
 
@@ -267,9 +225,16 @@ const Sidebar = () => {
             );
           }
           const Icon = item.icon;
-          const isActive = item.poleKey
-            ? location.pathname.startsWith('/finance') && poleForPath(location.pathname).key === item.poleKey
-            : location.pathname === item.path;
+          let isActive;
+          if (item.poleKey) {
+            isActive = location.pathname.startsWith('/finance') && poleForPath(location.pathname).key === item.poleKey;
+          } else if (item.financeRoot) {
+            isActive = location.pathname.startsWith('/finance');
+          } else if (item.domainKey) {
+            isActive = domainForPath(location.pathname, profile?.role)?.domain.key === item.domainKey;
+          } else {
+            isActive = location.pathname === item.path;
+          }
 
           return (
             <Link

@@ -1,23 +1,41 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { poleForPath, POLE_COLORS } from './financeNav';
+import { FINANCE_POLES, poleForPath, POLE_COLORS } from './financeNav';
 
-// Coquille du module finance : affiche le titre du pôle actif et sa barre
-// d'onglets, puis rend la page courante via <Outlet/>. La barre latérale
-// gère le passage d'un pôle à l'autre (4 entrées).
+// Coquille du module finance : Finance est une seule entrée dans la barre
+// latérale. Le passage d'un pôle à l'autre se fait ici (rangée de pôles), puis
+// la rangée d'onglets du pôle actif, puis la page courante via <Outlet/>.
 export default function FinanceShell() {
   const { pathname } = useLocation();
   const pole = poleForPath(pathname);
   const colors = POLE_COLORS[pole.color] || POLE_COLORS.blue;
-  const PoleIcon = pole.icon;
 
   return (
     <div className="min-h-full">
       <div className="bg-card border-b border-border sticky top-0 z-20">
         <div className="px-6 pt-4">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <PoleIcon className="w-4 h-4" />
-            <span className="font-medium text-gray-700">{pole.label}</span>
-          </div>
+          {/* Niveau 1 : pôles finance */}
+          <nav className="flex items-center gap-1 overflow-x-auto">
+            {FINANCE_POLES.map((p) => {
+              const PoleTabIcon = p.icon;
+              const active = p.key === pole.key;
+              return (
+                <NavLink
+                  key={p.key}
+                  to={p.tabs[0].path}
+                  end={p.tabs[0].end}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                    active
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                >
+                  <PoleTabIcon className="w-4 h-4" />
+                  {p.label}
+                </NavLink>
+              );
+            })}
+          </nav>
+          {/* Niveau 2 : onglets du pôle actif */}
           <nav className="flex items-center gap-1 mt-3 -mb-px overflow-x-auto">
             {pole.tabs.map((tab) => {
               const TabIcon = tab.icon;
