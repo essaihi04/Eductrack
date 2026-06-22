@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, CreditCard, Wallet } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS, METHOD_LABELS } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 
 export default function FinanceStudentsPage() {
+  const { year } = useYear();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -15,14 +18,15 @@ export default function FinanceStudentsPage() {
   useEffect(() => {
     loadClasses();
     loadTemplates();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
 
-  useEffect(() => { load(); }, [filters.class_id]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.class_id, year]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await financeApi.listStudents({ class_id: filters.class_id });
+      const data = await financeApi.listStudents({ class_id: filters.class_id, academic_year: year });
       setStudents(data.students || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -30,7 +34,7 @@ export default function FinanceStudentsPage() {
 
   const loadClasses = async () => {
     try {
-      const data = await financeApi.listClasses();
+      const data = await financeApi.listClasses(year);
       setClasses(Array.isArray(data) ? data : (data.classes || []));
     } catch (e) { console.error(e); }
   };
@@ -115,6 +119,7 @@ export default function FinanceStudentsPage() {
         <StudentFeePlanModal
           student={selectedStudent}
           templates={templates}
+          defaultYear={toDashYear(year)}
           onClose={() => setSelectedStudent(null)}
           onSaved={() => { setSelectedStudent(null); load(); }}
         />
@@ -123,6 +128,7 @@ export default function FinanceStudentsPage() {
       {payStudent && (
         <MonthlyPaymentsModal
           student={payStudent}
+          defaultYear={toDashYear(year)}
           onClose={() => setPayStudent(null)}
           onPaid={() => load()}
         />
@@ -145,8 +151,8 @@ const MONTH_STATUS_META = {
   pending: { label: 'Non facturé', cls: 'bg-gray-100 text-gray-600' }
 };
 
-function MonthlyPaymentsModal({ student, onClose, onPaid }) {
-  const [academicYear, setAcademicYear] = useState(getCurrentAcademicYear());
+function MonthlyPaymentsModal({ student, onClose, onPaid, defaultYear }) {
+  const [academicYear, setAcademicYear] = useState(defaultYear || getCurrentAcademicYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState([]); // months cochés
@@ -331,11 +337,11 @@ function MonthlyPaymentsModal({ student, onClose, onPaid }) {
   );
 }
 
-function StudentFeePlanModal({ student, templates, onClose, onSaved }) {
+function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear }) {
   const [plan, setPlan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
-    academic_year: getCurrentYear(),
+    academic_year: defaultYear || getCurrentYear(),
     template_id: '',
     sibling_discount_percent: 0,
     sibling_discount_type: 'percent',

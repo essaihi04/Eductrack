@@ -74,6 +74,7 @@ router.get('/classes', async (req, res) => {
       .from('classes')
       .select('id, name, level, school_type, filiere, academic_year');
     if (schoolId) query = query.eq('school_id', schoolId);
+    if (req.query.academic_year) query = query.eq('academic_year', req.query.academic_year);
     const { data, error } = await query.order('name');
     if (error) throw error;
     res.json(data || []);
@@ -1567,27 +1568,57 @@ router.get('/students', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { class_id, academic_year } = req.query;
+    const range = academicYearRange(academic_year);
 
-    let query = supabaseAdmin
-      .from('profiles')
-      .select('id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)')
-      .eq('role', 'student');
-    if (schoolId) query = query.eq('school_id', schoolId);
-    if (class_id) query = query.eq('class_id', class_id);
+    // Liste des élèves : par année active = inscriptions actives (student_enrollments),
+    // avec la classe de CETTE année ; sinon (ou si table absente) → profils courants.
+    let students = null;
+    if (academic_year) {
+      let enrQ = supabaseAdmin
+        .from('student_enrollments')
+        .select('student_id, class_id, class:classes!student_enrollments_class_id_fkey(id, name)')
+        .eq('academic_year', academic_year)
+        .neq('status', 'NR');
+      if (schoolId) enrQ = enrQ.eq('school_id', schoolId);
+      if (class_id) enrQ = enrQ.eq('class_id', class_id);
+      const { data: enr, error: enrErr } = await enrQ;
+      if (!enrErr && enr) {
+        const ids = enr.map(e => e.student_id);
+        const classByStudent = {};
+        enr.forEach(e => { classByStudent[e.student_id] = e.class || null; });
+        if (ids.length === 0) return res.json({ students: [] });
+        const { data: profs } = await supabaseAdmin
+          .from('profiles')
+          .select('id, first_name, last_name, class_id')
+          .in('id', ids);
+        students = (profs || []).map(p => ({ ...p, classes: classByStudent[p.id] || null }));
+      }
+      // enrErr (table absente) → repli ci-dessous
+    }
 
-    const { data: students, error } = await query;
-    if (error) throw error;
+    if (students === null) {
+      let query = supabaseAdmin
+        .from('profiles')
+        .select('id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)')
+        .eq('role', 'student');
+      if (schoolId) query = query.eq('school_id', schoolId);
+      if (class_id) query = query.eq('class_id', class_id);
+      const { data, error } = await query;
+      if (error) throw error;
+      students = data || [];
+    }
 
     const studentIds = (students || []).map(s => s.id);
     if (studentIds.length === 0) return res.json({ students: [] });
 
-    // Invoices totals per student
+    // Invoices totals per student — scopés à l'année (par dates) si fournie.
     let invQ = supabaseAdmin
       .from('invoices')
       .select('student_id, total, amount_paid, status')
       .in('student_id', studentIds)
       .neq('status', 'cancelled');
     if (schoolId) invQ = invQ.eq('school_id', schoolId);
+    if (range) invQ = invQ.gte('issue_date', range.start).lte('issue_date', range.end);
     const { data: invs } = await invQ;
 
     // Plans

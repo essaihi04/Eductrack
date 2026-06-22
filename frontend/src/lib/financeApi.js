@@ -44,7 +44,7 @@ async function uploadRequest(path, formData) {
 
 export const financeApi = {
   // Classes (lecture pour module finance)
-  listClasses: () => request('/api/finance/classes'),
+  listClasses: (academicYear) => request('/api/finance/classes', { query: { academic_year: academicYear } }),
 
   // Templates
   listTemplates: () => request('/api/finance/fee-templates'),
