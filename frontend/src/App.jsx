@@ -5,6 +5,7 @@ import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import YearSelectionPage from './pages/YearSelectionPage';
 import DashboardLayout from './components/Layout/DashboardLayout';
 import StudentsPage from './pages/admin/StudentsPage';
 import TeachersPage from './pages/admin/TeachersPage';
@@ -122,6 +123,8 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          {/* Choix de l'année scolaire après connexion (plein écran, façon Koolskools) */}
+          <Route path="/select-year" element={<ProtectedRoute><YearSelectionPage /></ProtectedRoute>} />
           {/* Routes chauffeur — interface mobile dédiée, hors layout standard */}
           <Route path="/driver" element={<ProtectedRoute><DriverDashboard /></ProtectedRoute>} />
           <Route path="/driver/trip/:id" element={<ProtectedRoute><ActiveTripPage /></ProtectedRoute>} />

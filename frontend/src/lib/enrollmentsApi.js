@@ -35,4 +35,6 @@ export const enrollmentsApi = {
   getFunnel: (academicYear) => request('/api/enrollments/funnel', { query: { academic_year: academicYear } }),
   list: (academicYear, classId) => request('/api/enrollments', { query: { academic_year: academicYear, class_id: classId } }),
   reinscription: (payload) => request('/api/enrollments/reinscription', { method: 'POST', body: payload }),
+  autoReinscription: (fromYear, options) => request('/api/enrollments/auto-reinscription', { method: 'POST', body: { from_year: fromYear, options } }),
+  reset: (year) => request('/api/enrollments/reset', { method: 'POST', body: { year } }),
 };

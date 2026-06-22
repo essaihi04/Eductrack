@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireSchoolAdmin } from '../middleware/auth.js';
+import { nextLevel, isTerminalLevel } from '../utils/levelProgression.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -37,6 +38,38 @@ const prevYearStr = (year) => {
 
 // Format finance (student_fee_plans, finance_budget) = tiret "YYYY-YYYY".
 const toDash = (year) => String(year || '').replace('/', '-');
+
+// Reconduit le plan de frais d'un élève d'une année à l'autre (format finance = tiret).
+// Renvoie true si un plan a été créé.
+const carryFeePlanForStudent = async (schoolId, sid, fromYear, toYear, userId) => {
+  const { data: prevPlan } = await supabaseAdmin
+    .from('student_fee_plans')
+    .select('template_id')
+    .eq('student_id', sid)
+    .eq('academic_year', toDash(fromYear))
+    .maybeSingle();
+  if (!prevPlan?.template_id) return false;
+  const { data: exists } = await supabaseAdmin
+    .from('student_fee_plans')
+    .select('id')
+    .eq('student_id', sid)
+    .eq('academic_year', toDash(toYear))
+    .maybeSingle();
+  if (exists) return false;
+  const { error } = await supabaseAdmin
+    .from('student_fee_plans')
+    .insert({ school_id: schoolId, student_id: sid, template_id: prevPlan.template_id, academic_year: toDash(toYear), created_by: userId });
+  return !error;
+};
+
+// Transforme le nom d'une classe en remplaçant le code de niveau (ex: "1AC-3" → "2AC-3").
+const promoteClassName = (name, oldLevel, newLevel) => {
+  if (!name) return `${newLevel}`;
+  if (oldLevel && name.toUpperCase().includes(oldLevel.toUpperCase())) {
+    return name.replace(new RegExp(oldLevel, 'i'), newLevel);
+  }
+  return name; // pas de code de niveau dans le nom → conservé tel quel
+};
 
 // --- GET /api/enrollments/school-years -------------------------------------
 // Liste des années scolaires connues de l'école + année courante + année suivante.
@@ -206,34 +239,10 @@ router.post('/reinscription', requireSchoolAdmin, async (req, res) => {
       // (Les liens parent_students et le code Massar sont indépendants de l'année → préservés.)
       await supabaseAdmin.from('profiles').update({ class_id: m.new_class_id }).eq('id', sid);
 
-      // Reconduction du plan de frais (format finance = tiret).
+      // Reconduction du plan de frais.
       if (carryFeePlan) {
-        const { data: prevPlan } = await supabaseAdmin
-          .from('student_fee_plans')
-          .select('template_id')
-          .eq('student_id', sid)
-          .eq('academic_year', toDash(from_year))
-          .maybeSingle();
-        if (prevPlan?.template_id) {
-          const { data: exists } = await supabaseAdmin
-            .from('student_fee_plans')
-            .select('id')
-            .eq('student_id', sid)
-            .eq('academic_year', toDash(to_year))
-            .maybeSingle();
-          if (!exists) {
-            const { error: feeErr } = await supabaseAdmin
-              .from('student_fee_plans')
-              .insert({
-                school_id: schoolId,
-                student_id: sid,
-                template_id: prevPlan.template_id,
-                academic_year: toDash(to_year),
-                created_by: req.user.id,
-              });
-            if (!feeErr) feePlansCopied += 1;
-          }
-        }
+        const done = await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id);
+        if (done) feePlansCopied += 1;
       }
 
       reinscrits += 1;
@@ -248,6 +257,153 @@ router.post('/reinscription', requireSchoolAdmin, async (req, res) => {
     });
   } catch (e) {
     console.error('POST /enrollments/reinscription:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+// --- POST /api/enrollments/auto-reinscription ------------------------------
+// Processus complet en un clic : crée automatiquement les classes de l'année
+// suivante (clonées + niveau promu) et y réinscrit tous les élèves.
+// body: { from_year, options?: { carryFeePlan } }
+router.post('/auto-reinscription', requireSchoolAdmin, async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { from_year } = req.body;
+    if (!schoolId) return res.status(400).json({ error: 'school_id requis' });
+    if (!from_year) return res.status(400).json({ error: 'from_year requis' });
+    const to_year = nextYearStr(from_year);
+    const carryFee = req.body.options?.carryFeePlan !== false;
+
+    // 1) Classes de l'année source.
+    const { data: srcClasses } = await supabaseAdmin
+      .from('classes')
+      .select('id, name, level, school_type, filiere, academic_year')
+      .eq('school_id', schoolId)
+      .eq('academic_year', from_year);
+
+    // 2) Classes déjà existantes pour l'année cible (idempotence).
+    const { data: dstExisting } = await supabaseAdmin
+      .from('classes')
+      .select('id, name, level, filiere')
+      .eq('school_id', schoolId)
+      .eq('academic_year', to_year);
+    const findDst = (name, level, filiere) =>
+      (dstExisting || []).find((c) => c.level === level && (c.filiere || '') === (filiere || '') && c.name === name)
+      || (dstExisting || []).find((c) => c.level === level && (c.filiere || '') === (filiere || ''));
+
+    // Map classe source → classe cible (créée si nécessaire). Les niveaux terminaux
+    // (2BAC) n'ont pas de classe suivante : les élèves seront diplômés (NR).
+    const classMap = new Map();
+    let classesCreated = 0;
+    for (const sc of srcClasses || []) {
+      if (isTerminalLevel(sc.level)) continue;
+      const newLevel = nextLevel(sc.level);
+      if (!newLevel) continue;
+      let dst = findDst(promoteClassName(sc.name, sc.level, newLevel), newLevel, sc.filiere);
+      if (!dst) {
+        const { data: created, error: cErr } = await supabaseAdmin
+          .from('classes')
+          .insert({
+            name: promoteClassName(sc.name, sc.level, newLevel),
+            level: newLevel,
+            school_type: sc.school_type || null,
+            filiere: sc.filiere || null,
+            academic_year: to_year,
+            school_id: schoolId,
+          })
+          .select()
+          .single();
+        if (cErr || !created) continue;
+        dst = created;
+        dstExisting.push(created);
+        classesCreated += 1;
+      }
+      classMap.set(sc.id, dst.id);
+    }
+
+    // 3) Élèves actifs de l'année source.
+    const { data: roster } = await supabaseAdmin
+      .from('student_enrollments')
+      .select('student_id, class_id, status')
+      .eq('school_id', schoolId)
+      .eq('academic_year', from_year);
+    const srcLevelByClass = new Map((srcClasses || []).map((c) => [c.id, c.level]));
+
+    let reinscrits = 0;
+    let nonReinscrits = 0;
+    let feePlansCopied = 0;
+    for (const e of (roster || []).filter((r) => r.status !== 'NR')) {
+      const sid = e.student_id;
+      const srcLevel = srcLevelByClass.get(e.class_id);
+      const newClassId = classMap.get(e.class_id);
+
+      // Pas de classe cible (niveau terminal ou classe non clonée) → non réinscrit.
+      if (!newClassId || isTerminalLevel(srcLevel)) {
+        await supabaseAdmin.from('student_enrollments').upsert({
+          school_id: schoolId, student_id: sid, class_id: null, academic_year: to_year,
+          status: 'NR', previous_class_id: e.class_id, created_by: req.user.id,
+        }, { onConflict: 'student_id,academic_year' });
+        nonReinscrits += 1;
+        continue;
+      }
+
+      const { error: enrErr } = await supabaseAdmin.from('student_enrollments').upsert({
+        school_id: schoolId, student_id: sid, class_id: newClassId, academic_year: to_year,
+        status: 'RI', previous_class_id: e.class_id, created_by: req.user.id,
+      }, { onConflict: 'student_id,academic_year' });
+      if (enrErr) continue;
+      await supabaseAdmin.from('profiles').update({ class_id: newClassId }).eq('id', sid);
+      if (carryFee && await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id)) feePlansCopied += 1;
+      reinscrits += 1;
+    }
+
+    res.json({ success: true, to_year, classes_created: classesCreated, reinscrits, non_reinscrits: nonReinscrits, fee_plans_copied: feePlansCopied });
+  } catch (e) {
+    console.error('POST /enrollments/auto-reinscription:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+// --- POST /api/enrollments/reset -------------------------------------------
+// Réinitialise la réinscription d'une année : remet chaque élève dans sa classe
+// précédente, supprime les inscriptions et plans de frais de l'année.
+// (Les classes vides éventuellement créées sont conservées et réutilisées au
+//  prochain « Tout réinscrire » — pour les supprimer, passez par la page Classes.)
+// body: { year }
+router.post('/reset', requireSchoolAdmin, async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { year } = req.body;
+    if (!schoolId) return res.status(400).json({ error: 'school_id requis' });
+    if (!year) return res.status(400).json({ error: 'year requis' });
+
+    const { data: enrollments } = await supabaseAdmin
+      .from('student_enrollments')
+      .select('student_id, class_id, previous_class_id')
+      .eq('school_id', schoolId)
+      .eq('academic_year', year);
+
+    // Remettre la classe courante du profil à la classe précédente (si elle pointe
+    // encore vers la classe de l'année réinitialisée).
+    let reverted = 0;
+    for (const e of enrollments || []) {
+      const { data: prof } = await supabaseAdmin
+        .from('profiles').select('class_id').eq('id', e.student_id).maybeSingle();
+      if (prof && e.class_id && prof.class_id === e.class_id) {
+        await supabaseAdmin.from('profiles').update({ class_id: e.previous_class_id || null }).eq('id', e.student_id);
+        reverted += 1;
+      }
+    }
+
+    // Supprimer les plans de frais et les inscriptions de l'année.
+    await supabaseAdmin.from('student_fee_plans').delete().eq('school_id', schoolId).eq('academic_year', toDash(year));
+    const { error: delErr } = await supabaseAdmin
+      .from('student_enrollments').delete().eq('school_id', schoolId).eq('academic_year', year);
+    if (delErr) throw delErr;
+
+    res.json({ success: true, year, reverted, deleted: (enrollments || []).length });
+  } catch (e) {
+    console.error('POST /enrollments/reset:', e);
     res.status(500).json({ error: 'Erreur serveur', details: e.message });
   }
 });
