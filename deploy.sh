@@ -9,8 +9,8 @@ echo "════════════════════════�
 
 # Variables
 SERVER_USER="root"
-SERVER_IP="51.79.251.164"
-SERVER_PATH="/root/student-tracking-app"
+SERVER_IP="87.106.1.128"
+SERVER_PATH="/var/www/Eductrack"
 BACKUP_PATH="/root/backups/$(date +%Y%m%d_%H%M%S)"
 
 echo "📍 Serveur: $SERVER_IP"
