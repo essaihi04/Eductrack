@@ -3657,10 +3657,29 @@ router.get('/teachers', async (req, res) => {
       }
     }
 
+    // Matières enseignées par chaque prof (pour filtrer dans l'emploi du temps)
+    const subjectsByTeacher = {};
+    if (teacherIds.length > 0) {
+      const CHUNK = 200;
+      for (let i = 0; i < teacherIds.length; i += CHUNK) {
+        const chunk = teacherIds.slice(i, i + CHUNK);
+        const { data: ts, error: tsErr } = await supabaseAdmin
+          .from('teacher_subjects')
+          .select('teacher_id, subject_id')
+          .in('teacher_id', chunk);
+        if (tsErr) throw tsErr;
+        (ts || []).forEach(r => {
+          if (!r.teacher_id || !r.subject_id) return;
+          (subjectsByTeacher[r.teacher_id] = subjectsByTeacher[r.teacher_id] || []).push(r.subject_id);
+        });
+      }
+    }
+
     const withHours = (data || []).map(t => ({
       ...t,
       // arrondi à 0,5 h près pour un affichage lisible
       weekly_hours: Math.round(((hoursByTeacher[t.id] || 0) / 60) * 2) / 2,
+      subject_ids: subjectsByTeacher[t.id] || [],
     }));
 
     res.json(withHours);

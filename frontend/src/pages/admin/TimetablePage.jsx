@@ -40,6 +40,8 @@ const TimetablePage = () => {
   const [teachers, setTeachers] = useState([]);
   const [grid, setGrid] = useState({});
   const [timeSlots, setTimeSlots] = useState([...DEFAULT_SLOTS]);
+  const [perDayTimes, setPerDayTimes] = useState(false);
+  const [dayTimes, setDayTimes] = useState({}); // { [dayKey]: [{ start_time, end_time }] }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -57,6 +59,27 @@ const TimetablePage = () => {
   subjects.forEach((s, i) => {
     subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
   });
+
+  // Profs autorisés pour une matière donnée (chaque prof est assigné à des matières
+  // via teacher_subjects). Si aucune matière n'est choisie, on montre tous les profs.
+  // On garde toujours le prof déjà sélectionné dans la liste, même s'il n'enseigne
+  // pas officiellement cette matière, pour ne pas perdre la donnée existante.
+  const teachersForSubject = (subjectId, selectedTeacherId) => {
+    if (!subjectId) return teachers;
+    const matching = teachers.filter(t => Array.isArray(t.subject_ids) && t.subject_ids.includes(subjectId));
+    if (selectedTeacherId && !matching.some(t => t.id === selectedTeacherId)) {
+      const sel = teachers.find(t => t.id === selectedTeacherId);
+      if (sel) return [sel, ...matching];
+    }
+    return matching;
+  };
+
+  // Horaire effectif d'un créneau pour un jour donné : si les horaires par jour
+  // sont activés et définis, on les utilise ; sinon on retombe sur le modèle commun.
+  const slotTime = (dayKey, idx) => {
+    if (perDayTimes && dayTimes[dayKey] && dayTimes[dayKey][idx]) return dayTimes[dayKey][idx];
+    return timeSlots[idx] || { start_time: '08:00', end_time: '10:00' };
+  };
 
   useEffect(() => {
     fetchData();
@@ -101,17 +124,27 @@ const TimetablePage = () => {
           slotsFromData.add(JSON.stringify({ start_time: slot.start_time?.slice(0, 5), end_time: slot.end_time?.slice(0, 5) }));
         });
 
-        // Reconstruct time slots from data
+        // Reconstruct time slots from data, par modèle commun + horaires par jour
         const maxSlotOrder = Math.max(...timetableData.map(s => s.slot_order));
-        const slotTimes = [];
+        const template = [];
+        const perDay = {};
+        let differs = false;
         for (let i = 1; i <= maxSlotOrder; i++) {
-          const existing = timetableData.find(s => s.slot_order === i);
-          slotTimes.push({
-            start_time: existing?.start_time?.slice(0, 5) || DEFAULT_SLOTS[i - 1]?.start_time || '08:00',
-            end_time: existing?.end_time?.slice(0, 5) || DEFAULT_SLOTS[i - 1]?.end_time || '10:00',
+          const anyRow = timetableData.find(s => s.slot_order === i);
+          const tStart = anyRow?.start_time?.slice(0, 5) || DEFAULT_SLOTS[i - 1]?.start_time || '08:00';
+          const tEnd = anyRow?.end_time?.slice(0, 5) || DEFAULT_SLOTS[i - 1]?.end_time || '10:00';
+          template.push({ start_time: tStart, end_time: tEnd });
+          DAYS.forEach(day => {
+            const row = timetableData.find(s => s.slot_order === i && s.day_of_week === day.key);
+            const st = row?.start_time?.slice(0, 5) || tStart;
+            const en = row?.end_time?.slice(0, 5) || tEnd;
+            (perDay[day.key] = perDay[day.key] || [])[i - 1] = { start_time: st, end_time: en };
+            if (row && (st !== tStart || en !== tEnd)) differs = true;
           });
         }
-        if (slotTimes.length > 0) setTimeSlots(slotTimes);
+        if (template.length > 0) setTimeSlots(template);
+        setDayTimes(perDay);
+        if (differs) setPerDayTimes(true);
         setGrid(newGrid);
       }
     } catch (error) {
@@ -123,10 +156,23 @@ const TimetablePage = () => {
 
   const handleCellChange = (dayKey, slotIdx, field, value) => {
     const key = `${dayKey}_${slotIdx + 1}`;
-    setGrid(prev => ({
-      ...prev,
-      [key]: { ...prev[key], [field]: value }
-    }));
+    setGrid(prev => {
+      const next = { ...prev[key], [field]: value };
+      // À la sélection d'une matière : on aligne le prof sur ceux qui l'enseignent.
+      if (field === 'subject_id') {
+        const eligible = teachers.filter(t => Array.isArray(t.subject_ids) && t.subject_ids.includes(value));
+        if (!value) {
+          next.teacher_id = '';
+        } else if (eligible.length === 1) {
+          // un seul prof pour cette matière → auto-sélection
+          next.teacher_id = eligible[0].id;
+        } else if (next.teacher_id && !eligible.some(t => t.id === next.teacher_id)) {
+          // le prof déjà choisi n'enseigne pas cette matière → on le retire
+          next.teacher_id = '';
+        }
+      }
+      return { ...prev, [key]: next };
+    });
     setSaved(false);
   };
 
@@ -135,14 +181,57 @@ const TimetablePage = () => {
     setSaved(false);
   };
 
+  // Modifier l'horaire d'un créneau pour UN jour précis (horaires par jour)
+  const handleDayTimeChange = (dayKey, slotIdx, field, value) => {
+    setDayTimes(prev => {
+      const base = prev[dayKey] ? prev[dayKey].map(s => ({ ...s })) : [];
+      while (base.length < timeSlots.length) base.push({ ...timeSlots[base.length] });
+      base[slotIdx] = { ...base[slotIdx], [field]: value };
+      return { ...prev, [dayKey]: base };
+    });
+    setSaved(false);
+  };
+
+  // Active/désactive les horaires spécifiques par jour. À l'activation, on initialise
+  // chaque jour avec le modèle commun pour que l'admin parte d'une base cohérente.
+  const togglePerDayTimes = () => {
+    setPerDayTimes(prev => {
+      const next = !prev;
+      if (next) {
+        setDayTimes(dt => {
+          const copy = { ...dt };
+          DAYS.forEach(day => {
+            if (!copy[day.key] || copy[day.key].length < timeSlots.length) {
+              copy[day.key] = timeSlots.map((s, i) => copy[day.key]?.[i] || { ...s });
+            }
+          });
+          return copy;
+        });
+      }
+      return next;
+    });
+    setSaved(false);
+  };
+
   const addTimeSlot = () => {
     const last = timeSlots[timeSlots.length - 1];
-    setTimeSlots([...timeSlots, { start_time: last?.end_time || '08:00', end_time: '18:00' }]);
+    const newSlot = { start_time: last?.end_time || '08:00', end_time: '18:00' };
+    setTimeSlots([...timeSlots, newSlot]);
+    setDayTimes(prev => {
+      const copy = { ...prev };
+      Object.keys(copy).forEach(k => { copy[k] = [...copy[k], { ...newSlot }]; });
+      return copy;
+    });
   };
 
   const removeTimeSlot = (idx) => {
     if (timeSlots.length <= 1) return;
     setTimeSlots(prev => prev.filter((_, i) => i !== idx));
+    setDayTimes(prev => {
+      const copy = { ...prev };
+      Object.keys(copy).forEach(k => { copy[k] = copy[k].filter((_, i) => i !== idx); });
+      return copy;
+    });
     // Remove grid entries for this slot
     const newGrid = {};
     Object.entries(grid).forEach(([key, val]) => {
@@ -171,6 +260,16 @@ const TimetablePage = () => {
       }
     });
     setGrid(newGrid);
+    // En mode horaires par jour, on copie aussi les horaires du jour source.
+    if (perDayTimes && dayTimes[fromDay]) {
+      setDayTimes(prev => {
+        const copy = { ...prev };
+        DAYS.forEach(day => {
+          if (day.key !== fromDay) copy[day.key] = dayTimes[fromDay].map(s => ({ ...s }));
+        });
+        return copy;
+      });
+    }
     setCopyFromDay('');
     setSaved(false);
   };
@@ -182,10 +281,11 @@ const TimetablePage = () => {
 
       const slots = [];
       DAYS.forEach(day => {
-        timeSlots.forEach((ts, idx) => {
+        timeSlots.forEach((_, idx) => {
           const key = `${day.key}_${idx + 1}`;
           const cell = grid[key];
           if (cell?.subject_id) {
+            const ts = slotTime(day.key, idx);
             slots.push({
               day_of_week: day.key,
               slot_order: idx + 1,
@@ -268,10 +368,18 @@ const TimetablePage = () => {
       {/* Time slots config */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="w-4 h-4" /> Créneaux horaires
-          </CardTitle>
-          <CardDescription>Définissez les horaires des séances de la journée</CardDescription>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="w-4 h-4" /> Créneaux horaires {perDayTimes && <span className="text-xs font-normal text-muted-foreground">(modèle commun — ajustable par jour dans la grille)</span>}
+              </CardTitle>
+              <CardDescription>Définissez les horaires des séances de la journée</CardDescription>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input type="checkbox" checked={perDayTimes} onChange={togglePerDayTimes} className="rounded" />
+              Horaires différents selon les jours
+            </label>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3 items-end">
@@ -328,18 +436,38 @@ const TimetablePage = () => {
                   <tr key={slotIdx} className="border-t">
                     <td className="p-2 align-top">
                       <div className="text-xs font-bold text-blue-700 bg-blue-50 rounded px-2 py-1 text-center">
-                        {ts.start_time}
-                        <br />
-                        {ts.end_time}
+                        {perDayTimes ? (
+                          <>Séance<br />{slotIdx + 1}</>
+                        ) : (
+                          <>{ts.start_time}<br />{ts.end_time}</>
+                        )}
                       </div>
                     </td>
                     {DAYS.map(day => {
                       const key = `${day.key}_${slotIdx + 1}`;
                       const cell = grid[key] || {};
                       const subjectColor = cell.subject_id ? subjectColorMap[cell.subject_id] || 'bg-gray-50 border-gray-200' : '';
+                      const dt = slotTime(day.key, slotIdx);
+                      const subjectTeachers = teachersForSubject(cell.subject_id, cell.teacher_id);
                       return (
                         <td key={day.key} className="p-1 align-top">
                           <div className={`border rounded-lg p-2 space-y-1.5 min-h-[80px] ${cell.subject_id ? subjectColor : 'bg-gray-50/50 border-dashed border-gray-200'}`}>
+                            {perDayTimes && (
+                              <div className="flex items-center gap-0.5">
+                                <input
+                                  type="time"
+                                  value={dt.start_time}
+                                  onChange={(e) => handleDayTimeChange(day.key, slotIdx, 'start_time', e.target.value)}
+                                  className="w-full text-[10px] border rounded px-1 py-0.5 bg-white/80"
+                                />
+                                <input
+                                  type="time"
+                                  value={dt.end_time}
+                                  onChange={(e) => handleDayTimeChange(day.key, slotIdx, 'end_time', e.target.value)}
+                                  className="w-full text-[10px] border rounded px-1 py-0.5 bg-white/80"
+                                />
+                              </div>
+                            )}
                             <select
                               value={cell.subject_id || ''}
                               onChange={(e) => handleCellChange(day.key, slotIdx, 'subject_id', e.target.value)}
@@ -353,10 +481,12 @@ const TimetablePage = () => {
                             <select
                               value={cell.teacher_id || ''}
                               onChange={(e) => handleCellChange(day.key, slotIdx, 'teacher_id', e.target.value)}
-                              className="w-full text-xs border rounded px-1.5 py-1 bg-white/80"
+                              disabled={!cell.subject_id}
+                              title={!cell.subject_id ? 'Choisissez d\'abord une matière' : undefined}
+                              className="w-full text-xs border rounded px-1.5 py-1 bg-white/80 disabled:opacity-50"
                             >
                               <option value="">— Prof —</option>
-                              {teachers.map(t => (
+                              {subjectTeachers.map(t => (
                                 <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
                               ))}
                             </select>
