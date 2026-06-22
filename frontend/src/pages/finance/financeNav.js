@@ -29,6 +29,7 @@ export const FINANCE_POLES = [
     color: 'green',
     tabs: [
       { label: 'Encaissement', path: '/finance/quick-collect', icon: Banknote },
+      { label: 'Paiements groupés', path: '/finance/grouped-payments', icon: Layers },
       { label: 'Élèves', path: '/finance/students', icon: Users },
       { label: 'Factures', path: '/finance/invoices', icon: FileText },
       { label: 'Paiements', path: '/finance/payments', icon: CreditCard },

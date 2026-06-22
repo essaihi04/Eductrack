@@ -87,6 +87,7 @@ const CashRegisterPage = () => {
       { header: 'Élève', key: 'student', width: 28 },
       { header: 'Classe', key: 'class', width: 16 },
       { header: 'Mode', key: 'method', width: 14 },
+      { header: 'Caissier', key: 'cashier', width: 22 },
       { header: 'Référence', key: 'reference', width: 18 },
       { header: 'Montant', key: 'amount', width: 14 },
     ];
@@ -98,6 +99,7 @@ const CashRegisterPage = () => {
         student: p.student ? `${p.student.first_name} ${p.student.last_name}` : '—',
         class: p.student?.classes?.name || '',
         method: METHOD_LABELS[p.method] || p.method,
+        cashier: p.cashier ? `${p.cashier.first_name} ${p.cashier.last_name}` : '',
         reference: p.reference || '',
         amount: Number(p.amount || 0),
       });
@@ -198,6 +200,7 @@ const CashRegisterPage = () => {
                       <th className="px-4 py-2 text-left">N° Reçu</th>
                       <th className="px-4 py-2 text-right">Montant</th>
                       <th className="px-4 py-2 text-left">Mode</th>
+                      <th className="px-4 py-2 text-left">Caissier</th>
                       <th className="px-4 py-2 text-left">Détail</th>
                     </tr>
                   </thead>
@@ -207,6 +210,7 @@ const CashRegisterPage = () => {
                         <td className="px-4 py-2 font-mono text-xs text-gray-600">{p.receipt_number}</td>
                         <td className="px-4 py-2 text-right"><Money value={p.amount} tone="green" /></td>
                         <td className="px-4 py-2"><Badge tone="gray">{METHOD_LABELS[p.method] || p.method}</Badge></td>
+                        <td className="px-4 py-2 text-xs text-gray-600">{p.cashier ? `${p.cashier.first_name} ${p.cashier.last_name}` : '—'}</td>
                         <td className="px-4 py-2 text-gray-700">
                           {p.student ? `${p.student.first_name} ${p.student.last_name}` : '—'}
                           {p.student?.classes?.name && <span className="text-gray-400"> · {p.student.classes.name}</span>}

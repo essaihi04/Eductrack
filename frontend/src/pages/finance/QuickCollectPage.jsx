@@ -1,23 +1,27 @@
 import { useState, useEffect } from 'react';
-import { Banknote, Search, Wallet, CheckCircle2, X, User } from 'lucide-react';
-import { financeApi, formatMAD, METHOD_LABELS } from '../../lib/financeApi';
-import { PageHeader, Card, EmptyState, Button } from '../../components/finance/ui';
+import { Banknote, Search, Wallet, CheckCircle2, X, User, Ban, ChevronRight } from 'lucide-react';
+import { financeApi, formatMAD, METHOD_LABELS, CATEGORY_LABELS } from '../../lib/financeApi';
+import { PageHeader, Card, EmptyState, Button, Badge } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear, toSlashYear } from '../../lib/schoolYear';
 
-// Code couleur des tuiles, calqué sur Koolskools (vert=payé, jaune=partiel,
-// rouge=retard, orange=impayé, gris=non facturé).
-const TILE_META = {
-  paid:    { ring: 'ring-green-500',  bg: 'bg-green-500 text-white',   label: 'Payé' },
-  partial: { ring: 'ring-yellow-500', bg: 'bg-yellow-400 text-yellow-950', label: 'Partiel' },
-  overdue: { ring: 'ring-red-500',    bg: 'bg-red-500 text-white',     label: 'En retard' },
-  unpaid:  { ring: 'ring-orange-500', bg: 'bg-white text-gray-800',    label: 'Impayé' },
-  pending: { ring: 'ring-gray-300',   bg: 'bg-white text-gray-500',    label: 'Non facturé' },
+// Code couleur des tuiles mois (agrégat) : vert=payé, orange=partiel, rouge=impayé.
+const MONTH_META = {
+  paid:    { bg: 'bg-green-500 text-white',        ring: 'ring-green-500' },
+  partial: { bg: 'bg-orange-400 text-orange-950',  ring: 'ring-orange-500' },
+  overdue: { bg: 'bg-red-500 text-white',          ring: 'ring-red-500' },
+  unpaid:  { bg: 'bg-red-500 text-white',          ring: 'ring-red-500' },
+  pending: { bg: 'bg-white text-gray-500',         ring: 'ring-gray-300' },
 };
+const SERVICE_TONE = { paid: 'green', partial: 'orange', overdue: 'red', unpaid: 'red', pending: 'gray' };
+const SERVICE_STATUS_LABEL = { paid: 'Payé', partial: 'Partiel', overdue: 'En retard', unpaid: 'Impayé', pending: 'Non facturé' };
+
+const svcLabel = (s) => CATEGORY_LABELS[s.category] || s.label || 'Service';
+const keyOf = (month, category) => `${month}:${category ?? 'all'}`;
 
 export default function QuickCollectPage() {
   const { year, years } = useYear();
-  const [activeYear, setActiveYear] = useState(year); // format slash
+  const [activeYear, setActiveYear] = useState(year);
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
   const [filters, setFilters] = useState({ class_id: '', search: '' });
@@ -26,14 +30,14 @@ export default function QuickCollectPage() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [data, setData] = useState(null);
   const [loadingData, setLoadingData] = useState(false);
+  const [openMonth, setOpenMonth] = useState(null); // mois déplié
 
-  const [selected, setSelected] = useState([]); // mois cochés
+  const [selected, setSelected] = useState([]); // [{month, category, remaining, label}]
   const [method, setMethod] = useState('cash');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Liste des années pour les onglets (slash). Fallback : 3 ans autour de l'actif.
   const yearTabs = (years && years.length)
     ? years
     : (() => {
@@ -44,6 +48,7 @@ export default function QuickCollectPage() {
 
   useEffect(() => { loadClasses(); /* eslint-disable-next-line */ }, [activeYear]);
   useEffect(() => { loadStudents(); /* eslint-disable-next-line */ }, [filters.class_id, activeYear]);
+  useEffect(() => { if (selectedStudent) loadStatus(selectedStudent); /* eslint-disable-next-line */ }, [activeYear]);
 
   const loadClasses = async () => {
     try {
@@ -61,24 +66,18 @@ export default function QuickCollectPage() {
     finally { setLoadingStudents(false); }
   };
 
-  const loadMonthly = async (student) => {
+  const loadStatus = async (student) => {
     if (!student) return;
     setLoadingData(true);
     setSelected([]);
     try {
-      const res = await financeApi.getMonthlyStatus(student.id, toDashYear(activeYear));
+      const res = await financeApi.getMonthlyServicesStatus(student.id, toDashYear(activeYear));
       setData(res);
     } catch (e) { console.error(e); setData(null); }
     finally { setLoadingData(false); }
   };
 
-  const pickStudent = (s) => { setSelectedStudent(s); loadMonthly(s); };
-
-  // Recharge la grille quand l'année change (élève déjà sélectionné).
-  useEffect(() => {
-    if (selectedStudent) loadMonthly(selectedStudent);
-    // eslint-disable-next-line
-  }, [activeYear]);
+  const pickStudent = (s) => { setSelectedStudent(s); setOpenMonth(null); loadStatus(s); };
 
   const filteredStudents = filters.search
     ? students.filter((s) => `${s.first_name} ${s.last_name}`.toLowerCase().includes(filters.search.toLowerCase()))
@@ -86,46 +85,60 @@ export default function QuickCollectPage() {
 
   const months = data?.months || [];
   const summary = data?.summary;
-  const payableMonths = months.filter((m) => m.remaining > 0);
+  const openMonthData = months.find((m) => m.month === openMonth) || null;
 
-  const toggle = (m) => {
-    if (m.remaining <= 0) return;
-    setSelected((prev) => prev.includes(m.month) ? prev.filter((x) => x !== m.month) : [...prev, m.month]);
+  const isSelected = (month, category) => selected.some((x) => keyOf(x.month, x.category) === keyOf(month, category));
+
+  const toggleService = (month, s) => {
+    if (s.remaining <= 0) return;
+    const k = keyOf(month, s.category);
+    setSelected((prev) => prev.some((x) => keyOf(x.month, x.category) === k)
+      ? prev.filter((x) => keyOf(x.month, x.category) !== k)
+      : [...prev, { month, category: s.category, remaining: s.remaining, label: `${svcLabel(s)} ${openMonthData?.label || ''}`.trim() }]);
   };
 
-  const selectAll = () => {
-    if (selected.length === payableMonths.length) setSelected([]);
-    else setSelected(payableMonths.map((m) => m.month));
-  };
-
-  const selectedTotal = months.filter((m) => selected.includes(m.month)).reduce((s, m) => s + Number(m.remaining), 0);
+  const selectedTotal = selected.reduce((s, x) => s + Number(x.remaining), 0);
 
   const submit = async () => {
     if (selected.length === 0 || !selectedStudent) return;
-    if (!confirm(`Encaisser ${selected.length} mois — total ${formatMAD(selectedTotal)} ?`)) return;
+    if (!confirm(`Encaisser ${selected.length} service(s) — total ${formatMAD(selectedTotal)} ?`)) return;
     setSaving(true);
     try {
-      const res = await financeApi.payMonths(selectedStudent.id, {
+      const res = await financeApi.payServices(selectedStudent.id, {
         academic_year: toDashYear(activeYear),
-        months: selected,
+        items: selected.map((x) => ({ month: x.month, category: x.category })),
         payment_date: paymentDate,
         method,
         reference: reference || undefined,
       });
-      alert(`${res.paid_count} mois encaissé(s) · ${formatMAD(res.total_paid)}`);
+      alert(`${res.paid_count} service(s) encaissé(s) · ${formatMAD(res.total_paid)}`);
       setReference('');
-      await loadMonthly(selectedStudent);
+      await loadStatus(selectedStudent);
       loadStudents();
     } catch (e) { alert('Erreur: ' + e.message); }
     finally { setSaving(false); }
   };
 
+  // Annulation d'un service : on annule le(s) paiement(s) confirmé(s) de sa facture.
+  const cancelService = async (s) => {
+    if (!s.invoice_id || s.paid <= 0) return;
+    const reason = prompt(`Annuler le paiement de "${svcLabel(s)}" ?\nMotif :`);
+    if (!reason) return;
+    try {
+      const { payments } = await financeApi.listPayments({ invoice_id: s.invoice_id });
+      for (const p of (payments || [])) {
+        if (p.status !== 'cancelled') await financeApi.cancelPayment(p.id, reason);
+      }
+      await loadStatus(selectedStudent);
+      loadStudents();
+    } catch (e) { alert('Erreur: ' + e.message); }
+  };
+
   return (
     <div className="p-6 space-y-5 pb-28">
       <PageHeader icon={Banknote} title="Encaissement rapide" color="green"
-        subtitle="Sélectionnez un élève, encaissez ses mois en un clic" />
+        subtitle="Élève → mois → service : encaissez ou annulez chaque service séparément" />
 
-      {/* Onglets années */}
       <div className="flex items-center gap-2 flex-wrap">
         {yearTabs.map((y) => {
           const active = toSlashYear(y) === toSlashYear(activeYear);
@@ -139,7 +152,7 @@ export default function QuickCollectPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-5">
-        {/* Colonne sélection élève */}
+        {/* Sélection élève */}
         <Card title="Élèves" bodyClassName="p-0">
           <div className="p-3 space-y-2 border-b border-border">
             <div className="relative">
@@ -174,10 +187,10 @@ export default function QuickCollectPage() {
           </div>
         </Card>
 
-        {/* Colonne grille mensuelle */}
+        {/* Grille mois + services */}
         <div className="space-y-4">
           {!selectedStudent ? (
-            <Card><EmptyState icon={User} title="Sélectionnez un élève" hint="Choisissez un élève à gauche pour afficher et encaisser ses mois." /></Card>
+            <Card><EmptyState icon={User} title="Sélectionnez un élève" hint="Choisissez un élève à gauche pour afficher ses mois et services." /></Card>
           ) : loadingData ? (
             <Card><p className="p-8 text-center text-gray-400">Chargement…</p></Card>
           ) : !data?.plan_exists ? (
@@ -189,39 +202,61 @@ export default function QuickCollectPage() {
             </Card>
           ) : (
             <>
-              <Card
-                title={`${selectedStudent.first_name} ${selectedStudent.last_name} · ${selectedStudent.classes?.name || '—'}`}
-                actions={payableMonths.length > 0 && (
-                  <button onClick={selectAll} className="text-xs text-green-700 hover:underline">
-                    {selected.length === payableMonths.length ? 'Tout désélectionner' : 'Tout sélectionner'}
-                  </button>
-                )}
-              >
+              <Card title={`${selectedStudent.first_name} ${selectedStudent.last_name} · ${selectedStudent.classes?.name || '—'}`}>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {months.map((m) => {
-                    const meta = TILE_META[m.status] || TILE_META.pending;
-                    const isSelected = selected.includes(m.month);
-                    const payable = m.remaining > 0;
+                    const meta = MONTH_META[m.status] || MONTH_META.pending;
+                    const open = openMonth === m.month;
                     return (
-                      <button key={m.month} onClick={() => toggle(m)} disabled={!payable}
-                        className={`relative rounded-xl border p-3 text-left transition-all ${meta.bg} ${payable ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-90'} ${isSelected ? `ring-2 ring-offset-1 ${meta.ring}` : 'border-black/5'}`}>
-                        <div className="text-xs font-semibold opacity-90 truncate">{m.label}</div>
+                      <button key={m.month} onClick={() => setOpenMonth(open ? null : m.month)}
+                        className={`relative rounded-xl border p-3 text-left transition-all hover:shadow-md ${meta.bg} ${open ? `ring-2 ring-offset-1 ${meta.ring}` : 'border-black/5'}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold opacity-90 truncate">{m.label}</span>
+                          <ChevronRight className={`w-4 h-4 opacity-70 transition-transform ${open ? 'rotate-90' : ''}`} />
+                        </div>
                         <div className="text-lg font-bold mt-1 tabular-nums">{formatMAD(m.paid)}</div>
-                        <div className="text-[11px] opacity-80 tabular-nums">CA : {formatMAD(m.total)}</div>
-                        {m.remaining > 0 && (
-                          <div className="text-[11px] font-medium mt-0.5 tabular-nums">Reste {formatMAD(m.remaining)}</div>
-                        )}
-                        {isSelected && (
-                          <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-black/20 flex items-center justify-center">
-                            <CheckCircle2 className="w-4 h-4" />
-                          </span>
-                        )}
+                        <div className="text-[11px] opacity-80 tabular-nums">CA : {formatMAD(m.expected)}</div>
+                        {m.remaining > 0 && <div className="text-[11px] font-medium mt-0.5 tabular-nums">Reste {formatMAD(m.remaining)}</div>}
                       </button>
                     );
                   })}
                   {months.length === 0 && <p className="col-span-full text-center text-gray-400 py-6">Aucune échéance dans ce plan</p>}
                 </div>
               </Card>
+
+              {/* Services du mois déplié */}
+              {openMonthData && (
+                <Card title={`Services — ${openMonthData.label}`}>
+                  <div className="divide-y divide-border">
+                    {openMonthData.services.map((s) => {
+                      const sel = isSelected(openMonthData.month, s.category);
+                      const payable = s.remaining > 0;
+                      return (
+                        <div key={keyOf(openMonthData.month, s.category)}
+                          className={`flex items-center gap-3 py-2.5 ${sel ? 'bg-green-50/60 -mx-4 px-4' : ''}`}>
+                          {payable ? (
+                            <input type="checkbox" checked={sel} onChange={() => toggleService(openMonthData.month, s)} className="w-4 h-4" />
+                          ) : <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-800">{svcLabel(s)}</div>
+                            <div className="text-xs text-gray-500 tabular-nums">
+                              {formatMAD(s.paid)} / {formatMAD(s.total)}
+                              {s.remaining > 0 && <span className="text-orange-600"> · reste {formatMAD(s.remaining)}</span>}
+                            </div>
+                          </div>
+                          <Badge tone={SERVICE_TONE[s.status] || 'gray'}>{SERVICE_STATUS_LABEL[s.status] || s.status}</Badge>
+                          {s.paid > 0 && s.invoice_id && (
+                            <button onClick={() => cancelService(s)} className="p-1.5 hover:bg-red-50 rounded" title="Annuler ce service">
+                              <Ban className="w-4 h-4 text-red-500" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {openMonthData.services.length === 0 && <p className="py-4 text-center text-gray-400 text-sm">Aucun service ce mois</p>}
+                  </div>
+                </Card>
+              )}
 
               {/* Situation élève */}
               {summary && (
@@ -241,7 +276,7 @@ export default function QuickCollectPage() {
         <div className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-gray-200 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
           <div className="max-w-6xl mx-auto px-6 py-3 flex flex-wrap items-center gap-3">
             <div className="text-sm">
-              <span className="text-gray-600">{selected.length} mois · </span>
+              <span className="text-gray-600">{selected.length} service(s) · </span>
               <span className="font-bold text-green-700">{formatMAD(selectedTotal)}</span>
             </div>
             <div className="flex items-center gap-2 ml-auto flex-wrap">

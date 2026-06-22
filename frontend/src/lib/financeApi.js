@@ -61,6 +61,10 @@ export const financeApi = {
   // Échéancier mensuel + encaissement par mois (factures auto-générées)
   getMonthlyStatus: (studentId, academicYear) => request(`/api/finance/students/${studentId}/monthly-status`, { query: { academic_year: academicYear } }),
   payMonths: (studentId, data) => request(`/api/finance/students/${studentId}/pay-months`, { method: 'POST', body: data }),
+  getMonthlyServicesStatus: (studentId, academicYear) => request(`/api/finance/students/${studentId}/monthly-services-status`, { query: { academic_year: academicYear } }),
+  payServices: (studentId, data) => request(`/api/finance/students/${studentId}/pay-services`, { method: 'POST', body: data }),
+  payGroupPreview: (data) => request('/api/finance/pay-group/preview', { method: 'POST', body: data }),
+  payGroup: (data) => request('/api/finance/pay-group', { method: 'POST', body: data }),
 
   // Invoices
   listInvoices: (filters) => request('/api/finance/invoices', { query: filters }),

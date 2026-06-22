@@ -126,6 +126,7 @@ export default function PaymentsPage() {
     ) : <span className="text-gray-400">—</span> },
     { key: 'method', header: 'Mode', render: (p) => <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge> },
     { key: 'reference', header: 'Référence', render: (p) => <span className="text-gray-500 text-xs">{p.reference || '—'}</span> },
+    { key: 'cashier', header: 'Caissier', render: (p) => <span className="text-gray-600 text-xs">{p.cashier ? `${p.cashier.first_name} ${p.cashier.last_name}` : '—'}</span> },
     { key: 'amount', header: 'Montant', align: 'right', render: (p) => <Money value={p.amount} tone="green" /> },
     { key: 'actions', header: 'Actions', align: 'right', render: (p) => (
       <div className="flex justify-end gap-1">
@@ -202,9 +203,12 @@ function ReceiptCard({ p, isAdmin, onPrint, onCancel }) {
   const period = p.invoice?.period_label || p.reference || null;
   return (
     <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-2 hover:shadow-sm transition-shadow">
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-2">
         <span className="text-xl font-bold text-green-700 tabular-nums">{formatMAD(p.amount)}</span>
-        <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge>
+        <div className="flex flex-col items-end gap-1">
+          <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge>
+          <Badge tone={p.status === 'cancelled' ? 'red' : 'green'}>{p.status === 'cancelled' ? 'Annulé' : 'Confirmé'}</Badge>
+        </div>
       </div>
       <div className="text-sm font-medium text-gray-800 truncate">
         {p.student?.first_name} {p.student?.last_name}
@@ -213,6 +217,7 @@ function ReceiptCard({ p, isAdmin, onPrint, onCancel }) {
       <div className="text-xs text-gray-500 space-y-0.5">
         <div>{formatDate(p.payment_date)} · <span className="font-mono">N° {p.receipt_number}</span></div>
         {period && <div className="text-gray-600">{period}</div>}
+        {p.cashier && <div className="text-gray-400">Encaissé par {p.cashier.first_name} {p.cashier.last_name}</div>}
       </div>
       <div className="flex items-center gap-1.5 pt-1 mt-auto border-t border-border">
         <button onClick={() => onPrint(p)} className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">

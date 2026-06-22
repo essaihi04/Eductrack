@@ -633,6 +633,409 @@ router.post('/students/:studentId/pay-months', async (req, res) => {
   }
 });
 
+// ── Statut d'un mois ventilé par SERVICE (paiement à la maille mois × service) ──
+// Pour chaque mois du plan, renvoie la liste des services avec payé / reste /
+// statut, plus un statut agrégé du mois (paid / partial / overdue / unpaid).
+router.get('/students/:studentId/monthly-services-status', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const academicYear = req.query.academic_year;
+    if (!academicYear) return res.status(400).json({ error: 'academic_year requis' });
+
+    const plan = await fetchStudentPlan(studentId, academicYear, schoolId);
+    if (!plan) return res.json({ academic_year: academicYear, plan_exists: false, months: [], summary: null });
+
+    const scheduleMonths = getScheduleMonths(plan);
+    const periodLabels = scheduleMonths.map(m => periodLabelFor(academicYear, m));
+
+    let invQ = supabaseAdmin
+      .from('invoices')
+      .select('id, invoice_number, period_label, service_category, total, amount_paid, status, due_date')
+      .eq('student_id', studentId)
+      .neq('status', 'cancelled');
+    if (schoolId) invQ = invQ.eq('school_id', schoolId);
+    if (periodLabels.length > 0) invQ = invQ.in('period_label', periodLabels);
+    const { data: invoices } = await invQ;
+
+    const today = new Date().toISOString().split('T')[0];
+    const statusOf = (paid, total, dueDate) => {
+      if (paid >= total && total > 0) return 'paid';
+      if (paid > 0) return 'partial';
+      if (dueDate && dueDate < today) return 'overdue';
+      return 'unpaid';
+    };
+
+    const months = scheduleMonths.map(m => {
+      const label = periodLabelFor(academicYear, m);
+      const monthInvs = (invoices || []).filter(i => i.period_label === label);
+      const bundle = monthInvs.find(i => !i.service_category); // facture héritée « mois groupé »
+
+      let services;
+      if (bundle) {
+        const paid = Number(bundle.amount_paid || 0);
+        const total = Number(bundle.total || 0);
+        services = [{
+          category: null, label: 'Mensualité', expected: total, total, paid,
+          remaining: Math.max(0, total - paid), invoice_id: bundle.id,
+          invoice_number: bundle.invoice_number, status: statusOf(paid, total, bundle.due_date),
+        }];
+      } else {
+        const byCat = {};
+        monthInvs.forEach(i => { if (i.service_category) byCat[i.service_category] = i; });
+        services = computeMonthServices(plan, m).map(s => {
+          const inv = byCat[s.category];
+          const total = inv ? Number(inv.total) : s.total;
+          const paid = inv ? Number(inv.amount_paid || 0) : 0;
+          return {
+            category: s.category, label: s.name, expected: s.total, total, paid,
+            remaining: Math.max(0, total - paid), invoice_id: inv?.id || null,
+            invoice_number: inv?.invoice_number || null,
+            status: inv ? statusOf(paid, total, inv.due_date) : 'pending',
+          };
+        });
+      }
+
+      const expected = services.reduce((a, s) => a + Number(s.total), 0);
+      const paid = services.reduce((a, s) => a + Number(s.paid), 0);
+      const remaining = services.reduce((a, s) => a + Number(s.remaining), 0);
+      let status = 'unpaid';
+      if (remaining <= 0 && expected > 0) status = 'paid';
+      else if (paid > 0) status = 'partial';
+      else if (services.some(s => s.status === 'overdue')) status = 'overdue';
+
+      return { month: m, label, services, expected, paid, remaining, status };
+    });
+
+    const expectedTotal = months.reduce((s, mo) => s + Number(mo.expected), 0);
+    const paidTotal = months.reduce((s, mo) => s + Number(mo.paid), 0);
+    const remainingTotal = months.reduce((s, mo) => s + Number(mo.remaining), 0);
+
+    res.json({
+      academic_year: academicYear,
+      plan_exists: true,
+      currency: plan.template?.currency || 'MAD',
+      months,
+      summary: {
+        expected_total: expectedTotal,
+        paid_total: paidTotal,
+        remaining_total: remainingTotal,
+        all_paid: remainingTotal <= 0 && expectedTotal > 0,
+        paid_months: months.filter(mo => mo.status === 'paid').length,
+        total_months: months.length,
+      },
+    });
+  } catch (error) {
+    console.error('Erreur monthly-services-status:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Encaisser des SERVICES précis (couples mois × service). 1 reçu = 1 service/mois.
+// La facture (period_label, service_category) est créée automatiquement si absente.
+router.post('/students/:studentId/pay-services', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const { academic_year, items, payment_date, method, reference, notes, due_day } = req.body;
+
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items[] requis' });
+    if (!method) return res.status(400).json({ error: 'Méthode de paiement requise' });
+
+    const plan = await fetchStudentPlan(studentId, academic_year, schoolId);
+    if (!plan) return res.status(400).json({ error: 'Aucun plan de frais actif pour cet élève sur cette année' });
+
+    const payDate = payment_date || new Date().toISOString().split('T')[0];
+    const dueDay = String(due_day || 5).padStart(2, '0');
+
+    const receipts = [];
+    const skipped = [];
+    const errors = [];
+
+    for (const raw of items) {
+      const month = Number(raw.month);
+      const category = raw.category || null; // null = mois entier (compat)
+      try {
+        let lines, total;
+        if (category) {
+          const svc = computeMonthServices(plan, month).find(s => s.category === category);
+          if (!svc || svc.total <= 0) { skipped.push({ month, category, reason: 'aucun frais' }); continue; }
+          total = svc.total;
+          lines = [{ description: svc.name, category, quantity: 1, unit_price: svc.total, amount: svc.total }];
+        } else {
+          const computed = computeMonthForPlan(plan, month);
+          if (computed.total <= 0) { skipped.push({ month, reason: 'aucun frais' }); continue; }
+          total = computed.total;
+          lines = computed.lines;
+        }
+
+        const periodLabel = periodLabelFor(academic_year, month);
+        const calYear = calendarYearFor(academic_year, month);
+        const dueDate = `${calYear}-${String(month).padStart(2, '0')}-${dueDay}`;
+
+        // Facture du couple (période, service) ou création automatique
+        let invQ = supabaseAdmin
+          .from('invoices')
+          .select('id, total, amount_paid')
+          .eq('student_id', studentId)
+          .eq('period_label', periodLabel)
+          .neq('status', 'cancelled');
+        if (schoolId) invQ = invQ.eq('school_id', schoolId);
+        invQ = category ? invQ.eq('service_category', category) : invQ.is('service_category', null);
+        const { data: existingInv } = await invQ.maybeSingle();
+
+        let invoice = existingInv;
+        if (!invoice) {
+          const invoiceNumber = await getNextCounter(schoolId, 'invoice');
+          const subtotal = lines.reduce((s, l) => s + Number(l.amount), 0);
+          const { data: newInv, error: invErr } = await supabaseAdmin
+            .from('invoices')
+            .insert({
+              school_id: schoolId,
+              invoice_number: invoiceNumber,
+              student_id: studentId,
+              plan_id: plan.id,
+              due_date: dueDate,
+              period_label: periodLabel,
+              service_category: category,
+              subtotal,
+              discount: Math.max(0, subtotal - total),
+              total,
+              status: 'issued',
+              created_by: req.user.id,
+            })
+            .select('id, total, amount_paid')
+            .single();
+          if (invErr) { errors.push({ month, category, error: invErr.message }); continue; }
+          const linesToInsert = lines.map((l, idx) => ({ invoice_id: newInv.id, ...l, sort_order: idx }));
+          await supabaseAdmin.from('invoice_lines').insert(linesToInsert);
+          invoice = newInv;
+        }
+
+        const remaining = Number(invoice.total) - Number(invoice.amount_paid || 0);
+        if (remaining <= 0) { skipped.push({ month, category, reason: 'déjà payé' }); continue; }
+
+        const receiptNumber = await getNextCounter(schoolId, 'receipt');
+        const tag = category ? `${periodLabel} — ${category}` : periodLabel;
+        const { data: payment, error: payErr } = await supabaseAdmin
+          .from('payments')
+          .insert({
+            school_id: schoolId,
+            receipt_number: receiptNumber,
+            invoice_id: invoice.id,
+            student_id: studentId,
+            amount: remaining,
+            payment_date: payDate,
+            method,
+            reference: reference || null,
+            notes: notes ? `${notes} (${tag})` : tag,
+            recorded_by: req.user.id,
+          })
+          .select('id, receipt_number, amount')
+          .single();
+        if (payErr) { errors.push({ month, category, error: payErr.message }); continue; }
+
+        receipts.push({ month, category, period_label: periodLabel, receipt_number: payment.receipt_number, amount: payment.amount });
+      } catch (e) {
+        errors.push({ month, category: raw.category, error: e.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      paid_count: receipts.length,
+      skipped_count: skipped.length,
+      receipts,
+      skipped,
+      total_paid: receipts.reduce((s, r) => s + Number(r.amount), 0),
+      errors: errors.slice(0, 10),
+    });
+  } catch (error) {
+    console.error('Erreur pay-services:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Encaisse UN service pour UN élève (crée la facture mois×service si absente).
+// Helper interne réutilisé par pay-services groupés. Renvoie un objet résultat.
+async function collectOneService({ plan, studentId, schoolId, academicYear, month, category, payDate, method, reference, notes, dueDay, userId }) {
+  let lines, total;
+  if (category) {
+    const svc = computeMonthServices(plan, month).find(s => s.category === category);
+    if (!svc || svc.total <= 0) return { skipped: 'aucun frais' };
+    total = svc.total;
+    lines = [{ description: svc.name, category, quantity: 1, unit_price: svc.total, amount: svc.total }];
+  } else {
+    const computed = computeMonthForPlan(plan, month);
+    if (computed.total <= 0) return { skipped: 'aucun frais' };
+    total = computed.total;
+    lines = computed.lines;
+  }
+
+  const periodLabel = periodLabelFor(academicYear, month);
+  const calYear = calendarYearFor(academicYear, month);
+  const dueDate = `${calYear}-${String(month).padStart(2, '0')}-${dueDay}`;
+
+  let invQ = supabaseAdmin
+    .from('invoices')
+    .select('id, total, amount_paid')
+    .eq('student_id', studentId)
+    .eq('period_label', periodLabel)
+    .neq('status', 'cancelled');
+  if (schoolId) invQ = invQ.eq('school_id', schoolId);
+  invQ = category ? invQ.eq('service_category', category) : invQ.is('service_category', null);
+  const { data: existingInv } = await invQ.maybeSingle();
+
+  let invoice = existingInv;
+  if (!invoice) {
+    const invoiceNumber = await getNextCounter(schoolId, 'invoice');
+    const subtotal = lines.reduce((s, l) => s + Number(l.amount), 0);
+    const { data: newInv, error: invErr } = await supabaseAdmin
+      .from('invoices')
+      .insert({
+        school_id: schoolId, invoice_number: invoiceNumber, student_id: studentId, plan_id: plan.id,
+        due_date: dueDate, period_label: periodLabel, service_category: category,
+        subtotal, discount: Math.max(0, subtotal - total), total, status: 'issued', created_by: userId,
+      })
+      .select('id, total, amount_paid')
+      .single();
+    if (invErr) return { error: invErr.message };
+    await supabaseAdmin.from('invoice_lines').insert(lines.map((l, idx) => ({ invoice_id: newInv.id, ...l, sort_order: idx })));
+    invoice = newInv;
+  }
+
+  const remaining = Number(invoice.total) - Number(invoice.amount_paid || 0);
+  if (remaining <= 0) return { skipped: 'déjà payé' };
+
+  const receiptNumber = await getNextCounter(schoolId, 'receipt');
+  const tag = category ? `${periodLabel} — ${category}` : periodLabel;
+  const { data: payment, error: payErr } = await supabaseAdmin
+    .from('payments')
+    .insert({
+      school_id: schoolId, receipt_number: receiptNumber, invoice_id: invoice.id, student_id: studentId,
+      amount: remaining, payment_date: payDate, method, reference: reference || null,
+      notes: notes ? `${notes} (${tag})` : tag, recorded_by: userId,
+    })
+    .select('id, receipt_number, amount')
+    .single();
+  if (payErr) return { error: payErr.message };
+  return { receipt: { receipt_number: payment.receipt_number, amount: payment.amount } };
+}
+
+// Paiements GROUPÉS : encaisse des couples mois×service pour plusieurs élèves
+// (une classe entière ou une liste d'élèves) en une seule opération.
+router.post('/pay-group', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { academic_year, class_id, student_ids, months, categories, method, payment_date, reference, due_day } = req.body;
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+    if (!Array.isArray(months) || months.length === 0) return res.status(400).json({ error: 'months[] requis' });
+    if (!method) return res.status(400).json({ error: 'Méthode de paiement requise' });
+
+    // Résolution des élèves cibles
+    let studentIds = Array.isArray(student_ids) ? student_ids : [];
+    if (studentIds.length === 0) {
+      if (!class_id) return res.status(400).json({ error: 'class_id ou student_ids requis' });
+      let sQ = supabaseAdmin.from('profiles').select('id').eq('role', 'student').eq('class_id', class_id);
+      if (schoolId) sQ = sQ.eq('school_id', schoolId);
+      const { data: studs } = await sQ;
+      studentIds = (studs || []).map(s => s.id);
+    }
+    if (studentIds.length === 0) return res.json({ success: true, students_paid: 0, receipts_count: 0, total_paid: 0, details: [] });
+
+    const payDate = payment_date || new Date().toISOString().split('T')[0];
+    const dueDay = String(due_day || 5).padStart(2, '0');
+    // 'all'/vide → tous les services dus du mois ; sinon liste de catégories.
+    const wantCats = Array.isArray(categories) && categories.length > 0 && categories[0] !== 'all'
+      ? categories : null;
+
+    const details = [];
+    let receiptsCount = 0;
+    let totalPaid = 0;
+    let studentsPaid = 0;
+
+    for (const studentId of studentIds) {
+      const plan = await fetchStudentPlan(studentId, academic_year, schoolId);
+      if (!plan) { details.push({ student_id: studentId, skipped: 'pas de plan' }); continue; }
+      let studReceipts = 0;
+      let studAmount = 0;
+      for (const rawMonth of months) {
+        const month = Number(rawMonth);
+        const svcCats = (computeMonthServices(plan, month) || [])
+          .map(s => s.category)
+          .filter(c => !wantCats || wantCats.includes(c));
+        for (const category of svcCats) {
+          const r = await collectOneService({ plan, studentId, schoolId, academicYear: academic_year, month, category, payDate, method, reference, dueDay, userId: req.user.id });
+          if (r.receipt) { studReceipts += 1; studAmount += Number(r.receipt.amount); }
+        }
+      }
+      if (studReceipts > 0) { studentsPaid += 1; receiptsCount += studReceipts; totalPaid += studAmount; }
+      details.push({ student_id: studentId, receipts: studReceipts, amount: studAmount });
+    }
+
+    res.json({ success: true, students_paid: studentsPaid, receipts_count: receiptsCount, total_paid: totalPaid, details });
+  } catch (error) {
+    console.error('Erreur pay-group:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Aperçu (read-only) des paiements groupés : pour chaque élève cible, montant
+// encore dû sur les mois × services sélectionnés. N'écrit rien.
+router.post('/pay-group/preview', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { academic_year, class_id, student_ids, months, categories } = req.body;
+    if (!academic_year || !Array.isArray(months) || months.length === 0) {
+      return res.status(400).json({ error: 'academic_year et months[] requis' });
+    }
+
+    let studentIds = Array.isArray(student_ids) ? student_ids : [];
+    if (studentIds.length === 0) {
+      if (!class_id) return res.status(400).json({ error: 'class_id ou student_ids requis' });
+      let sQ = supabaseAdmin.from('profiles').select('id, first_name, last_name').eq('role', 'student').eq('class_id', class_id);
+      if (schoolId) sQ = sQ.eq('school_id', schoolId);
+      const { data: studs } = await sQ;
+      studentIds = (studs || []).map(s => s.id);
+    }
+
+    const wantCats = Array.isArray(categories) && categories.length > 0 && categories[0] !== 'all' ? categories : null;
+    const rows = [];
+    let totalDue = 0;
+
+    for (const studentId of studentIds) {
+      const plan = await fetchStudentPlan(studentId, academic_year, schoolId);
+      if (!plan) continue;
+      const periodLabels = months.map(m => periodLabelFor(academic_year, Number(m)));
+      let invQ = supabaseAdmin.from('invoices')
+        .select('period_label, service_category, total, amount_paid, status')
+        .eq('student_id', studentId).neq('status', 'cancelled').in('period_label', periodLabels);
+      if (schoolId) invQ = invQ.eq('school_id', schoolId);
+      const { data: invs } = await invQ;
+
+      let due = 0;
+      for (const rawMonth of months) {
+        const month = Number(rawMonth);
+        const label = periodLabelFor(academic_year, month);
+        for (const s of computeMonthServices(plan, month)) {
+          if (wantCats && !wantCats.includes(s.category)) continue;
+          const inv = (invs || []).find(i => i.period_label === label && i.service_category === s.category);
+          const total = inv ? Number(inv.total) : s.total;
+          const paid = inv ? Number(inv.amount_paid || 0) : 0;
+          due += Math.max(0, total - paid);
+        }
+      }
+      if (due > 0) { rows.push({ student_id: studentId, due }); totalDue += due; }
+    }
+
+    res.json({ students_with_due: rows.length, total_due: totalDue, rows });
+  } catch (error) {
+    console.error('Erreur pay-group/preview:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
 // ============================================================
 // FACTURES
 // ============================================================
@@ -909,7 +1312,8 @@ router.get('/payments', async (req, res) => {
       .select(`*,
         student:profiles!payments_student_id_fkey(id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)),
         school:schools(id, name, logo_url, address, phone),
-        invoice:invoices(id, invoice_number, total, period_label)
+        invoice:invoices(id, invoice_number, total, period_label),
+        cashier:profiles!payments_recorded_by_fkey(id, first_name, last_name)
       `)
       .eq('status', 'confirmed')
       .order('payment_date', { ascending: false })
@@ -984,8 +1388,9 @@ router.get('/cash-register', async (req, res) => {
     // Encaissements (paiements confirmés)
     let payQ = supabaseAdmin
       .from('payments')
-      .select(`id, receipt_number, amount, payment_date, method, reference,
-        student:profiles!payments_student_id_fkey(first_name, last_name, classes!fk_profiles_class(name))`)
+      .select(`id, receipt_number, amount, payment_date, method, reference, status,
+        student:profiles!payments_student_id_fkey(first_name, last_name, classes!fk_profiles_class(name)),
+        cashier:profiles!payments_recorded_by_fkey(first_name, last_name)`)
       .eq('status', 'confirmed')
       .gte('payment_date', from)
       .lte('payment_date', to)
@@ -1781,6 +2186,32 @@ function computeMonthForPlan(plan, month) {
   const discount = siblingDiscount + monthlyScholarship + monthlyCustom;
   const total = Math.max(0, subtotal - discount);
   return { lines, subtotal, discount, total };
+}
+
+// Décompose un mois en SERVICES (catégories de frais), avec la remise mensuelle
+// répartie au prorata pour que Σ(total des services) == total du mois.
+// Retourne [{ category, name, gross, total }].
+function computeMonthServices(plan, month) {
+  const { lines, subtotal, total } = computeMonthForPlan(plan, month);
+  if (!lines.length) return [];
+  const byCat = {};
+  for (const l of lines) {
+    const cat = l.category || 'other';
+    if (!byCat[cat]) byCat[cat] = { category: cat, name: l.description, gross: 0 };
+    byCat[cat].gross += Number(l.amount || 0);
+  }
+  const cats = Object.values(byCat);
+  const ratio = subtotal > 0 ? total / subtotal : 0;
+  let allocated = 0;
+  cats.forEach((c, i) => {
+    if (i === cats.length - 1) {
+      c.total = Math.round((total - allocated) * 100) / 100; // le reste absorbe l'arrondi
+    } else {
+      c.total = Math.round(c.gross * ratio * 100) / 100;
+      allocated += c.total;
+    }
+  });
+  return cats;
 }
 
 // Année civile correspondant à un mois dans une année scolaire "2025-2026"
