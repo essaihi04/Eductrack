@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, UserCircle, TrendingUp, GraduationCap, BookOpen,
   Users2, FileText, ClipboardList, Calendar, ShieldCheck, BarChart3,
   Wallet, Bus, MapPin, Sparkles, Image as ImageIcon, Search, BarChart2,
-  AlertTriangle, Settings, UserCog, MessageSquare, UserCheck,
+  AlertTriangle, Settings, UserCog, MessageSquare, UserCheck, Bot,
 } from 'lucide-react';
 
 // Source de navigation admin unique — utilisée par la Sidebar (domaines de
@@ -116,6 +116,7 @@ export const ADMIN_DOMAINS = [
           { label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors', icon: UserCog, roles: FULL },
           { label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers', icon: UserCog, roles: NON_MANAGER },
           { label: 'Resp. transport', path: '/transport/managers', icon: UserCog, roles: FULL },
+          { label: 'Réceptionniste (chatbot)', path: '/admin/receptionists', icon: Bot, roles: FULL },
           { label: 'WhatsApp', path: '/whatsapp', icon: MessageSquare, roles: ALL_ADMIN },
         ],
       },

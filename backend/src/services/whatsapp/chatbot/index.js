@@ -33,6 +33,7 @@ import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery } from './ai.js';
+import { getReceptionistByPhone, answerSchoolAI, receptionistWelcome, receptionistFooter } from './adminAi.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
@@ -967,6 +968,52 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Chatbot « Réceptionniste » — assistant statistiques de l'école
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Traite un message d'un numéro déclaré « réceptionniste » : chatbot IA libre
+ * répondant sur les statistiques globales de l'école (DeepSeek). Pas de menu :
+ * questions libres uniquement.
+ */
+async function handleReceptionistMessage({ phone, text, providerMessageId, schoolId, receptionist }) {
+  // Log du message entrant (parent_id = null : ce n'est pas un parent).
+  const { data: incomingMsg } = await supabaseAdmin
+    .from('whatsapp_incoming_messages')
+    .insert({
+      phone_e164: phone,
+      parent_id: null,
+      school_id: schoolId,
+      message_text: text || '',
+      provider_message_id: providerMessageId,
+      processed: false,
+      category: 'admin_stats',
+    })
+    .select()
+    .single();
+
+  const cmd = detectSpecialCommand(text);
+  if (cmd === 'menu' || cmd === 'help' || !String(text || '').trim()) {
+    await sendText(schoolId, phone, receptionistWelcome(receptionist, text), { urgent: true });
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+
+  const reply = await answerSchoolAI({ messageText: text, schoolInfo: receptionist });
+  await sendText(schoolId, phone, reply, { urgent: true });
+  await supabaseAdmin
+    .from('whatsapp_incoming_messages')
+    .update({ ai_response_sent: true, ai_response_text: reply })
+    .eq('id', incomingMsg?.id);
+
+  setTimeout(() => {
+    sendText(schoolId, phone, receptionistFooter(text), { urgent: true });
+  }, 1500);
+
+  await markProcessed(incomingMsg?.id);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Entry point principal
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -998,6 +1045,25 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   // 1. Identifier le parent
   const parentInfo = await getParentByPhone(phone, schoolId);
   if (!parentInfo) {
+    // 1.bis Pas un parent → est-ce un « réceptionniste » déclaré par l'admin ?
+    // Si oui, on bascule sur le chatbot IA « statistiques de l'école ».
+    if (location || image) {
+      // Le chatbot réceptionniste ne gère que le texte (questions libres).
+      console.log('[chatbot] Numéro non autorisé (média ignoré):', phone);
+      return;
+    }
+    const receptionist = await getReceptionistByPhone(phone, schoolId);
+    if (receptionist) {
+      console.log(`[chatbot] ← réceptionniste ${phone} (school=${receptionist.school_id})`);
+      await handleReceptionistMessage({
+        phone,
+        text,
+        providerMessageId: id,
+        schoolId: receptionist.school_id,
+        receptionist,
+      });
+      return;
+    }
     console.log('[chatbot] Numéro non autorisé:', phone);
     return; // Silence total pour les inconnus (anti-bruit)
   }

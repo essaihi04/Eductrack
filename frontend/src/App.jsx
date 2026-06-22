@@ -46,6 +46,7 @@ import WhatsAppPage from './pages/admin/WhatsAppPage';
 import FinanceManagersPage from './pages/admin/FinanceManagersPage';
 import PedagogicalDirectorsPage from './pages/admin/PedagogicalDirectorsPage';
 import PedagogicalManagersPage from './pages/admin/PedagogicalManagersPage';
+import ReceptionistsPage from './pages/admin/ReceptionistsPage';
 import FinanceShell from './pages/finance/FinanceShell';
 import FinanceDashboard from './pages/finance/FinanceDashboard';
 import FeeTemplatesPage from './pages/finance/FeeTemplatesPage';
@@ -170,6 +171,7 @@ function App() {
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />
+            <Route path="admin/receptionists" element={<ReceptionistsPage />} />
             <Route path="admin/school-year-config" element={<SchoolYearConfigPage />} />
             <Route path="admin/reinscription" element={<ReinscriptionPage />} />
             <Route path="admin/coefficients" element={<CoefficientsPage />} />
