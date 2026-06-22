@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Wallet, TrendingUp, TrendingDown, Banknote, CreditCard, Building2, FileCheck, MoreHorizontal } from 'lucide-react';
+import { Wallet, TrendingUp, TrendingDown, Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, FileSpreadsheet } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
-import { PageHeader, KpiGrid, KpiCard, Card, DataTable, Money, Badge } from '../../components/finance/ui';
+import { PageHeader, KpiGrid, KpiCard, Card, Money, Badge, Button } from '../../components/finance/ui';
 
 // Bornes de période (jour / semaine / mois / année / personnalisé)
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -64,24 +64,65 @@ const CashRegisterPage = () => {
     }
   };
 
-  const columns = [
-    { key: 'date', header: 'Date', render: (p) => <span className="text-gray-700">{formatDate(p.payment_date)}</span> },
-    { key: 'receipt', header: 'Reçu', render: (p) => <span className="font-mono text-xs text-gray-500">{p.receipt_number}</span> },
-    { key: 'student', header: 'Élève', render: (p) => (
-      <span className="text-gray-900">
-        {p.student ? `${p.student.first_name} ${p.student.last_name}` : '—'}
-        {p.student?.classes?.name && <span className="text-gray-400"> · {p.student.classes.name}</span>}
-      </span>
-    ) },
-    { key: 'method', header: 'Mode', render: (p) => <Badge tone="gray">{METHOD_LABELS[p.method] || p.method}</Badge> },
-    { key: 'amount', header: 'Montant', align: 'right', render: (p) => <Money value={p.amount} tone="green" /> },
-  ];
+  // Regroupement des reçus par journée (journal de caisse façon « Coffre »).
+  const byDay = useMemo(() => {
+    const groups = {};
+    for (const p of data?.payments || []) {
+      const d = String(p.payment_date).slice(0, 10);
+      if (!groups[d]) groups[d] = { date: d, total: 0, items: [] };
+      groups[d].items.push(p);
+      groups[d].total += Number(p.amount || 0);
+    }
+    return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
+  }, [data]);
+
+  const exportExcel = async () => {
+    if (!data?.payments?.length) return;
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Coffre');
+    ws.columns = [
+      { header: 'Date', key: 'date', width: 14 },
+      { header: 'N° Reçu', key: 'receipt', width: 16 },
+      { header: 'Élève', key: 'student', width: 28 },
+      { header: 'Classe', key: 'class', width: 16 },
+      { header: 'Mode', key: 'method', width: 14 },
+      { header: 'Référence', key: 'reference', width: 18 },
+      { header: 'Montant', key: 'amount', width: 14 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const p of data.payments) {
+      ws.addRow({
+        date: formatDate(p.payment_date),
+        receipt: p.receipt_number,
+        student: p.student ? `${p.student.first_name} ${p.student.last_name}` : '—',
+        class: p.student?.classes?.name || '',
+        method: METHOD_LABELS[p.method] || p.method,
+        reference: p.reference || '',
+        amount: Number(p.amount || 0),
+      });
+    }
+    ws.addRow({});
+    ws.addRow({ student: 'TOTAL', amount: data.income?.total || 0 }).font = { bold: true };
+    const buf = await wb.xlsx.writeBuffer();
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `coffre_${range.from}_${range.to}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="p-6 space-y-5">
       <PageHeader icon={Wallet} title="Caisse" color="green"
         subtitle="Encaissements par période et mode de paiement"
-        onRefresh={load} loading={loading} />
+        onRefresh={load} loading={loading}
+        actions={
+          <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcel} disabled={!data?.payments?.length}>
+            Export Excel
+          </Button>
+        } />
 
       <div className="flex flex-wrap items-center gap-2">
         {PERIODS.map((p) => (
@@ -139,9 +180,44 @@ const CashRegisterPage = () => {
             </div>
           </Card>
 
-          <div>
-            <p className="text-sm font-semibold text-gray-800 mb-2">Détail des encaissements ({data.payments?.length || 0})</p>
-            <DataTable columns={columns} rows={data.payments || []} empty="Aucun encaissement sur cette période." />
+          {/* Journal de caisse groupé par journée (« Coffre ») */}
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-gray-800">Coffre — détail par journée ({data.payments?.length || 0} reçu(s))</p>
+            {byDay.length === 0 ? (
+              <div className="bg-card border border-border rounded-xl py-10 text-center text-gray-400">
+                Aucun encaissement sur cette période.
+              </div>
+            ) : byDay.map((day) => (
+              <Card key={day.date}
+                title={`Journée du ${formatDate(day.date)}`}
+                actions={<span className="text-sm font-semibold text-green-700">{formatMAD(day.total)}</span>}
+                bodyClassName="p-0">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 text-muted-foreground text-xs uppercase">
+                    <tr>
+                      <th className="px-4 py-2 text-left">N° Reçu</th>
+                      <th className="px-4 py-2 text-right">Montant</th>
+                      <th className="px-4 py-2 text-left">Mode</th>
+                      <th className="px-4 py-2 text-left">Détail</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {day.items.map((p) => (
+                      <tr key={p.id} className="hover:bg-muted/30">
+                        <td className="px-4 py-2 font-mono text-xs text-gray-600">{p.receipt_number}</td>
+                        <td className="px-4 py-2 text-right"><Money value={p.amount} tone="green" /></td>
+                        <td className="px-4 py-2"><Badge tone="gray">{METHOD_LABELS[p.method] || p.method}</Badge></td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {p.student ? `${p.student.first_name} ${p.student.last_name}` : '—'}
+                          {p.student?.classes?.name && <span className="text-gray-400"> · {p.student.classes.name}</span>}
+                          {p.reference && <span className="text-gray-400"> · {p.reference}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            ))}
           </div>
         </>
       ) : null}

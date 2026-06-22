@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { CreditCard, Search, Ban, Printer } from 'lucide-react';
+import { CreditCard, Search, Ban, Printer, LayoutGrid, List } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
@@ -12,6 +12,7 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ from: '', to: '', method: '', search: '' });
+  const [view, setView] = useState('cards'); // 'cards' | 'table'
   const isAdmin = ['admin', 'school_admin', 'super_admin'].includes(profile?.role);
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.from, filters.to, filters.method, year]);
@@ -170,7 +171,59 @@ export default function PaymentsPage() {
           className="px-3 py-2 border border-gray-300 rounded-lg" />
       </FilterBar>
 
-      <DataTable columns={columns} rows={filteredBySearch} empty="Aucun paiement" />
+      <div className="flex items-center justify-end gap-1">
+        <button onClick={() => setView('cards')} title="Cartes"
+          className={`p-2 rounded-lg border ${view === 'cards' ? 'bg-green-50 border-green-300 text-green-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+          <LayoutGrid className="w-4 h-4" />
+        </button>
+        <button onClick={() => setView('table')} title="Tableau"
+          className={`p-2 rounded-lg border ${view === 'table' ? 'bg-green-50 border-green-300 text-green-700' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+          <List className="w-4 h-4" />
+        </button>
+      </div>
+
+      {view === 'table' ? (
+        <DataTable columns={columns} rows={filteredBySearch} empty="Aucun paiement" />
+      ) : filteredBySearch.length === 0 ? (
+        <div className="bg-card border border-border rounded-xl py-12 text-center text-gray-400">Aucun paiement</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {filteredBySearch.map((p) => (
+            <ReceiptCard key={p.id} p={p} isAdmin={isAdmin} onPrint={printReceipt} onCancel={cancelPayment} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Carte reçu façon Koolskools : montant, date, N° reçu, mois couverts, mode, actions.
+function ReceiptCard({ p, isAdmin, onPrint, onCancel }) {
+  const period = p.invoice?.period_label || p.reference || null;
+  return (
+    <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-2 hover:shadow-sm transition-shadow">
+      <div className="flex items-start justify-between">
+        <span className="text-xl font-bold text-green-700 tabular-nums">{formatMAD(p.amount)}</span>
+        <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge>
+      </div>
+      <div className="text-sm font-medium text-gray-800 truncate">
+        {p.student?.first_name} {p.student?.last_name}
+        <span className="text-xs text-gray-400 font-normal"> · {p.student?.classes?.name || '—'}</span>
+      </div>
+      <div className="text-xs text-gray-500 space-y-0.5">
+        <div>{formatDate(p.payment_date)} · <span className="font-mono">N° {p.receipt_number}</span></div>
+        {period && <div className="text-gray-600">{period}</div>}
+      </div>
+      <div className="flex items-center gap-1.5 pt-1 mt-auto border-t border-border">
+        <button onClick={() => onPrint(p)} className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
+          <Printer className="w-3.5 h-3.5" /> Imprimer
+        </button>
+        {isAdmin && (
+          <button onClick={() => onCancel(p.id)} className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-red-50 text-red-600 rounded-lg hover:bg-red-100" title="Annuler / avoir">
+            <Ban className="w-3.5 h-3.5" /> Annuler
+          </button>
+        )}
+      </div>
     </div>
   );
 }
