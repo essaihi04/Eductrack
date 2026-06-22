@@ -39,30 +39,40 @@ else
     exit 1
 fi
 
-# 3. Installer les dépendances
+# 3. Installer les dépendances backend
 echo ""
-echo "📦 3/5 - Installation des dépendances..."
+echo "📦 3/6 - Installation des dépendances backend..."
 ssh $SERVER_USER@$SERVER_IP "cd $SERVER_PATH/backend && npm install"
 if [ $? -eq 0 ]; then
-    echo "✅ Dépendances installées"
+    echo "✅ Dépendances backend installées"
 else
-    echo "❌ Erreur lors de l'installation des dépendances"
+    echo "❌ Erreur lors de l'installation des dépendances backend"
     exit 1
 fi
 
-# 4. Exécuter la migration SQL
+# 4. Rebuild du frontend (indispensable : l'app React servie provient de
+#    frontend/dist ; sans ce build, les changements d'interface n'apparaissent pas).
 echo ""
-echo "🗄️  4/5 - Migration de la base de données..."
-ssh $SERVER_USER@$SERVER_IP "cd $SERVER_PATH && psql -h localhost -U postgres -d postgres -f backend/migrations/create_whatsapp_chatbot_tables.sql"
+echo "🏗️  4/6 - Build du frontend..."
+ssh $SERVER_USER@$SERVER_IP "cd $SERVER_PATH/frontend && npm install && npm run build"
 if [ $? -eq 0 ]; then
-    echo "✅ Migration SQL exécutée"
+    echo "✅ Frontend reconstruit (frontend/dist à jour)"
 else
-    echo "⚠️  Migration SQL peut avoir échoué (peut-être déjà exécutée)"
+    echo "❌ Erreur lors du build frontend"
+    exit 1
 fi
 
-# 5. Redémarrer le serveur
+# 5. Migration base de données
+#    La base est sur Supabase : les migrations DDL se lancent dans l'éditeur SQL
+#    Supabase (pas via psql). Rappel du fichier à appliquer une seule fois.
 echo ""
-echo "🔄 5/5 - Redémarrage du serveur..."
+echo "🗄️  5/6 - Migration de la base de données (manuelle sur Supabase)..."
+echo "   ⚠️  Si ce n'est pas déjà fait, exécutez dans Supabase → SQL Editor :"
+echo "       backend/migrations/create_student_enrollments.sql"
+
+# 6. Redémarrer le serveur
+echo ""
+echo "🔄 6/6 - Redémarrage du serveur..."
 ssh $SERVER_USER@$SERVER_IP "cd $SERVER_PATH && pm2 restart all"
 if [ $? -eq 0 ]; then
     echo "✅ Serveur redémarré"

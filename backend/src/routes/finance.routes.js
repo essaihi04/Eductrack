@@ -1087,22 +1087,23 @@ router.get('/dashboard/summary', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const today = new Date();
-    const firstDayMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    const lastDayMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    const range = academicYearRange(req.query.academic_year);
+    // Période d'agrégation : toute l'année scolaire si fournie, sinon le mois en cours.
+    const periodStart = range ? range.start : new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const periodEnd = range ? range.end : new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
 
-    // Encaissé ce mois
+    // Encaissé sur la période
     let paidQuery = supabaseAdmin
       .from('payments')
       .select('amount')
       .eq('status', 'confirmed')
-      .gte('payment_date', firstDayMonth)
-      .lte('payment_date', lastDayMonth);
+      .gte('payment_date', periodStart)
+      .lte('payment_date', periodEnd);
     if (schoolId) paidQuery = paidQuery.eq('school_id', schoolId);
     const { data: paidRows } = await paidQuery;
     const collectedThisMonth = (paidRows || []).reduce((s, r) => s + Number(r.amount), 0);
 
     // Dû total (non annulé, non payé) — scopé à l'année active si fournie.
-    const range = academicYearRange(req.query.academic_year);
     let dueQuery = supabaseAdmin
       .from('invoices')
       .select('total, amount_paid, due_date, status')
@@ -1117,12 +1118,12 @@ router.get('/dashboard/summary', async (req, res) => {
     const totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
     const overdueCount = overdueRows.length;
 
-    // Factures émises ce mois
+    // Factures émises sur la période
     let issuedQuery = supabaseAdmin
       .from('invoices')
       .select('total')
-      .gte('issue_date', firstDayMonth)
-      .lte('issue_date', lastDayMonth)
+      .gte('issue_date', periodStart)
+      .lte('issue_date', periodEnd)
       .neq('status', 'cancelled');
     if (schoolId) issuedQuery = issuedQuery.eq('school_id', schoolId);
     const { data: issuedRows } = await issuedQuery;

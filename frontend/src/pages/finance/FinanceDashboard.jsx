@@ -44,9 +44,9 @@ export default function FinanceDashboard() {
         onRefresh={load} loading={loading} />
 
       <KpiGrid cols={4}>
-        <KpiCard icon={DollarSign} label="Encaissé ce mois" tone="green"
+        <KpiCard icon={DollarSign} label={`Encaissé ${year}`} tone="green"
           value={loading ? '—' : formatMAD(summary?.collectedThisMonth)} />
-        <KpiCard icon={FileText} label="Facturé ce mois" tone="blue"
+        <KpiCard icon={FileText} label={`Facturé ${year}`} tone="blue"
           value={loading ? '—' : formatMAD(summary?.issuedThisMonth)}
           sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%` : ''} />
         <KpiCard icon={TrendingUp} label="Dû total" tone="orange"
