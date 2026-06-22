@@ -11,6 +11,7 @@ import {
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import FinanceSummaryCard from '../../components/dashboard/FinanceSummaryCard';
 
 const getStatusColor = (value, thresholds) => {
@@ -175,6 +176,8 @@ const PriorityAlert = ({ alert, onAction }) => {
 
 const AdminDashboard = () => {
   const { user, profile } = useAuth();
+  const { year } = useYear();
+  const yearQS = year ? `?academic_year=${encodeURIComponent(year)}` : '';
   const isPedagogical = profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -251,7 +254,7 @@ const AdminDashboard = () => {
       // Try the optimized dashboard endpoint first
       let data = null;
       try {
-        const dashboardRes = await fetch(`${apiUrl}/api/admin/dashboard`, { headers });
+        const dashboardRes = await fetch(`${apiUrl}/api/admin/dashboard${yearQS}`, { headers });
         if (dashboardRes.ok) {
           data = await dashboardRes.json();
         }
@@ -329,7 +332,7 @@ const AdminDashboard = () => {
       } else {
         // Fallback to individual API calls
         const [statsRes, studentsRes, teachersRes, classesRes] = await Promise.all([
-          fetch(`${apiUrl}/api/admin/stats`, { headers }),
+          fetch(`${apiUrl}/api/admin/stats${yearQS}`, { headers }),
           fetch(`${apiUrl}/api/admin/students`, { headers }),
           fetch(`${apiUrl}/api/admin/teachers`, { headers }),
           fetch(`${apiUrl}/api/admin/classes`, { headers })
@@ -389,7 +392,7 @@ const AdminDashboard = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [apiUrl, getToken]);
+  }, [apiUrl, getToken, yearQS]);
 
   useEffect(() => {
     fetchDashboardData();

@@ -15,6 +15,14 @@ const getSchoolId = (req) => {
 
 const isAdminRole = (req) => ['admin', 'school_admin', 'super_admin'].includes(req.user.role);
 
+// Plage de dates d'une année scolaire (slash "YYYY/YYYY" ou tiret "YYYY-YYYY") :
+// du 1er septembre Y1 au 31 août Y2. Renvoie null si format invalide.
+const academicYearRange = (year) => {
+  const y1 = parseInt(String(year || '').split(/[/\-]/)[0], 10);
+  if (Number.isNaN(y1)) return null;
+  return { start: `${y1}-09-01`, end: `${y1 + 1}-08-31` };
+};
+
 // Mapping catégorie facture -> flux de recette (aligné sur financeAccounting.routes.js)
 const STREAM_OF_CATEGORY = { tuition: 'tuition', transport: 'transport', registration: 'fi', supplies: 'fr' };
 const streamOfCategory = (c) => STREAM_OF_CATEGORY[c] || 'other';
@@ -1093,12 +1101,14 @@ router.get('/dashboard/summary', async (req, res) => {
     const { data: paidRows } = await paidQuery;
     const collectedThisMonth = (paidRows || []).reduce((s, r) => s + Number(r.amount), 0);
 
-    // Dû total (non annulé, non payé)
+    // Dû total (non annulé, non payé) — scopé à l'année active si fournie.
+    const range = academicYearRange(req.query.academic_year);
     let dueQuery = supabaseAdmin
       .from('invoices')
       .select('total, amount_paid, due_date, status')
       .in('status', ['issued', 'partial', 'overdue']);
     if (schoolId) dueQuery = dueQuery.eq('school_id', schoolId);
+    if (range) dueQuery = dueQuery.gte('issue_date', range.start).lte('issue_date', range.end);
     const { data: dueRows } = await dueQuery;
 
     const totalDue = (dueRows || []).reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
@@ -1170,11 +1180,13 @@ router.get('/dashboard/cashflow', async (req, res) => {
 router.get('/dashboard/by-class', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
+    const range = academicYearRange(req.query.academic_year);
     let invQuery = supabaseAdmin
       .from('invoices')
-      .select('total, amount_paid, student:profiles!invoices_student_id_fkey(class_id, classes!fk_profiles_class(id, name))')
+      .select('total, amount_paid, issue_date, student:profiles!invoices_student_id_fkey(class_id, classes!fk_profiles_class(id, name))')
       .neq('status', 'cancelled');
     if (schoolId) invQuery = invQuery.eq('school_id', schoolId);
+    if (range) invQuery = invQuery.gte('issue_date', range.start).lte('issue_date', range.end);
     const { data } = await invQuery;
 
     const byClass = {};

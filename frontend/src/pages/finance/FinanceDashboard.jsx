@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { TrendingUp, AlertCircle, DollarSign, FileText, CreditCard, Calendar } from 'lucide-react';
 import { financeApi, formatMAD } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
 
 export default function FinanceDashboard() {
+  const { year } = useYear();
   const [summary, setSummary] = useState(null);
   const [cashflow, setCashflow] = useState([]);
   const [byClass, setByClass] = useState([]);
@@ -12,15 +14,16 @@ export default function FinanceDashboard() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
 
   const load = async () => {
     setLoading(true);
     try {
       const [s, c, cl] = await Promise.all([
-        financeApi.getSummary(),
+        financeApi.getSummary(year),
         financeApi.getCashflow(6),
-        financeApi.getByClass()
+        financeApi.getByClass(year)
       ]);
       setSummary(s);
       setCashflow(c.cashflow || []);

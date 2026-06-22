@@ -4522,18 +4522,39 @@ router.post('/students/import', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    let studentsQ = supabaseAdmin.from('profiles').select('id', { count: 'exact' }).eq('role', 'student');
+    const academicYear = req.query.academic_year; // format slash "YYYY/YYYY" (optionnel)
     let teachersQ = supabaseAdmin.from('profiles').select('id', { count: 'exact' }).eq('role', 'teacher');
     let classesQ = supabaseAdmin.from('classes').select('id', { count: 'exact' });
     let attendanceQ = supabaseAdmin.from('attendance').select('status');
     if (schoolId) {
-      studentsQ = studentsQ.eq('school_id', schoolId);
       teachersQ = teachersQ.eq('school_id', schoolId);
       classesQ = classesQ.eq('school_id', schoolId);
       attendanceQ = attendanceQ.eq('school_id', schoolId);
     }
-    const [studentsRes, teachersRes, classesRes, attendanceRes] = await Promise.all([
-      studentsQ, teachersQ, classesQ, attendanceQ
+    // Classes et élèves filtrés par année active si fournie.
+    if (academicYear) classesQ = classesQ.eq('academic_year', academicYear);
+
+    // Élèves : par année active = inscriptions actives (student_enrollments) ; sinon tous.
+    const countStudents = async () => {
+      if (academicYear) {
+        let q = supabaseAdmin
+          .from('student_enrollments')
+          .select('student_id', { count: 'exact', head: true })
+          .eq('academic_year', academicYear)
+          .neq('status', 'NR');
+        if (schoolId) q = q.eq('school_id', schoolId);
+        const { count, error } = await q;
+        if (!error) return count || 0;
+        // Repli si la table n'existe pas encore (migration non appliquée).
+      }
+      let q = supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student');
+      if (schoolId) q = q.eq('school_id', schoolId);
+      const { count } = await q;
+      return count || 0;
+    };
+
+    const [totalStudents, teachersRes, classesRes, attendanceRes] = await Promise.all([
+      countStudents(), teachersQ, classesQ, attendanceQ
     ]);
 
     const totalPresent = attendanceRes.data?.filter(a => a.status === 'present').length || 0;
@@ -4541,7 +4562,7 @@ router.get('/stats', async (req, res) => {
     const attendanceRate = ((totalPresent / totalRecords) * 100).toFixed(1);
 
     res.json({
-      totalStudents: studentsRes.count || 0,
+      totalStudents,
       totalTeachers: teachersRes.count || 0,
       totalClasses: classesRes.count || 0,
       attendanceRate
@@ -6389,6 +6410,7 @@ router.get('/dashboard', async (req, res) => {
 
     // Récupérer toutes les données en parallèle (filtrées par school_id)
     const schoolId = getSchoolId(req);
+    const academicYear = req.query.academic_year; // format slash "YYYY/YYYY" (optionnel)
     let studentsQ = supabaseAdmin.from('profiles').select('*').eq('role', 'student');
     let teachersQ = supabaseAdmin.from('profiles').select('*').eq('role', 'teacher');
     let classesQ = supabaseAdmin.from('classes').select('*, teacher:profiles!classes_teacher_id_fkey(id, first_name, last_name)');
@@ -6401,14 +6423,33 @@ router.get('/dashboard', async (req, res) => {
       trackingQ = trackingQ.eq('sessions.school_id', schoolId);
       homeworkQ = homeworkQ.eq('school_id', schoolId);
     }
+    // Filtrer les classes par année active si fournie.
+    if (academicYear) classesQ = classesQ.eq('academic_year', academicYear);
+
     const [
-      studentsRes, teachersRes, classesRes, 
+      studentsRes, teachersRes, classesRes,
       trackingRes, homeworkRes
     ] = await Promise.all([
       studentsQ, teachersQ, classesQ, trackingQ, homeworkQ
     ]);
 
-    const students = studentsRes.data || [];
+    let students = studentsRes.data || [];
+
+    // Restreindre les élèves aux inscriptions actives de l'année (si année fournie).
+    if (academicYear) {
+      let enrQ = supabaseAdmin
+        .from('student_enrollments')
+        .select('student_id')
+        .eq('academic_year', academicYear)
+        .neq('status', 'NR');
+      if (schoolId) enrQ = enrQ.eq('school_id', schoolId);
+      const { data: enr, error: enrErr } = await enrQ;
+      if (!enrErr && enr) {
+        const activeIds = new Set(enr.map((e) => e.student_id));
+        students = students.filter((s) => activeIds.has(s.id));
+      }
+      // Si la table n'existe pas (migration non appliquée) → on garde tous les élèves.
+    }
     const teachers = teachersRes.data || [];
     const classes = classesRes.data || [];
     const trackingData = trackingRes.data || [];

@@ -83,9 +83,9 @@ export const financeApi = {
   getReportSummary: (from, to) => request('/api/finance/reports/summary', { query: { from, to } }),
 
   // Dashboard
-  getSummary: () => request('/api/finance/dashboard/summary'),
+  getSummary: (academicYear) => request('/api/finance/dashboard/summary', { query: { academic_year: academicYear } }),
   getCashflow: (months = 6) => request('/api/finance/dashboard/cashflow', { query: { months } }),
-  getByClass: () => request('/api/finance/dashboard/by-class'),
+  getByClass: (academicYear) => request('/api/finance/dashboard/by-class', { query: { academic_year: academicYear } }),
 
   // Overdue
   getOverdue: () => request('/api/finance/overdue'),
