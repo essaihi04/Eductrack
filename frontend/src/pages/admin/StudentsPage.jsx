@@ -970,32 +970,7 @@ L'administration de ${schoolName}`;
   }
 
   return (
-    <div className="p-3 md:p-8 space-y-4 md:space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Élèves</h1>
-          <p className="text-muted-foreground mt-1">Total: {students.length} élèves</p>
-        </div>
-        {isAdmin && (
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <button
-              onClick={() => setShowSendCredentialsModal(true)}
-              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-            >
-              <Send className="w-4 h-4" />
-              Identifiants WhatsApp
-            </button>
-            <button
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Ajouter un élève
-            </button>
-          </div>
-        )}
-      </div>
-
+    <div className="p-3 md:p-6 space-y-3 md:space-y-4">
       {/* Modal pour envoyer les identifiants via WhatsApp */}
       {showSendCredentialsModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSendCredentialsModal(false)}>
@@ -1091,132 +1066,147 @@ L'administration de ${schoolName}`;
       )}
 
       <Card>
-        <CardContent className="py-3">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <CardContent className="py-2">
+          {/* Tous les filtres + sélection + compteur + actions sur une seule ligne */}
+          <div className="flex flex-wrap items-center gap-2">
             <input
               type="text"
-              placeholder="Rechercher par nom..."
+              placeholder="Nom..."
               value={filters.searchName}
               onChange={(e) => setFilters({ ...filters, searchName: e.target.value })}
-              className="w-full px-3 py-1.5 border rounded text-sm"
+              className="flex-1 min-w-[110px] px-2 py-1 border rounded text-xs"
             />
             <input
               type="text"
-              placeholder="Rechercher par email..."
+              placeholder="Email..."
               value={filters.searchEmail}
               onChange={(e) => setFilters({ ...filters, searchEmail: e.target.value })}
-              className="w-full px-3 py-1.5 border rounded text-sm"
+              className="flex-1 min-w-[110px] px-2 py-1 border rounded text-xs"
             />
             <select
               value={filters.className}
               onChange={(e) => setFilters({ ...filters, className: e.target.value })}
-              className="w-full px-3 py-1.5 border rounded text-sm"
+              className="min-w-[110px] px-2 py-1 border rounded text-xs"
             >
               <option value="">Toutes les classes</option>
-              <option value="unassigned">Élèves non assignés</option>
+              <option value="unassigned">Non assignés</option>
               {classes.map(cls => (
-                <option key={cls.id} value={cls.id}>
-                  {cls.name}
-                </option>
+                <option key={cls.id} value={cls.id}>{cls.name}</option>
               ))}
             </select>
             <select
               value={filters.level}
               onChange={(e) => setFilters({ ...filters, level: e.target.value })}
-              className="w-full px-3 py-1.5 border rounded text-sm"
+              className="min-w-[100px] px-2 py-1 border rounded text-xs"
             >
-              <option value="">Tous les niveaux</option>
+              <option value="">Tous niveaux</option>
               {getAvailableLevels().map(level => (
-                <option key={level} value={level}>
-                  {level}
-                </option>
+                <option key={level} value={level}>{level}</option>
               ))}
             </select>
             <select
               value={filters.parentStatus}
               onChange={(e) => setFilters({ ...filters, parentStatus: e.target.value })}
-              className="w-full px-3 py-1.5 border rounded text-sm"
+              className="min-w-[100px] px-2 py-1 border rounded text-xs"
             >
-              <option value="">Tous (parent)</option>
+              <option value="">Parent : tous</option>
               <option value="without">⚠ Sans parent</option>
               <option value="with">👪 Avec parent</option>
             </select>
             <select
               value={filters.locationStatus}
               onChange={(e) => setFilters({ ...filters, locationStatus: e.target.value })}
-              className="w-full px-3 py-1.5 border rounded text-sm"
+              className="min-w-[100px] px-2 py-1 border rounded text-xs"
             >
-              <option value="">Tous (localisation)</option>
+              <option value="">Localis. : tous</option>
               <option value="with">📍 Localisé</option>
-              <option value="without">❌ Sans localisation</option>
+              <option value="without">❌ Sans</option>
             </select>
-          </div>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              {isAdmin && getFilteredStudents().length > 0 && (
-                <button
-                  onClick={toggleSelectAll}
-                  className="flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-blue-600"
-                >
-                  {isAllSelected() ? (
-                    <CheckSquare className="w-5 h-5 text-blue-600" />
-                  ) : isSomeSelected() ? (
-                    <div className="w-5 h-5 border-2 border-blue-600 bg-blue-100 rounded relative">
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-3 h-3 bg-blue-600 rounded-sm" />
-                      </div>
+
+            {isAdmin && getFilteredStudents().length > 0 && (
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-blue-600"
+              >
+                {isAllSelected() ? (
+                  <CheckSquare className="w-4 h-4 text-blue-600" />
+                ) : isSomeSelected() ? (
+                  <div className="w-4 h-4 border-2 border-blue-600 bg-blue-100 rounded relative">
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-2 h-2 bg-blue-600 rounded-sm" />
                     </div>
-                  ) : (
-                    <Square className="w-5 h-5 text-gray-400" />
-                  )}
-                  {isAllSelected() ? 'Désélectionner tout' : 'Sélectionner tout'}
-                  <span className="text-gray-500 font-normal">({selectedStudents.size} / {getFilteredStudents().length})</span>
-                </button>
-              )}
-              <div className="text-sm text-gray-600">
-                Affichage: <span className="font-semibold">{getFilteredStudents().length}</span> / <span className="font-semibold">{students.length}</span> élève(s)
-                {(() => {
-                  const without = students.filter(s => !(s.parents?.length > 0)).length;
-                  return without > 0 ? <span className="ml-2 text-amber-600 font-medium">• {without} sans parent</span> : null;
-                })()}
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+                  </div>
+                ) : (
+                  <Square className="w-4 h-4 text-gray-400" />
+                )}
+                {isAllSelected() ? 'Désélect.' : 'Tout'}
+                <span className="text-gray-500 font-normal">({selectedStudents.size}/{getFilteredStudents().length})</span>
+              </button>
+            )}
+
+            <span className="text-xs text-gray-600 whitespace-nowrap">
+              {getFilteredStudents().length}/{students.length} élève(s)
+              {(() => {
+                const without = students.filter(s => !(s.parents?.length > 0)).length;
+                return without > 0 ? <span className="ml-1 text-amber-600 font-medium">• {without} sans parent</span> : null;
+              })()}
+            </span>
+
+            {/* Actions à droite */}
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {isAdmin && selectedStudents.size > 0 && (
                 <>
                   <button
                     onClick={() => openParentModal(students.filter(s => selectedStudents.has(s.id)))}
-                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
+                    className="flex items-center gap-1 px-2 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-700"
                     title="Ajouter les parents des élèves sélectionnés"
                   >
-                    <UserPlus className="w-4 h-4" />
+                    <UserPlus className="w-3.5 h-3.5" />
                     Parents ({selectedStudents.size})
                   </button>
                   <button
                     onClick={sendBulkCredentialsToParents}
-                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                    className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700"
                     title="Envoyer les identifiants aux parents via WhatsApp"
                   >
-                    <MessageCircle className="w-4 h-4" />
+                    <MessageCircle className="w-3.5 h-3.5" />
                     WhatsApp ({selectedStudents.size})
                   </button>
                   <button
                     onClick={deleteSelectedStudents}
-                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                    className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
                   >
-                    <Trash2 className="w-4 h-4" />
-                    Supprimer ({selectedStudents.size})
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Suppr. ({selectedStudents.size})
                   </button>
                 </>
               )}
               {isAdmin && filters.parentStatus === 'without' && getFilteredStudents().length > 0 && (
                 <button
                   onClick={() => openParentModal(getFilteredStudents())}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm"
+                  className="flex items-center gap-1 px-2 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-700"
                 >
-                  <UserPlus className="w-4 h-4" />
-                  Ajouter les parents ({getFilteredStudents().length})
+                  <UserPlus className="w-3.5 h-3.5" />
+                  Ajouter parents ({getFilteredStudents().length})
                 </button>
+              )}
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={() => setShowSendCredentialsModal(true)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Identifiants WhatsApp
+                  </button>
+                  <button
+                    onClick={() => { resetForm(); setShowForm(true); }}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Ajouter un élève
+                  </button>
+                </>
               )}
             </div>
           </div>
