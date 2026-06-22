@@ -6,6 +6,7 @@ import { GenderSplit, Avatar, ClassCard, DetailDrawer } from '../../components/d
 import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 
 // Moroccan education system hierarchy
 const SCHOOL_HIERARCHY = {
@@ -171,6 +172,7 @@ const parseMassarInfoEleve = (workbook) => {
 const ClassesPage = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { year } = useYear();
   const [classes, setClasses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1535,11 +1537,14 @@ const ClassesPage = () => {
     ? SCHOOL_HIERARCHY[editForm.school_type].levels[editForm.level].filieres
     : [];
 
+  // Filtre par année scolaire active (les classes sans année — legacy — restent visibles).
+  const visibleClasses = classes.filter(c => !c.academic_year || c.academic_year === year);
+
   // Group classes by school_type → level → filiere
   const grouped = {};
   const uncategorized = [];
 
-  classes.forEach(cls => {
+  visibleClasses.forEach(cls => {
     const normalizedType = normalizeSchoolType(cls.school_type);
 
     if (!normalizedType || !SCHOOL_HIERARCHY[normalizedType]) {
@@ -1782,7 +1787,12 @@ const ClassesPage = () => {
             Codes Massar
           </button>
           <button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => {
+              if (!showForm && !formData.academicYear) {
+                setFormData((f) => ({ ...f, academicYear: year }));
+              }
+              setShowForm(!showForm);
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700"
           >
             <Plus className="w-4 h-4" />

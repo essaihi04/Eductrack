@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { YearProvider } from './contexts/YearContext';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -75,6 +76,7 @@ import ParentNotificationsPage from './pages/parent/ParentNotificationsPage';
 import DriverDashboard from './pages/driver/DriverDashboard';
 import ActiveTripPage from './pages/driver/ActiveTripPage';
 import SchoolYearConfigPage from './pages/admin/SchoolYearConfigPage';
+import ReinscriptionPage from './pages/admin/ReinscriptionPage';
 import TeacherTrackingDashboard from './pages/admin/TeacherTrackingDashboard';
 import CoefficientsPage from './pages/admin/CoefficientsPage';
 import BulletinsPage from './pages/admin/BulletinsPage';
@@ -114,6 +116,7 @@ const ProtectedRoute = ({ children }) => {
 function App() {
   return (
     <AuthProvider>
+      <YearProvider>
       <Router>
         <Routes>
           <Route path="/" element={<LandingPage />} />
@@ -165,6 +168,7 @@ function App() {
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
             <Route path="admin/pedagogical-directors" element={<PedagogicalDirectorsPage />} />
             <Route path="admin/school-year-config" element={<SchoolYearConfigPage />} />
+            <Route path="admin/reinscription" element={<ReinscriptionPage />} />
             <Route path="admin/coefficients" element={<CoefficientsPage />} />
             <Route path="admin/bulletins" element={<BulletinsPage />} />
             <Route path="admin/exam-notes" element={<ExamNotesPage />} />
@@ -225,6 +229,7 @@ function App() {
           </Route>
         </Routes>
       </Router>
+      </YearProvider>
     </AuthProvider>
   );
 }

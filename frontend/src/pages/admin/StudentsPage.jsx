@@ -6,10 +6,12 @@ import {
   DetailDrawer, FieldRow, Avatar,
 } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 
 const StudentsPage = () => {
   const { profile } = useAuth();
+  const { year } = useYear();
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -183,6 +185,15 @@ const StudentsPage = () => {
   // Fonction pour filtrer les élèves
   const getFilteredStudents = () => {
     return students.filter(student => {
+      // Filtre par année scolaire active : l'élève est retenu si sa classe appartient à
+      // l'année active. Les élèves sans classe (non affectés) restent toujours visibles.
+      if (student.class_id) {
+        const studentClass = classes.find(c => c.id === student.class_id);
+        if (studentClass && studentClass.academic_year && studentClass.academic_year !== year) {
+          return false;
+        }
+      }
+
       // Filtre par classe (ID exact ou "unassigned" pour les élèves sans classe)
       if (filters.className) {
         if (filters.className === 'unassigned') {
