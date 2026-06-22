@@ -43,11 +43,13 @@ export default function ChartOfAccountsPage() {
     try { await financeApi.createAccount({ kind, node_type: 'section', name, sort_order: 990 }); load(); }
     catch (e) { alert('Erreur: ' + e.message); }
   };
-  const remove = async (id) => {
-    if (!confirm('Supprimer ce poste ?')) return;
+  const remove = async (id, label = 'ce poste') => {
+    if (!confirm(`Supprimer ${label} ?`)) return;
     try { await financeApi.deleteAccount(id); load(); }
     catch (e) { alert(e.message); }
   };
+  // Enregistre le renommage sur Entrée (en plus de la perte de focus).
+  const saveOnEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
   const sync = async () => {
     setSaving(true);
     try { const r = await financeApi.syncDefaultAccounts(); alert(`${r.added} poste(s) ajouté(s).`); load(); }
@@ -69,10 +71,13 @@ export default function ChartOfAccountsPage() {
           {sections.map(sec => (
             <div key={sec.id}>
               <div className="flex items-center gap-2 px-4 py-2 bg-gray-50">
-                <input defaultValue={sec.name} onBlur={e => e.target.value !== sec.name && patch(sec.id, { name: e.target.value })}
-                  className="font-semibold text-gray-700 bg-transparent flex-1 outline-none" />
-                {sec.is_system && <Lock className="w-3 h-3 text-gray-400" title="Poste système" />}
+                <input defaultValue={sec.name} onKeyDown={saveOnEnter}
+                  onBlur={e => e.target.value !== sec.name && patch(sec.id, { name: e.target.value })}
+                  className="font-semibold text-gray-700 bg-transparent flex-1 outline-none border-b border-transparent focus:border-gray-300" />
                 <button onClick={() => addLine(kind, sec.id)} className="text-xs text-blue-600 hover:underline">+ ligne</button>
+                {sec.is_system
+                  ? <Lock className="w-3 h-3 text-gray-400" title="Section par défaut (non supprimable)" />
+                  : <button onClick={() => remove(sec.id, 'cette section')} className="p-1 hover:bg-red-50 rounded" title="Supprimer la section"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
               </div>
               {lines.filter(l => l.parent_id === sec.id).map(line => renderLine(line, kind))}
             </div>
@@ -90,7 +95,8 @@ export default function ChartOfAccountsPage() {
 
   const renderLine = (line, kind) => (
     <div key={line.id} className={`flex items-center gap-2 px-4 py-2 pl-8 ${line.is_active ? '' : 'opacity-40'}`}>
-      <input defaultValue={line.name} onBlur={e => e.target.value !== line.name && patch(line.id, { name: e.target.value })}
+      <input defaultValue={line.name} onKeyDown={saveOnEnter}
+        onBlur={e => e.target.value !== line.name && patch(line.id, { name: e.target.value })}
         className="flex-1 text-sm text-gray-800 bg-transparent outline-none border-b border-transparent focus:border-gray-300" />
       {kind === 'revenue' ? (
         <select value={line.revenue_stream || ''} onChange={e => patch(line.id, { revenue_stream: e.target.value || null })}
@@ -115,7 +121,7 @@ export default function ChartOfAccountsPage() {
   return (
     <div className="p-6 space-y-5">
       <PageHeader icon={ListTree} title="Plan comptable" color="purple"
-        subtitle="Postes de recettes et de dépenses — renommez, ajoutez ou désactivez selon votre école."
+        subtitle="Renommer : tapez puis Entrée (ou cliquez ailleurs). Cadenas = poste par défaut : décochez « actif » pour le masquer. Corbeille : supprime vos postes/sections perso (s'ils ne sont pas utilisés)."
         onRefresh={load} loading={loading}
         actions={
           <Button variant="secondary" onClick={sync} disabled={saving}>
