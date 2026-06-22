@@ -654,6 +654,9 @@ router.get('/invoices', async (req, res) => {
     if (student_id) query = query.eq('student_id', student_id);
     if (from) query = query.gte('issue_date', from);
     if (to) query = query.lte('issue_date', to);
+    // Scope par année scolaire (plage de dates) si fournie et sans from/to explicites.
+    const invRange = academicYearRange(academic_year);
+    if (invRange && !from && !to) query = query.gte('issue_date', invRange.start).lte('issue_date', invRange.end);
 
     const { data, error } = await query;
     if (error) throw error;
@@ -899,7 +902,7 @@ router.post('/invoices/mark-overdue', async (req, res) => {
 router.get('/payments', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { from, to, method, student_id, invoice_id } = req.query;
+    const { from, to, method, student_id, invoice_id, academic_year } = req.query;
 
     let query = supabaseAdmin
       .from('payments')
@@ -914,6 +917,9 @@ router.get('/payments', async (req, res) => {
     if (schoolId) query = query.eq('school_id', schoolId);
     if (from) query = query.gte('payment_date', from);
     if (to) query = query.lte('payment_date', to);
+    // Scope par année scolaire (plage de dates) si fournie et sans from/to explicites.
+    const payRange = academicYearRange(academic_year);
+    if (payRange && !from && !to) query = query.gte('payment_date', payRange.start).lte('payment_date', payRange.end);
     if (method) query = query.eq('method', method);
     if (student_id) query = query.eq('student_id', student_id);
     if (invoice_id) query = query.eq('invoice_id', invoice_id);
@@ -1479,6 +1485,9 @@ router.get('/overdue', async (req, res) => {
       .lt('due_date', today)
       .order('due_date', { ascending: true });
     if (schoolId) query = query.eq('school_id', schoolId);
+    // Scope par année scolaire (plage de dates) si fournie.
+    const ovRange = academicYearRange(req.query.academic_year);
+    if (ovRange) query = query.gte('issue_date', ovRange.start).lte('issue_date', ovRange.end);
 
     const { data, error } = await query;
     if (error) throw error;
@@ -1503,12 +1512,15 @@ router.get('/expenses', async (req, res) => {
   try {
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Accès admin requis' });
     const schoolId = getSchoolId(req);
-    const { from, to, category, account_id } = req.query;
+    const { from, to, category, account_id, academic_year } = req.query;
 
     let q = supabaseAdmin.from('school_expenses').select('*').order('expense_date', { ascending: false }).limit(500);
     if (schoolId) q = q.eq('school_id', schoolId);
     if (from) q = q.gte('expense_date', from);
     if (to) q = q.lte('expense_date', to);
+    // Scope par année scolaire (plage de dates) si fournie et sans from/to explicites.
+    const expRange = academicYearRange(academic_year);
+    if (expRange && !from && !to) q = q.gte('expense_date', expRange.start).lte('expense_date', expRange.end);
     if (category) q = q.eq('category', category);
     if (account_id) q = q.eq('account_id', account_id);
 

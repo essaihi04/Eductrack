@@ -2,6 +2,8 @@ import { useState, useEffect, Fragment } from 'react';
 import { CalendarRange, Save, Copy } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
 import { PageHeader, Button } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 
 const MONTH_ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 const SHORT = { 1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin', 7: 'Juil', 8: 'Août', 9: 'Sept', 10: 'Oct', 11: 'Nov', 12: 'Déc' };
@@ -16,7 +18,8 @@ function yearOptions() {
 }
 
 export default function BudgetPage() {
-  const [year, setYear] = useState(currentAcademicYear());
+  const { year: activeYear } = useYear();
+  const [year, setYear] = useState(toDashYear(activeYear) || currentAcademicYear());
   const [accounts, setAccounts] = useState([]);
   const [grid, setGrid] = useState({});
   const [loading, setLoading] = useState(true);

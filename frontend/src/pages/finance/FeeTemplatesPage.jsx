@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Copy, Save, Layers, Calendar, Users, Check, Sparkles } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
 import { PageHeader, EmptyState, Drawer, Button } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 
 const defaultItem = () => ({
   category: 'tuition',
@@ -21,6 +23,8 @@ const currentYearStr = () => {
 };
 
 export default function FeeTemplatesPage() {
+  const { year } = useYear();
+  const dashYear = toDashYear(year);
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
@@ -33,20 +37,22 @@ export default function FeeTemplatesPage() {
   useEffect(() => {
     load();
     loadClasses();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
 
   const load = async () => {
     setLoading(true);
     try {
       const data = await financeApi.listTemplates();
-      setTemplates(data.templates || []);
+      // N'afficher que les modèles de l'année active.
+      setTemplates((data.templates || []).filter(t => !t.academic_year || t.academic_year === dashYear));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
 
   const loadClasses = async () => {
     try {
-      const data = await financeApi.listClasses();
+      const data = await financeApi.listClasses(year);
       setClasses(Array.isArray(data) ? data : (data.classes || []));
     } catch (e) { console.error(e); }
   };
@@ -55,7 +61,7 @@ export default function FeeTemplatesPage() {
     setEditing({
       name: '',
       description: '',
-      academic_year: currentYearStr(),
+      academic_year: dashYear,
       level: '',
       school_type: '',
       items: [defaultItem()]

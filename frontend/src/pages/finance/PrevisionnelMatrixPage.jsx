@@ -3,6 +3,8 @@ import { LayoutGrid, Download, Printer } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
 import { PageHeader, Button } from '../../components/finance/ui';
 import { addPrevisionnelSheet } from './previsionnelSheet';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 
 const SHORT = { 1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin', 7: 'Juil', 8: 'Août', 9: 'Sept', 10: 'Oct', 11: 'Nov', 12: 'Déc' };
 
@@ -17,7 +19,8 @@ function yearOptions() {
 const fmt = (n) => { const v = Math.round(Number(n) || 0); return v === 0 ? '' : v.toLocaleString('fr-FR'); };
 
 export default function PrevisionnelMatrixPage() {
-  const [year, setYear] = useState(currentAcademicYear());
+  const { year: activeYear } = useYear();
+  const [year, setYear] = useState(toDashYear(activeYear) || currentAcademicYear());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 

@@ -2,21 +2,24 @@ import { useState, useEffect } from 'react';
 import { CreditCard, Search, Ban, Printer } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge } from '../../components/finance/ui';
 
 export default function PaymentsPage() {
   const { profile } = useAuth();
+  const { year } = useYear();
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ from: '', to: '', method: '', search: '' });
   const isAdmin = ['admin', 'school_admin', 'super_admin'].includes(profile?.role);
 
-  useEffect(() => { load(); }, [filters.from, filters.to, filters.method]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.from, filters.to, filters.method, year]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await financeApi.listPayments(filters);
+      const data = await financeApi.listPayments({ ...filters, academic_year: toDashYear(year) });
       setPayments(data.payments || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }

@@ -2,24 +2,26 @@ import { useState, useEffect } from 'react';
 import { AlertCircle, MessageSquare, CheckSquare, Square, Eye } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { supabase } from '../../lib/supabase';
 import { PageHeader, KpiGrid, KpiCard, DataTable, Money, Badge, Drawer, Button } from '../../components/finance/ui';
 
 export default function OverduePage() {
   const { school } = useAuth();
+  const { year } = useYear();
   const [overdue, setOverdue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(new Set());
   const [sendingReminders, setSendingReminders] = useState(false);
   const [previewMessage, setPreviewMessage] = useState(null);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [year]);
 
   const load = async () => {
     setLoading(true);
     try {
       await financeApi.markOverdue();
-      const data = await financeApi.getOverdue();
+      const data = await financeApi.getOverdue(year);
       setOverdue(data.overdue || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }

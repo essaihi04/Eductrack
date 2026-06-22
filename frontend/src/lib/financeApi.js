@@ -88,7 +88,7 @@ export const financeApi = {
   getByClass: (academicYear) => request('/api/finance/dashboard/by-class', { query: { academic_year: academicYear } }),
 
   // Overdue
-  getOverdue: () => request('/api/finance/overdue'),
+  getOverdue: (academicYear) => request('/api/finance/overdue', { query: { academic_year: academicYear } }),
 
   // Expenses
   listExpenses: (filters) => request('/api/finance/expenses', { query: filters }),

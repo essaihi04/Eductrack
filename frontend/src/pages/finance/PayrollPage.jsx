@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Wallet, Users, Plus, Trash2, Check, RotateCcw, ArrowLeft, Save } from 'lucide-react';
 import { financeApi, formatMAD } from '../../lib/financeApi';
 import { PageHeader, Drawer, Button, Field } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -115,7 +117,8 @@ function EmployeesTab() {
 
 // ── Bulletins de paie ────────────────────────────────────────────────────
 function PayrollTab() {
-  const [year, setYear] = useState(currentAcademicYear());
+  const { year: activeYear } = useYear();
+  const [year, setYear] = useState(toDashYear(activeYear) || currentAcademicYear());
   const [runs, setRuns] = useState([]);
   const [newMonth, setNewMonth] = useState(ORDER[0]);
   const [run, setRun] = useState(null);

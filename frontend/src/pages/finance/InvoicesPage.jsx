@@ -2,17 +2,21 @@ import { useState, useEffect } from 'react';
 import { FileText, Search, Ban, Eye, Zap, Printer } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, STATUS_LABELS, STATUS_COLORS, METHOD_LABELS } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
 
 const STATUS_TONE = { draft: 'gray', issued: 'blue', partial: 'yellow', paid: 'green', overdue: 'red', cancelled: 'gray' };
 
 export default function InvoicesPage() {
+  const { year } = useYear();
+  const dashYear = toDashYear(year);
   const [invoices, setInvoices] = useState([]);
   const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ status: '', class_id: '', search: '', from: '', to: '' });
   const [showGenerate, setShowGenerate] = useState(false);
   const [genForm, setGenForm] = useState({
-    academic_year: getCurrentYear(),
+    academic_year: dashYear,
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear(),
     due_day: 5,
@@ -21,23 +25,18 @@ export default function InvoicesPage() {
   const [generating, setGenerating] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
 
-  function getCurrentYear() {
-    const y = new Date().getFullYear();
-    const m = new Date().getMonth();
-    return m >= 7 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
-  }
-
   useEffect(() => {
     load();
     loadClasses();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
 
-  useEffect(() => { load(); }, [filters.status, filters.class_id, filters.from, filters.to]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.status, filters.class_id, filters.from, filters.to, year]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const data = await financeApi.listInvoices(filters);
+      const data = await financeApi.listInvoices({ ...filters, academic_year: dashYear });
       setInvoices(data.invoices || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -45,7 +44,7 @@ export default function InvoicesPage() {
 
   const loadClasses = async () => {
     try {
-      const data = await financeApi.listClasses();
+      const data = await financeApi.listClasses(year);
       setClasses(Array.isArray(data) ? data : (data.classes || []));
     } catch (e) { console.error(e); }
   };

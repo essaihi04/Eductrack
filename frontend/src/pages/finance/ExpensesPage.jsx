@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { TrendingDown, Plus, Trash2 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, EXPENSE_CATEGORIES } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
+import { useYear } from '../../contexts/YearContext';
 
 const blankForm = () => ({
   account_id: '', description: '', amount: 0,
@@ -10,6 +11,7 @@ const blankForm = () => ({
 });
 
 export default function ExpensesPage() {
+  const { year } = useYear();
   const [expenses, setExpenses] = useState([]);
   const [accounts, setAccounts] = useState([]);     // lignes de dépense du plan comptable
   const [sections, setSections] = useState([]);     // sections de dépense
@@ -19,7 +21,7 @@ export default function ExpensesPage() {
   const [form, setForm] = useState(blankForm());
 
   useEffect(() => { loadChart(); }, []);
-  useEffect(() => { load(); }, [filters.from, filters.to, filters.account_id]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.from, filters.to, filters.account_id, year]);
 
   const loadChart = async () => {
     try {
@@ -35,7 +37,7 @@ export default function ExpensesPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await financeApi.listExpenses(filters);
+      const data = await financeApi.listExpenses({ ...filters, academic_year: year });
       setExpenses(data.expenses || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
