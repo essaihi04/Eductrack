@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { LayoutGrid, Download, Printer } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
 import { PageHeader, Button } from '../../components/finance/ui';
+import { addPrevisionnelSheet } from './previsionnelSheet';
 
 const SHORT = { 1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin', 7: 'Juil', 8: 'Août', 9: 'Sept', 10: 'Oct', 11: 'Nov', 12: 'Déc' };
 
@@ -88,125 +89,9 @@ export default function PrevisionnelMatrixPage() {
   // négatifs en rouge, barre de données sur le cumulé, ligne de résultat mise en avant.
   const exportXLSX = async () => {
     const ExcelJS = (await import('exceljs')).default;
-    const C = {
-      headText: 'FFFFFFFF', slate: 'FF334155',
-      realHead: 'FF334155', prevHead: 'FF2563EB', prevFill: 'FFEFF6FF',
-      sectionRev: 'FFDCFCE7', sectionRevTx: 'FF166534',
-      sectionExp: 'FFFEE2E2', sectionExpTx: 'FF991B1B',
-      sub: 'FFF1F5F9', result: 'FF4F46E5', total: 'FFE2E8F0', border: 'FFE5E7EB',
-    };
-    const MONEY = '#,##0;[Red]-#,##0';
-    const thin = { style: 'thin', color: { argb: C.border } };
-    const borders = { top: thin, left: thin, bottom: thin, right: thin };
-    const ncol = months.length + 4; // Poste + mois + Cumulé + Budget + %
-
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Edutrack';
-    const ws = wb.addWorksheet(`Prévisionnel ${year}`, {
-      views: [{ state: 'frozen', xSplit: 1, ySplit: 3, showGridLines: false }],
-      properties: { tabColor: { argb: C.result } },
-    });
-    ws.getColumn(1).width = 32;
-    months.forEach((_, i) => { ws.getColumn(2 + i).width = 11; });
-    ws.getColumn(months.length + 2).width = 13;
-    ws.getColumn(months.length + 3).width = 13;
-    ws.getColumn(months.length + 4).width = 8;
-
-    // Titre + période
-    ws.mergeCells(1, 1, 1, ncol);
-    const t = ws.getCell('A1');
-    t.value = `PRÉVISIONNEL / RÉEL — ${year}`;
-    t.font = { bold: true, size: 16, color: { argb: C.headText } };
-    t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.result } };
-    t.alignment = { vertical: 'middle', indent: 1 };
-    ws.getRow(1).height = 30;
-    ws.mergeCells(2, 1, 2, ncol);
-    const sub = ws.getCell('A2');
-    sub.value = 'Cellules bleutées = Prévisionnel (mois à venir) · cellules claires = Réel (mois écoulés)';
-    sub.font = { italic: true, size: 10, color: { argb: C.slate } };
-    sub.alignment = { indent: 1 };
-
-    // En-têtes (ligne 3) : mois colorés selon Réel/Prévisionnel
-    const headRow = ws.getRow(3);
-    headRow.getCell(1).value = 'Poste';
-    months.forEach((m, i) => { headRow.getCell(2 + i).value = `${SHORT[m.month]} ${String(m.year).slice(2)}`; });
-    headRow.getCell(months.length + 2).value = 'Cumulé';
-    headRow.getCell(months.length + 3).value = 'Budget';
-    headRow.getCell(months.length + 4).value = '%';
-    for (let i = 1; i <= ncol; i++) {
-      const cell = headRow.getCell(i);
-      const isPrevMonth = i >= 2 && i <= months.length + 1 && !months[i - 2].is_real;
-      cell.font = { bold: true, color: { argb: C.headText }, size: 10 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isPrevMonth ? C.prevHead : C.realHead } };
-      cell.alignment = { vertical: 'middle', horizontal: i === 1 ? 'left' : 'right', indent: i === 1 ? 1 : 0 };
-      cell.border = borders;
-    }
-    headRow.height = 22;
-
-    let firstDataRow = null, lastDataRow = null;
-    rows.forEach((r) => {
-      if (r.section) {
-        const rowIdx = ws.lastRow.number + 1;
-        ws.mergeCells(rowIdx, 1, rowIdx, ncol);
-        const isRev = /RECETTE/i.test(r.section);
-        const cell = ws.getCell(rowIdx, 1);
-        cell.value = r.section;
-        cell.font = { bold: true, size: 11, color: { argb: isRev ? C.sectionRevTx : C.sectionExpTx } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isRev ? C.sectionRev : C.sectionExp } };
-        cell.alignment = { vertical: 'middle', indent: 1 };
-        ws.getRow(rowIdx).height = 18;
-        return;
-      }
-      if (r.subheader) {
-        const rowIdx = ws.lastRow.number + 1;
-        ws.mergeCells(rowIdx, 1, rowIdx, ncol);
-        const cell = ws.getCell(rowIdx, 1);
-        cell.value = r.label;
-        cell.font = { bold: true, size: 10, color: { argb: C.slate } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.sub } };
-        cell.alignment = { vertical: 'middle', indent: 1 };
-        return;
-      }
-      const { e, cumule, totalBudget, pct } = lineValues(r);
-      const row = ws.addRow([
-        (r.indent ? '   ' : '') + r.label,
-        ...e.map((v) => Math.round(v)),
-        Math.round(cumule), Math.round(totalBudget),
-        pct != null ? Number(pct.toFixed(1)) / 100 : null,
-      ]);
-      const idx = row.number;
-      if (firstDataRow == null) firstDataRow = idx;
-      lastDataRow = idx;
-      const isResult = r.result;
-      const isTotal = r.bold && !isResult;
-      for (let i = 1; i <= ncol; i++) {
-        const cell = row.getCell(i);
-        cell.border = borders;
-        const isPrevMonth = i >= 2 && i <= months.length + 1 && !months[i - 2].is_real;
-        if (isResult) {
-          cell.font = { bold: true, color: { argb: C.headText } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.result } };
-        } else if (isTotal) {
-          cell.font = { bold: true, color: { argb: C.slate } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.total } };
-        } else if (isPrevMonth) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.prevFill } };
-        }
-        if (i === 1) cell.alignment = { horizontal: 'left', indent: 1 };
-        else if (i === ncol) { cell.numFmt = '0.0%'; cell.alignment = { horizontal: 'right' }; }
-        else { cell.numFmt = MONEY; cell.alignment = { horizontal: 'right' }; }
-      }
-    });
-
-    // Barre de données sur la colonne Cumulé
-    if (firstDataRow != null) {
-      const col = months.length + 2;
-      const letter = ws.getColumn(col).letter;
-      ws.addConditionalFormatting({
-        ref: `${letter}${firstDataRow}:${letter}${lastDataRow}`,
-        rules: [{ type: 'dataBar', cfvo: [{ type: 'num', value: 0 }, { type: 'max' }], color: { argb: 'FFB5D4F4' } }],
-      });
-    }
+    addPrevisionnelSheet(wb, year, data);
 
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

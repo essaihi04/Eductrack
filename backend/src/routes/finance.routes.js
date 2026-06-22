@@ -15,6 +15,17 @@ const getSchoolId = (req) => {
 
 const isAdminRole = (req) => ['admin', 'school_admin', 'super_admin'].includes(req.user.role);
 
+// Mapping catégorie facture -> flux de recette (aligné sur financeAccounting.routes.js)
+const STREAM_OF_CATEGORY = { tuition: 'tuition', transport: 'transport', registration: 'fi', supplies: 'fr' };
+const streamOfCategory = (c) => STREAM_OF_CATEGORY[c] || 'other';
+const STREAM_LABEL_FALLBACK = { tuition: 'Scolarité', transport: 'Transport', fi: "Frais d'inscription", fr: 'Fournitures & divers', other: 'Autres recettes' };
+// Mapping ancien enum dépense -> default_key (fallback si account_id absent)
+const EXP_DEFAULT_OF_CATEGORY = {
+  salaries: 'salaries_permanent', rent: 'rent', utilities: 'water_electricity',
+  maintenance: 'premises_maintenance', equipment: 'equipment_it', taxes: 'is_acomptes',
+  insurance: 'insurance_rc', transport: 'fuel_gasoil',
+};
+
 // Numérotation atomique des factures/reçus
 async function getNextCounter(schoolId, counterType) {
   const year = new Date().getFullYear();
@@ -1208,7 +1219,7 @@ router.get('/reports/summary', async (req, res) => {
     // ---- Encaissements (paiements confirmés sur la période) ----
     let payQ = supabaseAdmin
       .from('payments')
-      .select(`id, receipt_number, amount, payment_date, method, reference,
+      .select(`id, receipt_number, amount, payment_date, method, reference, invoice_id,
         student:profiles!payments_student_id_fkey(first_name, last_name, classes!fk_profiles_class(name))`)
       .eq('status', 'confirmed')
       .gte('payment_date', from)
@@ -1242,7 +1253,7 @@ router.get('/reports/summary', async (req, res) => {
     if (isAdminRole(req)) {
       let expQ = supabaseAdmin
         .from('school_expenses')
-        .select('amount, expense_date, payment_method, category, description, paid_to')
+        .select('amount, expense_date, payment_method, category, description, paid_to, account_id')
         .gte('expense_date', from)
         .lte('expense_date', to)
         .order('expense_date', { ascending: false });
@@ -1283,7 +1294,7 @@ router.get('/reports/summary', async (req, res) => {
     // Facturé sur la période (factures émises entre from et to)
     let issuedQ = supabaseAdmin
       .from('invoices')
-      .select('total')
+      .select('id, total')
       .gte('issue_date', from)
       .lte('issue_date', to)
       .neq('status', 'cancelled');
@@ -1321,6 +1332,89 @@ router.get('/reports/summary', async (req, res) => {
       rate: c.invoiced > 0 ? (c.paid / c.invoiced) * 100 : 0,
     })).sort((a, b) => a.rate - b.rate);
 
+    // ---- Découpage réel par flux (recettes) et par poste comptable (dépenses) ----
+    // Sur la période EXACTE demandée (au jour près), uniquement le réel.
+    let accounts = [];
+    if (schoolId) {
+      const { data: accRows } = await supabaseAdmin
+        .from('finance_account').select('*').eq('school_id', schoolId).order('sort_order');
+      accounts = accRows || [];
+    }
+    const defaultKeyToId = {};
+    accounts.forEach((a) => { if (a.default_key) defaultKeyToId[a.default_key] = a.id; });
+    const streamName = {};
+    accounts
+      .filter((a) => a.kind === 'revenue' && a.node_type === 'line' && a.revenue_stream)
+      .forEach((a) => { if (!streamName[a.revenue_stream]) streamName[a.revenue_stream] = a.name; });
+
+    // Lignes de facture nécessaires : factures émises sur la période + factures réglées par les paiements de la période
+    const periodInvIds = (issuedRows || []).map((r) => r.id);
+    const periodInvSet = new Set(periodInvIds);
+    const paidInvIds = (payments || []).map((p) => p.invoice_id).filter(Boolean);
+    const allInvIds = Array.from(new Set([...periodInvIds, ...paidInvIds]));
+    const linesByInvoice = {};
+    if (allInvIds.length) {
+      const { data: ld } = await supabaseAdmin
+        .from('invoice_lines').select('invoice_id, category, amount').in('invoice_id', allInvIds);
+      (ld || []).forEach((l) => { (linesByInvoice[l.invoice_id] = linesByInvoice[l.invoice_id] || []).push(l); });
+    }
+    // Facturé par flux (lignes des factures émises sur la période)
+    const billedByStream = {};
+    periodInvIds.forEach((invId) => {
+      (linesByInvoice[invId] || []).forEach((l) => {
+        const s = streamOfCategory(l.category);
+        billedByStream[s] = (billedByStream[s] || 0) + Number(l.amount || 0);
+      });
+    });
+    // Encaissé par flux (paiements de la période ventilés selon les lignes de la facture réglée)
+    const collectedByStream = {};
+    const addColl = (s, v) => { collectedByStream[s] = (collectedByStream[s] || 0) + v; };
+    (payments || []).forEach((p) => {
+      const amt = Number(p.amount || 0);
+      const il = p.invoice_id ? linesByInvoice[p.invoice_id] : null;
+      if (il && il.length) {
+        const tot = il.reduce((s, x) => s + Number(x.amount || 0), 0);
+        if (tot > 0) il.forEach((x) => addColl(streamOfCategory(x.category), amt * (Number(x.amount || 0) / tot)));
+        else addColl('other', amt);
+      } else addColl('other', amt);
+    });
+    const streamKeys = Array.from(new Set([...Object.keys(billedByStream), ...Object.keys(collectedByStream)]));
+    const revenueByStream = streamKeys.map((s) => ({
+      stream: s,
+      name: streamName[s] || STREAM_LABEL_FALLBACK[s] || s,
+      billed: billedByStream[s] || 0,
+      collected: collectedByStream[s] || 0,
+      impayes: (billedByStream[s] || 0) - (collectedByStream[s] || 0),
+    })).sort((a, b) => b.collected - a.collected);
+
+    // Dépenses réelles par poste comptable (regroupées par section) — période exacte
+    const actualByAccount = {};
+    let unmappedExpense = 0;
+    expensesDetail.forEach((e) => {
+      let accId = e.account_id || defaultKeyToId[EXP_DEFAULT_OF_CATEGORY[e.category] || 'misc'];
+      if (!accId) { unmappedExpense += Number(e.amount || 0); return; }
+      actualByAccount[accId] = (actualByAccount[accId] || 0) + Number(e.amount || 0);
+    });
+    const expSecAccounts = accounts.filter((a) => a.kind === 'expense' && a.node_type === 'section');
+    const expLineAccounts = accounts.filter((a) => a.kind === 'expense' && a.node_type === 'line' && a.is_active);
+    const buildLines = (lines) => lines
+      .map((a) => ({ id: a.id, name: a.name, amount: actualByAccount[a.id] || 0 }))
+      .filter((l) => l.amount !== 0);
+    const expenseSections = [];
+    expSecAccounts.forEach((sec) => {
+      const secLines = buildLines(expLineAccounts.filter((l) => l.parent_id === sec.id));
+      if (secLines.length) {
+        expenseSections.push({ name: sec.name, lines: secLines, subtotal: secLines.reduce((s, l) => s + l.amount, 0) });
+      }
+    });
+    const orphanLines = buildLines(expLineAccounts.filter((l) => !expSecAccounts.some((s) => s.id === l.parent_id)));
+    const otherLines = [...orphanLines];
+    if (unmappedExpense !== 0) otherLines.push({ id: 'unmapped', name: 'Non affecté', amount: unmappedExpense });
+    if (otherLines.length) {
+      expenseSections.push({ name: 'Autres dépenses', lines: otherLines, subtotal: otherLines.reduce((s, l) => s + l.amount, 0) });
+    }
+    const expenseByAccountTotal = expenseSections.reduce((s, sec) => s + sec.subtotal, 0);
+
     res.json({
       period: { from, to },
       income: { total: incomeTotal, count: (payments || []).length, by_method: incomeByMethod },
@@ -1328,6 +1422,14 @@ router.get('/reports/summary', async (req, res) => {
       net: incomeTotal - expenseTotal,
       by_day: byDay,
       by_month: byMonth,
+      by_stream: {
+        revenue: revenueByStream,
+        billed_total: revenueByStream.reduce((s, r) => s + r.billed, 0),
+        collected_total: revenueByStream.reduce((s, r) => s + r.collected, 0),
+        impayes_total: revenueByStream.reduce((s, r) => s + r.impayes, 0),
+        expense_sections: expenseSections,
+        expense_total: expenseByAccountTotal,
+      },
       recouvrement: {
         invoiced_period: invoicedPeriod,
         collected_period: incomeTotal,

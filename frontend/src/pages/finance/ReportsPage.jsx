@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3, TrendingUp, TrendingDown, Wallet, FileSpreadsheet, FileText,
-  Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt,
+  Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt, LayoutGrid,
 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS, EXPENSE_CATEGORIES } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, Card, Button } from '../../components/finance/ui';
+import { addPrevisionnelSheet } from './previsionnelSheet';
+
+// Année scolaire courante (sept → août), pour l'onglet Prévisionnel de l'export complet.
+const currentAcademicYear = () => {
+  const d = new Date(); const y = d.getFullYear();
+  return d.getMonth() + 1 >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+};
 
 // Bornes de période (jour / semaine / mois / trimestre / année / personnalisé)
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -81,11 +88,9 @@ const ReportsPage = () => {
   const fileBase = `rapport_finance_${range.from}_${range.to}`;
   const breakdown = granularity === 'month' ? (data?.by_month || []) : (data?.by_day || []);
 
-  // ── Export Excel (multi-feuilles, tableaux colorés via ExcelJS) ──────────
-  const exportExcel = async () => {
-    if (!data) return;
-    const ExcelJS = (await import('exceljs')).default;
-
+  // Construit les feuilles de détail (synthèse, ventilations, recouvrement) dans
+  // le classeur fourni. Réutilisé par l'export simple ET l'export complet.
+  const buildReportSheets = (wb) => {
     // Palette
     const C = {
       indigo: 'FF4F46E5', green: 'FF10B981', red: 'FFEF4444', blue: 'FF3B82F6',
@@ -97,10 +102,6 @@ const ReportsPage = () => {
     const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
     // Couleurs des barres de données (mini-graphes en cellule)
     const BAR = { green: 'FF9FE1CB', red: 'FFF7C1C1', blue: 'FFB5D4F4', amber: 'FFFAC775' };
-
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'Edutrack';
-    wb.created = new Date();
 
     // Helper : construit une feuille « tableau » avec titre + en-tête coloré + zébrures
     const buildSheet = (name, tabColor, title, columns, rows, totals) => {
@@ -400,15 +401,80 @@ const ReportsPage = () => {
       },
     );
 
-    // Téléchargement
+    // ── Feuille : Recettes par flux (réel, période exacte) ──
+    const revStream = data.by_stream?.revenue || [];
+    if (revStream.length) {
+      buildSheet('Recettes par flux', C.green, 'Recettes réelles par flux (sur la période)',
+        [
+          { key: 'flux', header: 'Flux', width: 24 },
+          { key: 'billed', header: 'Facturé', width: 18, money: true, bar: true, barColor: BAR.blue },
+          { key: 'collected', header: 'Encaissé', width: 18, money: true, bar: true, barColor: BAR.green },
+          { key: 'impayes', header: 'Impayés', width: 18, money: true, bar: true, barColor: BAR.red },
+        ],
+        revStream.map(r => ({ flux: r.name, billed: r.billed, collected: r.collected, impayes: r.impayes })),
+        {
+          flux: 'TOTAL',
+          billed: Number(data.by_stream?.billed_total || 0),
+          collected: Number(data.by_stream?.collected_total || 0),
+          impayes: Number(data.by_stream?.impayes_total || 0),
+        },
+      );
+    }
+
+    // ── Feuille : Dépenses par poste comptable (réel, période exacte) ──
+    const expSections = data.by_stream?.expense_sections || [];
+    if (expSections.length) {
+      const flatRows = [];
+      expSections.forEach(sec => sec.lines.forEach(l => flatRows.push({ section: sec.name, poste: l.name, montant: l.amount })));
+      buildSheet('Dépenses par poste', C.red, 'Dépenses réelles par poste comptable (sur la période)',
+        [
+          { key: 'section', header: 'Section', width: 24 },
+          { key: 'poste', header: 'Poste', width: 28 },
+          { key: 'montant', header: 'Montant', width: 18, money: true, bar: true, barColor: BAR.red },
+        ],
+        flatRows,
+        { section: 'TOTAL', poste: '', montant: Number(data.by_stream?.expense_total || 0) },
+      );
+    }
+  };
+
+  // Télécharge un classeur ExcelJS sous le nom donné.
+  const downloadWorkbook = async (wb, name) => {
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${fileBase}.xlsx`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Export simple : synthèse + détails de la période choisie.
+  const exportExcel = async () => {
+    if (!data) return;
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Edutrack';
+    wb.created = new Date();
+    buildReportSheets(wb);
+    await downloadWorkbook(wb, `${fileBase}.xlsx`);
+  };
+
+  // Export complet : matrice annuelle Prévisionnel/Réel (1er onglet) + détails de la période.
+  const exportExcelComplet = async () => {
+    if (!data) return;
+    const ExcelJS = (await import('exceljs')).default;
+    const year = currentAcademicYear();
+    let matrix = null;
+    try { matrix = await financeApi.getAnnualMatrix(year); }
+    catch (e) { alert('Impossible de charger le tableau annuel : ' + e.message); return; }
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Edutrack';
+    wb.created = new Date();
+    addPrevisionnelSheet(wb, year, matrix);
+    buildReportSheets(wb);
+    await downloadWorkbook(wb, `finance_complet_${year}_${range.from}_${range.to}.xlsx`);
   };
 
   // ── Export PDF ───────────────────────────────────────────────────────────
@@ -496,6 +562,40 @@ const ReportsPage = () => {
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
       margin: { left: M, right: M },
     });
+    y = doc.lastAutoTable.finalY + 6;
+
+    // Recettes réelles par flux (période)
+    const revStream = data.by_stream?.revenue || [];
+    if (revStream.length) {
+      autoTable(doc, {
+        startY: y, theme: 'striped',
+        head: [['Flux', 'Facturé', 'Encaissé', 'Impayés']],
+        body: revStream.map(r => [r.name, formatMAD(r.billed), formatMAD(r.collected), formatMAD(r.impayes)]),
+        foot: [['TOTAL', formatMAD(data.by_stream?.billed_total), formatMAD(data.by_stream?.collected_total), formatMAD(data.by_stream?.impayes_total)]],
+        headStyles: { fillColor: [16, 185, 129] }, footStyles: { fillColor: [51, 65, 85] },
+        styles: { fontSize: 8 },
+        columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+        margin: { left: M, right: M },
+      });
+      y = doc.lastAutoTable.finalY + 6;
+    }
+
+    // Dépenses réelles par poste comptable (période)
+    const expSections = data.by_stream?.expense_sections || [];
+    if (expSections.length) {
+      const body = [];
+      expSections.forEach(sec => sec.lines.forEach(l => body.push([sec.name, l.name, formatMAD(l.amount)])));
+      autoTable(doc, {
+        startY: y, theme: 'striped',
+        head: [['Section', 'Poste', 'Montant']],
+        body,
+        foot: [['TOTAL', '', formatMAD(data.by_stream?.expense_total)]],
+        headStyles: { fillColor: [239, 68, 68] }, footStyles: { fillColor: [51, 65, 85] },
+        styles: { fontSize: 8 },
+        columnStyles: { 2: { halign: 'right' } },
+        margin: { left: M, right: M },
+      });
+    }
 
     doc.save(`${fileBase}.pdf`);
   };
@@ -509,6 +609,7 @@ const ReportsPage = () => {
         actions={
           <>
             <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcel} disabled={!data}>Excel</Button>
+            <Button variant="secondary" icon={LayoutGrid} onClick={exportExcelComplet} disabled={!data}>Excel complet</Button>
             <Button color="blue" icon={FileText} onClick={exportPDF} disabled={!data}>PDF</Button>
           </>
         } />
@@ -649,6 +750,72 @@ const ReportsPage = () => {
               </div>
             )}
           </div>
+
+          {/* Recettes réelles par flux (période exacte) */}
+          {(data.by_stream?.revenue || []).length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-card shadow-sm p-5">
+              <h2 className="font-semibold text-gray-900 mb-1">Recettes par flux</h2>
+              <p className="text-xs text-gray-500 mb-4">Réel sur la période — facturé, encaissé et impayés par type de recette.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b border-gray-100">
+                      <th className="px-3 py-2 font-medium">Flux</th>
+                      <th className="px-3 py-2 font-medium text-right">Facturé</th>
+                      <th className="px-3 py-2 font-medium text-right">Encaissé</th>
+                      <th className="px-3 py-2 font-medium text-right">Impayés</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.by_stream.revenue.map((r, i) => (
+                      <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-2 text-gray-700">{r.name}</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{formatMAD(r.billed)}</td>
+                        <td className="px-3 py-2 text-right text-emerald-700">{formatMAD(r.collected)}</td>
+                        <td className={`px-3 py-2 text-right ${r.impayes > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatMAD(r.impayes)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-gray-200 font-semibold text-gray-900">
+                      <td className="px-3 py-2">TOTAL</td>
+                      <td className="px-3 py-2 text-right">{formatMAD(data.by_stream.billed_total)}</td>
+                      <td className="px-3 py-2 text-right">{formatMAD(data.by_stream.collected_total)}</td>
+                      <td className="px-3 py-2 text-right">{formatMAD(data.by_stream.impayes_total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Dépenses réelles par poste comptable (période exacte) */}
+          {(data.by_stream?.expense_sections || []).length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-card shadow-sm p-5">
+              <h2 className="font-semibold text-gray-900 mb-1">Dépenses par poste</h2>
+              <p className="text-xs text-gray-500 mb-4">Réel sur la période — regroupé par section et poste comptable.</p>
+              <div className="space-y-4">
+                {data.by_stream.expense_sections.map((sec, i) => (
+                  <div key={i}>
+                    <div className="flex items-center justify-between text-sm font-semibold text-gray-800 border-b border-gray-100 pb-1 mb-1">
+                      <span>{sec.name}</span>
+                      <span>{formatMAD(sec.subtotal)}</span>
+                    </div>
+                    {sec.lines.map((l, j) => (
+                      <div key={j} className="flex items-center justify-between text-sm text-gray-600 py-0.5 pl-3">
+                        <span>{l.name}</span>
+                        <span className="tabular-nums">{formatMAD(l.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <div className="flex items-center justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2">
+                  <span>TOTAL DÉPENSES</span>
+                  <span>{formatMAD(data.by_stream.expense_total)}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>
