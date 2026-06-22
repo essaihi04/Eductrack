@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Wallet, TrendingUp, AlertCircle, ArrowRight, DollarSign } from 'lucide-react';
 import { financeApi, formatMAD } from '../../lib/financeApi';
+import { useYear } from '../../contexts/YearContext';
 
 export default function FinanceSummaryCard() {
+  const { year } = useYear();
   const [summary, setSummary] = useState(null);
   const [cashflow, setCashflow] = useState([]);
   const [byClass, setByClass] = useState([]);
@@ -13,14 +15,15 @@ export default function FinanceSummaryCard() {
 
   useEffect(() => {
     loadAll();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
 
   const loadAll = async () => {
     try {
       const [s, c, cl] = await Promise.all([
-        financeApi.getSummary(),
+        financeApi.getSummary(year),
         financeApi.getCashflow(6),
-        financeApi.getByClass()
+        financeApi.getByClass(year)
       ]);
       setSummary(s);
       setCashflow(c.cashflow || []);
@@ -51,7 +54,7 @@ export default function FinanceSummaryCard() {
               <Wallet className="w-5 h-5 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-800">Trésorerie du mois</h2>
+              <h2 className="text-lg font-bold text-gray-800">Trésorerie {year}</h2>
               <p className="text-xs text-gray-500">Aperçu des recouvrements et retards</p>
             </div>
           </div>
