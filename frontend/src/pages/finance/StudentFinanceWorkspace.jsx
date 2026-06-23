@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, Users, History, Search, Plus, X, CheckCircle2,
-  Printer, Ban, CreditCard, Pencil, Save, ChevronDown, ChevronRight,
+  Printer, Ban, CreditCard, Pencil, Save, ChevronDown, ChevronRight, ArrowLeft,
 } from 'lucide-react';
 import { financeApi, formatMAD, METHOD_LABELS, CATEGORY_LABELS } from '../../lib/financeApi';
-import { Drawer, Button } from '../../components/finance/ui';
+import { Button } from '../../components/finance/ui';
 import { Avatar } from '../../components/directory/ui';
 
 const STATUS_META = {
@@ -35,19 +35,29 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
   const [tab, setTab] = useState('collect');
 
   return (
-    <Drawer open onClose={onClose} width="max-w-3xl"
-      title={`Finance — ${fullName(student)}`}>
-      <div className="flex items-center justify-between gap-2 -mt-1">
-        <p className="text-sm text-gray-500 flex items-center gap-2">
-          <CreditCard className="w-4 h-4" /> {student.classes?.name || '—'} · {academicYear}
-        </p>
+    <div className="space-y-4">
+      {/* En-tête plein écran avec retour */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          {onClose && (
+            <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg" title="Retour à la liste">
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Finance — {fullName(student)}</h1>
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <CreditCard className="w-4 h-4" /> {student.classes?.name || '—'} · {academicYear}
+            </p>
+          </div>
+        </div>
         {onOpenPlan && (
           <Button variant="secondary" onClick={onOpenPlan}>Plan de frais</Button>
         )}
       </div>
 
       {/* Onglets */}
-      <div className="flex gap-1 border-b border-gray-200 mt-3 mb-4">
+      <div className="flex gap-1 border-b border-gray-200">
         {[
           { k: 'collect', label: 'Encaissement', icon: Wallet },
           { k: 'family', label: 'Famille / groupé', icon: Users },
@@ -65,7 +75,7 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
       {tab === 'collect' && <CollectTab student={student} academicYear={academicYear} onChanged={onChanged} />}
       {tab === 'family' && <FamilyTab student={student} allStudents={allStudents} academicYear={academicYear} onChanged={onChanged} />}
       {tab === 'history' && <HistoryTab student={student} academicYear={academicYear} onChanged={onChanged} />}
-    </Drawer>
+    </div>
   );
 }
 

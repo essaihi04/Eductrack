@@ -86,70 +86,8 @@ export default function FinanceStudentsPage() {
 
   return (
     <div className="p-6 space-y-5">
-      <PageHeader icon={Users} title="Élèves — Finance" color="green"
-        subtitle={`${filtered.length} élève(s)`} onRefresh={load} loading={loading} />
-
-      <KpiGrid cols={4}>
-        <KpiCard label="Total facturé" value={formatMAD(totals.invoiced)} tone="blue" />
-        <KpiCard label="Encaissé" value={formatMAD(totals.paid)} tone="green" />
-        <KpiCard label="Restant dû" value={formatMAD(totals.due)} tone="orange" />
-        <KpiCard label="Élèves en retard" value={totals.overdue} tone="red" icon={AlertCircle} />
-      </KpiGrid>
-
-      <FilterBar>
-        <div className="flex-1 min-w-[200px] relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="Rechercher un élève..." value={filters.search}
-            onChange={e => setFilters({ ...filters, search: e.target.value })}
-            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg" />
-        </div>
-        <select value={filters.class_id} onChange={e => setFilters({ ...filters, class_id: e.target.value })}
-          className="px-3 py-2 border border-gray-300 rounded-lg">
-          <option value="">Toutes classes</option>
-          {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-      </FilterBar>
-
-      {/* Bascule grille / liste */}
-      <div className="flex items-center justify-end">
-        <GridListToggle value={viewMode} onChange={setViewMode} />
-      </div>
-
-      {filtered.length === 0 ? (
-        <p className="text-center py-10 text-gray-400">Aucun élève</p>
-      ) : viewMode === 'grid' ? (
-        <CardGrid min={180}>
-          {filtered.map((s) => (
-            <StudentCard
-              key={s.id}
-              name={`${s.first_name} ${s.last_name}`}
-              photo={resolveAvatar(s.avatar_url)}
-              gender={s.gender || ''}
-              classLabel={s.classes?.name || '—'}
-              status={financeStatus(s)}
-              onClick={() => setActiveStudent(s)}
-            />
-          ))}
-        </CardGrid>
-      ) : (
-        <div>
-          {filtered.map((s) => (
-            <StudentRow
-              key={s.id}
-              name={`${s.first_name} ${s.last_name}`}
-              photo={resolveAvatar(s.avatar_url)}
-              gender={s.gender || ''}
-              classLabel={s.classes?.name || '—'}
-              sub={s.total_due > 0 ? `Reste dû ${formatMAD(s.total_due)}` : 'À jour'}
-              status={financeStatus(s)}
-              onClick={() => setActiveStudent(s)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Espace finance complet de l'élève (panneau latéral à onglets) */}
-      {activeStudent && (
+      {/* Espace finance plein écran de l'élève (remplit l'interface) */}
+      {activeStudent ? (
         <StudentFinanceWorkspace
           student={activeStudent}
           allStudents={students}
@@ -158,6 +96,70 @@ export default function FinanceStudentsPage() {
           onChanged={load}
           onOpenPlan={() => setSelectedStudent(activeStudent)}
         />
+      ) : (
+        <>
+          <PageHeader icon={Users} title="Élèves — Finance" color="green"
+            subtitle={`${filtered.length} élève(s)`} onRefresh={load} loading={loading} />
+
+          <KpiGrid cols={4}>
+            <KpiCard label="Total facturé" value={formatMAD(totals.invoiced)} tone="blue" />
+            <KpiCard label="Encaissé" value={formatMAD(totals.paid)} tone="green" />
+            <KpiCard label="Restant dû" value={formatMAD(totals.due)} tone="orange" />
+            <KpiCard label="Élèves en retard" value={totals.overdue} tone="red" icon={AlertCircle} />
+          </KpiGrid>
+
+          <FilterBar>
+            <div className="flex-1 min-w-[200px] relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input type="text" placeholder="Rechercher un élève..." value={filters.search}
+                onChange={e => setFilters({ ...filters, search: e.target.value })}
+                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg" />
+            </div>
+            <select value={filters.class_id} onChange={e => setFilters({ ...filters, class_id: e.target.value })}
+              className="px-3 py-2 border border-gray-300 rounded-lg">
+              <option value="">Toutes classes</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </FilterBar>
+
+          {/* Bascule grille / liste */}
+          <div className="flex items-center justify-end">
+            <GridListToggle value={viewMode} onChange={setViewMode} />
+          </div>
+
+          {filtered.length === 0 ? (
+            <p className="text-center py-10 text-gray-400">Aucun élève</p>
+          ) : viewMode === 'grid' ? (
+            <CardGrid min={180}>
+              {filtered.map((s) => (
+                <StudentCard
+                  key={s.id}
+                  name={`${s.first_name} ${s.last_name}`}
+                  photo={resolveAvatar(s.avatar_url)}
+                  gender={s.gender || ''}
+                  classLabel={s.classes?.name || '—'}
+                  status={financeStatus(s)}
+                  onClick={() => setActiveStudent(s)}
+                />
+              ))}
+            </CardGrid>
+          ) : (
+            <div>
+              {filtered.map((s) => (
+                <StudentRow
+                  key={s.id}
+                  name={`${s.first_name} ${s.last_name}`}
+                  photo={resolveAvatar(s.avatar_url)}
+                  gender={s.gender || ''}
+                  classLabel={s.classes?.name || '—'}
+                  sub={s.total_due > 0 ? `Reste dû ${formatMAD(s.total_due)}` : 'À jour'}
+                  status={financeStatus(s)}
+                  onClick={() => setActiveStudent(s)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {selectedStudent && (
