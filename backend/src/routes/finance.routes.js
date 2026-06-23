@@ -299,7 +299,19 @@ router.get('/fee-templates/class-assignments', async (req, res) => {
       const t = tmap[p.template_id] || (tmap[p.template_id] = { template_id: p.template_id, template_name: p.template?.name || '', count: 0 });
       t.count++;
     }
-    const assignments = Object.entries(byClass).map(([class_id, tmap]) => ({ class_id, templates: Object.values(tmap) }));
+
+    // Total d'élèves par classe → pour détecter les nouveaux élèves sans plan.
+    let stuQ = supabaseAdmin.from('profiles').select('class_id').eq('role', 'student');
+    if (schoolId) stuQ = stuQ.eq('school_id', schoolId);
+    const { data: studs } = await stuQ;
+    const totalByClass = {};
+    (studs || []).forEach(s => { if (s.class_id) totalByClass[s.class_id] = (totalByClass[s.class_id] || 0) + 1; });
+
+    const assignments = Object.entries(byClass).map(([class_id, tmap]) => {
+      const templates = Object.values(tmap);
+      const plans_total = templates.reduce((a, t) => a + t.count, 0);
+      return { class_id, templates, plans_total, total_students: totalByClass[class_id] || 0 };
+    });
     res.json({ assignments });
   } catch (error) {
     console.error('Erreur class-assignments:', error);

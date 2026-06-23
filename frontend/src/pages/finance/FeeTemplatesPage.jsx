@@ -72,16 +72,33 @@ export default function FeeTemplatesPage() {
       // dashYear, sinon le format slash ne remonte aucune assignation.
       const data = await financeApi.getClassAssignments(dashYear);
       const map = {};
-      (data.assignments || []).forEach(a => { map[a.class_id] = a.templates || []; });
+      (data.assignments || []).forEach(a => { map[a.class_id] = a; });
       setAssignments(map);
     } catch (e) { console.error(e); }
   };
 
-  // Modèle (différent de celui en cours d'application) couvrant déjà cette classe.
+  // Cette classe est-elle déjà appliquée à CE modèle ?
+  const appliedToThisTemplate = (classId, templateId) =>
+    !!(assignments[classId]?.templates || []).some(t => t.template_id === templateId);
+
+  // Modèle (différent de celui-ci) couvrant déjà cette classe — sauf si elle est
+  // déjà sur ce modèle (priorité à l'état « déjà appliquée à ce modèle »).
   const assignedOtherTemplate = (classId, currentTemplateId) => {
-    const tpls = assignments[classId] || [];
+    if (appliedToThisTemplate(classId, currentTemplateId)) return null;
+    const tpls = assignments[classId]?.templates || [];
     return tpls.find(t => t.template_id !== currentTemplateId) || null;
   };
+
+  // Nombre d'élèves sans plan dans la classe (= élèves à ajouter par une mise à jour).
+  const newStudentsForClass = (classId) => {
+    const a = assignments[classId];
+    if (!a) return 0;
+    return Math.max(0, (a.total_students || 0) - (a.plans_total || 0));
+  };
+
+  // Nombre de classes déjà prises par ce modèle.
+  const appliedClassCount = (templateId) =>
+    classes.filter(c => appliedToThisTemplate(c.id, templateId)).length;
 
   const startNew = () => {
     setEditing({
@@ -173,13 +190,30 @@ export default function FeeTemplatesPage() {
     const t = templates.find(x => x.id === templateId);
     const { matches } = sortedClassesFor(t);
     setApplyingTemplateId(templateId);
-    // Pré-cocher les classes correspondantes SAUF celles déjà dans un autre modèle.
-    setSelectedClassIds(matches.filter(c => !assignedOtherTemplate(c.id, templateId)).map(c => c.id));
+    // Pré-cocher les classes correspondantes SAUF celles dans un autre modèle ou déjà appliquées ici.
+    setSelectedClassIds(matches
+      .filter(c => !assignedOtherTemplate(c.id, templateId) && !appliedToThisTemplate(c.id, templateId))
+      .map(c => c.id));
   };
 
   const toggleClass = (classId) => {
-    if (assignedOtherTemplate(classId, applyingTemplateId)) return; // verrouillée
+    if (assignedOtherTemplate(classId, applyingTemplateId)) return; // dans un autre modèle
+    if (appliedToThisTemplate(classId, applyingTemplateId)) return; // déjà appliquée ici
     setSelectedClassIds(prev => prev.includes(classId) ? prev.filter(x => x !== classId) : [...prev, classId]);
+  };
+
+  // Mise à jour d'une classe déjà appliquée : ajoute le plan aux nouveaux élèves
+  // (les élèves déjà couverts sont ignorés côté serveur).
+  const [updatingClassId, setUpdatingClassId] = useState(null);
+  const updateClass = async (templateId, classId) => {
+    const t = templates.find(x => x.id === templateId);
+    setUpdatingClassId(classId);
+    try {
+      const res = await financeApi.applyTemplateToClasses(templateId, { class_ids: [classId], academic_year: t.academic_year });
+      alert(`${res.created_count} élève(s) ajouté(s), ${res.skipped_count} déjà couvert(s)`);
+      loadAssignments();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setUpdatingClassId(null); }
   };
 
   const applyToSelected = async (templateId) => {
@@ -286,10 +320,14 @@ export default function FeeTemplatesPage() {
               {applyingTemplateId === t.id ? (
                 (() => {
                   const { matches, others } = sortedClassesFor(t);
-                  const selectableIds = classes.filter(c => !assignedOtherTemplate(c.id, t.id)).map(c => c.id);
+                  const selectableIds = classes
+                    .filter(c => !assignedOtherTemplate(c.id, t.id) && !appliedToThisTemplate(c.id, t.id))
+                    .map(c => c.id);
                   const allSelected = selectableIds.length > 0 && selectedClassIds.length === selectableIds.length;
-                  // Rendu d'une ligne classe : grisée + verrouillée si déjà dans un autre modèle.
+                  // Rendu d'une ligne classe selon 3 états : autre modèle (verrouillée),
+                  // déjà appliquée à ce modèle (avec mise à jour), ou sélectionnable.
                   const classRow = (c, hover) => {
+                    const meta = <span className="text-[10px] text-gray-400 whitespace-nowrap">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>;
                     const locked = assignedOtherTemplate(c.id, t.id);
                     if (locked) {
                       return (
@@ -302,7 +340,29 @@ export default function FeeTemplatesPage() {
                               Déjà dans « {locked.template_name} ». Retirez-la de ce modèle pour pouvoir l'ajouter ici.
                             </p>
                           </div>
-                          <span className="text-[10px] text-gray-400 whitespace-nowrap">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
+                          {meta}
+                        </div>
+                      );
+                    }
+                    if (appliedToThisTemplate(c.id, t.id)) {
+                      const nb = newStudentsForClass(c.id);
+                      return (
+                        <div key={c.id} className="flex items-center gap-2 px-2 py-1.5 text-sm bg-emerald-50/60 border-b border-gray-50">
+                          <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <span className="truncate text-gray-700">{c.name}</span>
+                            <span className="ml-1 text-[10px] text-emerald-700">· déjà appliquée à ce modèle</span>
+                          </div>
+                          {nb > 0 ? (
+                            <button onClick={() => updateClass(t.id, c.id)} disabled={updatingClassId === c.id}
+                              className="text-[11px] px-2 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                              title={`${nb} nouvel(s) élève(s) sans plan`}>
+                              {updatingClassId === c.id ? '...' : `Mettre à jour (+${nb})`}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 whitespace-nowrap">à jour</span>
+                          )}
+                          {meta}
                         </div>
                       );
                     }
@@ -315,7 +375,7 @@ export default function FeeTemplatesPage() {
                           className="rounded"
                         />
                         <span className="flex-1 truncate">{c.name}</span>
-                        <span className="text-[10px] text-gray-500">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
+                        {meta}
                       </label>
                     );
                   };
@@ -375,12 +435,19 @@ export default function FeeTemplatesPage() {
                   );
                 })()
               ) : (
-                <button
-                  onClick={() => openApply(t.id)}
-                  className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
-                >
-                  <Users className="w-4 h-4" /> Appliquer à des classes
-                </button>
+                <div className="mt-3 space-y-2">
+                  {appliedClassCount(t.id) > 0 && (
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
+                      <Check className="w-3.5 h-3.5" /> Appliqué à {appliedClassCount(t.id)} classe(s)
+                    </div>
+                  )}
+                  <button
+                    onClick={() => openApply(t.id)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                  >
+                    <Users className="w-4 h-4" /> Appliquer à des classes
+                  </button>
+                </div>
               )}
             </div>
           );
