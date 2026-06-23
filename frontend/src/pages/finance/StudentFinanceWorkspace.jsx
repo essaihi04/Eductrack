@@ -121,6 +121,7 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
                 const payable = svc.remaining > 0;
                 const checked = !!sel[k]?.checked;
                 const hasPaid = Number(svc.paid) > 0;
+                const billed = !!svc.invoice_id; // facturé : annulable / supprimable
                 return (
                   <div key={k} className={`flex items-center gap-2 px-2.5 py-1.5 text-sm ${checked ? 'bg-green-50' : ''}`}>
                     {payable ? (
@@ -145,9 +146,10 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
                     ) : (
                       <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
                     )}
-                    {/* Annuler le paiement de ce service (admin) */}
-                    {onCancelService && hasPaid && (
-                      <button onClick={() => onCancelService(m.month, svc)} title="Annuler le paiement de ce service"
+                    {/* Annuler le paiement (si payé) ou supprimer la facturation (si non payé) — admin */}
+                    {onCancelService && billed && (
+                      <button onClick={() => onCancelService(m.month, svc)}
+                        title={hasPaid ? 'Annuler le paiement de ce service' : 'Supprimer ce service'}
                         className="p-1 hover:bg-red-100 rounded flex-shrink-0"><Ban className="w-3.5 h-3.5 text-red-500" /></button>
                     )}
                   </div>
@@ -259,13 +261,19 @@ function CollectTab({ student, academicYear, onChanged }) {
   };
   const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount }));
 
-  // Annule le paiement d'un service (mois×service) — le service redevient dû.
+  // Annule le paiement d'un service (s'il est payé → redevient dû) ou supprime
+  // la facturation du service (s'il n'est pas payé → retiré du dû).
   const cancelService = async (month, svc) => {
     if (!svc.invoice_id) return;
-    const reason = prompt(`Annuler le paiement de « ${serviceLabel(svc)} » ? Motif :`);
+    const paid = Number(svc.paid) > 0;
+    const verb = paid ? 'Annuler le paiement de' : 'Supprimer';
+    const reason = prompt(`${verb} « ${serviceLabel(svc)} » ? Motif :`);
     if (reason === null) return;
     try {
-      await financeApi.cancelServicePayment(student.id, { invoice_id: svc.invoice_id, reason });
+      await financeApi.cancelServicePayment(student.id, {
+        invoice_id: svc.invoice_id, reason,
+        cancel_invoice: !paid, // non payé → on annule aussi la facture (retire le dû)
+      });
       await load();
       onChanged?.();
     } catch (e) { alert('Erreur: ' + e.message); }
