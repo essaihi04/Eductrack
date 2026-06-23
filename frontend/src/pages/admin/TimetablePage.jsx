@@ -38,6 +38,7 @@ const TimetablePage = () => {
   const [className, setClassName] = useState('');
   const [subjects, setSubjects] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [classTeacherIds, setClassTeacherIds] = useState([]);
   const [grid, setGrid] = useState({});
   const [timeSlots, setTimeSlots] = useState([...DEFAULT_SLOTS]);
   const [perDayTimes, setPerDayTimes] = useState(false);
@@ -60,13 +61,22 @@ const TimetablePage = () => {
     subjectColorMap[s.id] = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
   });
 
-  // Profs autorisés pour une matière donnée (chaque prof est assigné à des matières
-  // via teacher_subjects). Si aucune matière n'est choisie, on montre tous les profs.
-  // On garde toujours le prof déjà sélectionné dans la liste, même s'il n'enseigne
-  // pas officiellement cette matière, pour ne pas perdre la donnée existante.
+  // Profs candidats : on part des profs ASSIGNÉS à cette classe (class_teachers).
+  // Si aucun prof n'est assigné à la classe, on retombe sur tous les profs de l'école.
+  const classScopedTeachers = () => {
+    if (classTeacherIds.length === 0) return teachers;
+    const scoped = teachers.filter(t => classTeacherIds.includes(t.id));
+    return scoped.length > 0 ? scoped : teachers;
+  };
+
+  // Profs autorisés pour une matière donnée : profs de la classe qui enseignent cette
+  // matière (via teacher_subjects). Sans matière choisie, on montre les profs de la classe.
+  // On garde toujours le prof déjà sélectionné, même s'il ne correspond plus, pour ne
+  // pas perdre la donnée existante.
   const teachersForSubject = (subjectId, selectedTeacherId) => {
-    if (!subjectId) return teachers;
-    const matching = teachers.filter(t => Array.isArray(t.subject_ids) && t.subject_ids.includes(subjectId));
+    const pool = classScopedTeachers();
+    if (!subjectId) return pool;
+    const matching = pool.filter(t => Array.isArray(t.subject_ids) && t.subject_ids.includes(subjectId));
     if (selectedTeacherId && !matching.some(t => t.id === selectedTeacherId)) {
       const sel = teachers.find(t => t.id === selectedTeacherId);
       if (sel) return [sel, ...matching];
@@ -90,10 +100,11 @@ const TimetablePage = () => {
       setLoading(true);
       const token = await getToken();
 
-      const [classRes, subjectsRes, teachersRes, timetableRes] = await Promise.all([
+      const [classRes, subjectsRes, teachersRes, classTeachersRes, timetableRes] = await Promise.all([
         fetch(`${apiUrl}/api/admin/classes`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/subjects`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${apiUrl}/api/admin/classes/${classId}/teachers`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/classes/${classId}/timetable`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
 
@@ -106,6 +117,14 @@ const TimetablePage = () => {
 
       const teachersData = await teachersRes.json();
       setTeachers(Array.isArray(teachersData) ? teachersData : []);
+
+      // Profs assignés à CETTE classe (pour ne proposer qu'eux dans l'emploi du temps)
+      const classTeachersData = await classTeachersRes.json();
+      setClassTeacherIds(
+        (Array.isArray(classTeachersData) ? classTeachersData : [])
+          .map(r => r.teacher_id)
+          .filter(Boolean)
+      );
 
       const timetableData = await timetableRes.json();
 
@@ -158,9 +177,10 @@ const TimetablePage = () => {
     const key = `${dayKey}_${slotIdx + 1}`;
     setGrid(prev => {
       const next = { ...prev[key], [field]: value };
-      // À la sélection d'une matière : on aligne le prof sur ceux qui l'enseignent.
+      // À la sélection d'une matière : on aligne le prof sur ceux qui l'enseignent
+      // PARMI les profs assignés à cette classe.
       if (field === 'subject_id') {
-        const eligible = teachers.filter(t => Array.isArray(t.subject_ids) && t.subject_ids.includes(value));
+        const eligible = classScopedTeachers().filter(t => Array.isArray(t.subject_ids) && t.subject_ids.includes(value));
         if (!value) {
           next.teacher_id = '';
         } else if (eligible.length === 1) {
