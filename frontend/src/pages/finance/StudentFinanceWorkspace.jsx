@@ -20,6 +20,17 @@ const STATUS_META = {
 const fullName = (s) => `${s.first_name || ''} ${s.last_name || ''}`.trim();
 const keyOf = (month, category) => `${month}:${category || 'bundle'}`;
 
+// Couleur de l'en-tête d'un mois selon son statut de paiement.
+const MONTH_HEAD = {
+  paid: 'bg-green-100 text-green-800 border-green-300',
+  partial: 'bg-orange-100 text-orange-800 border-orange-300',
+  overdue: 'bg-red-200 text-red-900 border-red-400', // retard : rouge plus foncé
+  unpaid: 'bg-red-50 text-red-700 border-red-200',
+};
+
+// Libellé lisible d'un service (Scolarité, Transport…) à partir d'une ligne.
+const serviceLabel = (svc) => svc?.label || (svc?.category ? (CATEGORY_LABELS[svc.category] || svc.category) : 'Mensualité');
+
 export default function StudentFinanceWorkspace({ student, allStudents = [], academicYear, onClose, onChanged, onOpenPlan }) {
   const [tab, setTab] = useState('collect');
 
@@ -61,49 +72,53 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
 // ── Grille mois × service réutilisable ───────────────────────────────────────
 // sel : { 'month:category' -> { checked, amount } }. Les services déjà payés
 // (remaining<=0) sont verrouillés et marqués payés.
-function MonthsServicesGrid({ months, sel, onToggle, onAmount }) {
+function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false }) {
+  const amtCls = compact ? 'w-16 px-1.5 py-1 text-xs' : 'w-28 px-2 py-1 text-sm';
   return (
-    <div className="space-y-3">
-      {(months || []).map(m => (
-        <div key={m.month} className="border border-gray-200 rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 bg-gray-50 text-sm">
-            <span className="font-semibold text-gray-800">{m.label}</span>
-            <span className="text-xs text-gray-500">
-              {m.remaining > 0 ? `Reste ${formatMAD(m.remaining)}` : <span className="text-green-600">Payé ✓</span>}
-            </span>
-          </div>
-          <div className="divide-y divide-gray-100">
-            {m.services.map(svc => {
-              const k = keyOf(m.month, svc.category);
-              const payable = svc.remaining > 0;
-              const checked = !!sel[k]?.checked;
-              return (
-                <div key={k} className={`flex items-center gap-2 px-3 py-2 text-sm ${checked ? 'bg-green-50' : ''}`}>
-                  {payable ? (
-                    <input type="checkbox" checked={checked} onChange={() => onToggle(m.month, svc)} className="w-4 h-4 accent-green-600" />
-                  ) : (
-                    // Déjà payé : case cochée verrouillée (impossible à décocher)
-                    <input type="checkbox" checked readOnly disabled className="w-4 h-4 accent-green-600" title="Payé" />
-                  )}
-                  <span className="flex-1 text-gray-800">{svc.label}</span>
-                  <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>
-                  {payable ? (
-                    checked ? (
-                      <input type="number" step="0.01" min="0" max={svc.remaining} value={sel[k].amount}
-                        onChange={e => onAmount(m.month, svc.category, e.target.value)}
-                        className="w-28 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+    <div className="space-y-2.5">
+      {(months || []).map(m => {
+        const head = MONTH_HEAD[m.status] || MONTH_HEAD.unpaid;
+        return (
+          <div key={m.month} className="border border-gray-200 rounded-lg overflow-hidden">
+            <div className={`flex items-center justify-between px-3 py-1.5 text-sm border-b ${head}`}>
+              <span className="font-semibold">{m.label}</span>
+              <span className="text-xs">
+                {m.remaining > 0 ? `Reste ${formatMAD(m.remaining)}` : 'Payé ✓'}
+              </span>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {m.services.map(svc => {
+                const k = keyOf(m.month, svc.category);
+                const payable = svc.remaining > 0;
+                const checked = !!sel[k]?.checked;
+                return (
+                  <div key={k} className={`flex items-center gap-2 px-2.5 py-1.5 text-sm ${checked ? 'bg-green-50' : ''}`}>
+                    {payable ? (
+                      <input type="checkbox" checked={checked} onChange={() => onToggle(m.month, svc)} className="w-4 h-4 accent-green-600 flex-shrink-0" />
                     ) : (
-                      <span className="w-28 text-right font-medium text-orange-600">{formatMAD(svc.remaining)}</span>
-                    )
-                  ) : (
-                    <span className="w-28 text-right text-xs text-green-600">Payé</span>
-                  )}
-                </div>
-              );
-            })}
+                      // Déjà payé : case cochée verrouillée (impossible à décocher)
+                      <input type="checkbox" checked readOnly disabled className="w-4 h-4 accent-green-600 flex-shrink-0" title="Payé" />
+                    )}
+                    <span className="flex-1 min-w-0 truncate text-gray-800">{serviceLabel(svc)}</span>
+                    {!compact && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
+                    {payable ? (
+                      checked ? (
+                        <input type="number" step="0.01" min="0" max={svc.remaining} value={sel[k].amount}
+                          onChange={e => onAmount(m.month, svc.category, e.target.value)}
+                          className={`${amtCls} border border-gray-300 rounded text-right flex-shrink-0`} />
+                      ) : (
+                        <span className={`${compact ? 'w-16 text-xs' : 'w-28'} text-right font-medium text-orange-600 flex-shrink-0`}>{formatMAD(svc.remaining)}</span>
+                      )
+                    ) : (
+                      <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -178,7 +193,7 @@ function CollectTab({ student, academicYear, onChanged }) {
   const labelFor = (item) => {
     const mo = (data?.months || []).find(m => m.month === item.month);
     const svc = mo?.services.find(s => (s.category || 'bundle') === (item.category || 'bundle'));
-    return `${mo?.label || item.month} — ${svc?.label || 'Service'}`;
+    return `${mo?.label || item.month} — ${serviceLabel(svc)}`;
   };
   const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount }));
 
@@ -359,7 +374,7 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
     Object.values(selById[id] || {}).filter(s => s.checked).forEach(s => {
       const mo = (data?.months || []).find(m => m.month === s.month);
       const svc = mo?.services.find(x => (x.category || 'bundle') === (s.category || 'bundle'));
-      listItems.push({ label: `${member ? fullName(member) : ''} · ${mo?.label || s.month} — ${svc?.label || 'Service'}`, amount: s.amount });
+      listItems.push({ label: `${member ? fullName(member) : ''} · ${mo?.label || s.month} — ${serviceLabel(svc)}`, amount: s.amount });
     });
   });
   const grandTotal = listItems.reduce((t, i) => t + (Number(i.amount) || 0), 0);
@@ -430,17 +445,27 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
         </div>
       </div>
 
-      {/* Par enfant : mois & services (payés cochés/verrouillés) */}
-      {[...selectedIds].map(id => {
-        const member = members.find(m => m.id === id);
-        const data = statusById[id];
+      {/* Par enfant : en colonnes si plusieurs (nom en haut, mois & services en bas) */}
+      {(() => {
+        const selArr = [...selectedIds];
+        const multi = selArr.length > 1;
         return (
-          <ChildSection key={id} member={member} data={data} loading={loadingIds.has(id)}
-            sel={selById[id] || {}}
-            onToggle={(month, svc) => toggleSvc(id, month, svc)}
-            onAmount={(month, cat, val) => setSvcAmount(id, month, cat, val)} />
+          <div className={multi ? 'flex gap-3 overflow-x-auto pb-2' : 'space-y-3'}>
+            {selArr.map(id => {
+              const member = members.find(m => m.id === id);
+              const data = statusById[id];
+              return (
+                <div key={id} className={multi ? 'w-[300px] flex-shrink-0' : ''}>
+                  <ChildSection member={member} data={data} loading={loadingIds.has(id)} column={multi}
+                    sel={selById[id] || {}}
+                    onToggle={(month, svc) => toggleSvc(id, month, svc)}
+                    onAmount={(month, cat, val) => setSvcAmount(id, month, cat, val)} />
+                </div>
+              );
+            })}
+          </div>
         );
-      })}
+      })()}
 
       {/* Liste live + paiement (sans bouton « Aperçu ») */}
       {listItems.length > 0 && (
@@ -473,28 +498,43 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
   );
 }
 
-// Bloc d'un enfant (repliable) avec sa grille mois × service.
-function ChildSection({ member, data, loading, sel, onToggle, onAmount }) {
+// Bloc d'un enfant avec sa grille mois × service.
+// column=true : carte verticale (nom + infos en haut, mois en bas) pour la vue multi-colonnes.
+function ChildSection({ member, data, loading, sel, onToggle, onAmount, column = false }) {
   const [open, setOpen] = useState(true);
   if (!member) return null;
+  const summary = data?.summary;
+  const summaryLine = summary && (
+    <span className={`text-xs ${summary.remaining_total > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+      {summary.paid_months}/{summary.total_months} mois · {summary.remaining_total > 0 ? `reste ${formatMAD(summary.remaining_total)}` : 'à jour'}
+    </span>
+  );
+  const body = loading ? <p className="text-xs text-gray-400 py-3 text-center">Chargement...</p>
+    : !data?.plan_exists ? <p className="text-xs text-amber-600 py-2">Aucun plan de frais pour cette année.</p>
+    : <MonthsServicesGrid months={data.months} sel={sel} onToggle={onToggle} onAmount={onAmount} compact={column} />;
+
+  if (column) {
+    return (
+      <div className="border border-gray-200 rounded-lg h-full flex flex-col">
+        <div className="flex flex-col items-center text-center gap-1 p-3 border-b border-gray-100 bg-gray-50 rounded-t-lg">
+          <Avatar name={fullName(member)} size="md" gender={member.gender || ''} />
+          <div className="font-medium text-sm truncate w-full">{fullName(member)}</div>
+          <div className="text-xs text-gray-500">{member.classes?.name || '—'}</div>
+          {summaryLine}
+        </div>
+        <div className="p-2 flex-1">{body}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="border border-gray-200 rounded-lg">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
         {open ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
         <span className="font-medium text-sm flex-1">{fullName(member)}</span>
-        {data?.summary && (
-          <span className={`text-xs ${data.summary.remaining_total > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-            {data.summary.paid_months}/{data.summary.total_months} mois · {data.summary.remaining_total > 0 ? `reste ${formatMAD(data.summary.remaining_total)}` : 'à jour'}
-          </span>
-        )}
+        {summaryLine}
       </button>
-      {open && (
-        <div className="px-3 pb-3">
-          {loading ? <p className="text-sm text-gray-400 py-3 text-center">Chargement...</p>
-            : !data?.plan_exists ? <p className="text-sm text-amber-600 py-2">Aucun plan de frais pour cette année.</p>
-            : <MonthsServicesGrid months={data.months} sel={sel} onToggle={onToggle} onAmount={onAmount} />}
-        </div>
-      )}
+      {open && <div className="px-3 pb-3">{body}</div>}
     </div>
   );
 }
