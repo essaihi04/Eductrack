@@ -28,6 +28,12 @@ const academicYearRange = (year) => {
 const STREAM_OF_CATEGORY = { tuition: 'tuition', transport: 'transport', registration: 'fi', supplies: 'fr' };
 const streamOfCategory = (c) => STREAM_OF_CATEGORY[c] || 'other';
 const STREAM_LABEL_FALLBACK = { tuition: 'Scolarité', transport: 'Transport', fi: "Frais d'inscription", fr: 'Fournitures & divers', other: 'Autres recettes' };
+// Libellés FR des catégories de services (factures mois×service).
+const CATEGORY_FR = {
+  registration: 'Inscription', tuition: 'Scolarité', transport: 'Transport',
+  canteen: 'Cantine', insurance: 'Assurance', activity: 'Activités',
+  supplies: 'Fournitures', uniform: 'Uniforme', other: 'Autre',
+};
 // Mapping ancien enum dépense -> default_key (fallback si account_id absent)
 const EXP_DEFAULT_OF_CATEGORY = {
   salaries: 'salaries_permanent', rent: 'rent', utilities: 'water_electricity',
@@ -695,6 +701,23 @@ router.get('/students/:studentId/monthly-services-status', async (req, res) => {
             status: inv ? statusOf(paid, total, inv.due_date) : 'pending',
           };
         });
+
+        // Services facturés hors plan (ajoutés manuellement à ce mois) :
+        // les inclure pour qu'ils apparaissent et soient encaissables/annulables.
+        const present = new Set(services.map(s => s.category));
+        monthInvs.forEach(i => {
+          if (i.service_category && !present.has(i.service_category)) {
+            const total = Number(i.total);
+            const paid = Number(i.amount_paid || 0);
+            services.push({
+              category: i.service_category, label: CATEGORY_FR[i.service_category] || i.service_category,
+              expected: total, total, paid, remaining: Math.max(0, total - paid),
+              invoice_id: i.id, invoice_number: i.invoice_number,
+              status: statusOf(paid, total, i.due_date), extra: true,
+            });
+            present.add(i.service_category);
+          }
+        });
       }
 
       const expected = services.reduce((a, s) => a + Number(s.total), 0);
@@ -871,6 +894,126 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur pay-services:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Annuler le PAIEMENT d'un service (mois×service) : annule les paiements
+// confirmés de la facture (le trigger recalcule le payé/reste). Option
+// `cancel_invoice` pour annuler aussi la facture (le service ne sera plus dû).
+// La traçabilité (qui/motif) est portée par les paiements annulés.
+router.post('/students/:studentId/services/cancel-payment', async (req, res) => {
+  try {
+    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const { invoice_id, reason, cancel_invoice } = req.body;
+    if (!invoice_id) return res.status(400).json({ error: 'invoice_id requis' });
+
+    let payQ = supabaseAdmin
+      .from('payments')
+      .select('id')
+      .eq('invoice_id', invoice_id)
+      .eq('student_id', studentId)
+      .eq('status', 'confirmed');
+    if (schoolId) payQ = payQ.eq('school_id', schoolId);
+    const { data: pays, error: e1 } = await payQ;
+    if (e1) throw e1;
+
+    if (pays && pays.length) {
+      const { error: e2 } = await supabaseAdmin
+        .from('payments')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: req.user.id,
+          cancellation_reason: reason || null,
+        })
+        .in('id', pays.map(p => p.id));
+      if (e2) throw e2;
+    }
+
+    if (cancel_invoice) {
+      const { error: e3 } = await supabaseAdmin
+        .from('invoices')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: req.user.id,
+          cancellation_reason: reason || null,
+        })
+        .eq('id', invoice_id);
+      if (e3) throw e3;
+    }
+
+    res.json({ success: true, cancelled_payments: pays?.length || 0, invoice_cancelled: !!cancel_invoice });
+  } catch (error) {
+    console.error('Erreur cancel-service:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Ajouter (facturer) un service à un mois : crée la facture mois×service.
+// Montant pris du plan si non fourni, sinon montant manuel (service hors plan).
+router.post('/students/:studentId/services/add', async (req, res) => {
+  try {
+    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut ajouter un service' });
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const { academic_year, month, category, amount, name, due_day } = req.body;
+    if (!academic_year || !month || !category) {
+      return res.status(400).json({ error: 'academic_year, month et category requis' });
+    }
+
+    const plan = await fetchStudentPlan(studentId, academic_year, schoolId);
+    if (!plan) return res.status(400).json({ error: 'Aucun plan de frais actif pour cet élève' });
+
+    const m = Number(month);
+    let total = amount != null && amount !== '' ? Number(amount) : null;
+    let label = name || CATEGORY_FR[category] || category;
+    if (total == null) {
+      const svc = computeMonthServices(plan, m).find(s => s.category === category);
+      if (!svc || !(svc.total > 0)) {
+        return res.status(400).json({ error: 'Service absent du plan pour ce mois — montant requis' });
+      }
+      total = svc.total;
+      label = name || svc.name || label;
+    }
+    if (!(total > 0)) return res.status(400).json({ error: 'Montant > 0 requis' });
+
+    const periodLabel = periodLabelFor(academic_year, m);
+    const calYear = calendarYearFor(academic_year, m);
+    const dueDate = `${calYear}-${String(m).padStart(2, '0')}-${String(due_day || 5).padStart(2, '0')}`;
+
+    let invQ = supabaseAdmin
+      .from('invoices')
+      .select('id')
+      .eq('student_id', studentId)
+      .eq('period_label', periodLabel)
+      .eq('service_category', category)
+      .neq('status', 'cancelled');
+    if (schoolId) invQ = invQ.eq('school_id', schoolId);
+    const { data: existing } = await invQ.maybeSingle();
+    if (existing) return res.status(409).json({ error: 'Ce service est déjà facturé pour ce mois' });
+
+    const invoiceNumber = await getNextCounter(schoolId, 'invoice');
+    const { data: inv, error } = await supabaseAdmin
+      .from('invoices')
+      .insert({
+        school_id: schoolId, invoice_number: invoiceNumber, student_id: studentId, plan_id: plan.id,
+        due_date: dueDate, period_label: periodLabel, service_category: category,
+        subtotal: total, discount: 0, total, status: 'issued', created_by: req.user.id,
+      })
+      .select('id')
+      .single();
+    if (error) throw error;
+    await supabaseAdmin.from('invoice_lines').insert([{
+      invoice_id: inv.id, description: label, category, quantity: 1, unit_price: total, amount: total, sort_order: 0,
+    }]);
+
+    res.json({ success: true, invoice_id: inv.id });
+  } catch (error) {
+    console.error('Erreur add-service:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });
@@ -1447,24 +1590,32 @@ router.get('/cash-register', async (req, res) => {
     const METHODS = ['cash', 'check', 'transfer', 'card_pos', 'other'];
     const emptyByMethod = () => METHODS.reduce((a, m) => ({ ...a, [m]: { total: 0, count: 0 } }), {});
 
-    // Encaissements (paiements confirmés)
+    // Encaissements (confirmés ET annulés) sur la période — les annulés sont
+    // conservés pour la traçabilité dans le coffre (motif + qui a annulé) mais
+    // n'entrent pas dans les totaux.
     let payQ = supabaseAdmin
       .from('payments')
-      .select(`id, receipt_number, amount, payment_date, method, reference, status,
+      .select(`id, receipt_number, amount, payment_date, method, reference, notes, status, batch_id,
+        cancelled_at, cancellation_reason,
         student:profiles!payments_student_id_fkey(first_name, last_name, classes!fk_profiles_class(name)),
-        cashier:profiles!payments_recorded_by_fkey(first_name, last_name)`)
-      .eq('status', 'confirmed')
+        invoice:invoices(invoice_number, period_label, service_category),
+        cashier:profiles!payments_recorded_by_fkey(first_name, last_name),
+        canceller:profiles!payments_cancelled_by_fkey(first_name, last_name)`)
+      .in('status', ['confirmed', 'cancelled'])
       .gte('payment_date', from)
       .lte('payment_date', to)
       .order('payment_date', { ascending: false });
     if (schoolId) payQ = payQ.eq('school_id', schoolId);
-    const { data: payments, error: payErr } = await payQ;
+    const { data: allPayments, error: payErr } = await payQ;
     if (payErr) throw payErr;
+
+    const payments = (allPayments || []).filter((p) => p.status === 'confirmed');
+    const cancellations = (allPayments || []).filter((p) => p.status === 'cancelled');
 
     const incomeByMethod = emptyByMethod();
     let incomeTotal = 0;
     const byDay = {};
-    for (const p of payments || []) {
+    for (const p of payments) {
       const m = METHODS.includes(p.method) ? p.method : 'other';
       const amt = Number(p.amount || 0);
       incomeByMethod[m].total += amt;
@@ -1504,7 +1655,8 @@ router.get('/cash-register', async (req, res) => {
       expense: { total: expenseTotal, by_method: expenseByMethod },
       net: incomeTotal - expenseTotal,
       by_day: Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date)),
-      payments: (payments || []).slice(0, 200),
+      payments: payments.slice(0, 300),
+      cancellations: cancellations.slice(0, 300),
     });
   } catch (error) {
     console.error('Erreur cash-register:', error);

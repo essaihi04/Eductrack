@@ -82,12 +82,31 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
 // ── Grille mois × service réutilisable ───────────────────────────────────────
 // sel : { 'month:category' -> { checked, amount } }. Les services déjà payés
 // (remaining<=0) sont verrouillés et marqués payés.
-function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false }) {
+function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, onCancelService, onAddService }) {
   const amtCls = compact ? 'w-16 px-1.5 py-1 text-xs' : 'w-28 px-2 py-1 text-sm';
+  // Ajout d'un service : mois en cours d'ajout + catégorie + montant.
+  const [addMonth, setAddMonth] = useState(null);
+  const [addCat, setAddCat] = useState('');
+  const [addAmount, setAddAmount] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const openAdd = (month, presentCats) => {
+    const firstFree = Object.keys(CATEGORY_LABELS).find(c => !presentCats.has(c)) || '';
+    setAddMonth(month); setAddCat(firstFree); setAddAmount('');
+  };
+  const submitAdd = async (month) => {
+    if (!addCat) return;
+    setAdding(true);
+    try { await onAddService(month, addCat, addAmount); setAddMonth(null); }
+    finally { setAdding(false); }
+  };
+
   return (
     <div className="space-y-2.5">
       {(months || []).map(m => {
         const head = MONTH_HEAD[m.status] || MONTH_HEAD.unpaid;
+        const presentCats = new Set(m.services.map(s => s.category).filter(Boolean));
+        const freeCats = Object.entries(CATEGORY_LABELS).filter(([c]) => !presentCats.has(c));
         return (
           <div key={m.month} className="border border-gray-200 rounded-lg overflow-hidden">
             <div className={`flex items-center justify-between px-3 py-1.5 text-sm border-b ${head}`}>
@@ -101,6 +120,7 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false }
                 const k = keyOf(m.month, svc.category);
                 const payable = svc.remaining > 0;
                 const checked = !!sel[k]?.checked;
+                const hasPaid = Number(svc.paid) > 0;
                 return (
                   <div key={k} className={`flex items-center gap-2 px-2.5 py-1.5 text-sm ${checked ? 'bg-green-50' : ''}`}>
                     {payable ? (
@@ -109,7 +129,10 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false }
                       // Déjà payé : case cochée verrouillée (impossible à décocher)
                       <input type="checkbox" checked readOnly disabled className="w-4 h-4 accent-green-600 flex-shrink-0" title="Payé" />
                     )}
-                    <span className="flex-1 min-w-0 truncate text-gray-800">{serviceLabel(svc)}</span>
+                    <span className="flex-1 min-w-0 truncate text-gray-800">
+                      {serviceLabel(svc)}
+                      {svc.extra && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 align-middle">ajouté</span>}
+                    </span>
                     {!compact && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
                     {payable ? (
                       checked ? (
@@ -122,10 +145,39 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false }
                     ) : (
                       <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
                     )}
+                    {/* Annuler le paiement de ce service (admin) */}
+                    {onCancelService && hasPaid && (
+                      <button onClick={() => onCancelService(m.month, svc)} title="Annuler le paiement de ce service"
+                        className="p-1 hover:bg-red-100 rounded flex-shrink-0"><Ban className="w-3.5 h-3.5 text-red-500" /></button>
+                    )}
                   </div>
                 );
               })}
             </div>
+
+            {/* Ajouter un service à ce mois */}
+            {onAddService && (
+              addMonth === m.month ? (
+                <div className="flex items-center gap-2 px-2.5 py-2 bg-purple-50/40 border-t border-gray-100">
+                  <select value={addCat} onChange={e => setAddCat(e.target.value)} className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm">
+                    {freeCats.length === 0 && <option value="">Tous les services sont déjà présents</option>}
+                    {freeCats.map(([c, v]) => <option key={c} value={c}>{v}</option>)}
+                  </select>
+                  <input type="number" step="0.01" min="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
+                    placeholder="Montant (auto si plan)" className="w-36 px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <button onClick={() => submitAdd(m.month)} disabled={adding || !addCat}
+                    className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50">
+                    {adding ? '...' : 'Ajouter'}
+                  </button>
+                  <button onClick={() => setAddMonth(null)} className="p-1.5 hover:bg-gray-200 rounded"><X className="w-4 h-4 text-gray-500" /></button>
+                </div>
+              ) : (
+                <button onClick={() => openAdd(m.month, presentCats)}
+                  className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs text-purple-700 hover:bg-purple-50 border-t border-gray-100">
+                  <Plus className="w-3.5 h-3.5" /> Ajouter un service
+                </button>
+              )
+            )}
           </div>
         );
       })}
@@ -207,6 +259,30 @@ function CollectTab({ student, academicYear, onChanged }) {
   };
   const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount }));
 
+  // Annule le paiement d'un service (mois×service) — le service redevient dû.
+  const cancelService = async (month, svc) => {
+    if (!svc.invoice_id) return;
+    const reason = prompt(`Annuler le paiement de « ${serviceLabel(svc)} » ? Motif :`);
+    if (reason === null) return;
+    try {
+      await financeApi.cancelServicePayment(student.id, { invoice_id: svc.invoice_id, reason });
+      await load();
+      onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
+  };
+
+  // Ajoute (facture) un service à un mois — montant auto (plan) ou manuel.
+  const addServiceToMonth = async (month, category, amount) => {
+    try {
+      await financeApi.addService(student.id, {
+        academic_year: academicYear, month, category,
+        amount: amount !== '' ? Number(amount) : undefined,
+      });
+      await load();
+      onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); throw e; }
+  };
+
   const submit = async () => {
     if (checkedItems.length === 0) return;
     if (!confirm(`Encaisser ${checkedItems.length} ligne(s) — total ${formatMAD(allocated)} ?`)) return;
@@ -267,7 +343,8 @@ function CollectTab({ student, academicYear, onChanged }) {
         </p>
       </div>
 
-      <MonthsServicesGrid months={data.months} sel={sel} onToggle={toggle} onAmount={setAmount} />
+      <MonthsServicesGrid months={data.months} sel={sel} onToggle={toggle} onAmount={setAmount}
+        onCancelService={cancelService} onAddService={addServiceToMonth} />
 
       {/* Liste live + encaissement */}
       {checkedItems.length > 0 && (

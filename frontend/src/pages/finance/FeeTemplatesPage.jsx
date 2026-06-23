@@ -5,6 +5,13 @@ import { PageHeader, EmptyState, Drawer, Button } from '../../components/finance
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
 
+// Mois de l'année scolaire (sept → août) pour les sélecteurs de période.
+const SCHOOL_MONTHS = [
+  { v: 9, l: 'Sep' }, { v: 10, l: 'Oct' }, { v: 11, l: 'Nov' }, { v: 12, l: 'Déc' },
+  { v: 1, l: 'Jan' }, { v: 2, l: 'Fév' }, { v: 3, l: 'Mar' }, { v: 4, l: 'Avr' },
+  { v: 5, l: 'Mai' }, { v: 6, l: 'Juin' }, { v: 7, l: 'Juil' }, { v: 8, l: 'Août' },
+];
+
 const defaultItem = () => ({
   category: 'tuition',
   name: '',
@@ -401,15 +408,24 @@ export default function FeeTemplatesPage() {
                 </div>
 
                 <div className="space-y-2">
+                  {/* En-têtes de colonnes */}
+                  <div className="grid grid-cols-12 gap-2 px-3 text-xs font-medium text-gray-500">
+                    <span className="col-span-3">Service</span>
+                    <span className="col-span-2">Nom du frais</span>
+                    <span className="col-span-2">Montant</span>
+                    <span className="col-span-2">Récurrence</span>
+                    <span className="col-span-2">Période</span>
+                    <span className="col-span-1" />
+                  </div>
                   {editing.items.map((it, idx) => (
-                    <div key={idx} className="grid grid-cols-12 gap-2 items-start p-3 bg-gray-50 rounded-lg">
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-center p-3 bg-gray-50 rounded-lg">
                       <select value={it.category} onChange={e => updateItem(idx, 'category', e.target.value)}
                         className="col-span-3 px-2 py-1.5 text-sm border border-gray-300 rounded">
                         {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
                       <input type="text" value={it.name} onChange={e => updateItem(idx, 'name', e.target.value)}
                         placeholder="Nom du frais"
-                        className="col-span-3 px-2 py-1.5 text-sm border border-gray-300 rounded" />
+                        className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded" />
                       <input type="number" value={it.amount} onChange={e => updateItem(idx, 'amount', e.target.value)}
                         placeholder="Montant"
                         className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded" />
@@ -417,21 +433,30 @@ export default function FeeTemplatesPage() {
                         className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded">
                         {Object.entries(RECURRENCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
-                      {(it.recurrence === 'one_time' || it.recurrence === 'annual') && (
-                        <select value={it.due_month || ''} onChange={e => updateItem(idx, 'due_month', e.target.value ? Number(e.target.value) : null)}
-                          className="col-span-1 px-1 py-1.5 text-sm border border-gray-300 rounded" title="Mois d'échéance">
-                          <option value="">Mois</option>
-                          {[9,10,11,12,1,2,3,4,5,6,7,8].map(m => <option key={m} value={m}>{m}</option>)}
-                        </select>
-                      )}
-                      {it.recurrence === 'monthly' && (
-                        <div className="col-span-1 flex gap-1">
-                          <input type="number" value={it.start_month} onChange={e => updateItem(idx, 'start_month', Number(e.target.value))}
-                            className="w-full px-1 py-1.5 text-xs border border-gray-300 rounded" title="Mois début" min="1" max="12" />
-                          <input type="number" value={it.end_month} onChange={e => updateItem(idx, 'end_month', Number(e.target.value))}
-                            className="w-full px-1 py-1.5 text-xs border border-gray-300 rounded" title="Mois fin" min="1" max="12" />
-                        </div>
-                      )}
+                      {/* Période — toujours col-span-2 pour garder l'alignement */}
+                      <div className="col-span-2">
+                        {it.recurrence === 'monthly' ? (
+                          <div className="flex items-center gap-1">
+                            <select value={it.start_month || 9} onChange={e => updateItem(idx, 'start_month', Number(e.target.value))}
+                              className="w-full px-1 py-1.5 text-sm border border-gray-300 rounded" title="Mois de début">
+                              {SCHOOL_MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                            </select>
+                            <span className="text-gray-400 text-xs">→</span>
+                            <select value={it.end_month || 6} onChange={e => updateItem(idx, 'end_month', Number(e.target.value))}
+                              className="w-full px-1 py-1.5 text-sm border border-gray-300 rounded" title="Mois de fin">
+                              {SCHOOL_MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                            </select>
+                          </div>
+                        ) : (it.recurrence === 'one_time' || it.recurrence === 'annual') ? (
+                          <select value={it.due_month || ''} onChange={e => updateItem(idx, 'due_month', e.target.value ? Number(e.target.value) : null)}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded" title="Mois d'échéance">
+                            <option value="">Mois d'échéance</option>
+                            {SCHOOL_MONTHS.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-xs text-gray-400">—</span>
+                        )}
+                      </div>
                       <button onClick={() => removeItem(idx)} className="col-span-1 flex items-center justify-center p-1.5 hover:bg-red-100 rounded">
                         <Trash2 className="w-4 h-4 text-red-500" />
                       </button>

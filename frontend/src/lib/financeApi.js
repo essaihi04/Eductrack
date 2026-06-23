@@ -63,6 +63,9 @@ export const financeApi = {
   payMonths: (studentId, data) => request(`/api/finance/students/${studentId}/pay-months`, { method: 'POST', body: data }),
   getMonthlyServicesStatus: (studentId, academicYear) => request(`/api/finance/students/${studentId}/monthly-services-status`, { query: { academic_year: academicYear } }),
   payServices: (studentId, data) => request(`/api/finance/students/${studentId}/pay-services`, { method: 'POST', body: data }),
+  // Annuler le paiement d'un service (mois×service) ; ajouter un service à un mois
+  cancelServicePayment: (studentId, data) => request(`/api/finance/students/${studentId}/services/cancel-payment`, { method: 'POST', body: data }),
+  addService: (studentId, data) => request(`/api/finance/students/${studentId}/services/add`, { method: 'POST', body: data }),
   payGroupPreview: (data) => request('/api/finance/pay-group/preview', { method: 'POST', body: data }),
   payGroup: (data) => request('/api/finance/pay-group', { method: 'POST', body: data }),
 
