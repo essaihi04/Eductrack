@@ -68,7 +68,9 @@ export default function FeeTemplatesPage() {
 
   const loadAssignments = async () => {
     try {
-      const data = await financeApi.getClassAssignments(year);
+      // Les plans/modèles sont stockés en année « tiret » (2025-2026) : utiliser
+      // dashYear, sinon le format slash ne remonte aucune assignation.
+      const data = await financeApi.getClassAssignments(dashYear);
       const map = {};
       (data.assignments || []).forEach(a => { map[a.class_id] = a.templates || []; });
       setAssignments(map);

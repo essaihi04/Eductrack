@@ -279,10 +279,13 @@ router.get('/fee-templates/class-assignments', async (req, res) => {
     const academic_year = req.query.academic_year;
     if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
 
+    // Tolérant au format d'année (slash « 2025/2026 » ou tiret « 2025-2026 »).
+    const yearVariants = [...new Set([academic_year, academic_year.replace('/', '-'), academic_year.replace('-', '/')])];
+
     let q = supabaseAdmin
       .from('student_fee_plans')
       .select('template_id, student:profiles!student_fee_plans_student_id_fkey(class_id), template:fee_templates(name)')
-      .eq('academic_year', academic_year)
+      .in('academic_year', yearVariants)
       .eq('status', 'active');
     if (schoolId) q = q.eq('school_id', schoolId);
     const { data, error } = await q;
