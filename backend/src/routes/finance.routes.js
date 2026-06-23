@@ -1334,7 +1334,7 @@ router.get('/payments', async (req, res) => {
       .select(`*,
         student:profiles!payments_student_id_fkey(id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)),
         school:schools(id, name, logo_url, address, phone),
-        invoice:invoices(id, invoice_number, total, period_label),
+        invoice:invoices(id, invoice_number, total, amount_paid, period_label, service_category),
         cashier:profiles!payments_recorded_by_fkey(id, first_name, last_name)
       `)
       .order('payment_date', { ascending: false })
@@ -1514,6 +1514,55 @@ router.put('/payments/:id/cancel', async (req, res) => {
   } catch (error) {
     console.error('Erreur cancel payment:', error);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Modifier un paiement (montant / mode / date / référence). Le trigger
+// recalcule automatiquement le statut et le payé de la facture liée.
+router.put('/payments/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut modifier un paiement' });
+    const { amount, method, payment_date, reference, notes } = req.body;
+
+    const { data: current, error: curErr } = await supabaseAdmin
+      .from('payments')
+      .select('id, invoice_id, status')
+      .eq('id', id)
+      .single();
+    if (curErr) throw curErr;
+    if (!current) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (current.status === 'cancelled') return res.status(400).json({ error: 'Paiement annulé : modification impossible' });
+
+    const patch = {};
+    if (method !== undefined) patch.method = method;
+    if (payment_date !== undefined) patch.payment_date = payment_date;
+    if (reference !== undefined) patch.reference = reference || null;
+    if (notes !== undefined) patch.notes = notes || null;
+
+    if (amount !== undefined) {
+      let newAmount = Number(amount);
+      if (!(newAmount > 0)) return res.status(400).json({ error: 'Montant invalide' });
+      // Plafonnement : le total payé de la facture ne doit pas dépasser son total.
+      if (current.invoice_id) {
+        const { data: inv } = await supabaseAdmin.from('invoices').select('total').eq('id', current.invoice_id).single();
+        const { data: others } = await supabaseAdmin
+          .from('payments').select('amount')
+          .eq('invoice_id', current.invoice_id).eq('status', 'confirmed').neq('id', id);
+        const otherSum = (others || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+        const maxForThis = Math.max(0, Number(inv?.total || 0) - otherSum);
+        if (inv && newAmount > maxForThis) newAmount = maxForThis;
+      }
+      patch.amount = newAmount;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('payments').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    res.json({ success: true, payment: data });
+  } catch (error) {
+    console.error('Erreur update payment:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });
 

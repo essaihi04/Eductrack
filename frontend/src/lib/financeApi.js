@@ -78,6 +78,7 @@ export const financeApi = {
   listPayments: (filters) => request('/api/finance/payments', { query: filters }),
   getPayment: (id) => request(`/api/finance/payments/${id}`),
   createPayment: (data) => request('/api/finance/payments', { method: 'POST', body: data }),
+  updatePayment: (id, data) => request(`/api/finance/payments/${id}`, { method: 'PUT', body: data }),
   cancelPayment: (id, reason) => request(`/api/finance/payments/${id}/cancel`, { method: 'PUT', body: { reason } }),
 
   // Caisse (encaissements/dépenses par période et mode)
