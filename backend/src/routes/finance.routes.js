@@ -271,6 +271,39 @@ router.post('/fee-templates/:id/apply-to-class', async (req, res) => {
   }
 });
 
+// Assignations classe → modèle pour une année : permet de griser les classes
+// déjà couvertes par un AUTRE modèle dans l'écran d'application.
+router.get('/fee-templates/class-assignments', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const academic_year = req.query.academic_year;
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+
+    let q = supabaseAdmin
+      .from('student_fee_plans')
+      .select('template_id, student:profiles!student_fee_plans_student_id_fkey(class_id), template:fee_templates(name)')
+      .eq('academic_year', academic_year)
+      .eq('status', 'active');
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const byClass = {};
+    for (const p of data || []) {
+      const cid = p.student?.class_id;
+      if (!cid || !p.template_id) continue;
+      const tmap = byClass[cid] || (byClass[cid] = {});
+      const t = tmap[p.template_id] || (tmap[p.template_id] = { template_id: p.template_id, template_name: p.template?.name || '', count: 0 });
+      t.count++;
+    }
+    const assignments = Object.entries(byClass).map(([class_id, tmap]) => ({ class_id, templates: Object.values(tmap) }));
+    res.json({ assignments });
+  } catch (error) {
+    console.error('Erreur class-assignments:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
 // Appliquer un modèle à plusieurs classes en une fois
 router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
   try {

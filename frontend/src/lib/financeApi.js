@@ -53,6 +53,7 @@ export const financeApi = {
   deleteTemplate: (id) => request(`/api/finance/fee-templates/${id}`, { method: 'DELETE' }),
   applyTemplateToClass: (id, data) => request(`/api/finance/fee-templates/${id}/apply-to-class`, { method: 'POST', body: data }),
   applyTemplateToClasses: (id, data) => request(`/api/finance/fee-templates/${id}/apply-to-classes`, { method: 'POST', body: data }),
+  getClassAssignments: (academicYear) => request('/api/finance/fee-templates/class-assignments', { query: { academic_year: academicYear } }),
 
   // Student plans
   getStudentPlan: (studentId, academicYear) => request(`/api/finance/students/${studentId}/fee-plan`, { query: { academic_year: academicYear } }),

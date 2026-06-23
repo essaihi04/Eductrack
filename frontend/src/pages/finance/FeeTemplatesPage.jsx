@@ -40,10 +40,12 @@ export default function FeeTemplatesPage() {
   const [applyingTemplateId, setApplyingTemplateId] = useState(null);
   const [selectedClassIds, setSelectedClassIds] = useState([]);
   const [applying, setApplying] = useState(false);
+  const [assignments, setAssignments] = useState({}); // class_id -> [{template_id, template_name, count}]
 
   useEffect(() => {
     load();
     loadClasses();
+    loadAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year]);
 
@@ -62,6 +64,21 @@ export default function FeeTemplatesPage() {
       const data = await financeApi.listClasses(year);
       setClasses(Array.isArray(data) ? data : (data.classes || []));
     } catch (e) { console.error(e); }
+  };
+
+  const loadAssignments = async () => {
+    try {
+      const data = await financeApi.getClassAssignments(year);
+      const map = {};
+      (data.assignments || []).forEach(a => { map[a.class_id] = a.templates || []; });
+      setAssignments(map);
+    } catch (e) { console.error(e); }
+  };
+
+  // Modèle (différent de celui en cours d'application) couvrant déjà cette classe.
+  const assignedOtherTemplate = (classId, currentTemplateId) => {
+    const tpls = assignments[classId] || [];
+    return tpls.find(t => t.template_id !== currentTemplateId) || null;
   };
 
   const startNew = () => {
@@ -154,10 +171,12 @@ export default function FeeTemplatesPage() {
     const t = templates.find(x => x.id === templateId);
     const { matches } = sortedClassesFor(t);
     setApplyingTemplateId(templateId);
-    setSelectedClassIds(matches.map(c => c.id)); // pré-cocher les classes correspondantes
+    // Pré-cocher les classes correspondantes SAUF celles déjà dans un autre modèle.
+    setSelectedClassIds(matches.filter(c => !assignedOtherTemplate(c.id, templateId)).map(c => c.id));
   };
 
   const toggleClass = (classId) => {
+    if (assignedOtherTemplate(classId, applyingTemplateId)) return; // verrouillée
     setSelectedClassIds(prev => prev.includes(classId) ? prev.filter(x => x !== classId) : [...prev, classId]);
   };
 
@@ -176,6 +195,7 @@ export default function FeeTemplatesPage() {
       alert(`${res.created_count} plan(s) créé(s), ${res.skipped_count} ignoré(s) sur ${selectedClassIds.length} classe(s)`);
       setApplyingTemplateId(null);
       setSelectedClassIds([]);
+      loadAssignments(); // rafraîchir les classes désormais assignées
     } catch (e) { alert('Erreur: ' + e.message); }
     finally { setApplying(false); }
   };
@@ -264,15 +284,47 @@ export default function FeeTemplatesPage() {
               {applyingTemplateId === t.id ? (
                 (() => {
                   const { matches, others } = sortedClassesFor(t);
-                  const allSelected = classes.length > 0 && selectedClassIds.length === classes.length;
+                  const selectableIds = classes.filter(c => !assignedOtherTemplate(c.id, t.id)).map(c => c.id);
+                  const allSelected = selectableIds.length > 0 && selectedClassIds.length === selectableIds.length;
+                  // Rendu d'une ligne classe : grisée + verrouillée si déjà dans un autre modèle.
+                  const classRow = (c, hover) => {
+                    const locked = assignedOtherTemplate(c.id, t.id);
+                    if (locked) {
+                      return (
+                        <div key={c.id} className="flex items-start gap-2 px-2 py-1.5 text-sm bg-gray-50 border-b border-gray-50 opacity-70 cursor-not-allowed"
+                          title={`Déjà appliquée par le modèle « ${locked.template_name} »`}>
+                          <input type="checkbox" checked={false} disabled readOnly className="rounded mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <span className="truncate text-gray-400 line-through">{c.name}</span>
+                            <p className="text-[10px] text-amber-700 mt-0.5">
+                              Déjà dans « {locked.template_name} ». Retirez-la de ce modèle pour pouvoir l'ajouter ici.
+                            </p>
+                          </div>
+                          <span className="text-[10px] text-gray-400 whitespace-nowrap">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <label key={c.id} className={`flex items-center gap-2 px-2 py-1.5 text-sm ${hover} cursor-pointer border-b border-gray-50`}>
+                        <input
+                          type="checkbox"
+                          checked={selectedClassIds.includes(c.id)}
+                          onChange={() => toggleClass(c.id)}
+                          className="rounded"
+                        />
+                        <span className="flex-1 truncate">{c.name}</span>
+                        <span className="text-[10px] text-gray-500">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
+                      </label>
+                    );
+                  };
                   return (
                     <div className="mt-3 p-3 bg-blue-50 rounded-lg space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-medium text-gray-700">
-                          {selectedClassIds.length} / {classes.length} classe(s) sélectionnée(s)
+                          {selectedClassIds.length} / {selectableIds.length} classe(s) sélectionnée(s)
                         </span>
                         <button
-                          onClick={() => setSelectedClassIds(allSelected ? [] : classes.map(c => c.id))}
+                          onClick={() => setSelectedClassIds(allSelected ? [] : selectableIds)}
                           className="text-blue-700 hover:underline"
                         >
                           {allSelected ? 'Tout désélectionner' : 'Tout sélectionner'}
@@ -289,18 +341,7 @@ export default function FeeTemplatesPage() {
                             <div className="px-2 py-1 text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-50 flex items-center gap-1">
                               <Sparkles className="w-3 h-3" /> Correspondance niveau/type
                             </div>
-                            {matches.map(c => (
-                              <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-emerald-50 cursor-pointer border-b border-gray-50">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedClassIds.includes(c.id)}
-                                  onChange={() => toggleClass(c.id)}
-                                  className="rounded"
-                                />
-                                <span className="flex-1 truncate">{c.name}</span>
-                                <span className="text-[10px] text-gray-500">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
-                              </label>
-                            ))}
+                            {matches.map(c => classRow(c, 'hover:bg-emerald-50'))}
                           </>
                         )}
                         {others.length > 0 && (
@@ -308,18 +349,7 @@ export default function FeeTemplatesPage() {
                             <div className="px-2 py-1 text-[10px] uppercase font-semibold text-gray-500 bg-gray-50">
                               Autres classes
                             </div>
-                            {others.map(c => (
-                              <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-gray-50 cursor-pointer border-b border-gray-50">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedClassIds.includes(c.id)}
-                                  onChange={() => toggleClass(c.id)}
-                                  className="rounded"
-                                />
-                                <span className="flex-1 truncate">{c.name}</span>
-                                <span className="text-[10px] text-gray-500">{c.level || ''}{c.filiere ? ` · ${c.filiere}` : ''}</span>
-                              </label>
-                            ))}
+                            {others.map(c => classRow(c, 'hover:bg-gray-50'))}
                           </>
                         )}
                       </div>
