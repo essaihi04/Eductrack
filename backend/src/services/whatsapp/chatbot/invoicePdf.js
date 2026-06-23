@@ -54,6 +54,46 @@ function smartText(doc, text, x, y, options = {}) {
   }
 }
 
+/**
+ * Rend une chaîne qui MÉLANGE arabe et latin (ex. « nom arabe — Classe »).
+ * Contrairement à smartText, chaque segment est écrit avec SA police : les
+ * lettres arabes en Noto Naskh, le reste (latin/chiffres/ponctuation) dans la
+ * police de base. Sinon, forcer tout le texte en police arabe affiche des
+ * carrés (.notdef) là où la police arabe n'a pas de glyphe latin.
+ * Réservé aux en-têtes simples (pas de gestion width/ellipsis).
+ */
+function smartMixedText(doc, text, x, y, options = {}) {
+  const t = String(text == null ? '' : text);
+  const baseFont = doc._font?.name || 'Helvetica';
+  if (!hasArabic(t)) {
+    // Aucun arabe : un seul appel, police de base.
+    if (x !== undefined && y !== undefined) doc.text(t, x, y, options);
+    else doc.text(t, options);
+    return;
+  }
+  // Découpe en segments consécutifs arabe / non-arabe (les espaces se
+  // rattachent au segment courant pour éviter les micro-segments).
+  const runs = [];
+  for (const ch of [...t]) {
+    const isAr = ARABIC_RE.test(ch);
+    const isSpace = /\s/.test(ch);
+    if (runs.length && (isSpace || runs[runs.length - 1].ar === isAr)) {
+      runs[runs.length - 1].text += ch;
+    } else {
+      runs.push({ ar: isAr, text: ch });
+    }
+  }
+  runs.forEach((run, i) => {
+    const isLast = i === runs.length - 1;
+    doc.font(run.ar ? ARABIC_FONT_NAME : baseFont);
+    const opt = { ...options, continued: !isLast };
+    if (run.ar) opt.features = [...(options.features || []), ...ARABIC_FEATURES];
+    if (i === 0 && x !== undefined && y !== undefined) doc.text(run.text, x, y, opt);
+    else doc.text(run.text, opt);
+  });
+  try { doc.font(baseFont); } catch (_) { doc.font('Helvetica'); }
+}
+
 const STATUS_LABEL = {
   issued: 'Émise',
   partial: 'Partiellement payée',
@@ -178,14 +218,14 @@ export function buildInvoicePdfBuffer(invoice) {
       const blockY = doc.y;
       doc.fontSize(10).fillColor('#64748b').text('Facturé à :', 50, blockY);
       doc.fontSize(12).fillColor('#0f172a');
-      smartText(
+      smartMixedText(
         doc,
         `${student.first_name || ''} ${student.last_name || ''}`.trim() || '—',
         50, blockY + 14,
       );
       doc.fontSize(10).fillColor('#475569');
       if (student.classes?.name) {
-        smartText(doc, `Classe : ${student.classes.name}${student.classes.level ? ` (${student.classes.level})` : ''}`, 50, blockY + 32);
+        smartMixedText(doc, `Classe : ${student.classes.name}${student.classes.level ? ` (${student.classes.level})` : ''}`, 50, blockY + 32);
       }
       if (invoice.period_label) {
         smartText(doc, `Période : ${invoice.period_label}`, 50, blockY + 48);
@@ -380,7 +420,7 @@ export function buildBatchReceiptPdfBuffer(batch) {
       let y = doc.y;
       for (const st of batch.students) {
         doc.fontSize(12).fillColor('#0f172a');
-        smartText(doc, `${st.name}${st.className ? ` — ${st.className}` : ''}`, 50, y);
+        smartMixedText(doc, `${st.name}${st.className ? ` — ${st.className}` : ''}`, 50, y);
         y = doc.y + 4;
         // En-tête tableau
         doc.rect(50, y, 495, 20).fill('#0f172a');
