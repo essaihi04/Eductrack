@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, CreditCard, Wallet, Receipt } from 'lucide-react';
-import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS, METHOD_LABELS } from '../../lib/financeApi';
+import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, Wallet } from 'lucide-react';
+import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, FilterBar, Drawer, Button } from '../../components/finance/ui';
 import {
-  CardGrid, StudentCard, StudentRow, GridListToggle,
-  DetailDrawer, FieldRow, Avatar, StatusPill,
+  CardGrid, StudentCard, StudentRow, GridListToggle, StatusPill,
 } from '../../components/directory/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
+import StudentFinanceWorkspace from './StudentFinanceWorkspace';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
@@ -20,9 +20,8 @@ export default function FinanceStudentsPage() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ class_id: '', search: '' });
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
-  const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer latéral
+  const [activeStudent, setActiveStudent] = useState(null); // espace finance ouvert (panneau latéral)
   const [selectedStudent, setSelectedStudent] = useState(null); // modale plan de frais
-  const [payStudent, setPayStudent] = useState(null); // modale encaissement
 
   useEffect(() => {
     loadClasses();
@@ -149,50 +148,17 @@ export default function FinanceStudentsPage() {
         </div>
       )}
 
-      {/* Fiche finance (drawer master-detail) : données + boutons + paiement */}
-      <DetailDrawer
-        open={!!activeStudent}
-        onClose={() => setActiveStudent(null)}
-        width={400}
-        title={activeStudent ? `${activeStudent.first_name} ${activeStudent.last_name}` : ''}
-      >
-        {activeStudent && (
-          <div className="space-y-4">
-            <div className="flex flex-col items-center text-center gap-2">
-              <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`}
-                src={resolveAvatar(activeStudent.avatar_url)} size="lg" gender={activeStudent.gender || ''} />
-              <div className="font-medium">{activeStudent.first_name} {activeStudent.last_name}</div>
-              <div className="text-xs text-gray-500">{activeStudent.classes?.name || '—'}</div>
-              <div>{financeStatus(activeStudent)}</div>
-            </div>
-
-            {/* Données financières */}
-            <div>
-              <FieldRow label="Plan de frais" value={activeStudent.has_plan ? 'Actif' : 'Aucun'} />
-              <FieldRow label="Total facturé" value={formatMAD(activeStudent.total_invoiced)} />
-              <FieldRow label="Encaissé" value={formatMAD(activeStudent.total_paid)} />
-              <FieldRow label="Restant dû" value={formatMAD(activeStudent.total_due)} />
-              <FieldRow label="Factures en retard" value={activeStudent.overdue_count || 0} />
-            </div>
-
-            {/* Boutons d'action */}
-            <div className="space-y-2 pt-1">
-              <button
-                onClick={() => setPayStudent(activeStudent)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-              >
-                <Wallet className="w-4 h-4" /> Encaisser un paiement
-              </button>
-              <button
-                onClick={() => setSelectedStudent(activeStudent)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
-              >
-                <Receipt className="w-4 h-4" /> Plan de frais
-              </button>
-            </div>
-          </div>
-        )}
-      </DetailDrawer>
+      {/* Espace finance complet de l'élève (panneau latéral à onglets) */}
+      {activeStudent && (
+        <StudentFinanceWorkspace
+          student={activeStudent}
+          allStudents={students}
+          academicYear={toDashYear(year)}
+          onClose={() => setActiveStudent(null)}
+          onChanged={load}
+          onOpenPlan={() => setSelectedStudent(activeStudent)}
+        />
+      )}
 
       {selectedStudent && (
         <StudentFeePlanModal
@@ -203,216 +169,7 @@ export default function FinanceStudentsPage() {
           onSaved={() => { setSelectedStudent(null); load(); }}
         />
       )}
-
-      {payStudent && (
-        <MonthlyPaymentsModal
-          student={payStudent}
-          defaultYear={toDashYear(year)}
-          onClose={() => setPayStudent(null)}
-          onPaid={() => load()}
-        />
-      )}
     </div>
-  );
-}
-
-function getCurrentAcademicYear() {
-  const y = new Date().getFullYear();
-  const m = new Date().getMonth();
-  return m >= 7 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
-}
-
-const MONTH_STATUS_META = {
-  paid: { label: 'Payé', cls: 'bg-green-100 text-green-700' },
-  partial: { label: 'Partiel', cls: 'bg-yellow-100 text-yellow-700' },
-  overdue: { label: 'En retard', cls: 'bg-red-100 text-red-700' },
-  unpaid: { label: 'Impayé', cls: 'bg-orange-100 text-orange-700' },
-  pending: { label: 'Non facturé', cls: 'bg-gray-100 text-gray-600' }
-};
-
-function MonthlyPaymentsModal({ student, onClose, onPaid, defaultYear }) {
-  const [academicYear, setAcademicYear] = useState(defaultYear || getCurrentAcademicYear());
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState([]); // months cochés
-  const [method, setMethod] = useState('cash');
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [reference, setReference] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { load(); }, [academicYear]);
-
-  const load = async () => {
-    setLoading(true);
-    setSelected([]);
-    try {
-      const res = await financeApi.getMonthlyStatus(student.id, academicYear);
-      setData(res);
-    } catch (e) { console.error(e); setData(null); }
-    finally { setLoading(false); }
-  };
-
-  const payableMonths = (data?.months || []).filter(m => m.remaining > 0);
-
-  const toggle = (month) => {
-    setSelected(prev => prev.includes(month) ? prev.filter(x => x !== month) : [...prev, month]);
-  };
-
-  const toggleAll = () => {
-    if (selected.length === payableMonths.length) setSelected([]);
-    else setSelected(payableMonths.map(m => m.month));
-  };
-
-  const selectedTotal = (data?.months || [])
-    .filter(m => selected.includes(m.month))
-    .reduce((s, m) => s + Number(m.remaining), 0);
-
-  const submit = async () => {
-    if (selected.length === 0) return;
-    if (!confirm(`Encaisser ${selected.length} mois pour un total de ${formatMAD(selectedTotal)} ?`)) return;
-    setSaving(true);
-    try {
-      const res = await financeApi.payMonths(student.id, {
-        academic_year: academicYear,
-        months: selected,
-        payment_date: paymentDate,
-        method,
-        reference: reference || undefined
-      });
-      alert(`${res.paid_count} mois encaissé(s) · ${formatMAD(res.total_paid)}`);
-      await load();
-      onPaid?.();
-    } catch (e) { alert('Erreur: ' + e.message); }
-    finally { setSaving(false); }
-  };
-
-  const summary = data?.summary;
-
-  return (
-    <Drawer open onClose={onClose} width="max-w-2xl" title="Paiements mensuels"
-      footer={
-        <div className="flex items-center justify-between gap-2 w-full">
-          <div className="text-sm">
-            {selected.length > 0 && (
-              <span className="text-gray-600">{selected.length} mois · <span className="font-bold text-green-700">{formatMAD(selectedTotal)}</span></span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={onClose}>Fermer</Button>
-            <Button color="green" icon={Wallet} onClick={submit} disabled={selected.length === 0 || saving}>
-              {saving ? 'Encaissement...' : 'Encaisser'}
-            </Button>
-          </div>
-        </div>
-      }>
-        <p className="text-sm text-gray-500 -mt-1 flex items-center gap-2"><CreditCard className="w-4 h-4" /> {student.first_name} {student.last_name} · {student.classes?.name || '—'}</p>
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium text-gray-700">Année scolaire</label>
-            <input type="text" value={academicYear} onChange={e => setAcademicYear(e.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-32" />
-          </div>
-
-          {loading ? (
-            <p className="text-gray-500 py-8 text-center">Chargement...</p>
-          ) : !data?.plan_exists ? (
-            <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm">
-              Aucun plan de frais actif pour cet élève sur {academicYear}. Définissez d'abord un « Plan de frais ».
-            </div>
-          ) : (
-            <>
-              {/* Bandeau récapitulatif */}
-              {summary && (
-                <div className={`rounded-lg p-4 flex items-center justify-between ${summary.all_paid ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'}`}>
-                  {summary.all_paid ? (
-                    <span className="flex items-center gap-2 text-green-700 font-semibold">
-                      <CheckCircle2 className="w-5 h-5" /> Tout payé ✓ ({summary.paid_months}/{summary.total_months} mois)
-                    </span>
-                  ) : (
-                    <div className="text-sm">
-                      <span className="text-gray-600">Reste à payer : </span>
-                      <span className="font-bold text-orange-600">{formatMAD(summary.remaining_total)}</span>
-                      <span className="text-gray-400"> · Payé {formatMAD(summary.paid_total)} / {formatMAD(summary.expected_total)}</span>
-                    </div>
-                  )}
-                  <span className="text-xs text-gray-500">{summary.paid_months}/{summary.total_months} mois payés</span>
-                </div>
-              )}
-
-              {/* Grille des mois */}
-              <div className="border border-gray-200 rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-                    <tr>
-                      <th className="px-3 py-2 text-center w-10">
-                        <input type="checkbox" checked={payableMonths.length > 0 && selected.length === payableMonths.length}
-                          onChange={toggleAll} disabled={payableMonths.length === 0} />
-                      </th>
-                      <th className="px-3 py-2 text-left">Mois</th>
-                      <th className="px-3 py-2 text-right">Montant</th>
-                      <th className="px-3 py-2 text-right">Payé</th>
-                      <th className="px-3 py-2 text-right">Reste</th>
-                      <th className="px-3 py-2 text-center">Statut</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {(data.months || []).map(m => {
-                      const meta = MONTH_STATUS_META[m.status] || MONTH_STATUS_META.pending;
-                      const payable = m.remaining > 0;
-                      return (
-                        <tr key={m.month} className={selected.includes(m.month) ? 'bg-blue-50' : 'hover:bg-gray-50'}>
-                          <td className="px-3 py-2 text-center">
-                            {payable ? (
-                              <input type="checkbox" checked={selected.includes(m.month)} onChange={() => toggle(m.month)} />
-                            ) : <CheckCircle2 className="w-4 h-4 text-green-500 inline" />}
-                          </td>
-                          <td className="px-3 py-2 font-medium text-gray-800">{m.label}</td>
-                          <td className="px-3 py-2 text-right text-gray-700">{formatMAD(m.total)}</td>
-                          <td className="px-3 py-2 text-right text-green-600">{formatMAD(m.paid)}</td>
-                          <td className={`px-3 py-2 text-right font-medium ${m.remaining > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
-                            {formatMAD(m.remaining)}
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${meta.cls}`}>{meta.label}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {(data.months || []).length === 0 && (
-                      <tr><td colSpan="6" className="px-3 py-6 text-center text-gray-400">Aucune échéance dans ce plan</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Zone d'encaissement */}
-              {selected.length > 0 && (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Mode de paiement</label>
-                      <select value={method} onChange={e => setMethod(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                        {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
-                      <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Référence (optionnel)</label>
-                    <input type="text" value={reference} onChange={e => setReference(e.target.value)}
-                      placeholder="N° chèque, virement..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-    </Drawer>
   );
 }
 

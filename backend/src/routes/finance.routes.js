@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
+import { generateInvoicePdfById } from '../services/whatsapp/chatbot/invoicePdf.js';
 
 const router = express.Router();
 
@@ -816,6 +817,12 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
         const remaining = Number(invoice.total) - Number(invoice.amount_paid || 0);
         if (remaining <= 0) { skipped.push({ month, category, reason: 'déjà payé' }); continue; }
 
+        // Montant partiel optionnel (paiement manuel sur une ligne précise) :
+        // si raw.amount est fourni, on encaisse min(amount, reste) ; sinon le reste entier.
+        const requested = raw.amount != null && raw.amount !== '' ? Number(raw.amount) : null;
+        const payAmount = requested != null && requested > 0 ? Math.min(requested, remaining) : remaining;
+        if (!(payAmount > 0)) { skipped.push({ month, category, reason: 'montant nul' }); continue; }
+
         const receiptNumber = await getNextCounter(schoolId, 'receipt');
         const tag = category ? `${periodLabel} — ${category}` : periodLabel;
         const { data: payment, error: payErr } = await supabaseAdmin
@@ -825,7 +832,7 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
             receipt_number: receiptNumber,
             invoice_id: invoice.id,
             student_id: studentId,
-            amount: remaining,
+            amount: payAmount,
             payment_date: payDate,
             method,
             reference: reference || null,
@@ -1103,6 +1110,21 @@ router.get('/invoices/:id', async (req, res) => {
   }
 });
 
+// Télécharger / imprimer une facture en PDF
+router.get('/invoices/:id/pdf', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await generateInvoicePdfById(id);
+    if (!result) return res.status(404).json({ error: 'Facture introuvable' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${result.fileName}"`);
+    res.send(result.buffer);
+  } catch (error) {
+    console.error('Erreur invoice pdf:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
 // Créer une facture manuelle
 router.post('/invoices', async (req, res) => {
   try {
@@ -1305,7 +1327,7 @@ router.post('/invoices/mark-overdue', async (req, res) => {
 router.get('/payments', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { from, to, method, student_id, invoice_id, academic_year } = req.query;
+    const { from, to, method, student_id, invoice_id, academic_year, status } = req.query;
 
     let query = supabaseAdmin
       .from('payments')
@@ -1315,9 +1337,12 @@ router.get('/payments', async (req, res) => {
         invoice:invoices(id, invoice_number, total, period_label),
         cashier:profiles!payments_recorded_by_fkey(id, first_name, last_name)
       `)
-      .eq('status', 'confirmed')
       .order('payment_date', { ascending: false })
       .limit(500);
+    // status: 'all' → tous (utile pour l'historique avec annulations) ;
+    // sinon valeur précise ('cancelled'…) ; par défaut 'confirmed'.
+    if (status === 'all') { /* aucun filtre de statut */ }
+    else query = query.eq('status', status || 'confirmed');
     if (schoolId) query = query.eq('school_id', schoolId);
     if (from) query = query.gte('payment_date', from);
     if (to) query = query.lte('payment_date', to);
@@ -2067,6 +2092,71 @@ router.get('/students', async (req, res) => {
   } catch (error) {
     console.error('Erreur finance students:', error);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Frères/sœurs d'un élève (détectés via parent commun) avec leurs totaux finance,
+// pour proposer automatiquement un paiement groupé famille.
+router.get('/students/:studentId/siblings', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const range = academicYearRange(req.query.academic_year);
+
+    // Parents de l'élève
+    const { data: links } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id')
+      .eq('student_id', studentId);
+    const parentIds = [...new Set((links || []).map(l => l.parent_id).filter(Boolean))];
+    if (parentIds.length === 0) return res.json({ siblings: [] });
+
+    // Autres élèves rattachés aux mêmes parents
+    const { data: sibLinks } = await supabaseAdmin
+      .from('parent_students')
+      .select('student_id')
+      .in('parent_id', parentIds);
+    const sibIds = [...new Set((sibLinks || []).map(l => l.student_id).filter(id => id && id !== studentId))];
+    if (sibIds.length === 0) return res.json({ siblings: [] });
+
+    let profQ = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, class_id, avatar_url, gender, classes!fk_profiles_class(id, name)')
+      .in('id', sibIds)
+      .eq('role', 'student');
+    if (schoolId) profQ = profQ.eq('school_id', schoolId);
+    const { data: profs } = await profQ;
+
+    // Totaux finance (mêmes règles que la liste élèves)
+    let invQ = supabaseAdmin
+      .from('invoices')
+      .select('student_id, total, amount_paid, status')
+      .in('student_id', sibIds)
+      .neq('status', 'cancelled');
+    if (schoolId) invQ = invQ.eq('school_id', schoolId);
+    if (range) invQ = invQ.gte('issue_date', range.start).lte('issue_date', range.end);
+    const { data: invs } = await invQ;
+
+    const totals = {};
+    (invs || []).forEach(i => {
+      if (!totals[i.student_id]) totals[i.student_id] = { total: 0, paid: 0, overdue_count: 0 };
+      totals[i.student_id].total += Number(i.total);
+      totals[i.student_id].paid += Number(i.amount_paid || 0);
+      if (i.status === 'overdue') totals[i.student_id].overdue_count += 1;
+    });
+
+    const siblings = (profs || []).map(s => ({
+      ...s,
+      total_invoiced: totals[s.id]?.total || 0,
+      total_paid: totals[s.id]?.paid || 0,
+      total_due: (totals[s.id]?.total || 0) - (totals[s.id]?.paid || 0),
+      overdue_count: totals[s.id]?.overdue_count || 0,
+    }));
+
+    res.json({ siblings });
+  } catch (error) {
+    console.error('Erreur siblings:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });
 
