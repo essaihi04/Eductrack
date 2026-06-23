@@ -2006,7 +2006,7 @@ router.get('/students', async (req, res) => {
         if (ids.length === 0) return res.json({ students: [] });
         const { data: profs } = await supabaseAdmin
           .from('profiles')
-          .select('id, first_name, last_name, class_id')
+          .select('id, first_name, last_name, class_id, avatar_url, gender')
           .in('id', ids);
         students = (profs || []).map(p => ({ ...p, classes: classByStudent[p.id] || null }));
       }
@@ -2016,7 +2016,7 @@ router.get('/students', async (req, res) => {
     if (students === null) {
       let query = supabaseAdmin
         .from('profiles')
-        .select('id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)')
+        .select('id, first_name, last_name, class_id, avatar_url, gender, classes!fk_profiles_class(id, name)')
         .eq('role', 'student');
       if (schoolId) query = query.eq('school_id', schoolId);
       if (class_id) query = query.eq('class_id', class_id);

@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, CreditCard, Wallet } from 'lucide-react';
+import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, CreditCard, Wallet, Receipt } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS, METHOD_LABELS } from '../../lib/financeApi';
-import { PageHeader, KpiGrid, KpiCard, FilterBar, DataTable, Money, Badge, Drawer, Button, Field } from '../../components/finance/ui';
+import { PageHeader, KpiGrid, KpiCard, FilterBar, Drawer, Button } from '../../components/finance/ui';
+import {
+  CardGrid, StudentCard, StudentRow, GridListToggle,
+  DetailDrawer, FieldRow, Avatar, StatusPill,
+} from '../../components/directory/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
+
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
 
 export default function FinanceStudentsPage() {
   const { year } = useYear();
@@ -12,8 +19,10 @@ export default function FinanceStudentsPage() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ class_id: '', search: '' });
-  const [selectedStudent, setSelectedStudent] = useState(null);
-  const [payStudent, setPayStudent] = useState(null);
+  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
+  const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer latéral
+  const [selectedStudent, setSelectedStudent] = useState(null); // modale plan de frais
+  const [payStudent, setPayStudent] = useState(null); // modale encaissement
 
   useEffect(() => {
     loadClasses();
@@ -22,6 +31,14 @@ export default function FinanceStudentsPage() {
   }, [year]);
 
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.class_id, year]);
+
+  // Garde la fiche ouverte alignée sur les données rechargées (ex : après un encaissement).
+  useEffect(() => {
+    if (!activeStudent) return;
+    const fresh = students.find(s => s.id === activeStudent.id);
+    if (fresh && fresh !== activeStudent) setActiveStudent(fresh);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [students]);
 
   const load = async () => {
     setLoading(true);
@@ -57,35 +74,16 @@ export default function FinanceStudentsPage() {
     overdue: acc.overdue + (s.overdue_count > 0 ? 1 : 0),
   }), { invoiced: 0, paid: 0, due: 0, overdue: 0 });
 
-  const columns = [
-    { key: 'student', header: 'Élève', render: (s) => (
-      <button onClick={(e) => { e.stopPropagation(); setPayStudent(s); }} className="text-left font-medium hover:text-blue-600 hover:underline">
-        {s.first_name} {s.last_name}
-      </button>
-    ) },
-    { key: 'class', header: 'Classe', render: (s) => <span className="text-gray-600">{s.classes?.name || '—'}</span> },
-    { key: 'plan', header: 'Plan', align: 'right', render: (s) => s.has_plan
-      ? <CheckCircle2 className="w-4 h-4 text-green-500 inline" />
-      : <XCircle className="w-4 h-4 text-gray-300 inline" /> },
-    { key: 'invoiced', header: 'Facturé', align: 'right', render: (s) => <Money value={s.total_invoiced} /> },
-    { key: 'paid', header: 'Payé', align: 'right', render: (s) => <Money value={s.total_paid} tone="green" /> },
-    { key: 'due', header: 'Dû', align: 'right', render: (s) => <span className={`tabular-nums font-medium ${s.total_due > 0 ? 'text-orange-600' : 'text-gray-400'}`}>{formatMAD(s.total_due)}</span> },
-    { key: 'overdue', header: 'Retards', align: 'right', render: (s) => s.overdue_count > 0
-      ? <Badge tone="red"><AlertCircle className="w-3 h-3 inline -mt-0.5" /> {s.overdue_count}</Badge>
-      : <span className="text-gray-300">—</span> },
-    { key: 'actions', header: 'Actions', align: 'right', render: (s) => (
-      <div className="flex justify-end gap-1.5">
-        <button onClick={(e) => { e.stopPropagation(); setPayStudent(s); }}
-          className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-green-50 text-green-700 rounded-lg hover:bg-green-100">
-          <Wallet className="w-3.5 h-3.5" /> Paiements
-        </button>
-        <button onClick={(e) => { e.stopPropagation(); setSelectedStudent(s); }}
-          className="px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
-          Plan de frais
-        </button>
-      </div>
-    ) },
-  ];
+  // Pastille de statut financier affichée sur la carte/ligne d'un élève.
+  const financeStatus = (s) => {
+    if (Number(s.total_due) > 0) {
+      return s.overdue_count > 0
+        ? <StatusPill tone="red" icon={AlertCircle}>{formatMAD(s.total_due)} en retard</StatusPill>
+        : <StatusPill tone="amber" icon={Wallet}>{formatMAD(s.total_due)} dû</StatusPill>;
+    }
+    if (s.has_plan) return <StatusPill tone="green" icon={CheckCircle2}>À jour</StatusPill>;
+    return <StatusPill tone="gray" icon={XCircle}>Sans plan</StatusPill>;
+  };
 
   return (
     <div className="p-6 space-y-5">
@@ -113,7 +111,88 @@ export default function FinanceStudentsPage() {
         </select>
       </FilterBar>
 
-      <DataTable columns={columns} rows={filtered} empty="Aucun élève" />
+      {/* Bascule grille / liste */}
+      <div className="flex items-center justify-end">
+        <GridListToggle value={viewMode} onChange={setViewMode} />
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="text-center py-10 text-gray-400">Aucun élève</p>
+      ) : viewMode === 'grid' ? (
+        <CardGrid min={180}>
+          {filtered.map((s) => (
+            <StudentCard
+              key={s.id}
+              name={`${s.first_name} ${s.last_name}`}
+              photo={resolveAvatar(s.avatar_url)}
+              gender={s.gender || ''}
+              classLabel={s.classes?.name || '—'}
+              status={financeStatus(s)}
+              onClick={() => setActiveStudent(s)}
+            />
+          ))}
+        </CardGrid>
+      ) : (
+        <div>
+          {filtered.map((s) => (
+            <StudentRow
+              key={s.id}
+              name={`${s.first_name} ${s.last_name}`}
+              photo={resolveAvatar(s.avatar_url)}
+              gender={s.gender || ''}
+              classLabel={s.classes?.name || '—'}
+              sub={s.total_due > 0 ? `Reste dû ${formatMAD(s.total_due)}` : 'À jour'}
+              status={financeStatus(s)}
+              onClick={() => setActiveStudent(s)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Fiche finance (drawer master-detail) : données + boutons + paiement */}
+      <DetailDrawer
+        open={!!activeStudent}
+        onClose={() => setActiveStudent(null)}
+        width={400}
+        title={activeStudent ? `${activeStudent.first_name} ${activeStudent.last_name}` : ''}
+      >
+        {activeStudent && (
+          <div className="space-y-4">
+            <div className="flex flex-col items-center text-center gap-2">
+              <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`}
+                src={resolveAvatar(activeStudent.avatar_url)} size="lg" gender={activeStudent.gender || ''} />
+              <div className="font-medium">{activeStudent.first_name} {activeStudent.last_name}</div>
+              <div className="text-xs text-gray-500">{activeStudent.classes?.name || '—'}</div>
+              <div>{financeStatus(activeStudent)}</div>
+            </div>
+
+            {/* Données financières */}
+            <div>
+              <FieldRow label="Plan de frais" value={activeStudent.has_plan ? 'Actif' : 'Aucun'} />
+              <FieldRow label="Total facturé" value={formatMAD(activeStudent.total_invoiced)} />
+              <FieldRow label="Encaissé" value={formatMAD(activeStudent.total_paid)} />
+              <FieldRow label="Restant dû" value={formatMAD(activeStudent.total_due)} />
+              <FieldRow label="Factures en retard" value={activeStudent.overdue_count || 0} />
+            </div>
+
+            {/* Boutons d'action */}
+            <div className="space-y-2 pt-1">
+              <button
+                onClick={() => setPayStudent(activeStudent)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+              >
+                <Wallet className="w-4 h-4" /> Encaisser un paiement
+              </button>
+              <button
+                onClick={() => setSelectedStudent(activeStudent)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                <Receipt className="w-4 h-4" /> Plan de frais
+              </button>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
 
       {selectedStudent && (
         <StudentFeePlanModal
