@@ -66,6 +66,7 @@ export const financeApi = {
   // Annuler le paiement d'un service (mois×service) ; ajouter un service à un mois
   cancelServicePayment: (studentId, data) => request(`/api/finance/students/${studentId}/services/cancel-payment`, { method: 'POST', body: data }),
   addService: (studentId, data) => request(`/api/finance/students/${studentId}/services/add`, { method: 'POST', body: data }),
+  restoreService: (studentId, data) => request(`/api/finance/students/${studentId}/services/restore`, { method: 'POST', body: data }),
   payGroupPreview: (data) => request('/api/finance/pay-group/preview', { method: 'POST', body: data }),
   payGroup: (data) => request('/api/finance/pay-group', { method: 'POST', body: data }),
 

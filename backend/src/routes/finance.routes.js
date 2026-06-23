@@ -659,11 +659,19 @@ router.get('/students/:studentId/monthly-services-status', async (req, res) => {
     let invQ = supabaseAdmin
       .from('invoices')
       .select('id, invoice_number, period_label, service_category, total, amount_paid, status, due_date')
-      .eq('student_id', studentId)
-      .neq('status', 'cancelled');
+      .eq('student_id', studentId);
     if (schoolId) invQ = invQ.eq('school_id', schoolId);
     if (periodLabels.length > 0) invQ = invQ.in('period_label', periodLabels);
-    const { data: invoices } = await invQ;
+    const { data: allInvoices } = await invQ;
+    const invoices = (allInvoices || []).filter(i => i.status !== 'cancelled');
+    // Services explicitement EXCLUS (avant paiement) : marqueur = facture annulée
+    // pour (période, catégorie). Indexés par période.
+    const excludedByPeriod = {};
+    (allInvoices || []).forEach(i => {
+      if (i.status === 'cancelled' && i.service_category) {
+        (excludedByPeriod[i.period_label] = excludedByPeriod[i.period_label] || new Set()).add(i.service_category);
+      }
+    });
 
     const today = new Date().toISOString().split('T')[0];
     const statusOf = (paid, total, dueDate) => {
@@ -690,15 +698,19 @@ router.get('/students/:studentId/monthly-services-status', async (req, res) => {
       } else {
         const byCat = {};
         monthInvs.forEach(i => { if (i.service_category) byCat[i.service_category] = i; });
+        const monthExcluded = excludedByPeriod[label];
         services = computeMonthServices(plan, m).map(s => {
           const inv = byCat[s.category];
-          const total = inv ? Number(inv.total) : s.total;
+          // Exclu = pas de facture active mais un marqueur d'exclusion présent.
+          const excluded = !inv && !!monthExcluded?.has(s.category);
+          const total = excluded ? 0 : (inv ? Number(inv.total) : s.total);
           const paid = inv ? Number(inv.amount_paid || 0) : 0;
           return {
             category: s.category, label: s.name, expected: s.total, total, paid,
-            remaining: Math.max(0, total - paid), invoice_id: inv?.id || null,
+            remaining: excluded ? 0 : Math.max(0, total - paid), invoice_id: inv?.id || null,
             invoice_number: inv?.invoice_number || null,
-            status: inv ? statusOf(paid, total, inv.due_date) : 'pending',
+            status: inv ? statusOf(paid, total, inv.due_date) : (excluded ? 'excluded' : 'pending'),
+            excluded: excluded || undefined,
           };
         });
 
@@ -907,8 +919,39 @@ router.post('/students/:studentId/services/cancel-payment', async (req, res) => 
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
-    const { invoice_id, reason, cancel_invoice } = req.body;
-    if (!invoice_id) return res.status(400).json({ error: 'invoice_id requis' });
+    const { invoice_id, reason, cancel_invoice, academic_year, month, category } = req.body;
+
+    // Pas de facture (service pas encore facturé) → EXCLUSION avant paiement :
+    // on pose un marqueur (facture annulée) pour (période, catégorie).
+    if (!invoice_id) {
+      if (!academic_year || !month || !category) {
+        return res.status(400).json({ error: 'invoice_id, ou (academic_year, month, category) requis' });
+      }
+      const plan = await fetchStudentPlan(studentId, academic_year, schoolId);
+      const m = Number(month);
+      let total = 0;
+      if (plan) { const svc = computeMonthServices(plan, m).find(s => s.category === category); total = svc?.total || 0; }
+      const periodLabel = periodLabelFor(academic_year, m);
+      const calYear = calendarYearFor(academic_year, m);
+      const dueDate = `${calYear}-${String(m).padStart(2, '0')}-05`;
+
+      let exQ = supabaseAdmin.from('invoices').select('id').eq('student_id', studentId)
+        .eq('period_label', periodLabel).eq('service_category', category).eq('status', 'cancelled');
+      if (schoolId) exQ = exQ.eq('school_id', schoolId);
+      const { data: already } = await exQ.maybeSingle();
+      if (already) return res.json({ success: true, excluded: true });
+
+      const invoiceNumber = await getNextCounter(schoolId, 'invoice');
+      const { error } = await supabaseAdmin.from('invoices').insert({
+        school_id: schoolId, invoice_number: invoiceNumber, student_id: studentId, plan_id: plan?.id || null,
+        due_date: dueDate, period_label: periodLabel, service_category: category,
+        subtotal: total, discount: 0, total, status: 'cancelled',
+        cancelled_at: new Date().toISOString(), cancelled_by: req.user.id, cancellation_reason: reason || null,
+        created_by: req.user.id,
+      });
+      if (error) throw error;
+      return res.json({ success: true, excluded: true });
+    }
 
     let payQ = supabaseAdmin
       .from('payments')
@@ -1014,6 +1057,41 @@ router.post('/students/:studentId/services/add', async (req, res) => {
     res.json({ success: true, invoice_id: inv.id });
   } catch (error) {
     console.error('Erreur add-service:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Réintégrer un service exclu : supprime les marqueurs d'exclusion (factures
+// annulées SANS aucun paiement lié) pour (période, catégorie).
+router.post('/students/:studentId/services/restore', async (req, res) => {
+  try {
+    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut réintégrer un service' });
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const { academic_year, month, category } = req.body;
+    if (!academic_year || !month || !category) {
+      return res.status(400).json({ error: 'academic_year, month et category requis' });
+    }
+    const periodLabel = periodLabelFor(academic_year, Number(month));
+
+    let q = supabaseAdmin.from('invoices').select('id').eq('student_id', studentId)
+      .eq('period_label', periodLabel).eq('service_category', category).eq('status', 'cancelled');
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { data: marks } = await q;
+    const markIds = (marks || []).map(i => i.id);
+    if (markIds.length === 0) return res.json({ success: true, restored: 0 });
+
+    // Ne supprimer que les marqueurs purs (aucun paiement lié) pour préserver l'historique.
+    const { data: pays } = await supabaseAdmin.from('payments').select('invoice_id').in('invoice_id', markIds);
+    const withPay = new Set((pays || []).map(p => p.invoice_id));
+    const ids = markIds.filter(id => !withPay.has(id));
+    if (ids.length) {
+      await supabaseAdmin.from('invoice_lines').delete().in('invoice_id', ids);
+      await supabaseAdmin.from('invoices').delete().in('id', ids);
+    }
+    res.json({ success: true, restored: ids.length });
+  } catch (error) {
+    console.error('Erreur restore-service:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, Users, History, Search, Plus, X, CheckCircle2,
-  Printer, Ban, CreditCard, Pencil, Save, ChevronDown, ChevronRight, ArrowLeft,
+  Printer, Ban, CreditCard, Pencil, Save, ChevronDown, ChevronRight, ArrowLeft, RotateCcw,
 } from 'lucide-react';
 import { financeApi, formatMAD, METHOD_LABELS, CATEGORY_LABELS } from '../../lib/financeApi';
 import { Button } from '../../components/finance/ui';
@@ -82,7 +82,7 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
 // ── Grille mois × service réutilisable ───────────────────────────────────────
 // sel : { 'month:category' -> { checked, amount } }. Les services déjà payés
 // (remaining<=0) sont verrouillés et marqués payés.
-function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, onCancelService, onAddService }) {
+function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, onCancelService, onAddService, onRestoreService }) {
   const amtCls = compact ? 'w-16 px-1.5 py-1 text-xs' : 'w-28 px-2 py-1 text-sm';
   // Ajout d'un service : mois en cours d'ajout + catégorie + montant.
   const [addMonth, setAddMonth] = useState(null);
@@ -118,24 +118,30 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
             <div className="divide-y divide-gray-100">
               {m.services.map(svc => {
                 const k = keyOf(m.month, svc.category);
+                const excluded = svc.status === 'excluded' || svc.excluded;
                 const payable = svc.remaining > 0;
                 const checked = !!sel[k]?.checked;
                 const hasPaid = Number(svc.paid) > 0;
                 const billed = !!svc.invoice_id; // facturé : annulable / supprimable
                 return (
-                  <div key={k} className={`flex items-center gap-2 px-2.5 py-1.5 text-sm ${checked ? 'bg-green-50' : ''}`}>
-                    {payable ? (
+                  <div key={k} className={`flex items-center gap-2 px-2.5 py-1.5 text-sm ${checked ? 'bg-green-50' : excluded ? 'bg-gray-50' : ''}`}>
+                    {excluded ? (
+                      <span className="w-4 h-4 flex-shrink-0" />
+                    ) : payable ? (
                       <input type="checkbox" checked={checked} onChange={() => onToggle(m.month, svc)} className="w-4 h-4 accent-green-600 flex-shrink-0" />
                     ) : (
                       // Déjà payé : case cochée verrouillée (impossible à décocher)
                       <input type="checkbox" checked readOnly disabled className="w-4 h-4 accent-green-600 flex-shrink-0" title="Payé" />
                     )}
-                    <span className="flex-1 min-w-0 truncate text-gray-800">
+                    <span className={`flex-1 min-w-0 truncate ${excluded ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
                       {serviceLabel(svc)}
-                      {svc.extra && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 align-middle">ajouté</span>}
+                      {svc.extra && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 align-middle no-underline">ajouté</span>}
+                      {excluded && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-gray-200 text-gray-500 align-middle no-underline">exclu</span>}
                     </span>
-                    {!compact && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
-                    {payable ? (
+                    {!compact && !excluded && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
+                    {excluded ? (
+                      <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-gray-400 flex-shrink-0`}>Exclu</span>
+                    ) : payable ? (
                       checked ? (
                         <input type="number" step="0.01" min="0" max={svc.remaining} value={sel[k].amount}
                           onChange={e => onAmount(m.month, svc.category, e.target.value)}
@@ -146,12 +152,15 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
                     ) : (
                       <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
                     )}
-                    {/* Annuler le paiement (si payé) ou supprimer la facturation (si non payé) — admin */}
-                    {onCancelService && billed && (
+                    {/* Exclu → réintégrer ; sinon annuler le paiement / supprimer / exclure avant paiement */}
+                    {onRestoreService && excluded ? (
+                      <button onClick={() => onRestoreService(m.month, svc)} title="Réintégrer ce service"
+                        className="p-1 hover:bg-green-100 rounded flex-shrink-0"><RotateCcw className="w-3.5 h-3.5 text-green-600" /></button>
+                    ) : onCancelService && !excluded && (billed || payable) ? (
                       <button onClick={() => onCancelService(m.month, svc)}
-                        title={hasPaid ? 'Annuler le paiement de ce service' : 'Supprimer ce service'}
+                        title={hasPaid ? 'Annuler le paiement de ce service' : (billed ? 'Supprimer ce service' : 'Exclure ce service (avant paiement)')}
                         className="p-1 hover:bg-red-100 rounded flex-shrink-0"><Ban className="w-3.5 h-3.5 text-red-500" /></button>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}
@@ -261,19 +270,37 @@ function CollectTab({ student, academicYear, onChanged }) {
   };
   const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount }));
 
-  // Annule le paiement d'un service (s'il est payé → redevient dû) ou supprime
-  // la facturation du service (s'il n'est pas payé → retiré du dû).
+  // Annuler / supprimer / exclure un service selon son état :
+  //  - payé          → annule le paiement (le service redevient dû)
+  //  - facturé impayé → supprime la facturation (retiré du dû)
+  //  - pas facturé    → exclut le service avant paiement (marqueur)
   const cancelService = async (month, svc) => {
-    if (!svc.invoice_id) return;
     const paid = Number(svc.paid) > 0;
-    const verb = paid ? 'Annuler le paiement de' : 'Supprimer';
-    const reason = prompt(`${verb} « ${serviceLabel(svc)} » ? Motif :`);
-    if (reason === null) return;
     try {
-      await financeApi.cancelServicePayment(student.id, {
-        invoice_id: svc.invoice_id, reason,
-        cancel_invoice: !paid, // non payé → on annule aussi la facture (retire le dû)
-      });
+      if (svc.invoice_id) {
+        const verb = paid ? 'Annuler le paiement de' : 'Supprimer';
+        const reason = prompt(`${verb} « ${serviceLabel(svc)} » ? Motif :`);
+        if (reason === null) return;
+        await financeApi.cancelServicePayment(student.id, {
+          invoice_id: svc.invoice_id, reason, cancel_invoice: !paid,
+        });
+      } else {
+        const reason = prompt(`Exclure « ${serviceLabel(svc)} » de ce mois (avant paiement) ? Motif :`);
+        if (reason === null) return;
+        await financeApi.cancelServicePayment(student.id, {
+          reason, cancel_invoice: true, academic_year: academicYear, month, category: svc.category,
+        });
+      }
+      await load();
+      onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
+  };
+
+  // Réintègre un service exclu (supprime le marqueur d'exclusion).
+  const restoreService = async (month, svc) => {
+    if (!confirm(`Réintégrer « ${serviceLabel(svc)} » dans ce mois ?`)) return;
+    try {
+      await financeApi.restoreService(student.id, { academic_year: academicYear, month, category: svc.category });
       await load();
       onChanged?.();
     } catch (e) { alert('Erreur: ' + e.message); }
@@ -352,7 +379,7 @@ function CollectTab({ student, academicYear, onChanged }) {
       </div>
 
       <MonthsServicesGrid months={data.months} sel={sel} onToggle={toggle} onAmount={setAmount}
-        onCancelService={cancelService} onAddService={addServiceToMonth} />
+        onCancelService={cancelService} onAddService={addServiceToMonth} onRestoreService={restoreService} />
 
       {/* Liste live + encaissement */}
       {checkedItems.length > 0 && (
