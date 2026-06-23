@@ -103,16 +103,19 @@ export const financeApi = {
   // Students finance view
   listStudents: (filters) => request('/api/finance/students', { query: filters }),
   getSiblings: (studentId, academicYear) => request(`/api/finance/students/${studentId}/siblings`, { query: { academic_year: academicYear } }),
-  // Ouvre le PDF de facture (fetch authentifié → blob → nouvel onglet pour impression)
-  openInvoicePdf: async (id) => {
+  getPaymentBatch: (batchId) => request(`/api/finance/payment-batches/${batchId}`),
+  // Ouvre un PDF (facture ou reçu de lot) via fetch authentifié → blob → nouvel onglet
+  _openPdf: async (path) => {
     const token = await getToken();
-    const res = await fetch(`${apiUrl}/api/finance/invoices/${id}/pdf`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   },
+  openInvoicePdf: (id) => financeApi._openPdf(`/api/finance/invoices/${id}/pdf`),
+  openBatchReceiptPdf: (batchId) => financeApi._openPdf(`/api/finance/payment-batches/${batchId}/receipt-pdf`),
 
   // ── Comptabilité de gestion (Phase 1) ──────────────────────────────────
   // Plan comptable

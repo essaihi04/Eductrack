@@ -215,6 +215,7 @@ function CollectTab({ student, academicYear, onChanged }) {
       const items = checkedItems.map(s => ({ month: s.month, category: s.category || null, amount: Number(s.amount) || undefined }));
       const res = await financeApi.payServices(student.id, {
         academic_year: academicYear, items, payment_date: paymentDate, method, reference: reference || undefined,
+        batch_id: crypto.randomUUID(),
       });
       alert(`${res.paid_count} encaissement(s) · ${formatMAD(res.total_paid)}`);
       setPool('');
@@ -395,11 +396,13 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
     setPaying(true);
     try {
       let count = 0, total = 0;
+      // Un seul lot pour toute la famille → 1 reçu unique couvrant tous les élèves.
+      const batchId = crypto.randomUUID();
       for (const id of [...selectedIds]) {
         const items = Object.values(selById[id] || {}).filter(s => s.checked)
           .map(s => ({ month: s.month, category: s.category || null, amount: Number(s.amount) || undefined }));
         if (items.length === 0) continue;
-        const res = await financeApi.payServices(id, { academic_year: academicYear, items, payment_date: paymentDate, method, reference: reference || undefined });
+        const res = await financeApi.payServices(id, { academic_year: academicYear, items, payment_date: paymentDate, method, reference: reference || undefined, batch_id: batchId });
         count += res.paid_count || 0; total += res.total_paid || 0;
         setSelById(prev => ({ ...prev, [id]: {} }));
         await reloadStatus(id);
@@ -563,6 +566,7 @@ function HistoryTab({ student, academicYear, onChanged }) {
   const [editShared, setEditShared] = useState({});
   const [editAmounts, setEditAmounts] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
+  const [batchDetails, setBatchDetails] = useState({}); // batchId -> { students, total, ... }
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
@@ -579,12 +583,13 @@ function HistoryTab({ student, academicYear, onChanged }) {
     finally { setLoading(false); }
   };
 
-  // Regroupement par opération d'encaissement.
+  // Regroupement par opération d'encaissement : par batch_id si présent
+  // (lie aussi les frères/sœurs), sinon par signature (date|mode|réf|caissier|minute).
   const groups = useMemo(() => {
     const map = new Map();
     for (const p of payments) {
       const minute = (p.created_at || '').slice(0, 16);
-      const key = `${p.payment_date}|${p.method}|${p.reference || ''}|${p.recorded_by || ''}|${minute}`;
+      const key = p.batch_id ? `batch:${p.batch_id}` : `${p.payment_date}|${p.method}|${p.reference || ''}|${p.recorded_by || ''}|${minute}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(p);
     }
@@ -592,6 +597,7 @@ function HistoryTab({ student, academicYear, onChanged }) {
       const confirmed = lines.filter(l => l.status !== 'cancelled');
       return {
         key, lines,
+        batchId: lines[0].batch_id || null,
         date: lines[0].payment_date,
         method: lines[0].method,
         reference: lines[0].reference,
@@ -604,6 +610,31 @@ function HistoryTab({ student, academicYear, onChanged }) {
     }).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
   }, [payments]);
 
+  // Précharge le détail des lots (pour afficher « Famille (N élèves) » dans la liste).
+  useEffect(() => {
+    const ids = [...new Set(groups.map(g => g.batchId).filter(Boolean))].filter(id => !batchDetails[id]);
+    if (ids.length === 0) return;
+    (async () => {
+      for (const id of ids) {
+        try { const res = await financeApi.getPaymentBatch(id); setBatchDetails(prev => ({ ...prev, [id]: res.batch })); }
+        catch (e) { console.error(e); }
+      }
+    })();
+    /* eslint-disable-next-line */
+  }, [groups]);
+
+  // Au dépliage d'un lot, on récupère le détail complet (tous les élèves du lot).
+  const toggleExpand = async (g) => {
+    const willOpen = expandedKey !== g.key;
+    setExpandedKey(willOpen ? g.key : null);
+    if (willOpen && g.batchId && !batchDetails[g.batchId]) {
+      try {
+        const res = await financeApi.getPaymentBatch(g.batchId);
+        setBatchDetails(prev => ({ ...prev, [g.batchId]: res.batch }));
+      } catch (e) { console.error(e); }
+    }
+  };
+
   const svcLabel = (p) => p.invoice?.service_category ? (CATEGORY_LABELS[p.invoice.service_category] || p.invoice.service_category) : 'Mensualité';
 
   const cancelGroup = async (g) => {
@@ -615,9 +646,12 @@ function HistoryTab({ student, academicYear, onChanged }) {
     } catch (e) { alert('Erreur: ' + e.message); }
   };
   const printGroup = async (g) => {
-    const ids = [...new Set(g.lines.map(l => l.invoice?.id).filter(Boolean))];
-    try { for (const id of ids) await financeApi.openInvoicePdf(id); }
-    catch (e) { alert('Erreur impression: ' + e.message); }
+    try {
+      // Lot → 1 reçu unique (tous les élèves + services) ; sinon facture(s) du lot.
+      if (g.batchId) { await financeApi.openBatchReceiptPdf(g.batchId); return; }
+      const ids = [...new Set(g.lines.map(l => l.invoice?.id).filter(Boolean))];
+      for (const id of ids) await financeApi.openInvoicePdf(id);
+    } catch (e) { alert('Erreur impression: ' + e.message); }
   };
   const cancelLine = async (p) => {
     const reason = prompt('Motif de l\'annulation de ce service ?');
@@ -674,15 +708,19 @@ function HistoryTab({ student, academicYear, onChanged }) {
             {groups.map(g => {
               const expanded = expandedKey === g.key;
               const editing = editKey === g.key;
+              const detail = g.batchId ? batchDetails[g.batchId] : null;
+              const nbStudents = detail?.students?.length || 1;
+              const multi = nbStudents > 1; // encaissement famille (plusieurs élèves)
               return (
                 <div key={g.key} className={`border rounded-lg text-sm ${g.allCancelled ? 'border-gray-200 bg-gray-50 opacity-80' : 'border-gray-200'}`}>
                   <div className="flex items-center gap-2 p-2">
-                    <button onClick={() => setExpandedKey(expanded ? null : g.key)} className="p-0.5">
+                    <button onClick={() => toggleExpand(g)} className="p-0.5">
                       {expanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className={`font-medium ${g.allCancelled ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                         {formatMAD(g.total)} <span className="text-xs font-normal text-gray-400">· {METHOD_LABELS[g.method] || g.method}</span>
+                        {multi && <span className="ml-1.5 text-xs font-medium text-purple-600">· Famille ({nbStudents} élèves)</span>}
                       </div>
                       <div className="text-xs text-gray-500 truncate">
                         {new Date(g.date).toLocaleDateString('fr-FR')} · {g.lines.length} service(s){g.reference ? ` · réf ${g.reference}` : ''}
@@ -693,9 +731,10 @@ function HistoryTab({ student, academicYear, onChanged }) {
                     </span>
                     {!g.allCancelled && (
                       <>
-                        <button onClick={() => startEdit(g)} title="Modifier l'encaissement" className="p-1 hover:bg-blue-100 rounded"><Pencil className="w-4 h-4 text-blue-600" /></button>
-                        <button onClick={() => printGroup(g)} title="Imprimer les factures" className="p-1 hover:bg-blue-100 rounded"><Printer className="w-4 h-4 text-blue-600" /></button>
-                        <button onClick={() => cancelGroup(g)} title="Annuler l'encaissement" className="p-1 hover:bg-red-100 rounded"><Ban className="w-4 h-4 text-red-500" /></button>
+                        {/* Édition/annulation par ligne réservées aux encaissements mono-élève */}
+                        {!multi && <button onClick={() => startEdit(g)} title="Modifier l'encaissement" className="p-1 hover:bg-blue-100 rounded"><Pencil className="w-4 h-4 text-blue-600" /></button>}
+                        <button onClick={() => printGroup(g)} title={g.batchId ? 'Imprimer le reçu (tous les élèves)' : 'Imprimer les factures'} className="p-1 hover:bg-blue-100 rounded"><Printer className="w-4 h-4 text-blue-600" /></button>
+                        {!multi && <button onClick={() => cancelGroup(g)} title="Annuler l'encaissement" className="p-1 hover:bg-red-100 rounded"><Ban className="w-4 h-4 text-red-500" /></button>}
                       </>
                     )}
                   </div>
@@ -703,6 +742,32 @@ function HistoryTab({ student, academicYear, onChanged }) {
                   {/* Détail des services de l'encaissement */}
                   {expanded && (
                     <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2">
+                      {multi ? (
+                        <div className="space-y-3">
+                          {(detail?.students || []).map((st, si) => (
+                            <div key={si} className="border border-gray-100 rounded-lg">
+                              <div className="px-3 py-1.5 bg-gray-50 text-sm font-medium flex items-center justify-between">
+                                <span>{st.name}{st.className ? ` · ${st.className}` : ''}</span>
+                                <span className="text-green-700">{formatMAD(st.total)}</span>
+                              </div>
+                              <div className="divide-y divide-gray-100">
+                                {st.lines.map((l, li) => (
+                                  <div key={li} className="flex items-center justify-between px-3 py-1.5 text-sm">
+                                    <span className="text-gray-700">{l.service}{l.period ? ` — ${l.period}` : ''}</span>
+                                    <span className="font-medium tabular-nums text-gray-800">{formatMAD(l.amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                          <div className="text-xs text-gray-500 flex flex-wrap gap-x-4">
+                            <span>Encaissé par : {g.cashier ? fullName(g.cashier) : '—'}</span>
+                            {g.reference && <span>Référence : {g.reference}</span>}
+                            <span className="text-purple-600">Reçu unique couvrant tous les élèves</span>
+                          </div>
+                        </div>
+                      ) : (
+                      <>
                       {editing && (
                         <div className="grid grid-cols-3 gap-2">
                           <div>
@@ -761,6 +826,8 @@ function HistoryTab({ student, academicYear, onChanged }) {
                           <span>Encaissé par : {g.cashier ? fullName(g.cashier) : '—'}</span>
                           {g.reference && <span>Référence : {g.reference}</span>}
                         </div>
+                      )}
+                      </>
                       )}
                     </div>
                   )}

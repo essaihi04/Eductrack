@@ -1,7 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
-import { generateInvoicePdfById } from '../services/whatsapp/chatbot/invoicePdf.js';
+import { generateInvoicePdfById, generateBatchReceiptPdfById, fetchBatchForReceipt } from '../services/whatsapp/chatbot/invoicePdf.js';
 
 const router = express.Router();
 
@@ -738,7 +738,7 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
   try {
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
-    const { academic_year, items, payment_date, method, reference, notes, due_day } = req.body;
+    const { academic_year, items, payment_date, method, reference, notes, due_day, batch_id } = req.body;
 
     if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items[] requis' });
@@ -749,6 +749,9 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
 
     const payDate = payment_date || new Date().toISOString().split('T')[0];
     const dueDay = String(due_day || 5).padStart(2, '0');
+    // Lot d'encaissement : tous les paiements de cette opération (et des frères/sœurs)
+    // partagent le même batch_id → 1 reçu unique. Repli si la colonne n'existe pas encore.
+    let batchSupported = !!batch_id;
 
     const receipts = [];
     const skipped = [];
@@ -825,22 +828,29 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
 
         const receiptNumber = await getNextCounter(schoolId, 'receipt');
         const tag = category ? `${periodLabel} — ${category}` : periodLabel;
-        const { data: payment, error: payErr } = await supabaseAdmin
+        const baseRow = {
+          school_id: schoolId,
+          receipt_number: receiptNumber,
+          invoice_id: invoice.id,
+          student_id: studentId,
+          amount: payAmount,
+          payment_date: payDate,
+          method,
+          reference: reference || null,
+          notes: notes ? `${notes} (${tag})` : tag,
+          recorded_by: req.user.id,
+        };
+        const doInsert = (withBatch) => supabaseAdmin
           .from('payments')
-          .insert({
-            school_id: schoolId,
-            receipt_number: receiptNumber,
-            invoice_id: invoice.id,
-            student_id: studentId,
-            amount: payAmount,
-            payment_date: payDate,
-            method,
-            reference: reference || null,
-            notes: notes ? `${notes} (${tag})` : tag,
-            recorded_by: req.user.id,
-          })
+          .insert(withBatch ? { ...baseRow, batch_id } : baseRow)
           .select('id, receipt_number, amount')
           .single();
+        let { data: payment, error: payErr } = await doInsert(batchSupported);
+        // Repli si la colonne batch_id n'existe pas encore (migration non appliquée)
+        if (payErr && batchSupported && /batch_id/i.test(payErr.message || '')) {
+          batchSupported = false;
+          ({ data: payment, error: payErr } = await doInsert(false));
+        }
         if (payErr) { errors.push({ month, category, error: payErr.message }); continue; }
 
         receipts.push({ month, category, period_label: periodLabel, receipt_number: payment.receipt_number, amount: payment.amount });
@@ -856,6 +866,7 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
       receipts,
       skipped,
       total_paid: receipts.reduce((s, r) => s + Number(r.amount), 0),
+      batch_id: batchSupported ? (batch_id || null) : null,
       errors: errors.slice(0, 10),
     });
   } catch (error) {
@@ -1121,6 +1132,32 @@ router.get('/invoices/:id/pdf', async (req, res) => {
     res.send(result.buffer);
   } catch (error) {
     console.error('Erreur invoice pdf:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Détail d'un lot d'encaissement (tous les élèves + services de l'opération)
+router.get('/payment-batches/:batchId', async (req, res) => {
+  try {
+    const batch = await fetchBatchForReceipt(req.params.batchId);
+    if (!batch) return res.status(404).json({ error: 'Lot introuvable' });
+    res.json({ batch });
+  } catch (error) {
+    console.error('Erreur batch:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Reçu unique (PDF) d'un lot d'encaissement : tous les élèves et services
+router.get('/payment-batches/:batchId/receipt-pdf', async (req, res) => {
+  try {
+    const result = await generateBatchReceiptPdfById(req.params.batchId);
+    if (!result) return res.status(404).json({ error: 'Lot introuvable' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${result.fileName}"`);
+    res.send(result.buffer);
+  } catch (error) {
+    console.error('Erreur batch receipt pdf:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });

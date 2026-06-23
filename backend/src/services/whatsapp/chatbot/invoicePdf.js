@@ -283,3 +283,150 @@ export async function generateInvoicePdfById(invoiceId) {
   const fileName = `Facture_${inv.invoice_number || invoiceId}.pdf`;
   return { buffer, fileName, invoice: inv };
 }
+
+// ── Reçu combiné d'un LOT d'encaissement (plusieurs élèves / services) ────────
+const CATEGORY_FR = {
+  registration: 'Inscription', tuition: 'Scolarité', transport: 'Transport',
+  canteen: 'Cantine', insurance: 'Assurance', activity: 'Activités',
+  supplies: 'Fournitures', uniform: 'Uniforme', other: 'Autre',
+};
+
+/**
+ * Récupère un lot d'encaissement (tous les paiements confirmés du batch),
+ * regroupés par élève, pour générer un reçu unique.
+ */
+export async function fetchBatchForReceipt(batchId) {
+  const { data: payments, error } = await supabaseAdmin
+    .from('payments')
+    .select(`
+      id, amount, payment_date, method, reference, receipt_number, created_at,
+      student:profiles!payments_student_id_fkey(id, first_name, last_name, classes!fk_profiles_class(name)),
+      invoice:invoices(period_label, service_category),
+      school:schools(name, address, phone, logo_url),
+      cashier:profiles!payments_recorded_by_fkey(first_name, last_name)
+    `)
+    .eq('batch_id', batchId)
+    .eq('status', 'confirmed')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  if (!payments || payments.length === 0) return null;
+
+  const first = payments[0];
+  const byStudent = new Map();
+  for (const p of payments) {
+    const sid = p.student?.id || 'unknown';
+    if (!byStudent.has(sid)) {
+      byStudent.set(sid, {
+        name: `${p.student?.first_name || ''} ${p.student?.last_name || ''}`.trim() || '—',
+        className: p.student?.classes?.name || '',
+        lines: [], total: 0,
+      });
+    }
+    const s = byStudent.get(sid);
+    s.lines.push({
+      service: p.invoice?.service_category ? (CATEGORY_FR[p.invoice.service_category] || p.invoice.service_category) : 'Mensualité',
+      period: p.invoice?.period_label || '',
+      amount: Number(p.amount || 0),
+    });
+    s.total += Number(p.amount || 0);
+  }
+
+  return {
+    batch_id: batchId,
+    school: first.school || {},
+    payment_date: first.payment_date,
+    method: first.method,
+    reference: first.reference,
+    cashier: first.cashier ? `${first.cashier.first_name || ''} ${first.cashier.last_name || ''}`.trim() : '',
+    students: [...byStudent.values()],
+    total: payments.reduce((s, p) => s + Number(p.amount || 0), 0),
+    count: payments.length,
+  };
+}
+
+const METHOD_FR = { cash: 'Espèces', check: 'Chèque', transfer: 'Virement', card_pos: 'Carte', other: 'Autre' };
+
+/** Génère un Buffer PDF du reçu combiné d'un lot. */
+export function buildBatchReceiptPdfBuffer(batch) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Title: 'Reçu d\'encaissement', Author: batch.school?.name || 'Eductrack' } });
+      try { doc.registerFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH); } catch (e) { /* police arabe optionnelle */ }
+      const chunks = [];
+      doc.on('data', c => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const school = batch.school || {};
+      // En-tête école
+      doc.fontSize(20).fillColor('#0f172a');
+      smartText(doc, school.name || 'École', undefined, undefined, { align: 'left' });
+      doc.fontSize(10).fillColor('#475569');
+      if (school.address) smartText(doc, school.address);
+      if (school.phone) doc.text(`Tél : ${school.phone}`);
+      doc.moveDown(0.5);
+      doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#cbd5e1').lineWidth(1).stroke();
+      doc.moveDown(0.8);
+
+      // Titre
+      doc.fontSize(18).fillColor('#0f172a').text('REÇU D\'ENCAISSEMENT', { align: 'right' });
+      doc.fontSize(10).fillColor('#334155');
+      doc.text(`Date : ${fmtDate(batch.payment_date)}`, { align: 'right' });
+      doc.text(`Mode : ${METHOD_FR[batch.method] || batch.method || '—'}`, { align: 'right' });
+      if (batch.reference) doc.text(`Référence : ${batch.reference}`, { align: 'right' });
+      doc.moveDown(1.2);
+
+      // Par élève
+      let y = doc.y;
+      for (const st of batch.students) {
+        doc.fontSize(12).fillColor('#0f172a');
+        smartText(doc, `${st.name}${st.className ? ` — ${st.className}` : ''}`, 50, y);
+        y = doc.y + 4;
+        // En-tête tableau
+        doc.rect(50, y, 495, 20).fill('#0f172a');
+        doc.fillColor('#ffffff').fontSize(9);
+        doc.text('Service', 58, y + 6);
+        doc.text('Période', 250, y + 6);
+        doc.text('Montant', 470, y + 6, { width: 70, align: 'right' });
+        y += 20;
+        st.lines.forEach((l, idx) => {
+          if (idx % 2 === 0) doc.rect(50, y, 495, 18).fill('#f8fafc');
+          doc.fillColor('#0f172a').fontSize(9);
+          smartText(doc, l.service, 58, y + 5, { width: 180, ellipsis: true });
+          doc.text(l.period || '—', 250, y + 5, { width: 180 });
+          doc.text(fmtMoney(l.amount, 'MAD'), 470, y + 5, { width: 70, align: 'right' });
+          y += 18;
+        });
+        // Sous-total élève
+        doc.fillColor('#334155').fontSize(9.5);
+        doc.text('Sous-total', 360, y + 4, { width: 100, align: 'right' });
+        doc.fillColor('#0f172a').text(fmtMoney(st.total, 'MAD'), 470, y + 4, { width: 70, align: 'right' });
+        y += 26;
+        if (y > 720) { doc.addPage(); y = 50; }
+      }
+
+      // Total général
+      doc.rect(345, y, 200, 30).fill('#dcfce7');
+      doc.fillColor('#15803d').fontSize(13);
+      doc.text('TOTAL', 360, y + 8, { width: 90, align: 'right' });
+      doc.text(fmtMoney(batch.total, 'MAD'), 460, y + 8, { width: 80, align: 'right' });
+      y += 40;
+
+      if (batch.cashier) { doc.fontSize(9).fillColor('#64748b').text(`Encaissé par : ${batch.cashier}`, 50, y); }
+
+      const footerY = doc.page.height - 60;
+      doc.fontSize(8).fillColor('#94a3b8').text(
+        `Reçu généré le ${fmtDate(new Date())} via Eductrack — ${school.name || ''}`,
+        50, footerY, { align: 'center', width: 495 },
+      );
+      doc.end();
+    } catch (e) { reject(e); }
+  });
+}
+
+export async function generateBatchReceiptPdfById(batchId) {
+  const batch = await fetchBatchForReceipt(batchId);
+  if (!batch) return null;
+  const buffer = await buildBatchReceiptPdfBuffer(batch);
+  return { buffer, fileName: `Recu_${batchId.slice(0, 8)}.pdf`, batch };
+}
