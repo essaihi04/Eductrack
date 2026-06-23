@@ -54,8 +54,6 @@ import InvoicesPage from './pages/finance/InvoicesPage';
 import PaymentsPage from './pages/finance/PaymentsPage';
 import OverduePage from './pages/finance/OverduePage';
 import FinanceStudentsPage from './pages/finance/FinanceStudentsPage';
-import QuickCollectPage from './pages/finance/QuickCollectPage';
-import GroupedPaymentsPage from './pages/finance/GroupedPaymentsPage';
 import ExpensesPage from './pages/finance/ExpensesPage';
 import CashRegisterPage from './pages/finance/CashRegisterPage';
 import ReportsPage from './pages/finance/ReportsPage';
@@ -159,8 +157,6 @@ function App() {
               <Route path="payments" element={<PaymentsPage />} />
               <Route path="overdue" element={<OverduePage />} />
               <Route path="students" element={<FinanceStudentsPage />} />
-              <Route path="quick-collect" element={<QuickCollectPage />} />
-              <Route path="grouped-payments" element={<GroupedPaymentsPage />} />
               <Route path="expenses" element={<ExpensesPage />} />
               <Route path="cash-register" element={<CashRegisterPage />} />
               <Route path="reports" element={<ReportsPage />} />
