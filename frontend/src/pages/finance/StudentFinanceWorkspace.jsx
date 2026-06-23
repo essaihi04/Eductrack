@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, Users, History, Search, Plus, X, CheckCircle2,
   Printer, Ban, CreditCard, Pencil, Save, ChevronDown, ChevronRight,
@@ -539,14 +539,19 @@ function ChildSection({ member, data, loading, sel, onToggle, onAmount, column =
   );
 }
 
-// ── Onglet Historique : détails + modification ───────────────────────────────
+
+// ── Onglet Historique : groupé par ENCAISSEMENT (1 opération = tous ses services) ──
+// Les paiements créés dans la même opération (un par service) partagent la même
+// date, le même mode, la même référence, le même caissier et la même minute de
+// création : on les regroupe pour afficher « la facture avec tous ses services ».
 function HistoryTab({ student, academicYear, onChanged }) {
   const [payments, setPayments] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null);
-  const [editId, setEditId] = useState(null);
-  const [editForm, setEditForm] = useState({});
+  const [expandedKey, setExpandedKey] = useState(null);
+  const [editKey, setEditKey] = useState(null);
+  const [editShared, setEditShared] = useState({});
+  const [editAmounts, setEditAmounts] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
@@ -564,11 +569,81 @@ function HistoryTab({ student, academicYear, onChanged }) {
     finally { setLoading(false); }
   };
 
-  const cancelPayment = async (p) => {
-    const reason = prompt('Motif de l\'annulation du paiement ?');
+  // Regroupement par opération d'encaissement.
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const p of payments) {
+      const minute = (p.created_at || '').slice(0, 16);
+      const key = `${p.payment_date}|${p.method}|${p.reference || ''}|${p.recorded_by || ''}|${minute}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(p);
+    }
+    return [...map.entries()].map(([key, lines]) => {
+      const confirmed = lines.filter(l => l.status !== 'cancelled');
+      return {
+        key, lines,
+        date: lines[0].payment_date,
+        method: lines[0].method,
+        reference: lines[0].reference,
+        cashier: lines[0].cashier,
+        created_at: lines[0].created_at,
+        total: confirmed.reduce((s, l) => s + Number(l.amount || 0), 0),
+        allCancelled: confirmed.length === 0,
+        cancelledCount: lines.length - confirmed.length,
+      };
+    }).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }, [payments]);
+
+  const svcLabel = (p) => p.invoice?.service_category ? (CATEGORY_LABELS[p.invoice.service_category] || p.invoice.service_category) : 'Mensualité';
+
+  const cancelGroup = async (g) => {
+    const reason = prompt(`Annuler cet encaissement (${g.lines.length} service(s)) ? Motif :`);
+    if (reason === null) return;
+    try {
+      for (const l of g.lines) if (l.status !== 'cancelled') await financeApi.cancelPayment(l.id, reason);
+      await load(); onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
+  };
+  const printGroup = async (g) => {
+    const ids = [...new Set(g.lines.map(l => l.invoice?.id).filter(Boolean))];
+    try { for (const id of ids) await financeApi.openInvoicePdf(id); }
+    catch (e) { alert('Erreur impression: ' + e.message); }
+  };
+  const cancelLine = async (p) => {
+    const reason = prompt('Motif de l\'annulation de ce service ?');
     if (reason === null) return;
     try { await financeApi.cancelPayment(p.id, reason); await load(); onChanged?.(); }
     catch (e) { alert('Erreur: ' + e.message); }
+  };
+
+  const startEdit = (g) => {
+    setEditKey(g.key);
+    setExpandedKey(g.key);
+    setEditShared({ payment_date: (g.date || '').slice(0, 10), method: g.method, reference: g.reference || '' });
+    const amts = {}; g.lines.forEach(l => { if (l.status !== 'cancelled') amts[l.id] = String(l.amount); });
+    setEditAmounts(amts);
+  };
+  const saveEdit = async (g) => {
+    setSavingEdit(true);
+    try {
+      for (const l of g.lines) {
+        if (l.status === 'cancelled') continue;
+        await financeApi.updatePayment(l.id, {
+          amount: Number(editAmounts[l.id]),
+          method: editShared.method,
+          payment_date: editShared.payment_date,
+          reference: editShared.reference,
+        });
+      }
+      setEditKey(null);
+      await load(); onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setSavingEdit(false); }
+  };
+
+  const printInvoice = async (inv) => {
+    try { await financeApi.openInvoicePdf(inv.id); }
+    catch (e) { alert('Erreur impression: ' + e.message); }
   };
   const cancelInvoice = async (inv) => {
     const reason = prompt('Motif de l\'annulation de la facture ?');
@@ -576,114 +651,107 @@ function HistoryTab({ student, academicYear, onChanged }) {
     try { await financeApi.cancelInvoice(inv.id, reason); await load(); onChanged?.(); }
     catch (e) { alert('Erreur: ' + e.message); }
   };
-  const printInvoice = async (inv) => {
-    try { await financeApi.openInvoicePdf(inv.id); }
-    catch (e) { alert('Erreur impression: ' + e.message); }
-  };
-
-  const startEdit = (p) => {
-    setEditId(p.id);
-    setEditForm({ amount: String(p.amount), method: p.method, payment_date: (p.payment_date || '').slice(0, 10), reference: p.reference || '' });
-  };
-  const saveEdit = async (p) => {
-    setSavingEdit(true);
-    try {
-      await financeApi.updatePayment(p.id, {
-        amount: Number(editForm.amount), method: editForm.method,
-        payment_date: editForm.payment_date, reference: editForm.reference,
-      });
-      setEditId(null);
-      await load();
-      onChanged?.();
-    } catch (e) { alert('Erreur: ' + e.message); }
-    finally { setSavingEdit(false); }
-  };
 
   if (loading) return <p className="text-gray-500 py-8 text-center">Chargement...</p>;
 
   return (
     <div className="space-y-5">
-      {/* Paiements */}
+      {/* Encaissements (groupés) */}
       <div>
-        <h4 className="text-sm font-semibold text-gray-800 mb-2">Paiements ({payments.length})</h4>
-        {payments.length === 0 ? <p className="text-sm text-gray-400">Aucun paiement</p> : (
+        <h4 className="text-sm font-semibold text-gray-800 mb-2">Encaissements ({groups.length})</h4>
+        {groups.length === 0 ? <p className="text-sm text-gray-400">Aucun encaissement</p> : (
           <div className="space-y-1.5">
-            {payments.map(p => {
-              const cancelled = p.status === 'cancelled';
-              const expanded = expandedId === p.id;
-              const editing = editId === p.id;
-              const svcLabel = p.invoice?.service_category ? (CATEGORY_LABELS[p.invoice.service_category] || p.invoice.service_category) : 'Mensualité';
+            {groups.map(g => {
+              const expanded = expandedKey === g.key;
+              const editing = editKey === g.key;
               return (
-                <div key={p.id} className={`border rounded-lg text-sm ${cancelled ? 'border-gray-200 bg-gray-50 opacity-80' : 'border-gray-200'}`}>
+                <div key={g.key} className={`border rounded-lg text-sm ${g.allCancelled ? 'border-gray-200 bg-gray-50 opacity-80' : 'border-gray-200'}`}>
                   <div className="flex items-center gap-2 p-2">
-                    <button onClick={() => setExpandedId(expanded ? null : p.id)} className="p-0.5">
+                    <button onClick={() => setExpandedKey(expanded ? null : g.key)} className="p-0.5">
                       {expanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <div className={`font-medium ${cancelled ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                        {formatMAD(p.amount)} <span className="text-xs font-normal text-gray-400">· {METHOD_LABELS[p.method] || p.method}</span>
+                      <div className={`font-medium ${g.allCancelled ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                        {formatMAD(g.total)} <span className="text-xs font-normal text-gray-400">· {METHOD_LABELS[g.method] || g.method}</span>
                       </div>
                       <div className="text-xs text-gray-500 truncate">
-                        {new Date(p.payment_date).toLocaleDateString('fr-FR')} · Reçu {p.receipt_number || '—'}{p.invoice?.period_label ? ` · ${p.invoice.period_label}` : ''}
+                        {new Date(g.date).toLocaleDateString('fr-FR')} · {g.lines.length} service(s){g.reference ? ` · réf ${g.reference}` : ''}
                       </div>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_META[cancelled ? 'cancelled' : 'paid'].cls}`}>
-                      {cancelled ? 'Annulé' : 'Confirmé'}
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_META[g.allCancelled ? 'cancelled' : 'paid'].cls}`}>
+                      {g.allCancelled ? 'Annulé' : (g.cancelledCount > 0 ? `${g.cancelledCount} annulé(s)` : 'Confirmé')}
                     </span>
-                    {!cancelled && (
+                    {!g.allCancelled && (
                       <>
-                        <button onClick={() => startEdit(p)} title="Modifier" className="p-1 hover:bg-blue-100 rounded"><Pencil className="w-4 h-4 text-blue-600" /></button>
-                        <button onClick={() => cancelPayment(p)} title="Annuler" className="p-1 hover:bg-red-100 rounded"><Ban className="w-4 h-4 text-red-500" /></button>
+                        <button onClick={() => startEdit(g)} title="Modifier l'encaissement" className="p-1 hover:bg-blue-100 rounded"><Pencil className="w-4 h-4 text-blue-600" /></button>
+                        <button onClick={() => printGroup(g)} title="Imprimer les factures" className="p-1 hover:bg-blue-100 rounded"><Printer className="w-4 h-4 text-blue-600" /></button>
+                        <button onClick={() => cancelGroup(g)} title="Annuler l'encaissement" className="p-1 hover:bg-red-100 rounded"><Ban className="w-4 h-4 text-red-500" /></button>
                       </>
                     )}
                   </div>
 
-                  {/* Détails */}
-                  {expanded && !editing && (
-                    <div className="px-3 pb-3 pt-1 border-t border-gray-100 text-xs text-gray-600 grid grid-cols-2 gap-x-4 gap-y-1">
-                      <div><span className="text-gray-400">Service : </span>{svcLabel}</div>
-                      <div><span className="text-gray-400">Période : </span>{p.invoice?.period_label || '—'}</div>
-                      <div><span className="text-gray-400">Facture : </span>N° {p.invoice?.invoice_number || '—'}</div>
-                      <div><span className="text-gray-400">Référence : </span>{p.reference || '—'}</div>
-                      <div><span className="text-gray-400">Encaissé par : </span>{p.cashier ? fullName(p.cashier) : '—'}</div>
-                      {cancelled && <div className="col-span-2 text-red-500"><span className="text-gray-400">Motif annulation : </span>{p.cancellation_reason || '—'}</div>}
-                    </div>
-                  )}
+                  {/* Détail des services de l'encaissement */}
+                  {expanded && (
+                    <div className="px-3 pb-3 pt-1 border-t border-gray-100 space-y-2">
+                      {editing && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-0.5">Date</label>
+                            <input type="date" value={editShared.payment_date} onChange={e => setEditShared(s => ({ ...s, payment_date: e.target.value }))} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-0.5">Mode</label>
+                            <select value={editShared.method} onChange={e => setEditShared(s => ({ ...s, method: e.target.value }))} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
+                              {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-0.5">Référence</label>
+                            <input type="text" value={editShared.reference} onChange={e => setEditShared(s => ({ ...s, reference: e.target.value }))} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                          </div>
+                        </div>
+                      )}
+                      <div className="border border-gray-100 rounded-lg divide-y divide-gray-100">
+                        {g.lines.map(l => {
+                          const cancelled = l.status === 'cancelled';
+                          return (
+                            <div key={l.id} className="flex items-center gap-2 px-2.5 py-1.5 text-sm">
+                              <div className="flex-1 min-w-0">
+                                <div className={`${cancelled ? 'line-through text-gray-400' : 'text-gray-800'}`}>{svcLabel(l)}</div>
+                                <div className="text-xs text-gray-400 truncate">{l.invoice?.period_label || '—'} · Reçu {l.receipt_number || '—'}{l.invoice?.invoice_number ? ` · Fact. ${l.invoice.invoice_number}` : ''}</div>
+                              </div>
+                              {editing && !cancelled ? (
+                                <input type="number" step="0.01" min="0" value={editAmounts[l.id] ?? ''} onChange={e => setEditAmounts(a => ({ ...a, [l.id]: e.target.value }))}
+                                  className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                              ) : (
+                                <span className={`font-medium tabular-nums ${cancelled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{formatMAD(l.amount)}</span>
+                              )}
+                              {cancelled ? (
+                                <span className="text-xs text-gray-400 w-16 text-right">Annulé</span>
+                              ) : !editing ? (
+                                <div className="flex items-center gap-1">
+                                  {l.invoice?.id && <button onClick={() => printInvoice(l.invoice)} title="Imprimer cette facture" className="p-1 hover:bg-blue-100 rounded"><Printer className="w-3.5 h-3.5 text-blue-600" /></button>}
+                                  <button onClick={() => cancelLine(l)} title="Annuler ce service" className="p-1 hover:bg-red-100 rounded"><Ban className="w-3.5 h-3.5 text-red-500" /></button>
+                                </div>
+                              ) : <span className="w-16" />}
+                            </div>
+                          );
+                        })}
+                      </div>
 
-                  {/* Édition */}
-                  {editing && (
-                    <div className="px-3 pb-3 pt-2 border-t border-gray-100 space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-0.5">Montant</label>
-                          <input type="number" step="0.01" min="0" value={editForm.amount} onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                      {editing ? (
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => setEditKey(null)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Annuler</button>
+                          <button onClick={() => saveEdit(g)} disabled={savingEdit} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                            <Save className="w-3.5 h-3.5" /> {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                          </button>
                         </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-0.5">Mode</label>
-                          <select value={editForm.method} onChange={e => setEditForm(f => ({ ...f, method: e.target.value }))}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm">
-                            {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                          </select>
+                      ) : (
+                        <div className="text-xs text-gray-500 flex flex-wrap gap-x-4">
+                          <span>Encaissé par : {g.cashier ? fullName(g.cashier) : '—'}</span>
+                          {g.reference && <span>Référence : {g.reference}</span>}
                         </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-0.5">Date</label>
-                          <input type="date" value={editForm.payment_date} onChange={e => setEditForm(f => ({ ...f, payment_date: e.target.value }))}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-500 mb-0.5">Référence</label>
-                          <input type="text" value={editForm.reference} onChange={e => setEditForm(f => ({ ...f, reference: e.target.value }))}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
-                        </div>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <button onClick={() => setEditId(null)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Annuler</button>
-                        <button onClick={() => saveEdit(p)} disabled={savingEdit}
-                          className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                          <Save className="w-3.5 h-3.5" /> {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
-                        </button>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
