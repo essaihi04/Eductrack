@@ -45,10 +45,11 @@ export default function FinanceDashboard() {
 
       <KpiGrid cols={4}>
         <KpiCard icon={DollarSign} label={`Encaissé ${year}`} tone="green"
-          value={loading ? '—' : formatMAD(summary?.collectedThisMonth)} />
+          value={loading ? '—' : formatMAD(summary?.collectedThisMonth)}
+          sub={summary ? `Taux d'encaissement (réel): ${(summary.realRate || 0).toFixed(0)}%` : ''} />
         <KpiCard icon={FileText} label={`${summary?.forecast ? 'Attendu (prévisionnel)' : 'Facturé'} ${year}`} tone="blue"
           value={loading ? '—' : formatMAD(summary?.issuedThisMonth)}
-          sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%${summary.forecast ? ` · ${summary.forecastStudents || 0} élève(s)` : ''}` : ''} />
+          sub={summary ? `${summary.forecast ? 'Avancement' : 'Taux'}: ${(summary.collectionRate || 0).toFixed(0)}%${summary.forecast ? ` · ${summary.forecastStudents || 0} élève(s)` : ''}` : ''} />
         <KpiCard icon={TrendingUp} label={summary?.forecast ? 'Dû prévisionnel' : 'Dû total'} tone="orange"
           value={loading ? '—' : formatMAD(summary?.totalDue)} />
         <KpiCard icon={AlertCircle} label="En retard" tone="red"
@@ -90,7 +91,8 @@ export default function FinanceDashboard() {
 
         {/* Top retards par classe */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Taux de recouvrement par classe</h2>
+          <h2 className="text-lg font-semibold text-gray-800 mb-0.5">Avancement par classe (prévisionnel)</h2>
+          <p className="text-xs text-gray-400 mb-4">Encaissé / attendu de l'année</p>
           <div className="space-y-3 max-h-72 overflow-y-auto">
             {byClass.length === 0 && <p className="text-sm text-gray-500">Aucune donnée</p>}
             {byClass.slice(0, 10).map(c => (

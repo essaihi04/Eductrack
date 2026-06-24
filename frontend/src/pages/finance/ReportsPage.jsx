@@ -647,7 +647,7 @@ const ReportsPage = () => {
             <KpiCard label="Encaissements" value={formatMAD(data.income?.total)} tone="green" icon={TrendingUp} sub={`${data.income?.count || 0} paiement(s)`} />
             <KpiCard label="Dépenses" value={formatMAD(data.expense?.total)} tone="red" icon={TrendingDown} sub={`${data.expense?.count || 0} sortie(s)`} />
             <KpiCard label="Résultat net" value={formatMAD(data.net)} tone={data.net >= 0 ? 'blue' : 'orange'} icon={Wallet} sub="encaissé − dépensé" />
-            <KpiCard label="Reste à recouvrer" value={formatMAD(data.recouvrement?.outstanding_total)} tone="orange" icon={Receipt} sub={`Taux ${(data.recouvrement?.rate || 0).toFixed(0)}%`} />
+            <KpiCard label="Reste à recouvrer" value={formatMAD(data.recouvrement?.outstanding_total)} tone="orange" icon={Receipt} sub={`Taux d'encaissement (réel): ${(data.recouvrement?.rate || 0).toFixed(0)}%`} />
           </KpiGrid>
 
           {/* Répartition par mode */}
@@ -725,7 +725,8 @@ const ReportsPage = () => {
 
           {/* Recouvrement par classe */}
           <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-5">
-            <h2 className="font-semibold text-gray-900 mb-4">Recouvrement par classe (global)</h2>
+            <h2 className="font-semibold text-gray-900 mb-0.5">Taux d'encaissement par classe (réel)</h2>
+            <p className="text-xs text-gray-400 mb-4">Encaissé / facturé — sur l'ensemble des factures</p>
             {(data.recouvrement?.by_class || []).length === 0 ? (
               <p className="text-center text-gray-500 py-6">Aucune facture.</p>
             ) : (

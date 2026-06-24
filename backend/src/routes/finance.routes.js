@@ -1882,6 +1882,20 @@ router.get('/dashboard/summary', async (req, res) => {
     const { data: paidRows } = await paidQuery;
     const collectedThisMonth = (paidRows || []).reduce((s, r) => s + Number(r.amount), 0);
 
+    // Facturé RÉEL sur la période (factures émises, non annulées) — sert au
+    // « Taux d'encaissement (réel) » = encaissé / facturé, distinct de
+    // « Avancement (prévisionnel) » = encaissé / attendu des plans.
+    let realInvoicedQ = supabaseAdmin
+      .from('invoices')
+      .select('total')
+      .gte('issue_date', periodStart)
+      .lte('issue_date', periodEnd)
+      .neq('status', 'cancelled');
+    if (schoolId) realInvoicedQ = realInvoicedQ.eq('school_id', schoolId);
+    const { data: realInvRows } = await realInvoicedQ;
+    const realInvoiced = (realInvRows || []).reduce((s, r) => s + Number(r.total), 0);
+    const realRate = realInvoiced > 0 ? (collectedThisMonth / realInvoiced) * 100 : 0;
+
     // Si une année est fournie : tout est basé sur le PRÉVISIONNEL des plans
     // (exclusions déduites) → « Attendu » + « Dû » réagissent aux exclusions.
     // Sinon : repli sur le réel facturé.
@@ -1906,17 +1920,7 @@ router.get('/dashboard/summary', async (req, res) => {
       const overdueRows = (dueRows || []).filter(r => r.due_date < todayStr);
       totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
       overdueCount = overdueRows.length;
-
-      // Factures émises sur la période
-      let issuedQuery = supabaseAdmin
-        .from('invoices')
-        .select('total')
-        .gte('issue_date', periodStart)
-        .lte('issue_date', periodEnd)
-        .neq('status', 'cancelled');
-      if (schoolId) issuedQuery = issuedQuery.eq('school_id', schoolId);
-      const { data: issuedRows } = await issuedQuery;
-      issuedThisMonth = (issuedRows || []).reduce((s, r) => s + Number(r.total), 0);
+      issuedThisMonth = realInvoiced; // factures émises sur la période (réel)
     }
 
     res.json({
@@ -1927,6 +1931,9 @@ router.get('/dashboard/summary', async (req, res) => {
       overdueCount,
       forecast, // true = « Attendu (prévisionnel) » au lieu de « Facturé » réel
       forecastStudents, // nb d'élèves inscrits comptés dans l'attendu
+      realInvoiced, // facturé réel sur la période
+      realRate, // Taux d'encaissement (réel) = encaissé / facturé
+      // « Avancement » = encaissé / attendu (prévisionnel si année fournie)
       collectionRate: issuedThisMonth > 0 ? (collectedThisMonth / issuedThisMonth) * 100 : 0
     });
   } catch (error) {
