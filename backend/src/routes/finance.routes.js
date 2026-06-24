@@ -1885,13 +1885,14 @@ router.get('/dashboard/summary', async (req, res) => {
     // Si une année est fournie : tout est basé sur le PRÉVISIONNEL des plans
     // (exclusions déduites) → « Attendu » + « Dû » réagissent aux exclusions.
     // Sinon : repli sur le réel facturé.
-    let totalDue, totalOverdue, overdueCount, issuedThisMonth, forecast = false;
+    let totalDue, totalOverdue, overdueCount, issuedThisMonth, forecast = false, forecastStudents = 0;
     if (req.query.academic_year) {
       const rec = await planReceivables(schoolId, req.query.academic_year);
       totalDue = rec.totalDue;
       totalOverdue = rec.totalOverdue;
       overdueCount = rec.overdueCount;
       issuedThisMonth = rec.expectedTotal; // « Attendu (prévisionnel) »
+      forecastStudents = rec.studentCount;
       forecast = true;
     } else {
       let dueQuery = supabaseAdmin
@@ -1925,6 +1926,7 @@ router.get('/dashboard/summary', async (req, res) => {
       totalOverdue,
       overdueCount,
       forecast, // true = « Attendu (prévisionnel) » au lieu de « Facturé » réel
+      forecastStudents, // nb d'élèves inscrits comptés dans l'attendu
       collectionRate: issuedThisMonth > 0 ? (collectedThisMonth / issuedThisMonth) * 100 : 0
     });
   } catch (error) {
@@ -2765,13 +2767,34 @@ async function fetchAllRows(buildQuery) {
 // chaque élève (attendu du plan − payé), exclusions déduites. Sert au dashboard.
 async function planReceivables(schoolId, academicYear) {
   const yearVariants = [...new Set([academicYear, academicYear.replace('/', '-'), academicYear.replace('-', '/')])];
-  const plans = await fetchAllRows(() => {
+  let plans = await fetchAllRows(() => {
     let q = supabaseAdmin.from('student_fee_plans')
       .select('*, template:fee_templates(*, fee_template_items(*)), custom_items:student_fee_plan_items(*)')
       .in('academic_year', yearVariants).eq('status', 'active');
     if (schoolId) q = q.eq('school_id', schoolId);
     return q;
   });
+  if (plans.length === 0) return { totalDue: 0, totalOverdue: 0, overdueCount: 0, expectedTotal: 0, paidTotal: 0 };
+
+  // Restreindre aux élèves réellement INSCRITS cette année (≠ NR), comme la
+  // liste élèves — évite de compter des plans d'élèves partis/désinscrits.
+  try {
+    const enr = await fetchAllRows(() => {
+      let q = supabaseAdmin.from('student_enrollments').select('student_id')
+        .in('academic_year', yearVariants).neq('status', 'NR');
+      if (schoolId) q = q.eq('school_id', schoolId);
+      return q;
+    });
+    if (enr.length > 0) {
+      const enrolled = new Set(enr.map(e => e.student_id));
+      plans = plans.filter(p => enrolled.has(p.student_id));
+    }
+  } catch (_) { /* table absente : on garde tous les plans */ }
+
+  // Déduplication : un seul plan par élève (évite le double comptage si un même
+  // élève a un plan en double, ex. formats d'année slash/tiret différents).
+  const seen = new Set();
+  plans = plans.filter(p => { if (seen.has(p.student_id)) return false; seen.add(p.student_id); return true; });
   if (plans.length === 0) return { totalDue: 0, totalOverdue: 0, overdueCount: 0, expectedTotal: 0, paidTotal: 0 };
 
   const studentIds = [...new Set(plans.map(p => p.student_id))];
@@ -2801,7 +2824,7 @@ async function planReceivables(schoolId, academicYear) {
       }
     }
   }
-  return { totalDue, totalOverdue, overdueCount, expectedTotal, paidTotal };
+  return { totalDue, totalOverdue, overdueCount, expectedTotal, paidTotal, studentCount: plans.length };
 }
 
 function computeMonthServices(plan, month) {

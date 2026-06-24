@@ -48,7 +48,7 @@ export default function FinanceDashboard() {
           value={loading ? '—' : formatMAD(summary?.collectedThisMonth)} />
         <KpiCard icon={FileText} label={`${summary?.forecast ? 'Attendu (prévisionnel)' : 'Facturé'} ${year}`} tone="blue"
           value={loading ? '—' : formatMAD(summary?.issuedThisMonth)}
-          sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%` : ''} />
+          sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%${summary.forecast ? ` · ${summary.forecastStudents || 0} élève(s)` : ''}` : ''} />
         <KpiCard icon={TrendingUp} label={summary?.forecast ? 'Dû prévisionnel' : 'Dû total'} tone="orange"
           value={loading ? '—' : formatMAD(summary?.totalDue)} />
         <KpiCard icon={AlertCircle} label="En retard" tone="red"
