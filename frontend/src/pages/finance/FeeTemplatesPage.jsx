@@ -216,6 +216,21 @@ export default function FeeTemplatesPage() {
     finally { setUpdatingClassId(null); }
   };
 
+  // Retirer une classe du modèle (désélectionner). Les élèves ayant déjà payé
+  // sont préservés côté serveur.
+  const [removingClassId, setRemovingClassId] = useState(null);
+  const removeClass = async (templateId, classId) => {
+    if (!confirm('Retirer cette classe du modèle ? Les élèves déjà ayant payé seront conservés.')) return;
+    const t = templates.find(x => x.id === templateId);
+    setRemovingClassId(classId);
+    try {
+      const res = await financeApi.removeClassFromTemplate(templateId, { class_id: classId, academic_year: t.academic_year });
+      alert(`${res.removed} élève(s) retiré(s)${res.skipped ? `, ${res.skipped} conservé(s) (déjà payé)` : ''}`);
+      loadAssignments();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setRemovingClassId(null); }
+  };
+
   const applyToSelected = async (templateId) => {
     if (selectedClassIds.length === 0) {
       alert('Sélectionnez au moins une classe');
@@ -362,6 +377,10 @@ export default function FeeTemplatesPage() {
                           ) : (
                             <span className="text-[10px] text-gray-400 whitespace-nowrap">à jour</span>
                           )}
+                          <button onClick={() => removeClass(t.id, c.id)} disabled={removingClassId === c.id}
+                            className="p-1 rounded hover:bg-red-100 flex-shrink-0 disabled:opacity-50" title="Retirer cette classe du modèle">
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          </button>
                           {meta}
                         </div>
                       );

@@ -377,6 +377,48 @@ router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
   }
 });
 
+// Retirer une classe d'un modèle : supprime les plans actifs des élèves de la
+// classe rattachés à ce modèle pour l'année. Les élèves AYANT DÉJÀ un paiement
+// confirmé sont préservés (on ne touche pas à l'historique financier).
+router.post('/fee-templates/:id/remove-class', async (req, res) => {
+  try {
+    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut retirer une classe' });
+    const { id: templateId } = req.params;
+    const { class_id, academic_year } = req.body;
+    const schoolId = getSchoolId(req);
+    if (!class_id || !academic_year) return res.status(400).json({ error: 'class_id et academic_year requis' });
+
+    const yearVariants = [...new Set([academic_year, academic_year.replace('/', '-'), academic_year.replace('-', '/')])];
+
+    let sQ = supabaseAdmin.from('profiles').select('id').eq('role', 'student').eq('class_id', class_id);
+    if (schoolId) sQ = sQ.eq('school_id', schoolId);
+    const { data: students } = await sQ;
+    const studentIds = (students || []).map(s => s.id);
+    if (studentIds.length === 0) return res.json({ success: true, removed: 0, skipped: 0 });
+
+    // Plans actifs de ce modèle pour ces élèves.
+    let pQ = supabaseAdmin.from('student_fee_plans').select('id, student_id')
+      .eq('template_id', templateId).in('academic_year', yearVariants).in('student_id', studentIds);
+    const { data: plans } = await pQ;
+    if (!plans || plans.length === 0) return res.json({ success: true, removed: 0, skipped: 0 });
+
+    const planStudentIds = plans.map(p => p.student_id);
+    // Élèves protégés : ceux ayant au moins un paiement confirmé.
+    const { data: pays } = await supabaseAdmin.from('payments').select('student_id')
+      .eq('status', 'confirmed').in('student_id', planStudentIds);
+    const paidSet = new Set((pays || []).map(p => p.student_id));
+
+    const removableIds = plans.filter(p => !paidSet.has(p.student_id)).map(p => p.id);
+    if (removableIds.length) {
+      await supabaseAdmin.from('student_fee_plans').delete().in('id', removableIds);
+    }
+    res.json({ success: true, removed: removableIds.length, skipped: plans.length - removableIds.length });
+  } catch (error) {
+    console.error('Erreur remove-class:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
 // ============================================================
 // PLANS DE FRAIS PAR ÉLÈVE
 // ============================================================
