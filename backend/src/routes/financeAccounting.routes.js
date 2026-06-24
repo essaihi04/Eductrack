@@ -11,6 +11,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { seedDefaultChartOfAccounts, ensureChartSeeded } from '../services/financeChart.js';
+import { planMonthlyForecast } from './finance.routes.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -37,6 +38,12 @@ const calendarYearFor = (academicYear, month) => {
   return month >= 9 ? y1 : y2;
 };
 const monthOf = (isoDate) => new Date(isoDate).getMonth() + 1;
+// Mois (1-12) déduit d'un libellé de période « Septembre 2025 » → 9.
+const MONTH_INDEX = {}; MONTH_NAMES.forEach((n, i) => { MONTH_INDEX[n.toLowerCase()] = i + 1; });
+const periodMonthOf = (label) => {
+  if (!label) return null;
+  return MONTH_INDEX[String(label).trim().split(/\s+/)[0].toLowerCase()] || null;
+};
 const arrFor = (mapByMonth) => ACADEMIC_MONTH_ORDER.map((m) => Number((mapByMonth && mapByMonth[m]) || 0));
 const sumArr = (a, b) => a.map((v, i) => v + (b[i] || 0));
 const zero12 = () => ACADEMIC_MONTH_ORDER.map(() => 0);
@@ -250,11 +257,14 @@ router.get('/reports/annual-matrix', async (req, res) => {
     (accounts || []).forEach((a) => { if (a.default_key) defaultKeyToId[a.default_key] = a.id; });
 
     // --- Recettes : facturé (CA) + encaissé ---
+    // Réel ventilé par MOIS DE LA MENSUALITÉ (period_label), pas par date
+    // d'émission/paiement : la scolarité de septembre reste en septembre même si
+    // la facture a été générée en bloc plus tard. Repli sur la date si pas de période.
     const { data: invs } = await supabaseAdmin
-      .from('invoices').select('id, issue_date, status')
+      .from('invoices').select('id, issue_date, period_label, status')
       .eq('school_id', schoolId).neq('status', 'cancelled')
       .gte('issue_date', startDate).lte('issue_date', endDate);
-    const invMonth = {}; (invs || []).forEach((i) => { invMonth[i.id] = monthOf(i.issue_date); });
+    const invMonth = {}; (invs || []).forEach((i) => { invMonth[i.id] = periodMonthOf(i.period_label) || monthOf(i.issue_date); });
     const invIds = (invs || []).map((i) => i.id);
 
     let lines = [];
@@ -277,7 +287,7 @@ router.get('/reports/annual-matrix', async (req, res) => {
     const collected = {};
     const addCollected = (s, m, v) => { (collected[s] = collected[s] || {})[m] = (collected[s][m] || 0) + v; };
     (pays || []).forEach((p) => {
-      const m = monthOf(p.payment_date); const amt = Number(p.amount || 0);
+      const m = (p.invoice_id && invMonth[p.invoice_id]) || monthOf(p.payment_date); const amt = Number(p.amount || 0);
       const il = p.invoice_id ? linesByInvoice[p.invoice_id] : null;
       if (il && il.length) {
         const tot = il.reduce((s, x) => s + Number(x.amount || 0), 0);
@@ -312,6 +322,17 @@ router.get('/reports/annual-matrix', async (req, res) => {
       (actualExp[l.account_id] = actualExp[l.account_id] || {})[l.month] = (actualExp[l.account_id][l.month] || 0) + Number(l.amount || 0);
     });
 
+    // --- Prévisionnel des recettes : projeté depuis les PLANS DE FRAIS ---
+    // (mêmes montants attendus que le dashboard) — remplace le budget manuel
+    // pour les recettes, et alimente les mois à venir + la colonne « Budget ».
+    const forecastByCat = await planMonthlyForecast(schoolId, academicYear);
+    const forecastByStream = {};
+    Object.entries(forecastByCat).forEach(([cat, byMonth]) => {
+      const s = streamOfCategory(cat);
+      const dst = (forecastByStream[s] = forecastByStream[s] || {});
+      Object.entries(byMonth).forEach(([m, amt]) => { dst[m] = (dst[m] || 0) + Number(amt || 0); });
+    });
+
     // --- Assemblage ---
     const revenueLineAccounts = (accounts || []).filter((a) => a.kind === 'revenue' && a.node_type === 'line' && a.is_active);
     const expenseSections = (accounts || []).filter((a) => a.kind === 'expense' && a.node_type === 'section');
@@ -323,7 +344,7 @@ router.get('/reports/annual-matrix', async (req, res) => {
       return {
         id: a.id, name: a.name, revenue_stream: s,
         actual: arrFor(collected[s]),
-        budget: arrFor(budget[a.id]),
+        budget: arrFor(forecastByStream[s]),
         billed: arrFor(billed[s]),
         impayes: ACADEMIC_MONTH_ORDER.map((m) => Number((billed[s] && billed[s][m]) || 0) - Number((collected[s] && collected[s][m]) || 0)),
       };

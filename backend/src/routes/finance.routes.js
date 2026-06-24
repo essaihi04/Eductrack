@@ -2783,9 +2783,12 @@ async function planReceivables(schoolId, academicYear) {
 
   // Restreindre aux élèves réellement INSCRITS cette année (≠ NR), comme la
   // liste élèves — évite de compter des plans d'élèves partis/désinscrits.
+  // On en profite pour récupérer la classe de CETTE année (≠ classe courante).
+  const classByStudent = {};
   try {
     const enr = await fetchAllRows(() => {
-      let q = supabaseAdmin.from('student_enrollments').select('student_id')
+      let q = supabaseAdmin.from('student_enrollments')
+        .select('student_id, class:classes!student_enrollments_class_id_fkey(id, name)')
         .in('academic_year', yearVariants).neq('status', 'NR');
       if (schoolId) q = q.eq('school_id', schoolId);
       return q;
@@ -2793,6 +2796,7 @@ async function planReceivables(schoolId, academicYear) {
     if (enr.length > 0) {
       const enrolled = new Set(enr.map(e => e.student_id));
       plans = plans.filter(p => enrolled.has(p.student_id));
+      enr.forEach(e => { classByStudent[e.student_id] = e.class || null; });
     }
   } catch (_) { /* table absente : on garde tous les plans */ }
 
@@ -2813,17 +2817,20 @@ async function planReceivables(schoolId, academicYear) {
   const invByStudent = {};
   invs.forEach(i => { (invByStudent[i.student_id] = invByStudent[i.student_id] || []).push(i); });
 
-  // Classe de chaque élève → ventilation par classe alignée sur le prévisionnel
-  // (même base que les KPI globaux, pour éviter l'incohérence avec les factures réelles).
-  const profs = await fetchAllRows(() => {
-    let q = supabaseAdmin.from('profiles')
-      .select('id, class_id, classes!fk_profiles_class(id, name)')
-      .in('id', studentIds);
-    if (schoolId) q = q.eq('school_id', schoolId);
-    return q;
-  });
-  const classByStudent = {};
-  profs.forEach(p => { classByStudent[p.id] = p.classes || null; });
+  // Repli : pour les élèves sans inscription (table absente), on prend la classe
+  // courante du profil. La ventilation par classe est ainsi alignée sur le
+  // prévisionnel (même base que les KPI globaux) et sur la classe de l'année.
+  const missing = studentIds.filter(id => classByStudent[id] === undefined);
+  if (missing.length > 0) {
+    const profs = await fetchAllRows(() => {
+      let q = supabaseAdmin.from('profiles')
+        .select('id, classes!fk_profiles_class(id, name)')
+        .in('id', missing);
+      if (schoolId) q = q.eq('school_id', schoolId);
+      return q;
+    });
+    profs.forEach(p => { classByStudent[p.id] = p.classes || null; });
+  }
 
   const today = new Date().toISOString().split('T')[0];
   let totalDue = 0, totalOverdue = 0, overdueCount = 0, expectedTotal = 0, paidTotal = 0;
@@ -2856,6 +2863,50 @@ async function planReceivables(schoolId, academicYear) {
   })).sort((a, b) => a.rate - b.rate);
 
   return { totalDue, totalOverdue, overdueCount, expectedTotal, paidTotal, studentCount: plans.length, byClass };
+}
+
+// Prévisionnel mensuel par CATÉGORIE de service, basé sur les plans actifs
+// (mêmes règles que la fiche élève / le dashboard). Sert à alimenter la colonne
+// « Prévisionnel » de la matrice annuelle. Retourne { [category]: { [moisAcad]: montant } }.
+export async function planMonthlyForecast(schoolId, academicYear) {
+  const yearVariants = [...new Set([academicYear, academicYear.replace('/', '-'), academicYear.replace('-', '/')])];
+  let plans = await fetchAllRows(() => {
+    let q = supabaseAdmin.from('student_fee_plans')
+      .select('*, template:fee_templates(*, fee_template_items(*)), custom_items:student_fee_plan_items(*)')
+      .in('academic_year', yearVariants).eq('status', 'active');
+    if (schoolId) q = q.eq('school_id', schoolId);
+    return q;
+  });
+  if (plans.length === 0) return {};
+  // Mêmes restrictions que planReceivables : inscrits (≠ NR) + 1 plan par élève.
+  try {
+    const enr = await fetchAllRows(() => {
+      let q = supabaseAdmin.from('student_enrollments').select('student_id')
+        .in('academic_year', yearVariants).neq('status', 'NR');
+      if (schoolId) q = q.eq('school_id', schoolId);
+      return q;
+    });
+    if (enr.length > 0) {
+      const enrolled = new Set(enr.map(e => e.student_id));
+      plans = plans.filter(p => enrolled.has(p.student_id));
+    }
+  } catch (_) { /* table absente : on garde tous les plans */ }
+  const seen = new Set();
+  plans = plans.filter(p => { if (seen.has(p.student_id)) return false; seen.add(p.student_id); return true; });
+
+  const byCategory = {};
+  for (const plan of plans) {
+    // [] = pas de factures → prévisionnel pur du plan (montants attendus).
+    for (const mo of buildPlanMonths(plan, academicYear, [])) {
+      for (const s of mo.services) {
+        const amt = Number(s.expected || 0);
+        if (!amt) continue;
+        const cat = s.category || 'other';
+        (byCategory[cat] = byCategory[cat] || {})[mo.month] = (byCategory[cat][mo.month] || 0) + amt;
+      }
+    }
+  }
+  return byCategory;
 }
 
 function computeMonthServices(plan, month) {
