@@ -1973,6 +1973,11 @@ router.get('/dashboard/cashflow', async (req, res) => {
 router.get('/dashboard/by-class', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
+    // Année fournie → même base prévisionnelle que les KPI globaux (cohérence des taux).
+    if (req.query.academic_year) {
+      const rec = await planReceivables(schoolId, req.query.academic_year);
+      return res.json({ classes: rec.byClass || [] });
+    }
     const range = academicYearRange(req.query.academic_year);
     let invQuery = supabaseAdmin
       .from('invoices')
@@ -2808,14 +2813,34 @@ async function planReceivables(schoolId, academicYear) {
   const invByStudent = {};
   invs.forEach(i => { (invByStudent[i.student_id] = invByStudent[i.student_id] || []).push(i); });
 
+  // Classe de chaque élève → ventilation par classe alignée sur le prévisionnel
+  // (même base que les KPI globaux, pour éviter l'incohérence avec les factures réelles).
+  const profs = await fetchAllRows(() => {
+    let q = supabaseAdmin.from('profiles')
+      .select('id, class_id, classes!fk_profiles_class(id, name)')
+      .in('id', studentIds);
+    if (schoolId) q = q.eq('school_id', schoolId);
+    return q;
+  });
+  const classByStudent = {};
+  profs.forEach(p => { classByStudent[p.id] = p.classes || null; });
+
   const today = new Date().toISOString().split('T')[0];
   let totalDue = 0, totalOverdue = 0, overdueCount = 0, expectedTotal = 0, paidTotal = 0;
+  const byClassMap = {};
   for (const plan of plans) {
+    const cls = classByStudent[plan.student_id];
+    const key = cls?.id || '__none__';
+    const bucket = byClassMap[key] || (byClassMap[key] = {
+      class_id: cls?.id || null, class_name: cls?.name || 'Sans classe', total: 0, paid: 0
+    });
     const months = buildPlanMonths(plan, academicYear, invByStudent[plan.student_id] || []);
     for (const mo of months) {
       expectedTotal += Number(mo.expected);
       paidTotal += Number(mo.paid);
       totalDue += Number(mo.remaining);
+      bucket.total += Number(mo.expected);
+      bucket.paid += Number(mo.paid);
       for (const s of mo.services) {
         if (Number(s.remaining) > 0 && s.due_date && s.due_date < today) {
           totalOverdue += Number(s.remaining);
@@ -2824,7 +2849,13 @@ async function planReceivables(schoolId, academicYear) {
       }
     }
   }
-  return { totalDue, totalOverdue, overdueCount, expectedTotal, paidTotal, studentCount: plans.length };
+  const byClass = Object.values(byClassMap).map(c => ({
+    ...c,
+    due: c.total - c.paid,
+    rate: c.total > 0 ? (c.paid / c.total) * 100 : 0
+  })).sort((a, b) => a.rate - b.rate);
+
+  return { totalDue, totalOverdue, overdueCount, expectedTotal, paidTotal, studentCount: plans.length, byClass };
 }
 
 function computeMonthServices(plan, month) {
