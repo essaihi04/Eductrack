@@ -35,6 +35,7 @@ export default function PrevisionnelMatrixPage() {
   if (loading || !data) return <div className="p-6 text-gray-400">Chargement…</div>;
 
   const months = data.months || [];
+  const fcIdx = months.findIndex((m) => !m.is_real); // 1er mois prévisionnel (frontière réel/prév.)
   const eff = (actual = [], budget = []) => months.map((mo, i) => (mo.is_real ? Number(actual[i] || 0) : Number(budget[i] || 0)));
   const sum = (arr) => arr.reduce((s, v) => s + (Number(v) || 0), 0);
 
@@ -124,41 +125,48 @@ export default function PrevisionnelMatrixPage() {
       </div>
 
       <div className="flex gap-4 text-xs text-gray-500 print:hidden">
-        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-gray-100 border border-gray-200 inline-block" /> Réel</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-50 border border-blue-200 inline-block" /> Prévisionnel</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-white border border-gray-300 inline-block" /> Réel (mois passés)</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-100 border border-blue-300 inline-block" /> Prévisionnel (mois à venir)</span>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-auto">
-        <table className="text-xs border-collapse min-w-max">
-          <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+        <table className="w-full table-fixed text-[10px] border-collapse">
+          <colgroup>
+            <col className="w-[120px]" />
+            {months.map((m) => <col key={m.month} />)}
+            <col className="w-[58px]" />
+            <col className="w-[58px]" />
+            <col className="w-[34px]" />
+          </colgroup>
+          <thead className="sticky top-0 z-10">
             <tr>
-              <th className="px-3 py-2 text-left sticky left-0 bg-gray-50 min-w-[210px]">Poste</th>
-              {months.map((m) => (
-                <th key={m.month} className={`px-2 py-2 text-right min-w-[72px] ${m.is_real ? '' : 'text-blue-600'}`}>{SHORT[m.month]}<br /><span className="font-normal text-[10px]">{m.year}</span></th>
+              <th className="px-2 py-2 text-left sticky left-0 bg-gray-100 z-20 border-b border-gray-200">Poste</th>
+              {months.map((m, i) => (
+                <th key={m.month} className={`px-1 py-2 text-right leading-tight border-b border-gray-200 ${i === fcIdx ? 'border-l-2 border-l-blue-400' : ''} ${m.is_real ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>{SHORT[m.month]}<br /><span className="font-normal text-[9px] opacity-70">{m.year}</span></th>
               ))}
-              <th className="px-3 py-2 text-right min-w-[90px] font-bold">Cumulé</th>
-              <th className="px-3 py-2 text-right min-w-[90px]">Budget</th>
-              <th className="px-2 py-2 text-right min-w-[56px]">%</th>
+              <th className="px-1 py-2 text-right bg-gray-100 font-bold border-b border-gray-200">Cumulé</th>
+              <th className="px-1 py-2 text-right bg-gray-100 border-b border-gray-200">Budget</th>
+              <th className="px-1 py-2 text-right bg-gray-100 border-b border-gray-200">%</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, idx) => {
               if (r.section) return (
-                <tr key={idx} className={r.cls}><td className="px-3 py-1.5 sticky left-0" colSpan={months.length + 4}>{r.section}</td></tr>
+                <tr key={idx} className={r.cls}><td className="px-2 py-1.5 sticky left-0" colSpan={months.length + 4}>{r.section}</td></tr>
               );
               if (r.subheader) return (
-                <tr key={idx} className="bg-gray-50"><td className="px-3 py-1 font-semibold text-gray-600 sticky left-0 bg-gray-50" colSpan={months.length + 4}>{r.label}</td></tr>
+                <tr key={idx} className="bg-gray-50"><td className="px-2 py-1 font-semibold text-gray-600 sticky left-0 bg-gray-50" colSpan={months.length + 4}>{r.label}</td></tr>
               );
               const { e, cumule, totalBudget, pct } = lineValues(r);
               return (
                 <tr key={idx} className={`border-t border-gray-50 ${r.cls || ''}`}>
-                  <td className={`px-3 py-1 sticky left-0 bg-white ${r.bold ? 'font-bold' : ''} ${r.indent ? 'pl-7' : ''} ${r.muted ? 'text-gray-500' : 'text-gray-800'} ${r.cls || ''}`}>{r.label}</td>
+                  <td className={`px-2 py-1 sticky left-0 bg-white ${r.bold ? 'font-bold' : ''} ${r.indent ? 'pl-4' : ''} ${r.muted ? 'text-gray-500' : 'text-gray-800'} ${r.cls || ''}`}>{r.label}</td>
                   {months.map((m, i) => (
-                    <td key={i} className={`px-2 py-1 text-right tabular-nums ${m.is_real ? '' : 'bg-blue-50/60'} ${r.bold ? 'font-semibold' : ''} ${r.result && e[i] < 0 ? 'text-red-600' : ''}`}>{fmt(e[i])}</td>
+                    <td key={i} className={`px-1 py-1 text-right tabular-nums ${i === fcIdx ? 'border-l-2 border-l-blue-400' : ''} ${m.is_real ? '' : 'bg-blue-50'} ${r.bold ? 'font-semibold' : ''} ${r.result && e[i] < 0 ? 'text-red-600' : ''}`}>{fmt(e[i])}</td>
                   ))}
-                  <td className={`px-3 py-1 text-right tabular-nums font-bold ${r.result && cumule < 0 ? 'text-red-600' : ''}`}>{fmt(cumule)}</td>
-                  <td className="px-3 py-1 text-right tabular-nums text-gray-500">{fmt(totalBudget)}</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-gray-500">{pct != null && pct !== 0 ? pct.toFixed(0) + '%' : ''}</td>
+                  <td className={`px-1 py-1 text-right tabular-nums font-bold ${r.result && cumule < 0 ? 'text-red-600' : ''}`}>{fmt(cumule)}</td>
+                  <td className="px-1 py-1 text-right tabular-nums text-gray-500">{fmt(totalBudget)}</td>
+                  <td className="px-1 py-1 text-right tabular-nums text-gray-500">{pct != null && pct !== 0 ? pct.toFixed(0) + '%' : ''}</td>
                 </tr>
               );
             })}
