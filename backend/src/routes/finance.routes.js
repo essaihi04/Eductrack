@@ -1077,6 +1077,9 @@ router.post('/students/:studentId/services/cancel-payment', async (req, res) => 
         })
         .eq('id', invoice_id);
       if (e3) throw e3;
+    } else {
+      // Facture conservée : recalcul du payé/statut (le service redevient dû).
+      await recalcInvoicePaid(invoice_id);
     }
 
     res.json({ success: true, cancelled_payments: pays?.length || 0, invoice_cancelled: !!cancel_invoice });
@@ -1857,6 +1860,8 @@ router.put('/payments/:id/cancel', async (req, res) => {
     const { reason } = req.body;
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
 
+    const { data: cur } = await supabaseAdmin.from('payments').select('invoice_id').eq('id', id).maybeSingle();
+
     const { error } = await supabaseAdmin
       .from('payments')
       .update({
@@ -1867,6 +1872,8 @@ router.put('/payments/:id/cancel', async (req, res) => {
       })
       .eq('id', id);
     if (error) throw error;
+    // Recalcul du payé/statut de la facture (totaux à jour même sans trigger).
+    await recalcInvoicePaid(cur?.invoice_id);
     res.json({ success: true });
   } catch (error) {
     console.error('Erreur cancel payment:', error);
@@ -1916,6 +1923,8 @@ router.put('/payments/:id', async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from('payments').update(patch).eq('id', id).select().single();
     if (error) throw error;
+    // Recalcul du payé/statut si le montant a changé (totaux à jour même sans trigger).
+    if (patch.amount !== undefined) await recalcInvoicePaid(current.invoice_id);
     res.json({ success: true, payment: data });
   } catch (error) {
     console.error('Erreur update payment:', error);
@@ -2687,6 +2696,37 @@ function computeMonthForPlan(plan, month) {
 // Décompose un mois en SERVICES (catégories de frais), avec la remise mensuelle
 // répartie au prorata pour que Σ(total des services) == total du mois.
 // Retourne [{ category, name, gross, total }].
+// Recalcule amount_paid + status d'une facture à partir de ses paiements CONFIRMÉS.
+// Garantit que l'annulation/modification d'un paiement est répercutée sur les
+// totaux (dû élève, dashboard, rapports…) même si le trigger DB est absent.
+async function recalcInvoicePaid(invoiceId) {
+  if (!invoiceId) return;
+  const { data: inv } = await supabaseAdmin
+    .from('invoices')
+    .select('id, total, due_date, status')
+    .eq('id', invoiceId)
+    .maybeSingle();
+  if (!inv || inv.status === 'cancelled') return; // facture annulée : on n'y touche pas
+
+  const { data: pays } = await supabaseAdmin
+    .from('payments')
+    .select('amount')
+    .eq('invoice_id', invoiceId)
+    .eq('status', 'confirmed');
+  const paid = (pays || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+
+  const today = new Date().toISOString().split('T')[0];
+  let status = 'issued';
+  if (Number(inv.total) > 0 && paid >= Number(inv.total)) status = 'paid';
+  else if (paid > 0) status = 'partial';
+  else if (inv.due_date && inv.due_date < today) status = 'overdue';
+
+  await supabaseAdmin
+    .from('invoices')
+    .update({ amount_paid: paid, status, updated_at: new Date().toISOString() })
+    .eq('id', invoiceId);
+}
+
 function computeMonthServices(plan, month) {
   const { lines, subtotal, total } = computeMonthForPlan(plan, month);
   if (!lines.length) return [];
