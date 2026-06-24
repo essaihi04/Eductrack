@@ -754,85 +754,8 @@ router.get('/students/:studentId/monthly-services-status', async (req, res) => {
     if (schoolId) invQ = invQ.eq('school_id', schoolId);
     if (periodLabels.length > 0) invQ = invQ.in('period_label', periodLabels);
     const { data: allInvoices } = await invQ;
-    const invoices = (allInvoices || []).filter(i => i.status !== 'cancelled');
-    // Services explicitement EXCLUS (avant paiement) : marqueur = facture annulée
-    // pour (période, catégorie). Indexés par période.
-    const excludedByPeriod = {};
-    (allInvoices || []).forEach(i => {
-      if (i.status === 'cancelled' && i.service_category) {
-        (excludedByPeriod[i.period_label] = excludedByPeriod[i.period_label] || new Set()).add(i.service_category);
-      }
-    });
 
-    const today = new Date().toISOString().split('T')[0];
-    const statusOf = (paid, total, dueDate) => {
-      if (paid >= total && total > 0) return 'paid';
-      if (paid > 0) return 'partial';
-      if (dueDate && dueDate < today) return 'overdue';
-      return 'unpaid';
-    };
-
-    const months = scheduleMonths.map(m => {
-      const label = periodLabelFor(academicYear, m);
-      const monthInvs = (invoices || []).filter(i => i.period_label === label);
-      const bundle = monthInvs.find(i => !i.service_category); // facture héritée « mois groupé »
-
-      let services;
-      if (bundle) {
-        const paid = Number(bundle.amount_paid || 0);
-        const total = Number(bundle.total || 0);
-        services = [{
-          category: null, label: 'Mensualité', expected: total, total, paid,
-          remaining: Math.max(0, total - paid), invoice_id: bundle.id,
-          invoice_number: bundle.invoice_number, status: statusOf(paid, total, bundle.due_date),
-        }];
-      } else {
-        const byCat = {};
-        monthInvs.forEach(i => { if (i.service_category) byCat[i.service_category] = i; });
-        const monthExcluded = excludedByPeriod[label];
-        services = computeMonthServices(plan, m).map(s => {
-          const inv = byCat[s.category];
-          // Exclu = pas de facture active mais un marqueur d'exclusion présent.
-          const excluded = !inv && !!monthExcluded?.has(s.category);
-          const total = excluded ? 0 : (inv ? Number(inv.total) : s.total);
-          const paid = inv ? Number(inv.amount_paid || 0) : 0;
-          return {
-            category: s.category, label: s.name, expected: s.total, total, paid,
-            remaining: excluded ? 0 : Math.max(0, total - paid), invoice_id: inv?.id || null,
-            invoice_number: inv?.invoice_number || null,
-            status: inv ? statusOf(paid, total, inv.due_date) : (excluded ? 'excluded' : 'pending'),
-            excluded: excluded || undefined,
-          };
-        });
-
-        // Services facturés hors plan (ajoutés manuellement à ce mois) :
-        // les inclure pour qu'ils apparaissent et soient encaissables/annulables.
-        const present = new Set(services.map(s => s.category));
-        monthInvs.forEach(i => {
-          if (i.service_category && !present.has(i.service_category)) {
-            const total = Number(i.total);
-            const paid = Number(i.amount_paid || 0);
-            services.push({
-              category: i.service_category, label: CATEGORY_FR[i.service_category] || i.service_category,
-              expected: total, total, paid, remaining: Math.max(0, total - paid),
-              invoice_id: i.id, invoice_number: i.invoice_number,
-              status: statusOf(paid, total, i.due_date), extra: true,
-            });
-            present.add(i.service_category);
-          }
-        });
-      }
-
-      const expected = services.reduce((a, s) => a + Number(s.total), 0);
-      const paid = services.reduce((a, s) => a + Number(s.paid), 0);
-      const remaining = services.reduce((a, s) => a + Number(s.remaining), 0);
-      let status = 'unpaid';
-      if (remaining <= 0 && expected > 0) status = 'paid';
-      else if (paid > 0) status = 'partial';
-      else if (services.some(s => s.status === 'overdue')) status = 'overdue';
-
-      return { month: m, label, services, expected, paid, remaining, status };
-    });
+    const months = buildPlanMonths(plan, academicYear, allInvoices || []);
 
     const expectedTotal = months.reduce((s, mo) => s + Number(mo.expected), 0);
     const paidTotal = months.reduce((s, mo) => s + Number(mo.paid), 0);
@@ -1959,20 +1882,27 @@ router.get('/dashboard/summary', async (req, res) => {
     const { data: paidRows } = await paidQuery;
     const collectedThisMonth = (paidRows || []).reduce((s, r) => s + Number(r.amount), 0);
 
-    // Dû total (non annulé, non payé) — scopé à l'année active si fournie.
-    let dueQuery = supabaseAdmin
-      .from('invoices')
-      .select('total, amount_paid, due_date, status')
-      .in('status', ['issued', 'partial', 'overdue']);
-    if (schoolId) dueQuery = dueQuery.eq('school_id', schoolId);
-    if (range) dueQuery = dueQuery.gte('issue_date', range.start).lte('issue_date', range.end);
-    const { data: dueRows } = await dueQuery;
-
-    const totalDue = (dueRows || []).reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
-    const todayStr = today.toISOString().split('T')[0];
-    const overdueRows = (dueRows || []).filter(r => r.due_date < todayStr);
-    const totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
-    const overdueCount = overdueRows.length;
+    // Dû total = PRÉVISIONNEL des plans − payé (exclusions déduites), si une
+    // année est fournie. Sinon repli sur le dû « facturé » (factures non payées).
+    let totalDue, totalOverdue, overdueCount;
+    if (req.query.academic_year) {
+      const rec = await planReceivables(schoolId, req.query.academic_year);
+      totalDue = rec.totalDue;
+      totalOverdue = rec.totalOverdue;
+      overdueCount = rec.overdueCount;
+    } else {
+      let dueQuery = supabaseAdmin
+        .from('invoices')
+        .select('total, amount_paid, due_date, status')
+        .in('status', ['issued', 'partial', 'overdue']);
+      if (schoolId) dueQuery = dueQuery.eq('school_id', schoolId);
+      const { data: dueRows } = await dueQuery;
+      totalDue = (dueRows || []).reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
+      const todayStr = today.toISOString().split('T')[0];
+      const overdueRows = (dueRows || []).filter(r => r.due_date < todayStr);
+      totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
+      overdueCount = overdueRows.length;
+    }
 
     // Factures émises sur la période
     let issuedQuery = supabaseAdmin
@@ -2729,6 +2659,145 @@ async function recalcInvoicePaid(invoiceId) {
     .from('invoices')
     .update({ amount_paid: paid, status, updated_at: new Date().toISOString() })
     .eq('id', invoiceId);
+}
+
+// Construit les mois × services d'un plan (mêmes règles que l'écran élève) à
+// partir des factures de l'élève (annulées incluses pour détecter les exclusions).
+// Source unique de vérité partagée entre la fiche élève et le dashboard.
+function buildPlanMonths(plan, academicYear, studentInvoices) {
+  const scheduleMonths = getScheduleMonths(plan);
+  const today = new Date().toISOString().split('T')[0];
+  const statusOf = (paid, total, dueDate) => {
+    if (paid >= total && total > 0) return 'paid';
+    if (paid > 0) return 'partial';
+    if (dueDate && dueDate < today) return 'overdue';
+    return 'unpaid';
+  };
+  const invoices = (studentInvoices || []).filter(i => i.status !== 'cancelled');
+  const excludedByPeriod = {};
+  (studentInvoices || []).forEach(i => {
+    if (i.status === 'cancelled' && i.service_category) {
+      (excludedByPeriod[i.period_label] = excludedByPeriod[i.period_label] || new Set()).add(i.service_category);
+    }
+  });
+
+  return scheduleMonths.map(m => {
+    const label = periodLabelFor(academicYear, m);
+    const computedDue = `${calendarYearFor(academicYear, m)}-${String(m).padStart(2, '0')}-05`;
+    const monthInvs = invoices.filter(i => i.period_label === label);
+    const bundle = monthInvs.find(i => !i.service_category);
+
+    let services;
+    if (bundle) {
+      const paid = Number(bundle.amount_paid || 0);
+      const total = Number(bundle.total || 0);
+      services = [{
+        category: null, label: 'Mensualité', expected: total, total, paid,
+        remaining: Math.max(0, total - paid), invoice_id: bundle.id,
+        invoice_number: bundle.invoice_number, status: statusOf(paid, total, bundle.due_date),
+        due_date: bundle.due_date || computedDue,
+      }];
+    } else {
+      const byCat = {};
+      monthInvs.forEach(i => { if (i.service_category) byCat[i.service_category] = i; });
+      const monthExcluded = excludedByPeriod[label];
+      services = computeMonthServices(plan, m).map(s => {
+        const inv = byCat[s.category];
+        const excluded = !inv && !!monthExcluded?.has(s.category);
+        const total = excluded ? 0 : (inv ? Number(inv.total) : s.total);
+        const paid = inv ? Number(inv.amount_paid || 0) : 0;
+        return {
+          category: s.category, label: s.name, expected: s.total, total, paid,
+          remaining: excluded ? 0 : Math.max(0, total - paid), invoice_id: inv?.id || null,
+          invoice_number: inv?.invoice_number || null,
+          status: inv ? statusOf(paid, total, inv.due_date) : (excluded ? 'excluded' : 'pending'),
+          excluded: excluded || undefined, due_date: inv?.due_date || computedDue,
+        };
+      });
+      const present = new Set(services.map(s => s.category));
+      monthInvs.forEach(i => {
+        if (i.service_category && !present.has(i.service_category)) {
+          const total = Number(i.total);
+          const paid = Number(i.amount_paid || 0);
+          services.push({
+            category: i.service_category, label: CATEGORY_FR[i.service_category] || i.service_category,
+            expected: total, total, paid, remaining: Math.max(0, total - paid),
+            invoice_id: i.id, invoice_number: i.invoice_number,
+            status: statusOf(paid, total, i.due_date), extra: true, due_date: i.due_date || computedDue,
+          });
+          present.add(i.service_category);
+        }
+      });
+    }
+
+    const expected = services.reduce((a, s) => a + Number(s.total), 0);
+    const paid = services.reduce((a, s) => a + Number(s.paid), 0);
+    const remaining = services.reduce((a, s) => a + Number(s.remaining), 0);
+    let status = 'unpaid';
+    if (remaining <= 0 && expected > 0) status = 'paid';
+    else if (paid > 0) status = 'partial';
+    else if (services.some(s => s.status === 'overdue')) status = 'overdue';
+
+    return { month: m, label, services, expected, paid, remaining, status };
+  });
+}
+
+// Récupère toutes les lignes d'une requête en paginant (contourne la limite 1000).
+async function fetchAllRows(buildQuery) {
+  const pageSize = 1000;
+  let from = 0;
+  let all = [];
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+// Dû PRÉVISIONNEL global (basé sur les plans actifs) : Σ du reste à payer de
+// chaque élève (attendu du plan − payé), exclusions déduites. Sert au dashboard.
+async function planReceivables(schoolId, academicYear) {
+  const yearVariants = [...new Set([academicYear, academicYear.replace('/', '-'), academicYear.replace('-', '/')])];
+  const plans = await fetchAllRows(() => {
+    let q = supabaseAdmin.from('student_fee_plans')
+      .select('*, template:fee_templates(*, fee_template_items(*)), custom_items:student_fee_plan_items(*)')
+      .in('academic_year', yearVariants).eq('status', 'active');
+    if (schoolId) q = q.eq('school_id', schoolId);
+    return q;
+  });
+  if (plans.length === 0) return { totalDue: 0, totalOverdue: 0, overdueCount: 0, expectedTotal: 0, paidTotal: 0 };
+
+  const studentIds = [...new Set(plans.map(p => p.student_id))];
+  const invs = await fetchAllRows(() => {
+    let q = supabaseAdmin.from('invoices')
+      .select('id, student_id, period_label, service_category, total, amount_paid, status, due_date, invoice_number')
+      .in('student_id', studentIds);
+    if (schoolId) q = q.eq('school_id', schoolId);
+    return q;
+  });
+  const invByStudent = {};
+  invs.forEach(i => { (invByStudent[i.student_id] = invByStudent[i.student_id] || []).push(i); });
+
+  const today = new Date().toISOString().split('T')[0];
+  let totalDue = 0, totalOverdue = 0, overdueCount = 0, expectedTotal = 0, paidTotal = 0;
+  for (const plan of plans) {
+    const months = buildPlanMonths(plan, academicYear, invByStudent[plan.student_id] || []);
+    for (const mo of months) {
+      expectedTotal += Number(mo.expected);
+      paidTotal += Number(mo.paid);
+      totalDue += Number(mo.remaining);
+      for (const s of mo.services) {
+        if (Number(s.remaining) > 0 && s.due_date && s.due_date < today) {
+          totalOverdue += Number(s.remaining);
+          overdueCount += 1;
+        }
+      }
+    }
+  }
+  return { totalDue, totalOverdue, overdueCount, expectedTotal, paidTotal };
 }
 
 function computeMonthServices(plan, month) {
