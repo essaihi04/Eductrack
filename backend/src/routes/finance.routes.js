@@ -1882,14 +1882,17 @@ router.get('/dashboard/summary', async (req, res) => {
     const { data: paidRows } = await paidQuery;
     const collectedThisMonth = (paidRows || []).reduce((s, r) => s + Number(r.amount), 0);
 
-    // Dû total = PRÉVISIONNEL des plans − payé (exclusions déduites), si une
-    // année est fournie. Sinon repli sur le dû « facturé » (factures non payées).
-    let totalDue, totalOverdue, overdueCount;
+    // Si une année est fournie : tout est basé sur le PRÉVISIONNEL des plans
+    // (exclusions déduites) → « Attendu » + « Dû » réagissent aux exclusions.
+    // Sinon : repli sur le réel facturé.
+    let totalDue, totalOverdue, overdueCount, issuedThisMonth, forecast = false;
     if (req.query.academic_year) {
       const rec = await planReceivables(schoolId, req.query.academic_year);
       totalDue = rec.totalDue;
       totalOverdue = rec.totalOverdue;
       overdueCount = rec.overdueCount;
+      issuedThisMonth = rec.expectedTotal; // « Attendu (prévisionnel) »
+      forecast = true;
     } else {
       let dueQuery = supabaseAdmin
         .from('invoices')
@@ -1902,18 +1905,18 @@ router.get('/dashboard/summary', async (req, res) => {
       const overdueRows = (dueRows || []).filter(r => r.due_date < todayStr);
       totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
       overdueCount = overdueRows.length;
-    }
 
-    // Factures émises sur la période
-    let issuedQuery = supabaseAdmin
-      .from('invoices')
-      .select('total')
-      .gte('issue_date', periodStart)
-      .lte('issue_date', periodEnd)
-      .neq('status', 'cancelled');
-    if (schoolId) issuedQuery = issuedQuery.eq('school_id', schoolId);
-    const { data: issuedRows } = await issuedQuery;
-    const issuedThisMonth = (issuedRows || []).reduce((s, r) => s + Number(r.total), 0);
+      // Factures émises sur la période
+      let issuedQuery = supabaseAdmin
+        .from('invoices')
+        .select('total')
+        .gte('issue_date', periodStart)
+        .lte('issue_date', periodEnd)
+        .neq('status', 'cancelled');
+      if (schoolId) issuedQuery = issuedQuery.eq('school_id', schoolId);
+      const { data: issuedRows } = await issuedQuery;
+      issuedThisMonth = (issuedRows || []).reduce((s, r) => s + Number(r.total), 0);
+    }
 
     res.json({
       collectedThisMonth,
@@ -1921,6 +1924,7 @@ router.get('/dashboard/summary', async (req, res) => {
       totalDue,
       totalOverdue,
       overdueCount,
+      forecast, // true = « Attendu (prévisionnel) » au lieu de « Facturé » réel
       collectionRate: issuedThisMonth > 0 ? (collectedThisMonth / issuedThisMonth) * 100 : 0
     });
   } catch (error) {

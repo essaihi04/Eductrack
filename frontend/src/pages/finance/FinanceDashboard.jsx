@@ -46,14 +46,14 @@ export default function FinanceDashboard() {
       <KpiGrid cols={4}>
         <KpiCard icon={DollarSign} label={`Encaissé ${year}`} tone="green"
           value={loading ? '—' : formatMAD(summary?.collectedThisMonth)} />
-        <KpiCard icon={FileText} label={`Facturé ${year}`} tone="blue"
+        <KpiCard icon={FileText} label={`${summary?.forecast ? 'Attendu (prévisionnel)' : 'Facturé'} ${year}`} tone="blue"
           value={loading ? '—' : formatMAD(summary?.issuedThisMonth)}
           sub={summary ? `Taux: ${(summary.collectionRate || 0).toFixed(0)}%` : ''} />
-        <KpiCard icon={TrendingUp} label="Dû total" tone="orange"
+        <KpiCard icon={TrendingUp} label={summary?.forecast ? 'Dû prévisionnel' : 'Dû total'} tone="orange"
           value={loading ? '—' : formatMAD(summary?.totalDue)} />
         <KpiCard icon={AlertCircle} label="En retard" tone="red"
           value={loading ? '—' : formatMAD(summary?.totalOverdue)}
-          sub={summary ? `${summary.overdueCount} facture(s)` : ''}
+          sub={summary ? `${summary.overdueCount} service(s)` : ''}
           href="/finance/overdue" />
       </KpiGrid>
 
