@@ -708,6 +708,7 @@ router.post('/students/:studentId/pay-months', async (req, res) => {
           .select('id, receipt_number, amount')
           .single();
         if (payErr) { errors.push({ month, error: payErr.message }); continue; }
+        await recalcInvoicePaid(invoice.id); // payé/statut à jour même sans trigger
 
         receipts.push({ month, period_label: periodLabel, receipt_number: payment.receipt_number, amount: payment.amount });
       } catch (e) {
@@ -977,6 +978,7 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
           ({ data: payment, error: payErr } = await doInsert(false));
         }
         if (payErr) { errors.push({ month, category, error: payErr.message }); continue; }
+        await recalcInvoicePaid(invoice.id); // payé/statut à jour même sans trigger
 
         receipts.push({ month, category, period_label: periodLabel, receipt_number: payment.receipt_number, amount: payment.amount });
       } catch (e) {
@@ -1252,6 +1254,7 @@ async function collectOneService({ plan, studentId, schoolId, academicYear, mont
     .select('id, receipt_number, amount')
     .single();
   if (payErr) return { error: payErr.message };
+  await recalcInvoicePaid(invoice.id); // payé/statut à jour même sans trigger
   return { receipt: { receipt_number: payment.receipt_number, amount: payment.amount } };
 }
 
@@ -1741,6 +1744,7 @@ router.post('/payments', async (req, res) => {
       .select()
       .single();
     if (error) throw error;
+    await recalcInvoicePaid(invoice_id || null); // payé/statut à jour même sans trigger
 
     res.json({ success: true, payment });
   } catch (error) {
