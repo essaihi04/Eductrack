@@ -1,8 +1,7 @@
-import { useState, useEffect, Fragment } from 'react';
-import { LayoutGrid, Download, Printer } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { LayoutGrid } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
-import { PageHeader, Button } from '../../components/finance/ui';
-import { addPrevisionnelSheet } from './previsionnelSheet';
+import { PageHeader } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
 
@@ -12,15 +11,12 @@ function currentAcademicYear() {
   const d = new Date(); const y = d.getFullYear();
   return d.getMonth() + 1 >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
 }
-function yearOptions() {
-  const cur = currentAcademicYear(); const y1 = parseInt(cur.split('-')[0], 10);
-  return [`${y1 - 1}-${y1}`, cur, `${y1 + 1}-${y1 + 2}`];
-}
 const fmt = (n) => { const v = Math.round(Number(n) || 0); return v === 0 ? '' : v.toLocaleString('fr-FR'); };
 
 export default function PrevisionnelMatrixPage() {
   const { year: activeYear } = useYear();
-  const [year, setYear] = useState(toDashYear(activeYear) || currentAcademicYear());
+  // Année pilotée par le sélecteur global de l'en-tête (plus de sélecteur local).
+  const year = toDashYear(activeYear) || currentAcademicYear();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -73,56 +69,12 @@ export default function PrevisionnelMatrixPage() {
     return { e, cumule, totalBudget, pct };
   };
 
-  const exportCSV = () => {
-    const sep = ';';
-    const head = ['Poste', ...months.map((m) => `${SHORT[m.month]} ${m.year}${m.is_real ? '' : ' (prev)'}`), 'Cumulé', 'Budget', '%'];
-    const lines = [head.join(sep)];
-    rows.forEach((r) => {
-      if (r.section) { lines.push(r.section); return; }
-      if (r.subheader) { lines.push(r.label); return; }
-      const { e, cumule, totalBudget, pct } = lineValues(r);
-      lines.push([r.label, ...e.map((v) => Math.round(v)), Math.round(cumule), Math.round(totalBudget), pct != null ? pct.toFixed(1) : ''].join(sep));
-    });
-    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Previsionnel_${year}.csv`;
-    a.click();
-  };
-
-  // Export Excel coloré : Réel / Prévisionnel différenciés, sections colorées,
-  // négatifs en rouge, barre de données sur le cumulé, ligne de résultat mise en avant.
-  const exportXLSX = async () => {
-    const ExcelJS = (await import('exceljs')).default;
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'Edutrack';
-    addPrevisionnelSheet(wb, year, data);
-
-    const buf = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Previsionnel_${year}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
-
   return (
     <div className="p-6 space-y-4">
       <div className="print:hidden">
         <PageHeader icon={LayoutGrid} title="Prévisionnel / Réel" color="blue"
           subtitle="Tableau de gestion annuel — Réel (mois passés) vs Prévisionnel (mois à venir)."
-          onRefresh={load}
-          actions={
-            <>
-              <select value={year} onChange={(e) => setYear(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg">
-                {yearOptions().map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <Button variant="secondary" icon={Download} onClick={exportXLSX}>Excel</Button>
-              <Button variant="secondary" icon={Download} onClick={exportCSV}>CSV</Button>
-              <Button variant="secondary" icon={Printer} onClick={() => window.print()}>Imprimer</Button>
-            </>
-          } />
+          onRefresh={load} />
       </div>
 
       <div className="flex gap-4 text-xs text-gray-500 print:hidden">
@@ -131,23 +83,23 @@ export default function PrevisionnelMatrixPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <table className="w-full table-fixed text-[10px] border-collapse">
+        <table className="w-full table-fixed text-[11px] border-collapse">
           <colgroup>
-            <col className="w-[120px]" />
+            <col className="w-[200px]" />
             {months.map((m) => <col key={m.month} />)}
-            <col className="w-[58px]" />
-            <col className="w-[58px]" />
-            <col className="w-[34px]" />
+            <col />
+            <col />
+            <col />
           </colgroup>
           <thead className="sticky top-0 z-10">
             <tr>
               <th className="px-2 py-2 text-left sticky left-0 bg-gray-100 z-20 border-b border-gray-200">Poste</th>
               {months.map((m, i) => (
-                <th key={m.month} className={`px-1 py-2 text-right leading-tight border-b border-gray-200 ${i === fcIdx ? 'border-l-2 border-l-blue-400' : ''} ${m.is_real ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>{SHORT[m.month]}<br /><span className="font-normal text-[9px] opacity-70">{m.year}</span></th>
+                <th key={m.month} className={`px-2 py-2 text-right leading-tight border-b border-gray-200 ${i === fcIdx ? 'border-l-2 border-l-blue-400' : ''} ${m.is_real ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`}>{SHORT[m.month]}<br /><span className="font-normal text-[9px] opacity-70">{m.year}</span></th>
               ))}
-              <th className="px-1 py-2 text-right bg-gray-100 font-bold border-b border-gray-200">Cumulé</th>
-              <th className="px-1 py-2 text-right bg-gray-100 border-b border-gray-200">Budget</th>
-              <th className="px-1 py-2 text-right bg-gray-100 border-b border-gray-200">%</th>
+              <th className="px-2 py-2 text-right bg-gray-100 font-bold border-b border-gray-200">Cumulé</th>
+              <th className="px-2 py-2 text-right bg-gray-100 border-b border-gray-200">Budget</th>
+              <th className="px-2 py-2 text-right bg-gray-100 border-b border-gray-200">%</th>
             </tr>
           </thead>
           <tbody>
@@ -163,11 +115,11 @@ export default function PrevisionnelMatrixPage() {
                 <tr key={idx} className={`border-t border-gray-50 ${r.cls || ''}`}>
                   <td className={`px-2 py-1 sticky left-0 bg-white ${r.bold ? 'font-bold' : ''} ${r.indent ? 'pl-4' : ''} ${r.muted ? 'text-gray-500' : 'text-gray-800'} ${r.cls || ''}`}>{r.label}</td>
                   {months.map((m, i) => (
-                    <td key={i} className={`px-1 py-1 text-right tabular-nums ${i === fcIdx ? 'border-l-2 border-l-blue-400' : ''} ${m.is_real ? '' : 'bg-blue-50'} ${r.bold ? 'font-semibold' : ''} ${r.result && e[i] < 0 ? 'text-red-600' : ''}`}>{fmt(e[i])}</td>
+                    <td key={i} className={`px-2 py-1.5 text-right tabular-nums ${i === fcIdx ? 'border-l-2 border-l-blue-400' : ''} ${m.is_real ? '' : 'bg-blue-50'} ${r.bold ? 'font-semibold' : ''} ${r.result && e[i] < 0 ? 'text-red-600' : ''}`}>{fmt(e[i])}</td>
                   ))}
-                  <td className={`px-1 py-1 text-right tabular-nums font-bold ${r.result && cumule < 0 ? 'text-red-600' : ''}`}>{fmt(cumule)}</td>
-                  <td className="px-1 py-1 text-right tabular-nums text-gray-500">{fmt(totalBudget)}</td>
-                  <td className="px-1 py-1 text-right tabular-nums text-gray-500">{pct != null && pct !== 0 ? pct.toFixed(0) + '%' : ''}</td>
+                  <td className={`px-2 py-1.5 text-right tabular-nums font-bold ${r.result && cumule < 0 ? 'text-red-600' : ''}`}>{fmt(cumule)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{fmt(totalBudget)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{pct != null && pct !== 0 ? pct.toFixed(0) + '%' : ''}</td>
                 </tr>
               );
             })}
