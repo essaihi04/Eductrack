@@ -103,7 +103,6 @@ export function addPrevisionnelSheet(wb, year, data) {
   }
   headRow.height = 22;
 
-  let firstDataRow = null, lastDataRow = null;
   rows.forEach((r) => {
     if (r.section) {
       const rowIdx = ws.lastRow.number + 1;
@@ -134,9 +133,6 @@ export function addPrevisionnelSheet(wb, year, data) {
       Math.round(cumule), Math.round(totalBudget),
       pct != null ? Number(pct.toFixed(1)) / 100 : null,
     ]);
-    const idx = row.number;
-    if (firstDataRow == null) firstDataRow = idx;
-    lastDataRow = idx;
     const isResult = r.result;
     const isTotal = r.bold && !isResult;
     for (let i = 1; i <= ncol; i++) {
@@ -157,16 +153,6 @@ export function addPrevisionnelSheet(wb, year, data) {
       else { cell.numFmt = MONEY; cell.alignment = { horizontal: 'right' }; }
     }
   });
-
-  // Barre de données sur la colonne Cumulé
-  if (firstDataRow != null) {
-    const col = months.length + 2;
-    const letter = ws.getColumn(col).letter;
-    ws.addConditionalFormatting({
-      ref: `${letter}${firstDataRow}:${letter}${lastDataRow}`,
-      rules: [{ type: 'dataBar', cfvo: [{ type: 'num', value: 0 }, { type: 'max' }], color: { argb: 'FFB5D4F4' } }],
-    });
-  }
 
   return ws;
 }

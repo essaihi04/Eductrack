@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3, TrendingUp, TrendingDown, Wallet, FileSpreadsheet, FileText,
-  Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt, LayoutGrid,
+  Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt,
 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS, EXPENSE_CATEGORIES } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, Card, Button } from '../../components/finance/ui';
@@ -450,18 +450,7 @@ const ReportsPage = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Export simple : synthèse + détails de la période choisie.
-  const exportExcel = async () => {
-    if (!data) return;
-    const ExcelJS = (await import('exceljs')).default;
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'Edutrack';
-    wb.created = new Date();
-    buildReportSheets(wb);
-    await downloadWorkbook(wb, `${fileBase}.xlsx`);
-  };
-
-  // Export complet : matrice annuelle Prévisionnel/Réel (1er onglet) + détails de la période.
+  // Export Excel : matrice annuelle Prévisionnel/Réel (1er onglet) + détails de la période.
   const exportExcelComplet = async () => {
     if (!data) return;
     const ExcelJS = (await import('exceljs')).default;
@@ -608,8 +597,7 @@ const ReportsPage = () => {
         subtitle="Synthèse recettes / dépenses / recouvrement — exportable par période, mois ou jour"
         actions={
           <>
-            <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcel} disabled={!data}>Excel</Button>
-            <Button variant="secondary" icon={LayoutGrid} onClick={exportExcelComplet} disabled={!data}>Excel complet</Button>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={exportExcelComplet} disabled={!data}>Excel</Button>
             <Button color="blue" icon={FileText} onClick={exportPDF} disabled={!data}>PDF</Button>
           </>
         } />
