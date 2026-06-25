@@ -31,7 +31,8 @@ export function buildMatrix(data) {
   });
   rows.push({ label: 'TOTAL DÉPENSES', actual: data.expenses.total.actual, budget: data.expenses.total.budget, bold: true });
 
-  rows.push({ label: 'RÉSULTAT (CA − Dépenses)', actual: data.result.actual, budget: data.result.budget, bold: true, result: true });
+  rows.push({ label: 'RÉSULTAT COMPTABLE (CA − Dépenses)', actual: data.result.actual, budget: data.result.budget, bold: true, result: true });
+  rows.push({ label: 'RÉSULTAT ENCAISSÉ (encaissé − dépensé)', actual: data.resultCash?.actual || [], budget: data.resultCash?.budget || [], bold: true, result: true });
 
   const lineValues = (r) => {
     const e = eff(r.actual, r.budget);

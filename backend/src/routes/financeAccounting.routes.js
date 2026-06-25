@@ -377,9 +377,12 @@ router.get('/reports/annual-matrix', async (req, res) => {
     const expenseTotalActual = sections.reduce((acc, s) => sumArr(acc, s.subtotal.actual), zero12());
     const expenseTotalBudget = sections.reduce((acc, s) => sumArr(acc, s.subtotal.budget), zero12());
 
-    // Résultat (CA - Dépenses)
+    // Résultat COMPTABLE (CA facturé − dépenses) : rentabilité sur le papier.
     const resultActual = billedTotal.map((ca, i) => ca - expenseTotalActual[i]);
     const resultBudget = revenueBudgetTotal.map((ca, i) => ca - expenseTotalBudget[i]);
+    // Résultat ENCAISSÉ (encaissé − dépensé) : trésorerie réelle. Le prévisionnel
+    // reste identique (on suppose l'encaissement du prévu).
+    const resultCashActual = encaissementsTotal.map((enc, i) => enc - expenseTotalActual[i]);
 
     res.json({
       academic_year: academicYear,
@@ -393,6 +396,7 @@ router.get('/reports/annual-matrix', async (req, res) => {
         total: { actual: expenseTotalActual, budget: expenseTotalBudget },
       },
       result: { actual: resultActual, budget: resultBudget },
+      resultCash: { actual: resultCashActual, budget: resultBudget },
     });
   } catch (e) {
     console.error('GET /finance/reports/annual-matrix:', e);

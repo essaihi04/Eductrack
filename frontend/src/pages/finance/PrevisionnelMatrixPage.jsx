@@ -62,7 +62,8 @@ export default function PrevisionnelMatrixPage() {
   });
   rows.push({ label: 'TOTAL DÉPENSES', actual: data.expenses.total.actual, budget: data.expenses.total.budget, bold: true, cls: 'bg-red-50' });
 
-  rows.push({ label: 'RÉSULTAT (CA − Dépenses)', actual: data.result.actual, budget: data.result.budget, bold: true, cls: 'bg-indigo-100 text-indigo-900', result: true });
+  rows.push({ label: 'RÉSULTAT COMPTABLE (CA − Dépenses)', actual: data.result.actual, budget: data.result.budget, bold: true, cls: 'bg-indigo-100 text-indigo-900', result: true });
+  rows.push({ label: 'RÉSULTAT ENCAISSÉ (encaissé − dépensé)', actual: data.resultCash?.actual || [], budget: data.resultCash?.budget || [], bold: true, cls: 'bg-emerald-100 text-emerald-900', result: true });
 
   const lineValues = (r) => {
     const e = eff(r.actual, r.budget);
