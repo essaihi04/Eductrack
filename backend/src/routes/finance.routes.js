@@ -1452,6 +1452,83 @@ router.post('/invoices', async (req, res) => {
 });
 
 // Génération mensuelle en lot
+// Génère les factures d'UN mois pour une école/année (plans actifs).
+// Idempotent : saute tout élève déjà facturé pour cette période (pas de doublon).
+// Partagé entre le bouton manuel et le planificateur automatique.
+export async function generateInvoicesForMonth({ schoolId, academic_year, month, year, due_day = 5, class_id = null, userId = null }) {
+  let plansQuery = supabaseAdmin
+    .from('student_fee_plans')
+    .select(`*,
+      student:profiles!student_fee_plans_student_id_fkey(id, first_name, last_name, class_id, school_id),
+      template:fee_templates(*, fee_template_items(*)),
+      custom_items:student_fee_plan_items(*)
+    `)
+    .eq('academic_year', academic_year)
+    .eq('status', 'active');
+  if (schoolId) plansQuery = plansQuery.eq('school_id', schoolId);
+
+  const { data: plans, error } = await plansQuery;
+  if (error) throw error;
+
+  let filteredPlans = plans || [];
+  if (class_id) filteredPlans = filteredPlans.filter(p => p.student?.class_id === class_id);
+
+  const dueDate = `${year}-${String(month).padStart(2, '0')}-${String(due_day).padStart(2, '0')}`;
+  const periodLabel = `${getMonthName(month)} ${year}`;
+
+  let createdCount = 0;
+  let skippedCount = 0;
+  const errors = [];
+
+  for (const plan of filteredPlans) {
+    try {
+      // Calcul des lignes + totaux pour ce mois (helper partagé)
+      const { lines: applicableLines, subtotal, discount, total } = computeMonthForPlan(plan, month);
+
+      if (applicableLines.length === 0) { skippedCount++; continue; }
+
+      // Vérifier doublon (même élève, même période)
+      const { data: existing } = await supabaseAdmin
+        .from('invoices')
+        .select('id')
+        .eq('student_id', plan.student_id)
+        .eq('period_label', periodLabel)
+        .neq('status', 'cancelled')
+        .maybeSingle();
+      if (existing) { skippedCount++; continue; }
+
+      const invoiceNumber = await getNextCounter(schoolId, 'invoice');
+
+      const { data: inv, error: invErr } = await supabaseAdmin
+        .from('invoices')
+        .insert({
+          school_id: schoolId,
+          invoice_number: invoiceNumber,
+          student_id: plan.student_id,
+          plan_id: plan.id,
+          due_date: dueDate,
+          period_label: periodLabel,
+          subtotal, discount, total,
+          status: 'issued',
+          created_by: userId
+        })
+        .select()
+        .single();
+      if (invErr) { errors.push(invErr.message); continue; }
+
+      const linesToInsert = applicableLines.map((l, idx) => ({
+        invoice_id: inv.id, ...l, sort_order: idx
+      }));
+      await supabaseAdmin.from('invoice_lines').insert(linesToInsert);
+      createdCount++;
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+
+  return { created_count: createdCount, skipped_count: skippedCount, errors };
+}
+
 router.post('/invoices/generate-monthly', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -1459,84 +1536,11 @@ router.post('/invoices/generate-monthly', async (req, res) => {
     if (!academic_year || !month || !year) {
       return res.status(400).json({ error: 'academic_year, month, year requis' });
     }
-
-    // Récupérer les plans actifs
-    let plansQuery = supabaseAdmin
-      .from('student_fee_plans')
-      .select(`*,
-        student:profiles!student_fee_plans_student_id_fkey(id, first_name, last_name, class_id, school_id),
-        template:fee_templates(*, fee_template_items(*)),
-        custom_items:student_fee_plan_items(*)
-      `)
-      .eq('academic_year', academic_year)
-      .eq('status', 'active');
-    if (schoolId) plansQuery = plansQuery.eq('school_id', schoolId);
-
-    const { data: plans, error } = await plansQuery;
-    if (error) throw error;
-
-    let filteredPlans = plans || [];
-    if (class_id) filteredPlans = filteredPlans.filter(p => p.student?.class_id === class_id);
-
-    const dueDate = `${year}-${String(month).padStart(2, '0')}-${String(due_day || 5).padStart(2, '0')}`;
-    const periodLabel = `${getMonthName(month)} ${year}`;
-
-    let createdCount = 0;
-    let skippedCount = 0;
-    let errors = [];
-
-    for (const plan of filteredPlans) {
-      try {
-        // Calcul des lignes + totaux pour ce mois (helper partagé)
-        const { lines: applicableLines, subtotal, discount, total } = computeMonthForPlan(plan, month);
-
-        if (applicableLines.length === 0) { skippedCount++; continue; }
-
-        // Vérifier doublon (même élève, même période)
-        const { data: existing } = await supabaseAdmin
-          .from('invoices')
-          .select('id')
-          .eq('student_id', plan.student_id)
-          .eq('period_label', periodLabel)
-          .neq('status', 'cancelled')
-          .maybeSingle();
-        if (existing) { skippedCount++; continue; }
-
-        const invoiceNumber = await getNextCounter(schoolId, 'invoice');
-
-        const { data: inv, error: invErr } = await supabaseAdmin
-          .from('invoices')
-          .insert({
-            school_id: schoolId,
-            invoice_number: invoiceNumber,
-            student_id: plan.student_id,
-            plan_id: plan.id,
-            due_date: dueDate,
-            period_label: periodLabel,
-            subtotal, discount, total,
-            status: 'issued',
-            created_by: req.user.id
-          })
-          .select()
-          .single();
-        if (invErr) { errors.push(invErr.message); continue; }
-
-        const linesToInsert = applicableLines.map((l, idx) => ({
-          invoice_id: inv.id, ...l, sort_order: idx
-        }));
-        await supabaseAdmin.from('invoice_lines').insert(linesToInsert);
-        createdCount++;
-      } catch (e) {
-        errors.push(e.message);
-      }
-    }
-
-    res.json({
-      success: true,
-      created_count: createdCount,
-      skipped_count: skippedCount,
-      errors: errors.slice(0, 10)
+    const r = await generateInvoicesForMonth({
+      schoolId, academic_year, month, year,
+      due_day: due_day || 5, class_id: class_id || null, userId: req.user.id,
     });
+    res.json({ success: true, ...r, errors: r.errors.slice(0, 10) });
   } catch (error) {
     console.error('Erreur generate-monthly:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
