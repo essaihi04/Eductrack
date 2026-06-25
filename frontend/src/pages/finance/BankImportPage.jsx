@@ -49,11 +49,18 @@ function StatementsTab({ accounts }) {
 
   const doUpload = async () => {
     const file = fileRef.current?.files?.[0];
+    if (!file) return alert('Choisissez d’abord un relevé PDF.');
     const fd = new FormData();
-    if (file) fd.append('file', file);
+    fd.append('file', file);
     Object.entries(meta).forEach(([k, v]) => v && fd.append(k, v));
     setUploading(true);
-    try { const d = await financeApi.uploadStatement(fd); if (fileRef.current) fileRef.current.value = ''; load(); setSel({ statement: d.statement, transactions: d.transactions }); }
+    try {
+      const d = await financeApi.uploadStatement(fd);
+      if (fileRef.current) fileRef.current.value = '';
+      load();
+      if (!d.parsed) alert('Relevé importé mais aucune ligne détectée. Ajoutez-les manuellement ou réessayez avec un PDF plus net.');
+      setSel({ statement: d.statement, transactions: d.transactions });
+    }
     catch (e) { alert('Erreur: ' + e.message); }
     finally { setUploading(false); }
   };
@@ -70,7 +77,7 @@ function StatementsTab({ accounts }) {
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Relevé PDF</label><input ref={fileRef} type="file" accept="application/pdf" className="text-sm" /></div>
         <button onClick={doUpload} disabled={uploading} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"><Upload className="w-4 h-4" /> {uploading ? 'Import…' : 'Importer'}</button>
       </div>
-      <p className="text-xs text-gray-400">L'extraction PDF est automatique mais à vérifier (formats de relevés variés). Vous pouvez corriger chaque ligne.</p>
+      <p className="text-xs text-gray-400">Les lignes sont lues automatiquement par OCR (DeepSeek), puis classées par vos règles. Vérifiez et corrigez chaque ligne avant de comptabiliser : les débits affectés à un poste alimentent les dépenses du Prévisionnel/Réel.</p>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
@@ -101,7 +108,13 @@ function StatementDetail({ sel, accounts, reload, back, onDelete }) {
   const applyRules = async () => { try { const r = await financeApi.applyBankRules(statement.id); reload(); alert(`${r.updated} ligne(s) catégorisée(s).`); } catch (e) { alert(e.message); } };
   const postAll = async () => { try { const r = await financeApi.postAllBankTxns(statement.id); reload(); alert(`${r.posted} débit(s) comptabilisé(s).`); } catch (e) { alert(e.message); } };
 
-  const totalDebit = transactions.filter(t => t.direction === 'debit').reduce((a, t) => a + Number(t.amount), 0);
+  const debits = transactions.filter(t => t.direction === 'debit');
+  const totalDebit = debits.reduce((a, t) => a + Number(t.amount), 0);
+  const nPosted = debits.filter(t => t.status === 'posted').length;
+  const nCateg = debits.filter(t => t.status === 'categorized').length;
+  const nTodo = debits.filter(t => t.status === 'unmatched').length;
+  const postedAmount = debits.filter(t => t.status === 'posted').reduce((a, t) => a + Number(t.amount), 0);
+  const pct = debits.length ? Math.round((nPosted / debits.length) * 100) : 0;
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -113,6 +126,18 @@ function StatementDetail({ sel, accounts, reload, back, onDelete }) {
         </div>
       </div>
       <h2 className="text-lg font-semibold text-gray-800">{statement.account_label} · {transactions.length} ligne(s) · débits {formatMAD(totalDebit)}</h2>
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">{nTodo} à traiter</span>
+          <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700">{nCateg} catégorisé(s)</span>
+          <span className="px-2 py-1 rounded-full bg-green-100 text-green-700">{nPosted} comptabilisé(s)</span>
+          <span className="ml-auto text-gray-500">Dépenses comptabilisées : <strong className="text-gray-800">{formatMAD(postedAmount)}</strong> / {formatMAD(totalDebit)}</span>
+        </div>
+        <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-full bg-green-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
       <div className="bg-white rounded-xl border border-gray-200 overflow-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600 text-xs uppercase"><tr><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Libellé</th><th className="px-3 py-2 text-right">Montant</th><th className="px-3 py-2 text-left">Sens</th><th className="px-3 py-2 text-left">Poste</th><th className="px-3 py-2 text-center">Statut</th><th></th></tr></thead>

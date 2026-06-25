@@ -11,6 +11,7 @@
  */
 import express from 'express';
 import multer from 'multer';
+import OpenAI from 'openai';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 
@@ -29,18 +30,82 @@ const ymFromDate = (dateStr) => {
   return { year, month, academic_year: month >= 9 ? `${year}-${year + 1}` : `${year - 1}-${year}` };
 };
 
-// ── Extraction PDF -> transactions candidates (best effort) ───────────────
-async function extractTransactionsFromPdf(buffer) {
-  let text = '';
+const deepseekChat = new OpenAI({
+  baseURL: 'https://api.deepseek.com',
+  apiKey: process.env.DEEPSEEK_API_KEY || '',
+});
+
+// ── 1) OCR DeepSeek : PDF/image -> texte propre ───────────────────────────
+async function ocrTextFromBuffer(buffer, filename) {
+  const key = process.env.DEEPSEEK_OCR_API_KEY || process.env.DEEPSEEK_API_KEY;
+  if (!key) return '';
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: 'application/pdf' }), filename || 'releve.pdf');
+    form.append('prompt', "Extract the full bank statement as plain text. Keep every transaction line on one line with its date, label and amount. Preserve tables and columns.");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
+    const res = await fetch('https://api.deepsee-ocr.ai/v1/ocr', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+      body: form,
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!res.ok) { console.warn('[bank] OCR HTTP', res.status); return ''; }
+    const data = await res.json();
+    return (data?.text || '').trim();
+  } catch (e) {
+    console.warn('[bank] OCR DeepSeek échoué:', e.message);
+    return '';
+  }
+}
+
+// Repli : extraction texte locale via pdf-parse
+async function pdfTextFromBuffer(buffer) {
   try {
     const { PDFParse } = await import('pdf-parse');
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     const result = await parser.getText();
-    text = result?.text || '';
+    return result?.text || '';
   } catch (e) {
-    console.warn('[bank] extraction PDF échouée:', e.message);
-    return [];
+    console.warn('[bank] extraction pdf-parse échouée:', e.message);
+    return '';
   }
+}
+
+// ── 2a) Structuration LLM : texte du relevé -> lignes normalisées ─────────
+async function structureTransactionsWithLLM(text) {
+  if (!process.env.DEEPSEEK_API_KEY || !text) return null;
+  const sample = text.slice(0, 18_000);
+  try {
+    const completion = await deepseekChat.chat.completions.create({
+      model: 'deepseek-chat',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: "Tu extrais les opérations d'un relevé bancaire (souvent marocain). Réponds UNIQUEMENT en JSON {\"transactions\":[{\"txn_date\":\"YYYY-MM-DD\",\"label\":\"...\",\"amount\":<nombre positif>,\"direction\":\"debit|credit\"}]}. 'debit' = sortie d'argent (dépense), 'credit' = entrée. Ignore les lignes de solde, totaux et en-têtes. Montant toujours positif. N'invente rien." },
+        { role: 'user', content: sample },
+      ],
+    });
+    const raw = completion.choices?.[0]?.message?.content || '';
+    const parsed = JSON.parse(raw);
+    const arr = Array.isArray(parsed) ? parsed : (parsed.transactions || []);
+    return arr
+      .map((t) => ({
+        txn_date: /^\d{4}-\d{2}-\d{2}$/.test(t.txn_date) ? t.txn_date : null,
+        label: String(t.label || 'Opération').slice(0, 180),
+        amount: Math.abs(num(t.amount)),
+        direction: t.direction === 'credit' ? 'credit' : 'debit',
+      }))
+      .filter((t) => t.txn_date && t.amount > 0);
+  } catch (e) {
+    console.warn('[bank] structuration LLM échouée:', e.message);
+    return null;
+  }
+}
+
+// ── 2b) Repli : parsing par regex sur le texte ────────────────────────────
+function parseTransactionsFromText(text) {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const dateRe = /(\d{2})[\/\-.](\d{2})[\/\-.](\d{2,4})/;
   // montant : 1 234,56 / 1.234,56 / 1234.56
@@ -58,6 +123,30 @@ async function extractTransactionsFromPdf(buffer) {
     out.push({ txn_date: `${yy}-${mm}-${dd}`, label: label || 'Opération', amount: Math.abs(amount), direction: 'debit' });
   }
   return out;
+}
+
+/**
+ * Extraction des transactions d'un relevé. La plupart des relevés sont des
+ * PDF « texte » : on lit le texte localement (pdf-parse) puis on le structure
+ * en lignes de dépenses via DeepSeek (DEEPSEEK_API_KEY). Si le PDF n'a pas de
+ * couche texte (scanné/image), on bascule sur l'OCR. Repli regex en dernier
+ * recours. Renvoie { transactions, method }.
+ */
+async function extractTransactions(buffer, filename) {
+  // 1) PDF texte (cas le plus fréquent) -> extraction locale gratuite
+  let text = await pdfTextFromBuffer(buffer);
+  let source = text.trim().length > 40 ? 'pdf' : '';
+
+  // 2) PDF scanné / sans texte exploitable -> OCR (service dédié)
+  if (!source) { text = await ocrTextFromBuffer(buffer, filename); source = text ? 'ocr' : ''; }
+  if (!text) return { transactions: [], method: 'none' };
+
+  // 3) Structuration en lignes de dépenses via DeepSeek
+  const structured = await structureTransactionsWithLLM(text);
+  if (structured && structured.length) return { transactions: structured, method: `${source}+ia` };
+
+  // 4) Repli : parsing par regex
+  return { transactions: parseTransactionsFromText(text), method: source || 'pdf' };
 }
 
 async function applyRulesTo(schoolId, transactions) {
@@ -115,7 +204,11 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
     if (error) throw error;
 
     let candidates = [];
-    if (req.file?.buffer) candidates = await extractTransactionsFromPdf(req.file.buffer);
+    let method = 'none';
+    if (req.file?.buffer) {
+      const r = await extractTransactions(req.file.buffer, req.file.originalname);
+      candidates = r.transactions; method = r.method;
+    }
     candidates = await applyRulesTo(schoolId, candidates);
     let inserted = [];
     if (candidates.length) {
@@ -123,7 +216,7 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
       const { data } = await supabaseAdmin.from('bank_transaction').insert(rows).select();
       inserted = data || [];
     }
-    res.status(201).json({ statement, transactions: inserted, parsed: candidates.length });
+    res.status(201).json({ statement, transactions: inserted, parsed: candidates.length, method });
   } catch (e) { console.error('POST statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
