@@ -1896,43 +1896,48 @@ router.get('/dashboard/summary', async (req, res) => {
     const realInvoiced = (realInvRows || []).reduce((s, r) => s + Number(r.total), 0);
     const realRate = realInvoiced > 0 ? (collectedThisMonth / realInvoiced) * 100 : 0;
 
-    // Si une année est fournie : tout est basé sur le PRÉVISIONNEL des plans
-    // (exclusions déduites) → « Attendu » + « Dû » réagissent aux exclusions.
-    // Sinon : repli sur le réel facturé.
-    let totalDue, totalOverdue, overdueCount, issuedThisMonth, forecast = false, forecastStudents = 0;
+    // « En retard » = VRAIES créances : factures réellement émises, échues et
+    // non soldées. Indépendant du prévisionnel (on ne compte pas comme retard ce
+    // qui n'a jamais été facturé).
+    let arrearsQ = supabaseAdmin
+      .from('invoices')
+      .select('total, amount_paid, due_date, status')
+      .in('status', ['issued', 'partial', 'overdue']);
+    if (schoolId) arrearsQ = arrearsQ.eq('school_id', schoolId);
+    const { data: arrearsRows } = await arrearsQ;
+    const todayStr = today.toISOString().split('T')[0];
+    const totalDueReal = (arrearsRows || []).reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
+    const overdueRows = (arrearsRows || []).filter(r => r.due_date && r.due_date < todayStr && (Number(r.total) - Number(r.amount_paid || 0)) > 0);
+    const totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
+    const overdueCount = overdueRows.length;
+
+    // Si une année est fournie : « Attendu » + « Dû » basés sur le PRÉVISIONNEL
+    // des plans (exclusions déduites). Sinon : repli sur le réel facturé.
+    let totalDue, issuedThisMonth, forecast = false, forecastStudents = 0;
     if (req.query.academic_year) {
       const rec = await planReceivables(schoolId, req.query.academic_year);
-      totalDue = rec.totalDue;
-      totalOverdue = rec.totalOverdue;
-      overdueCount = rec.overdueCount;
+      totalDue = rec.totalDue; // « Dû prévisionnel »
       issuedThisMonth = rec.expectedTotal; // « Attendu (prévisionnel) »
       forecastStudents = rec.studentCount;
       forecast = true;
     } else {
-      let dueQuery = supabaseAdmin
-        .from('invoices')
-        .select('total, amount_paid, due_date, status')
-        .in('status', ['issued', 'partial', 'overdue']);
-      if (schoolId) dueQuery = dueQuery.eq('school_id', schoolId);
-      const { data: dueRows } = await dueQuery;
-      totalDue = (dueRows || []).reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
-      const todayStr = today.toISOString().split('T')[0];
-      const overdueRows = (dueRows || []).filter(r => r.due_date < todayStr);
-      totalOverdue = overdueRows.reduce((s, r) => s + (Number(r.total) - Number(r.amount_paid || 0)), 0);
-      overdueCount = overdueRows.length;
+      totalDue = totalDueReal;
       issuedThisMonth = realInvoiced; // factures émises sur la période (réel)
     }
+    // Reste à facturer = attendu prévisionnel − déjà facturé (réel).
+    const toBill = Math.max(0, issuedThisMonth - realInvoiced);
 
     res.json({
       collectedThisMonth,
       issuedThisMonth,
       totalDue,
-      totalOverdue,
+      totalOverdue, // VRAIES créances échues (réel)
       overdueCount,
       forecast, // true = « Attendu (prévisionnel) » au lieu de « Facturé » réel
       forecastStudents, // nb d'élèves inscrits comptés dans l'attendu
       realInvoiced, // facturé réel sur la période
       realRate, // Taux d'encaissement (réel) = encaissé / facturé
+      toBill, // reste à facturer (attendu − facturé)
       // « Avancement » = encaissé / attendu (prévisionnel si année fournie)
       collectionRate: issuedThisMonth > 0 ? (collectedThisMonth / issuedThisMonth) * 100 : 0
     });

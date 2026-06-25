@@ -58,6 +58,15 @@ export default function FinanceDashboard() {
           href="/finance/overdue" />
       </KpiGrid>
 
+      {summary?.forecast && (summary.toBill || 0) > 0 && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+          <span className="font-medium text-amber-800">Facturation incomplète</span>
+          <span className="text-gray-600">Facturé (réel) : <b className="text-gray-900">{formatMAD(summary.realInvoiced)}</b></span>
+          <span className="text-gray-600">Reste à facturer : <b className="text-amber-700">{formatMAD(summary.toBill)}</b></span>
+          <span className="text-gray-400">sur {formatMAD(summary.issuedThisMonth)} attendu</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cashflow chart */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
