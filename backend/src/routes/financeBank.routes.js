@@ -224,7 +224,7 @@ router.delete('/bank/statements/:id', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { data: txns } = await supabaseAdmin.from('bank_transaction').select('id').eq('statement_id', req.params.id).eq('school_id', schoolId);
-    for (const t of (txns || [])) await supabaseAdmin.from('finance_ledger_entry').delete().eq('source_type', 'expense').eq('source_id', t.id);
+    for (const t of (txns || [])) await supabaseAdmin.from('school_expenses').delete().eq('school_id', schoolId).eq('reference', bankRef(t.id));
     await supabaseAdmin.from('bank_statement').delete().eq('id', req.params.id).eq('school_id', schoolId);
     res.json({ success: true });
   } catch (e) { console.error('DELETE statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
@@ -263,14 +263,21 @@ router.put('/bank/transactions/:id', async (req, res) => {
   } catch (e) { console.error('PUT transaction:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
-async function postTxn(schoolId, t) {
-  await supabaseAdmin.from('finance_ledger_entry').delete().eq('source_type', 'expense').eq('source_id', t.id);
+// Un débit bancaire comptabilisé devient une dépense réelle dans
+// school_expenses (table lue par la page « Dépenses et charges » ET par la
+// matrice Prévisionnel/Réel). On lie la dépense à la ligne bancaire via
+// reference = 'BANK:<txn_id>' pour pouvoir la retrouver (dé-comptabiliser /
+// supprimer).
+const bankRef = (txnId) => `BANK:${txnId}`;
+
+async function postTxn(schoolId, t, userId = null) {
+  await supabaseAdmin.from('school_expenses').delete().eq('school_id', schoolId).eq('reference', bankRef(t.id));
   if (t.direction !== 'debit' || !t.account_id || num(t.amount) === 0 || !t.txn_date) return false;
-  const { year, month, academic_year } = ymFromDate(t.txn_date);
-  await supabaseAdmin.from('finance_ledger_entry').insert({
-    school_id: schoolId, account_id: t.account_id, academic_year, year, month,
-    amount: num(t.amount), source_type: 'expense', source_id: t.id, cash_or_bank: 'bank',
-    label: (t.label || 'Banque').slice(0, 180), entry_date: t.txn_date,
+  await supabaseAdmin.from('school_expenses').insert({
+    school_id: schoolId, account_id: t.account_id, category: 'other',
+    description: (t.label || 'Relevé bancaire').slice(0, 200), amount: num(t.amount),
+    expense_date: t.txn_date, payment_method: 'transfer', reference: bankRef(t.id),
+    notes: 'Importé du relevé bancaire', recorded_by: userId,
   });
   return true;
 }
@@ -282,7 +289,7 @@ router.post('/bank/transactions/:id/post', async (req, res) => {
     if (!t) return res.status(404).json({ error: 'Transaction introuvable' });
     if (t.direction !== 'debit') return res.status(400).json({ error: 'Seuls les débits se comptabilisent en dépense.' });
     if (!t.account_id) return res.status(400).json({ error: 'Affectez un poste avant de comptabiliser.' });
-    await postTxn(schoolId, t);
+    await postTxn(schoolId, t, req.user.id);
     await supabaseAdmin.from('bank_transaction').update({ status: 'posted' }).eq('id', t.id);
     res.json({ success: true });
   } catch (e) { console.error('post txn:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
@@ -291,7 +298,7 @@ router.post('/bank/transactions/:id/post', async (req, res) => {
 router.post('/bank/transactions/:id/unpost', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    await supabaseAdmin.from('finance_ledger_entry').delete().eq('source_type', 'expense').eq('source_id', req.params.id);
+    await supabaseAdmin.from('school_expenses').delete().eq('school_id', schoolId).eq('reference', bankRef(req.params.id));
     await supabaseAdmin.from('bank_transaction').update({ status: 'categorized' }).eq('id', req.params.id).eq('school_id', schoolId);
     res.json({ success: true });
   } catch (e) { console.error('unpost txn:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
@@ -304,7 +311,7 @@ router.post('/bank/statements/:id/post-all', async (req, res) => {
       .eq('statement_id', req.params.id).eq('school_id', schoolId).eq('direction', 'debit').not('account_id', 'is', null).neq('status', 'ignored');
     let count = 0;
     for (const t of (txns || [])) {
-      if (await postTxn(schoolId, t)) { await supabaseAdmin.from('bank_transaction').update({ status: 'posted' }).eq('id', t.id); count += 1; }
+      if (await postTxn(schoolId, t, req.user.id)) { await supabaseAdmin.from('bank_transaction').update({ status: 'posted' }).eq('id', t.id); count += 1; }
     }
     res.json({ success: true, posted: count });
   } catch (e) { console.error('post-all:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
