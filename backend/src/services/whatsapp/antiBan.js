@@ -27,6 +27,20 @@ const CONFIG = {
   // Présence "typing…" avant envoi
   TYPING_MIN_MS: 1_500,
   TYPING_MAX_MS: 4_000,
+  // Frappe "humaine" proportionnelle à la longueur du message.
+  // ~ vitesse de frappe d'un humain sur mobile : 18 caractères/seconde max,
+  // bornée pour ne jamais dépasser TYPING_CAP_MS (sinon trop long pour un bot
+  // de notif). Un humain relit aussi → on garde un plancher TYPING_MIN_MS.
+  TYPING_MS_PER_CHAR: 55,        // ~18 cps
+  TYPING_CAP_MS: 9_000,          // plafond de frappe pour un message long
+  // Pause "lecture" avant de répondre à un message entrant (le temps de lire).
+  READ_MIN_MS: 800,
+  READ_MAX_MS: 2_500,
+  // Pause "distraction" occasionnelle entre 2 envois (un humain n'a pas une
+  // cadence constante : parfois il s'interrompt). Probabilité + durée.
+  DISTRACTION_PROBABILITY: 0.12, // ~1 message sur 8
+  DISTRACTION_MIN_MS: 20_000,
+  DISTRACTION_MAX_MS: 75_000,
   // Quota journalier — DÉSACTIVÉ (numéros déjà chauffés en production).
   // La protection anti-ban repose uniquement sur :
   //   - le délai humain entre messages (waitHumanDelay)
@@ -220,11 +234,27 @@ export async function checkAllowed(schoolId, { urgent = false } = {}) {
 /**
  * Applique le délai humain depuis le dernier envoi de cette session.
  * Doit être appelé juste avant `sock.sendMessage`.
+ *
+ * Reproduit deux comportements humains :
+ *   1. un espacement de base (gaussienne 8–20 s) entre 2 messages ;
+ *   2. de temps en temps (≈ 1 fois sur 8) une pause « distraction » bien plus
+ *      longue, car un vrai humain qui transmet des messages à la main
+ *      s'interrompt, fait autre chose, puis reprend — la cadence n'est jamais
+ *      parfaitement régulière (signature comportementale typique d'un bot).
  */
 export async function waitHumanDelay(schoolId) {
   const state = getState(schoolId);
   const elapsed = Date.now() - state.lastSendAt;
-  const target = gaussianRandom(CONFIG.MIN_DELAY_MS, CONFIG.MAX_DELAY_MS);
+  let target = gaussianRandom(CONFIG.MIN_DELAY_MS, CONFIG.MAX_DELAY_MS);
+
+  // Pause « distraction » occasionnelle (uniquement si on a déjà envoyé au moins
+  // un message dans cette session, sinon le tout premier envoi serait retardé).
+  if (state.lastSendAt > 0 && Math.random() < CONFIG.DISTRACTION_PROBABILITY) {
+    const extra = gaussianRandom(CONFIG.DISTRACTION_MIN_MS, CONFIG.DISTRACTION_MAX_MS);
+    target += extra;
+    console.log(`[anti-ban] Pause "distraction" humaine +${Math.round(extra / 1000)}s avant le prochain envoi (école ${schoolId})`);
+  }
+
   const remaining = target - elapsed;
   if (remaining > 0) {
     await sleep(remaining);
@@ -232,17 +262,72 @@ export async function waitHumanDelay(schoolId) {
 }
 
 /**
- * Simule l'indicateur "typing…" pendant 1.5–4 s puis revient à 'paused'.
- * Doit être appelé juste avant l'envoi.
+ * Durée de frappe « humaine » pour un texte donné : proportionnelle à sa
+ * longueur (un message long se tape plus longtemps), bornée entre un plancher
+ * (le temps de réfléchir/relire) et un plafond (pour ne pas bloquer une file
+ * de notifications). Retourne une valeur en ms, légèrement bruitée.
  */
-export async function simulateTyping(sock, jid) {
+function humanTypingDuration(text) {
+  const len = typeof text === 'string' ? text.length : 0;
+  const base = len * CONFIG.TYPING_MS_PER_CHAR;
+  const bounded = Math.max(CONFIG.TYPING_MIN_MS, Math.min(CONFIG.TYPING_CAP_MS, base));
+  // ±15 % de bruit pour casser toute régularité.
+  const jitter = bounded * (0.85 + Math.random() * 0.3);
+  return Math.round(jitter);
+}
+
+/**
+ * Simule l'indicateur "typing…" puis revient à 'paused'.
+ *
+ * Si `text` est fourni, la durée de frappe est proportionnelle à sa longueur
+ * (frappe humaine réaliste). Sinon on retombe sur la durée fixe 1.5–4 s.
+ *
+ * Pour les longs messages, WhatsApp efface l'état 'composing' après quelques
+ * secondes : on le ré-émet périodiquement pour que l'indicateur « écrit… »
+ * reste visible côté destinataire pendant toute la frappe (comme un humain).
+ */
+export async function simulateTyping(sock, jid, text = null) {
   try {
+    const total = text != null
+      ? humanTypingDuration(text)
+      : gaussianRandom(CONFIG.TYPING_MIN_MS, CONFIG.TYPING_MAX_MS);
+
+    // Rafraîchit 'composing' toutes les ~3 s (l'état expire côté WhatsApp).
+    const REFRESH_MS = 3_000;
+    let waited = 0;
     await sock.sendPresenceUpdate('composing', jid);
-    const dur = gaussianRandom(CONFIG.TYPING_MIN_MS, CONFIG.TYPING_MAX_MS);
-    await sleep(dur);
+    while (waited < total) {
+      const chunk = Math.min(REFRESH_MS, total - waited);
+      await sleep(chunk);
+      waited += chunk;
+      if (waited < total) {
+        // Ré-émet l'indicateur pour qu'il ne s'éteigne pas avant la fin.
+        await sock.sendPresenceUpdate('composing', jid);
+      }
+    }
     await sock.sendPresenceUpdate('paused', jid);
   } catch (e) {
     // presence non critique
+  }
+}
+
+/**
+ * Simule la lecture d'un message entrant avant d'y répondre : marque le message
+ * comme lu (double coche bleue, comme un humain qui ouvre la conversation) puis
+ * marque une courte pause de « lecture ». À appeler dans le chatbot, juste après
+ * réception d'un message et avant de composer la réponse.
+ *
+ * @param {object} sock  socket Baileys
+ * @param {object} key   `msg.key` du message entrant (pour le receipt de lecture)
+ * @param {string} jid   conversation (pour la présence 'available')
+ */
+export async function simulateRead(sock, key, jid) {
+  try {
+    if (jid) await sock.sendPresenceUpdate('available', jid); // "en ligne"
+    if (key) await sock.readMessages([key]);                   // coches bleues
+    await sleep(gaussianRandom(CONFIG.READ_MIN_MS, CONFIG.READ_MAX_MS));
+  } catch (e) {
+    // lecture non critique
   }
 }
 

@@ -71,7 +71,7 @@ export async function sendText(schoolId, phone, text, opts = {}) {
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
 
   const jid = phoneToJid(phone);
-  if (!opts.skipTyping) await simulateTyping(sock, jid);
+  if (!opts.skipTyping) await simulateTyping(sock, jid, text);
 
   try {
     const finalText = processOutgoingText(text);
@@ -97,7 +97,7 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = 
 
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);
-  if (!opts.skipTyping) await simulateTyping(sock, jid);
+  if (!opts.skipTyping) await simulateTyping(sock, jid, caption);
 
   try {
     const buf = await fetchAsBuffer(imageUrl);
@@ -126,7 +126,7 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
 
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);
-  if (!opts.skipTyping) await simulateTyping(sock, jid);
+  if (!opts.skipTyping) await simulateTyping(sock, jid, caption);
 
   try {
     const buf = await fetchAsBuffer(documentUrl);
@@ -157,7 +157,7 @@ export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'documen
 
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);
-  if (!opts.skipTyping) await simulateTyping(sock, jid);
+  if (!opts.skipTyping) await simulateTyping(sock, jid, caption);
 
   try {
     const payload = type === 'image'

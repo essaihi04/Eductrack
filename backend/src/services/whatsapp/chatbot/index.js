@@ -38,6 +38,8 @@ import { detectCredentialRequest, handleCredentialRequest } from './credentials.
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
 import { sendMediaBuffer, sendImage } from '../index.js';
+import { getSocket } from '../baileysClient.js';
+import { simulateRead } from '../antiBan.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
 import { generatePreview } from '../../dailyReports.js';
@@ -1630,7 +1632,7 @@ async function markProcessed(incomingMsgId) {
 // Adapter Baileys (callback fourni à baileysClient.startSession)
 // ─────────────────────────────────────────────────────────────────────────
 
-export async function handleBaileysIncoming({ schoolId, msg }) {
+export async function handleBaileysIncoming({ schoolId, msg, sock }) {
   const m = msg.message || {};
   const text =
     m.conversation ||
@@ -1703,6 +1705,14 @@ export async function handleBaileysIncoming({ schoolId, msg }) {
 
   const from = '+' + phoneJid.split('@')[0];
   const id = msg.key?.id || `${Date.now()}`;
+
+  // Comportement humain : on "lit" d'abord le message (coches bleues + on
+  // apparaît en ligne) puis on marque une courte pause de lecture avant de
+  // composer la réponse — exactement comme une personne qui ouvre la conv.
+  const activeSock = sock || getSocket(schoolId);
+  if (activeSock) {
+    await simulateRead(activeSock, msg.key, remoteJid);
+  }
 
   return handleIncomingWhatsAppMessage({ from, text, id, schoolId, location, image });
 }

@@ -152,9 +152,8 @@ export async function sendMenu(schoolId, phone, menu, ctx = {}) {
 
   await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);
-  await simulateTyping(sock, jid);
-
   const text = renderMenuText(menu, ctx);
+  await simulateTyping(sock, jid, text);
 
   // Tentative listMessage (rendu "bouton" sur certaines versions WhatsApp)
   try {
