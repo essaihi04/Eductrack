@@ -77,7 +77,7 @@ function StatementsTab({ accounts }) {
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Relevé PDF</label><input ref={fileRef} type="file" accept="application/pdf" className="text-sm" /></div>
         <button onClick={doUpload} disabled={uploading} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"><Upload className="w-4 h-4" /> {uploading ? 'Import…' : 'Importer'}</button>
       </div>
-      <p className="text-xs text-gray-400">Les lignes sont lues automatiquement par OCR (DeepSeek), puis classées par vos règles. Vérifiez et corrigez chaque ligne avant de comptabiliser : les débits affectés à un poste alimentent les dépenses du Prévisionnel/Réel.</p>
+      <p className="text-xs text-gray-400">Les lignes sont lues puis <strong>affectées automatiquement à un poste par l'IA</strong> (DeepSeek), sans règle à saisir. Vérifiez/corrigez si besoin avant de comptabiliser : les débits alimentent les dépenses du Prévisionnel/Réel et la page Dépenses.</p>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
@@ -105,7 +105,7 @@ function StatementDetail({ sel, accounts, reload, back, onDelete }) {
   const upd = async (id, patch) => { try { await financeApi.updateBankTxn(id, patch); reload(); } catch (e) { alert(e.message); } };
   const post = async (id) => { try { await financeApi.postBankTxn(id); reload(); } catch (e) { alert(e.message); } };
   const unpost = async (id) => { try { await financeApi.unpostBankTxn(id); reload(); } catch (e) { alert(e.message); } };
-  const applyRules = async () => { try { const r = await financeApi.applyBankRules(statement.id); reload(); alert(`${r.updated} ligne(s) catégorisée(s).`); } catch (e) { alert(e.message); } };
+  const applyRules = async () => { try { const r = await financeApi.applyBankRules(statement.id); reload(); alert(`${r.updated} ligne(s) catégorisée(s) automatiquement.`); } catch (e) { alert(e.message); } };
   const postAll = async () => { try { const r = await financeApi.postAllBankTxns(statement.id); reload(); alert(`${r.posted} débit(s) comptabilisé(s).`); } catch (e) { alert(e.message); } };
 
   const debits = transactions.filter(t => t.direction === 'debit');
@@ -120,7 +120,7 @@ function StatementDetail({ sel, accounts, reload, back, onDelete }) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <button onClick={back} className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft className="w-4 h-4" /> Retour</button>
         <div className="flex items-center gap-2">
-          <button onClick={applyRules} className="flex items-center gap-1 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"><Wand2 className="w-4 h-4" /> Appliquer les règles</button>
+          <button onClick={applyRules} className="flex items-center gap-1 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"><Wand2 className="w-4 h-4" /> Catégoriser (IA)</button>
           <button onClick={postAll} className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700"><Check className="w-4 h-4" /> Tout comptabiliser</button>
           <button onClick={onDelete} className="p-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
         </div>
@@ -192,7 +192,7 @@ function RulesTab({ accounts }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-500">Quand le libellé d'une transaction contient le mot-clé, elle est affectée automatiquement au poste (ex. « CNSS » → CNSS et AMO, « GASOIL » → Gasoil).</p>
+      <p className="text-sm text-gray-500">Optionnel — la catégorisation est déjà automatique par IA. Ajoutez une règle seulement pour <strong>forcer</strong> un classement précis : quand le libellé contient le mot-clé, la ligne est affectée à ce poste en priorité sur l'IA (ex. « CNSS » → CNSS et AMO, « GASOIL » → Gasoil).</p>
       <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-wrap items-end gap-3">
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Mot-clé contenu</label><input value={form.pattern} onChange={e => setForm({ ...form, pattern: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg" placeholder="CNSS, GASOIL, LOYER…" /></div>
         <div><label className="block text-xs font-medium text-gray-700 mb-1">Poste</label>

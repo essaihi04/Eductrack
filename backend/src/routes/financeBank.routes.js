@@ -149,6 +149,51 @@ async function extractTransactions(buffer, filename) {
   return { transactions: parseTransactionsFromText(text), method: source || 'pdf' };
 }
 
+// ── Catégorisation IA : affecte chaque débit au poste le plus probable ────
+// du plan comptable de l'école, sans aucune règle à saisir. N'écrase jamais
+// une ligne déjà affectée (par une règle manuelle) ou comptabilisée/ignorée.
+async function aiCategorizeTransactions(schoolId, transactions) {
+  if (!process.env.DEEPSEEK_API_KEY) return transactions;
+  const todo = transactions.filter((t) => t.direction === 'debit' && !t.account_id && t.status !== 'posted' && t.status !== 'ignored');
+  if (!todo.length) return transactions;
+
+  const { data: accounts } = await supabaseAdmin.from('finance_account')
+    .select('id, name, kind, node_type, is_active, parent_id').eq('school_id', schoolId);
+  const sections = (accounts || []).filter((a) => a.kind === 'expense' && a.node_type === 'section');
+  const lines = (accounts || []).filter((a) => a.kind === 'expense' && a.node_type === 'line' && a.is_active);
+  if (!lines.length) return transactions;
+  const sectionName = (pid) => sections.find((s) => s.id === pid)?.name || '';
+  const valid = new Set(lines.map((l) => l.id));
+  const catalogue = lines.map((l) => `${l.id} = ${sectionName(l.parent_id)} > ${l.name}`).join('\n');
+  const items = todo.map((t, i) => `${i}. ${t.label} (${t.amount})`).join('\n');
+
+  try {
+    const completion = await deepseekChat.chat.completions.create({
+      model: 'deepseek-chat',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: "Tu affectes des opérations bancaires de débit (dépenses d'une école marocaine) au poste comptable le plus pertinent. Réponds UNIQUEMENT en JSON {\"assignments\":[{\"i\":<index>,\"account_id\":\"<id exact de la liste ou null>\"}]}. Utilise UNIQUEMENT des id présents dans la liste fournie. Si aucun poste ne correspond clairement, mets null. Exemples : gasoil/carburant -> transport/carburant, CNSS/AMO -> charges sociales, loyer -> loyer, salaire -> masse salariale, ONEE/électricité/eau -> utilities, internet/télécom -> télécommunications." },
+        { role: 'user', content: `POSTES DISPONIBLES (id = section > nom) :\n${catalogue}\n\nOPÉRATIONS À CLASSER :\n${items}` },
+      ],
+    });
+    const parsed = JSON.parse(completion.choices?.[0]?.message?.content || '{}');
+    const map = new Map();
+    (parsed.assignments || []).forEach((a) => { if (valid.has(a.account_id)) map.set(Number(a.i), a.account_id); });
+    let idx = 0;
+    return transactions.map((t) => {
+      if (t.direction === 'debit' && !t.account_id && t.status !== 'posted' && t.status !== 'ignored') {
+        const accId = map.get(idx); idx += 1;
+        if (accId) return { ...t, account_id: accId, status: 'categorized' };
+      }
+      return t;
+    });
+  } catch (e) {
+    console.warn('[bank] catégorisation IA échouée:', e.message);
+    return transactions;
+  }
+}
+
 async function applyRulesTo(schoolId, transactions) {
   const { data: rules } = await supabaseAdmin.from('bank_categorization_rule')
     .select('*').eq('school_id', schoolId).eq('is_active', true).order('priority');
@@ -210,6 +255,7 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
       candidates = r.transactions; method = r.method;
     }
     candidates = await applyRulesTo(schoolId, candidates);
+    candidates = await aiCategorizeTransactions(schoolId, candidates);
     let inserted = [];
     if (candidates.length) {
       const rows = candidates.map((t) => ({ ...t, school_id: schoolId, statement_id: statement.id }));
@@ -234,7 +280,8 @@ router.post('/bank/statements/:id/apply-rules', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { data: txns } = await supabaseAdmin.from('bank_transaction').select('*').eq('statement_id', req.params.id).eq('school_id', schoolId);
-    const updated = await applyRulesTo(schoolId, txns || []);
+    let updated = await applyRulesTo(schoolId, txns || []);
+    updated = await aiCategorizeTransactions(schoolId, updated);
     let count = 0;
     for (const t of updated) {
       const orig = (txns || []).find((x) => x.id === t.id);
