@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS, EXPENSE_CATEGORIES } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, Card, Button } from '../../components/finance/ui';
-import { addPrevisionnelSheet } from './previsionnelSheet';
+import { addPrevisionnelSheet, buildMatrix } from './previsionnelSheet';
 
 // Année scolaire courante (sept → août), pour l'onglet Prévisionnel de l'export complet.
 const currentAcademicYear = () => {
@@ -584,6 +584,79 @@ const ReportsPage = () => {
         columnStyles: { 2: { halign: 'right' } },
         margin: { left: M, right: M },
       });
+    }
+
+    // ── Matrice annuelle Prévisionnel / Réel (page paysage) ──────────────────
+    try {
+      const SHORT = { 1: 'Jan', 2: 'Fév', 3: 'Mar', 4: 'Avr', 5: 'Mai', 6: 'Juin', 7: 'Juil', 8: 'Août', 9: 'Sept', 10: 'Oct', 11: 'Nov', 12: 'Déc' };
+      const year = currentAcademicYear();
+      const matrix = await financeApi.getAnnualMatrix(year);
+      const { months, rows: mRows, lineValues } = buildMatrix(matrix);
+      const ncol = months.length + 4;
+      const fmt = (v) => { const n = Math.round(Number(v) || 0); return n === 0 ? '' : n.toLocaleString('fr-FR'); };
+
+      // Lisibilité : retire les sections de dépenses entièrement vides.
+      const visible = [];
+      for (let i = 0; i < mRows.length; i++) {
+        const r = mRows[i];
+        if (r.subheader) {
+          const block = []; let j = i + 1;
+          while (j < mRows.length && !mRows[j].section && !mRows[j].subheader) {
+            block.push(mRows[j]); const wasBold = mRows[j].bold; j++; if (wasBold) break;
+          }
+          if (block.some(b => Math.round(lineValues(b).cumule) !== 0)) visible.push(r, ...block);
+          i = j - 1; continue;
+        }
+        visible.push(r);
+      }
+
+      doc.addPage('a4', 'landscape');
+      let ly = M;
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
+      doc.text(`Prévisionnel / Réel — ${year}`, M, ly); ly += 5;
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(110);
+      doc.text('Colonnes bleutées = prévisionnel (mois à venir) · autres = réel (mois écoulés)', M, ly);
+      doc.setTextColor(0); ly += 3;
+
+      const head = [['Poste', ...months.map(m => `${SHORT[m.month]} ${String(m.year).slice(2)}`), 'Cumulé', 'Budget', '%']];
+      const body = visible.map((r) => {
+        if (r.section) {
+          const isRev = /RECETTE/i.test(r.section);
+          return [{ content: r.section, colSpan: ncol, styles: { fontStyle: 'bold', fillColor: isRev ? [220, 252, 231] : [254, 226, 226], textColor: isRev ? [22, 101, 52] : [153, 27, 27] } }];
+        }
+        if (r.subheader) return [{ content: r.label, colSpan: ncol, styles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [51, 65, 85] } }];
+        const { e, cumule, totalBudget, pct } = lineValues(r);
+        return [(r.indent ? '   ' : '') + r.label, ...e.map(fmt), fmt(cumule), fmt(totalBudget), pct != null && pct !== 0 ? pct.toFixed(0) + '%' : ''];
+      });
+
+      autoTable(doc, {
+        startY: ly, head, body, theme: 'grid',
+        styles: { fontSize: 6.5, cellPadding: 1, overflow: 'linebreak' },
+        headStyles: { fillColor: [51, 65, 85], textColor: 255, fontSize: 6.5, halign: 'right' },
+        columnStyles: { 0: { halign: 'left', cellWidth: 38 } },
+        margin: { left: M, right: M },
+        didParseCell: (hook) => {
+          const ci = hook.column.index;
+          // Colonnes de mois : alignées à droite ; prévisionnel en bleu.
+          if (ci >= 1 && ci <= months.length) {
+            hook.cell.styles.halign = 'right';
+            const prev = !months[ci - 1].is_real;
+            if (prev && hook.section === 'head') hook.cell.styles.fillColor = [37, 99, 235];
+            if (prev && hook.section === 'body') hook.cell.styles.fillColor = [239, 246, 255];
+          } else if (ci > months.length) {
+            hook.cell.styles.halign = 'right';
+          }
+          // Lignes totaux / résultats : surlignage prioritaire (écrase le bleu).
+          if (hook.section === 'body') {
+            const vr = visible[hook.row.index];
+            if (vr?.result) { hook.cell.styles.fillColor = [79, 70, 229]; hook.cell.styles.textColor = 255; hook.cell.styles.fontStyle = 'bold'; }
+            else if (vr?.bold) { hook.cell.styles.fillColor = [226, 232, 240]; hook.cell.styles.fontStyle = 'bold'; }
+          }
+        },
+      });
+    } catch (e) {
+      // Matrice indisponible : on conserve le reste du PDF sans bloquer.
+      console.error('PDF matrice annuelle:', e.message);
     }
 
     doc.save(`${fileBase}.pdf`);
