@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send, Edit2 } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, CheckCircle, User, Upload, Download, FileSpreadsheet, AlertCircle, Send, Edit2, X, KeyRound, BookOpen, LayoutGrid, Phone } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Avatar, StatusPill, toneFor, TeacherCard, DetailDrawer } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
@@ -84,7 +84,9 @@ const TeachersPage = () => {
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [showCreateHr, setShowCreateHr] = useState(false);
   const [expandedTeacher, setExpandedTeacher] = useState(null);
+  const [revealCreds, setRevealCreds] = useState(false);
   const [teacherSubjects, setTeacherSubjects] = useState({});
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [createdCredentials, setCreatedCredentials] = useState(null);
@@ -618,7 +620,7 @@ const TeachersPage = () => {
             Importer Excel
           </button>
           <button
-            onClick={() => { setShowForm(!showForm); setShowImport(false); }}
+            onClick={() => { setShowForm(true); setShowImport(false); setCreatedCredentials(null); setShowCreateHr(false); }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
           >
             <Plus className="w-4 h-4" />
@@ -744,51 +746,6 @@ const TeachersPage = () => {
         </div>
       )}
 
-      {/* Identifiants générés après création */}
-      {createdCredentials && (
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-full bg-green-100">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
-              <div className="flex-1 space-y-3">
-                <div>
-                  <h3 className="font-semibold text-green-900">Professeur créé avec succès !</h3>
-                  <p className="text-sm text-gray-600 mt-1">Voici les identifiants de connexion de <strong>{createdCredentials.name}</strong> :</p>
-                </div>
-                <div className="bg-gray-50 border rounded-lg p-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500">Email de connexion</p>
-                      <p className="font-mono text-sm font-medium">{createdCredentials.email}</p>
-                    </div>
-                    <button onClick={() => copyToClipboard(createdCredentials.email)} className="p-1.5 hover:bg-gray-200 rounded transition">
-                      <Copy className="w-4 h-4 text-gray-500" />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500">Mot de passe</p>
-                      <p className="font-mono text-sm font-medium">{createdCredentials.password}</p>
-                    </div>
-                    <button onClick={() => copyToClipboard(createdCredentials.password)} className="p-1.5 hover:bg-gray-200 rounded transition">
-                      <Copy className="w-4 h-4 text-gray-500" />
-                    </button>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setCreatedCredentials(null)}
-                  className="text-sm text-gray-500 hover:text-gray-700"
-                >
-                  Fermer
-                </button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Section Import Excel */}
       {showImport && (
         <Card>
@@ -897,17 +854,70 @@ const TeachersPage = () => {
         </Card>
       )}
 
+      {/* Modal unique : ajout d'un professeur + identifiants générés (même fenêtre) */}
       {showForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="w-5 h-5" />
-              Ajouter un nouveau professeur
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => { setShowForm(false); setCreatedCredentials(null); }}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <User className="w-5 h-5 text-green-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Ajouter un professeur</h3>
+              </div>
+              <button onClick={() => { setShowForm(false); setCreatedCredentials(null); }} className="p-1.5 hover:bg-gray-100 rounded-md" aria-label="Fermer">
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+
+            {createdCredentials ? (
+              /* Vue succès dans la même fenêtre */
+              <div className="px-6 py-5 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-full bg-green-100">
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-green-900">Professeur créé avec succès !</h4>
+                    <p className="text-sm text-gray-600 mt-1">Identifiants de connexion de <strong>{createdCredentials.name}</strong> :</p>
+                  </div>
+                </div>
+                <div className="bg-gray-50 border rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500">Email de connexion</p>
+                      <p className="font-mono text-sm font-medium">{createdCredentials.email}</p>
+                    </div>
+                    <button onClick={() => copyToClipboard(createdCredentials.email)} className="p-1.5 hover:bg-gray-200 rounded transition">
+                      <Copy className="w-4 h-4 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-500">Mot de passe</p>
+                      <p className="font-mono text-sm font-medium">{createdCredentials.password}</p>
+                    </div>
+                    <button onClick={() => copyToClipboard(createdCredentials.password)} className="p-1.5 hover:bg-gray-200 rounded transition">
+                      <Copy className="w-4 h-4 text-gray-500" />
+                    </button>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => { setCreatedCredentials(null); setShowCreateHr(false); }}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" /> Ajouter un autre
+                  </button>
+                  <button
+                    onClick={() => { setShowForm(false); setCreatedCredentials(null); }}
+                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+                  >
+                    Terminer
+                  </button>
+                </div>
+              </div>
+            ) : (
+            <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-1">Prénom *</label>
                   <input
@@ -954,25 +964,41 @@ const TeachersPage = () => {
                   </select>
                 </div>
               </div>
-              <HRFields hr={formData.hr} onChange={(hr) => setFormData({ ...formData, hr })} />
+              {/* Section Paie / RH repliable (à la demande) */}
+              <div className="border border-gray-200 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateHr(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-gray-50"
+                >
+                  <span className="text-xs font-semibold text-gray-500 uppercase">Paie / RH (optionnel)</span>
+                  {showCreateHr ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                </button>
+                {showCreateHr && (
+                  <div className="px-3 pb-3">
+                    <HRFields hr={formData.hr} onChange={(hr) => setFormData({ ...formData, hr })} />
+                  </div>
+                )}
+              </div>
               <p className="text-xs text-gray-500">
                 L'email et le mot de passe seront générés automatiquement ({profile?.school?.name ? `prénomnom@${profile.school.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}.ma` : 'prénomnom@école.ma'}).
               </p>
-              <div className="flex gap-2">
-                <button type="submit" className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">
-                  Créer le professeur
-                </button>
+              <div className="flex gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => { setShowForm(false); setCreatedCredentials(null); }}
-                  className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-gray-700"
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                 >
                   Annuler
                 </button>
+                <button type="submit" className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">
+                  Créer le professeur
+                </button>
               </div>
             </form>
-          </CardContent>
-        </Card>
+            )}
+          </div>
+        </div>
       )}
 
       <Card>
@@ -1086,7 +1112,7 @@ const TeachersPage = () => {
                       : null}
                     classesCount={teacherClasses[teacher.id]?.length}
                     hours={teacher.weekly_hours || null}
-                    onClick={() => setExpandedTeacher(teacher.id)}
+                    onClick={() => { setExpandedTeacher(teacher.id); setRevealCreds(false); }}
                     menu={
                       <input
                         type="checkbox"
@@ -1104,35 +1130,51 @@ const TeachersPage = () => {
                     width={440}
                   >
                     <div className="space-y-3">
-                      {/* Informations du professeur */}
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-medium text-gray-900">Informations personnelles</h4>
-                          <button
-                            onClick={() => openEditModal(teacher)}
-                            className="p-2 hover:bg-gray-200 rounded transition-colors"
-                            title="Modifier les informations"
-                          >
-                            <Edit2 className="w-4 h-4 text-gray-600" />
-                          </button>
+                      {/* En-tête fiche : avatar + matière + bouton modifier */}
+                      <div className="flex items-center gap-3">
+                        <Avatar name={`${teacher.first_name} ${teacher.last_name}`} src={teacher.avatar_url} size="lg" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-gray-900 truncate">{teacher.first_name} {teacher.last_name}</p>
+                          {teacherSubjects[teacher.id]?.[0] && (
+                            <p className="text-sm text-gray-500 truncate inline-flex items-center gap-1">
+                              <BookOpen className="w-3.5 h-3.5" />
+                              {teacherSubjects[teacher.id][0].subjects?.name || teacherSubjects[teacher.id][0].name || 'Matière'}
+                              {teacherSubjects[teacher.id].length > 1 ? ` +${teacherSubjects[teacher.id].length - 1}` : ''}
+                            </p>
+                          )}
                         </div>
-                        <div className="space-y-2">
-                          <div key={`name-${teacher.id}`}>
-                            <label className="text-sm font-medium text-gray-700">Nom complet:</label>
-                            <p className="text-sm text-gray-900">{teacher.first_name} {teacher.last_name}</p>
-                          </div>
-                          <div key={`phone-${teacher.id}`}>
-                            <label className="text-sm font-medium text-gray-700">Téléphone:</label>
-                            <p className="text-sm text-gray-900">{teacher.phone || 'Non renseigné'}</p>
-                          </div>
+                        <button
+                          onClick={() => openEditModal(teacher)}
+                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="Modifier les informations"
+                        >
+                          <Edit2 className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </div>
+
+                      {/* Infos essentielles */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 inline-flex items-center gap-1"><Phone className="w-3 h-3" /> Téléphone</p>
+                          <p className="text-sm font-medium text-gray-900 truncate">{teacher.phone || 'Non renseigné'}</p>
+                        </div>
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 inline-flex items-center gap-1"><LayoutGrid className="w-3 h-3" /> Classes</p>
+                          <p className="text-sm font-medium text-gray-900">{teacherClasses[teacher.id]?.length || 0}</p>
                         </div>
                       </div>
 
-                      {/* Carte avec identifiants */}
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <h4 className="font-medium text-blue-900 mb-3">Identifiants de connexion</h4>
-                        
-                        <div className="space-y-3">
+                      {/* Identifiants de connexion — masqués, affichés à la demande */}
+                      <div className="border border-gray-200 rounded-lg">
+                        <button
+                          onClick={() => setRevealCreds(v => !v)}
+                          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                        >
+                          <span className="inline-flex items-center gap-2"><KeyRound className="w-4 h-4 text-gray-500" /> Identifiants de connexion</span>
+                          {revealCreds ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                        </button>
+                        {revealCreds && (
+                        <div className="px-4 pb-4 pt-1 space-y-3 border-t border-gray-100">
                           <div className="flex items-center justify-between">
                             <div>
                               <label className="text-sm font-medium text-gray-700">Email:</label>
@@ -1192,6 +1234,7 @@ const TeachersPage = () => {
                             </div>
                           </div>
                         </div>
+                        )}
                       </div>
 
                       <div>
