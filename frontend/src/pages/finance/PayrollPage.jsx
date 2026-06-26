@@ -76,7 +76,7 @@ function EmployeesTab() {
   const [edit, setEdit] = useState(null);
   const [payEmp, setPayEmp] = useState(null);
   const [histEmp, setHistEmp] = useState(null);
-  const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true, profile_id: '' };
+  const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true, profile_id: '', hire_date: '', end_date: '', paid_months: [] };
   const [form, setForm] = useState(blank);
 
   useEffect(() => { load(); financeApi.listPayrollTeachers().then(d => setTeachers(d.teachers || [])).catch(() => {}); }, []);
@@ -159,7 +159,24 @@ function EmployeesTab() {
           <Field label="N° CNSS">
             <input value={form.cnss_number || ''} onChange={e => setForm({ ...form, cnss_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
           </Field>
+          <Field label="Date d'entrée">
+            <input type="date" value={form.hire_date || ''} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
+          <Field label="Date de sortie (optionnel)">
+            <input type="date" value={form.end_date || ''} onChange={e => setForm({ ...form, end_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </Field>
         </div>
+        <Field label="Mois payés">
+          <div className="flex flex-wrap gap-1.5">
+            {ORDER.map(m => {
+              const pm = form.paid_months || [];
+              const on = pm.includes(m);
+              return <button type="button" key={m} onClick={() => setForm({ ...form, paid_months: on ? pm.filter(x => x !== m) : [...pm, m] })}
+                className={`px-2 py-1 text-xs rounded border ${on ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{MONTHS[m - 1].slice(0, 4)}</button>;
+            })}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">Vide = payé tous les mois. Cochez pour limiter (ex. Sept→Juin, entrée/sortie en cours d'année).</p>
+        </Field>
         {hourly && (
           <Field label="Compte prof lié (heures réalisées)">
             <select value={form.profile_id || ''} onChange={e => setForm({ ...form, profile_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">

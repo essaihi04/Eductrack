@@ -15,6 +15,10 @@ ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS hourly_rate NUMERIC(14,2) 
 ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS default_monthly_hours NUMERIC(7,2) DEFAULT 0;
 ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'bank';
 ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS cnss_subject BOOLEAN DEFAULT true;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS hire_date DATE;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS end_date DATE;
+-- Mois payés (1-12) ; vide/null = tous les mois de l'année scolaire
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS paid_months JSONB;
 
 -- Contraintes (en DO pour rester idempotent)
 DO $$ BEGIN

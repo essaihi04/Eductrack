@@ -144,8 +144,28 @@ router.put('/payroll/config', async (req, res) => {
 // ============================================================
 // EMPLOYÉS
 // ============================================================
-const EMP_FIELDS = ['full_name', 'role_label', 'category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'is_active', 'profile_id'];
+const EMP_FIELDS = ['full_name', 'role_label', 'category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'is_active', 'profile_id', 'hire_date', 'end_date', 'paid_months'];
 const NUM_EMP_FIELDS = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours']);
+const DATE_EMP_FIELDS = new Set(['hire_date', 'end_date']);
+
+// Un employé est-il à payer pour ce mois (date d'entrée/sortie + mois cochés) ?
+function employeePaidForMonth(emp, year, month) {
+  const first = `${year}-${String(month).padStart(2, '0')}-01`;
+  const last = `${year}-${String(month).padStart(2, '0')}-31`;
+  if (emp.hire_date && String(emp.hire_date) > last) return false;
+  if (emp.end_date && String(emp.end_date) < first) return false;
+  if (Array.isArray(emp.paid_months) && emp.paid_months.length > 0 && !emp.paid_months.map(Number).includes(month)) return false;
+  return true;
+}
+
+// Normalise une valeur de champ employé (nombres, dates vides -> null, mois -> array)
+function coerceEmp(f, v) {
+  if (NUM_EMP_FIELDS.has(f)) return num(v);
+  if (DATE_EMP_FIELDS.has(f)) return v || null;
+  if (f === 'profile_id') return v || null;
+  if (f === 'paid_months') return Array.isArray(v) ? v.map(Number) : null;
+  return v;
+}
 
 router.get('/payroll/employees', async (req, res) => {
   try {
@@ -163,7 +183,7 @@ router.post('/payroll/employees', async (req, res) => {
     const schoolId = getSchoolId(req);
     if (!req.body.full_name) return res.status(400).json({ error: 'Nom requis' });
     const row = { school_id: schoolId };
-    for (const f of EMP_FIELDS) if (req.body[f] !== undefined) row[f] = NUM_EMP_FIELDS.has(f) ? num(req.body[f]) : req.body[f];
+    for (const f of EMP_FIELDS) if (req.body[f] !== undefined) row[f] = coerceEmp(f, req.body[f]);
     const { data, error } = await supabaseAdmin.from('finance_employee').insert(row).select().single();
     if (error) throw error;
     res.status(201).json({ employee: data });
@@ -174,7 +194,7 @@ router.put('/payroll/employees/:id', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const patch = { updated_at: new Date().toISOString() };
-    for (const f of EMP_FIELDS) if (req.body[f] !== undefined) patch[f] = NUM_EMP_FIELDS.has(f) ? num(req.body[f]) : req.body[f];
+    for (const f of EMP_FIELDS) if (req.body[f] !== undefined) patch[f] = coerceEmp(f, req.body[f]);
     const { data, error } = await supabaseAdmin.from('finance_employee')
       .update(patch).eq('id', req.params.id).eq('school_id', schoolId).select().single();
     if (error) throw error;
@@ -241,8 +261,10 @@ router.post('/payroll/runs', async (req, res) => {
 
     const config = await getOrCreatePayrollConfig(schoolId);
     const realized = await realizedHoursByTeacher(schoolId, year, month);
-    const { data: employees } = await supabaseAdmin.from('finance_employee')
+    const { data: allEmployees } = await supabaseAdmin.from('finance_employee')
       .select('*').eq('school_id', schoolId).eq('is_active', true);
+    // N'inclure que les employés à payer ce mois (date d'entrée/sortie + mois cochés)
+    const employees = (allEmployees || []).filter((e) => employeePaidForMonth(e, year, month));
     let lines = [];
     if (employees && employees.length) {
       const rows = employees.map((e) => {

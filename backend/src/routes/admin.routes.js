@@ -3614,9 +3614,15 @@ router.delete('/subjects/:id', async (req, res) => {
 const HR_NUM = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours']);
 async function syncTeacherEmployee(schoolId, profileId, fullName, hr) {
   if (!schoolId || !profileId || !hr) return;
-  const fields = ['category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number'];
+  const fields = ['category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'hire_date', 'end_date', 'paid_months'];
   const patch = {};
-  for (const f of fields) if (hr[f] !== undefined) patch[f] = HR_NUM.has(f) ? (Number(hr[f]) || 0) : hr[f];
+  for (const f of fields) {
+    if (hr[f] === undefined) continue;
+    if (HR_NUM.has(f)) patch[f] = Number(hr[f]) || 0;
+    else if (f === 'hire_date' || f === 'end_date') patch[f] = hr[f] || null;
+    else if (f === 'paid_months') patch[f] = Array.isArray(hr[f]) ? hr[f].map(Number) : null;
+    else patch[f] = hr[f];
+  }
   if (Object.keys(patch).length === 0) return;
   const { data: existing } = await supabaseAdmin.from('finance_employee')
     .select('id').eq('school_id', schoolId).eq('profile_id', profileId).maybeSingle();

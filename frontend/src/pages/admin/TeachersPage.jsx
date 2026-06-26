@@ -5,7 +5,8 @@ import { Avatar, StatusPill, toneFor, TeacherCard, DetailDrawer } from '../../co
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
-const BLANK_HR = { category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true };
+const BLANK_HR = { category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, hire_date: '', end_date: '', paid_months: [] };
+const HR_MONTHS = [['9', 'Sept'], ['10', 'Oct'], ['11', 'Nov'], ['12', 'Déc'], ['1', 'Jan'], ['2', 'Fév'], ['3', 'Mar'], ['4', 'Avr'], ['5', 'Mai'], ['6', 'Juin'], ['7', 'Juil'], ['8', 'Août']];
 
 // Section RH/paie partagée (création + édition d'un prof) -> finance_employee
 function HRFields({ hr, onChange }) {
@@ -50,6 +51,25 @@ function HRFields({ hr, onChange }) {
           <select value={h.payment_method} onChange={(e) => set({ payment_method: e.target.value })} className={cls}>
             <option value="bank">Virement bancaire</option><option value="cash">Espèce</option>
           </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Date d'entrée</label>
+          <input type="date" value={h.hire_date || ''} onChange={(e) => set({ hire_date: e.target.value })} className={cls} />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Date de sortie (optionnel)</label>
+          <input type="date" value={h.end_date || ''} onChange={(e) => set({ end_date: e.target.value })} className={cls} />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs text-gray-600 mb-1">Mois payés (vide = tous)</label>
+        <div className="flex flex-wrap gap-1.5">
+          {HR_MONTHS.map(([m, lbl]) => {
+            const pm = (h.paid_months || []).map(Number);
+            const on = pm.includes(Number(m));
+            return <button type="button" key={m} onClick={() => set({ paid_months: on ? pm.filter(x => x !== Number(m)) : [...pm, Number(m)] })}
+              className={`px-2 py-1 text-xs rounded border ${on ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{lbl}</button>;
+          })}
         </div>
       </div>
       <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={!!h.cnss_subject} onChange={(e) => set({ cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
