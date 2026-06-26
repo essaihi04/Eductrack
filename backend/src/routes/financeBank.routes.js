@@ -83,14 +83,15 @@ async function structureTransactionsWithLLM(text) {
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: "Tu extrais les opérations d'un relevé bancaire (souvent marocain). Réponds UNIQUEMENT en JSON {\"transactions\":[{\"txn_date\":\"YYYY-MM-DD\",\"label\":\"...\",\"amount\":<nombre positif>,\"direction\":\"debit|credit\"}]}. 'debit' = sortie d'argent (dépense), 'credit' = entrée. Ignore les lignes de solde, totaux et en-têtes. Montant toujours positif. N'invente rien." },
+        { role: 'system', content: "Tu extrais les opérations d'un relevé bancaire (souvent marocain). Réponds UNIQUEMENT en JSON {\"bank_name\":\"nom de la banque émettrice du relevé (ex: Attijariwafa Bank, BMCE/Bank of Africa, Banque Populaire, CIH, Société Générale…), ou null si introuvable\",\"transactions\":[{\"txn_date\":\"YYYY-MM-DD\",\"label\":\"...\",\"amount\":<nombre positif>,\"direction\":\"debit|credit\"}]}. 'debit' = sortie d'argent (dépense), 'credit' = entrée. Ignore les lignes de solde, totaux et en-têtes. Montant toujours positif. N'invente rien." },
         { role: 'user', content: sample },
       ],
     });
     const raw = completion.choices?.[0]?.message?.content || '';
     const parsed = JSON.parse(raw);
     const arr = Array.isArray(parsed) ? parsed : (parsed.transactions || []);
-    return arr
+    const bankName = (!Array.isArray(parsed) && parsed.bank_name) ? String(parsed.bank_name).slice(0, 120).trim() : '';
+    const transactions = arr
       .map((t) => ({
         txn_date: /^\d{4}-\d{2}-\d{2}$/.test(t.txn_date) ? t.txn_date : null,
         label: String(t.label || 'Opération').slice(0, 180),
@@ -98,6 +99,7 @@ async function structureTransactionsWithLLM(text) {
         direction: t.direction === 'credit' ? 'credit' : 'debit',
       }))
       .filter((t) => t.txn_date && t.amount > 0);
+    return { transactions, bankName };
   } catch (e) {
     console.warn('[bank] structuration LLM échouée:', e.message);
     return null;
@@ -141,12 +143,14 @@ async function extractTransactions(buffer, filename) {
   if (!source) { text = await ocrTextFromBuffer(buffer, filename); source = text ? 'ocr' : ''; }
   if (!text) return { transactions: [], method: 'none' };
 
-  // 3) Structuration en lignes de dépenses via DeepSeek
+  // 3) Structuration en lignes de dépenses via DeepSeek (+ nom de la banque)
   const structured = await structureTransactionsWithLLM(text);
-  if (structured && structured.length) return { transactions: structured, method: `${source}+ia` };
+  if (structured && structured.transactions.length) {
+    return { transactions: structured.transactions, bankName: structured.bankName, method: `${source}+ia` };
+  }
 
   // 4) Repli : parsing par regex
-  return { transactions: parseTransactionsFromText(text), method: source || 'pdf' };
+  return { transactions: parseTransactionsFromText(text), bankName: '', method: source || 'pdf' };
 }
 
 // ── Catégorisation IA : affecte chaque débit au poste le plus probable ────
@@ -250,10 +254,25 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
 
     let candidates = [];
     let method = 'none';
+    let detectedBank = '';
     if (req.file?.buffer) {
       const r = await extractTransactions(req.file.buffer, req.file.originalname);
-      candidates = r.transactions; method = r.method;
+      candidates = r.transactions; method = r.method; detectedBank = r.bankName || '';
     }
+
+    // Nom de banque détecté par l'IA : on le mémorise, et on l'utilise comme
+    // libellé du compte si l'admin n'a pas saisi de nom précis ("Banque" par défaut).
+    let finalStatement = statement;
+    if (detectedBank) {
+      const patch = { bank_name: detectedBank };
+      if (!account_label || account_label.trim() === '' || account_label.trim() === 'Banque') {
+        patch.account_label = detectedBank;
+      }
+      const { data: upd } = await supabaseAdmin.from('bank_statement')
+        .update(patch).eq('id', statement.id).select().single();
+      if (upd) finalStatement = upd;
+    }
+
     candidates = await applyRulesTo(schoolId, candidates);
     candidates = await aiCategorizeTransactions(schoolId, candidates);
     let inserted = [];
@@ -262,7 +281,7 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
       const { data } = await supabaseAdmin.from('bank_transaction').insert(rows).select();
       inserted = data || [];
     }
-    res.status(201).json({ statement, transactions: inserted, parsed: candidates.length, method });
+    res.status(201).json({ statement: finalStatement, transactions: inserted, parsed: candidates.length, method, detected_bank: detectedBank });
   } catch (e) { console.error('POST statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 

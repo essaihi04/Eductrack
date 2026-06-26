@@ -86,7 +86,12 @@ function StatementsTab({ accounts }) {
             {statements.length === 0 && <tr><td colSpan="5" className="px-4 py-8 text-center text-gray-400">Aucun relevé importé</td></tr>}
             {statements.map(s => (
               <tr key={s.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => open(s.id)}>
-                <td className="px-4 py-3 font-medium text-gray-800">{s.account_label}</td>
+                <td className="px-4 py-3 font-medium text-gray-800">
+                  {s.account_label}
+                  {s.bank_name && s.bank_name !== s.account_label && (
+                    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 text-[10px] font-normal" title="Banque détectée par l'IA"><Wand2 className="w-3 h-3" /> {s.bank_name}</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-gray-600">{s.period_start ? `${formatDate(s.period_start)} → ${formatDate(s.period_end)}` : '—'}</td>
                 <td className="px-4 py-3 text-gray-500 text-xs">{s.source_filename || '—'}</td>
                 <td className="px-4 py-3 text-gray-500">{formatDate(s.created_at)}</td>
@@ -125,7 +130,13 @@ function StatementDetail({ sel, accounts, reload, back, onDelete }) {
           <button onClick={onDelete} className="p-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50"><Trash2 className="w-4 h-4" /></button>
         </div>
       </div>
-      <h2 className="text-lg font-semibold text-gray-800">{statement.account_label} · {transactions.length} ligne(s) · débits {formatMAD(totalDebit)}</h2>
+      <h2 className="text-lg font-semibold text-gray-800">
+        {statement.account_label}
+        {statement.bank_name && statement.bank_name !== statement.account_label && (
+          <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 text-xs font-normal align-middle" title="Banque détectée par l'IA"><Wand2 className="w-3 h-3" /> {statement.bank_name}</span>
+        )}
+        <span className="font-normal text-gray-600"> · {transactions.length} ligne(s) · débits {formatMAD(totalDebit)}</span>
+      </h2>
 
       <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">

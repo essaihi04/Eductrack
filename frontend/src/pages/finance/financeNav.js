@@ -28,10 +28,16 @@ export const FINANCE_POLES = [
     icon: TrendingUp,
     color: 'green',
     tabs: [
-      { label: 'Élèves', path: '/finance/students', icon: Users },
-      { label: 'Factures', path: '/finance/invoices', icon: FileText },
-      { label: 'Paiements', path: '/finance/payments', icon: CreditCard },
-      { label: 'Retards', path: '/finance/overdue', icon: AlertCircle },
+      {
+        label: 'Élèves', path: '/finance/students', icon: Users,
+        // Onglet "Élèves" : regroupe le suivi par élève et son recouvrement.
+        subTabs: [
+          { label: 'Liste élèves', path: '/finance/students', end: true, icon: Users },
+          { label: 'Factures', path: '/finance/invoices', icon: FileText },
+          { label: 'Paiements', path: '/finance/payments', icon: CreditCard },
+          { label: 'Retards', path: '/finance/overdue', icon: AlertCircle },
+        ],
+      },
       { label: 'Modèles de frais', path: '/finance/fee-templates', icon: Layers },
       { label: 'Caisse', path: '/finance/cash-register', icon: Banknote },
     ],
@@ -54,9 +60,9 @@ export const FINANCE_POLES = [
     icon: BookOpen,
     color: 'purple',
     tabs: [
+      { label: 'Relevés bancaires', path: '/finance/bank', icon: Building2 },
       { label: 'Plan comptable', path: '/finance/chart', icon: ListTree },
       { label: 'Budget', path: '/finance/budget', icon: CalendarRange },
-      { label: 'Relevés bancaires', path: '/finance/bank', icon: Building2 },
     ],
   },
 ];
@@ -69,20 +75,43 @@ export const POLE_COLORS = {
   purple: { active: 'bg-purple-600 text-white', soft: 'bg-purple-50 text-purple-700', tab: 'border-purple-600 text-purple-700' },
 };
 
+// Feuilles d'un onglet : ses sous-onglets s'il en a, sinon lui-même.
+const leavesOf = (tab) => (tab.subTabs && tab.subTabs.length ? tab.subTabs : [tab]);
+// Tous les chemins (feuilles) d'un pôle, sous-onglets compris.
+const leafPaths = (pole) => pole.tabs.flatMap((t) => leavesOf(t).map((l) => l.path));
+
 // Pôle correspondant à un chemin (le plus spécifique gagne).
 export function poleForPath(pathname) {
   let best = null;
   let bestLen = -1;
   for (const pole of FINANCE_POLES) {
     for (const tab of pole.tabs) {
-      const match = tab.end ? pathname === tab.path : pathname.startsWith(tab.path);
-      if (match && tab.path.length > bestLen) {
-        best = pole;
-        bestLen = tab.path.length;
+      for (const leaf of leavesOf(tab)) {
+        const match = leaf.end ? pathname === leaf.path : pathname.startsWith(leaf.path);
+        if (match && leaf.path.length > bestLen) {
+          best = pole;
+          bestLen = leaf.path.length;
+        }
       }
     }
   }
   return best || FINANCE_POLES[0];
+}
+
+// Onglet (niveau 2) correspondant à un chemin, sous-onglets compris.
+export function tabForPath(pole, pathname) {
+  let best = null;
+  let bestLen = -1;
+  for (const tab of pole.tabs) {
+    for (const leaf of leavesOf(tab)) {
+      const match = leaf.end ? pathname === leaf.path : pathname.startsWith(leaf.path);
+      if (match && leaf.path.length > bestLen) {
+        best = tab;
+        bestLen = leaf.path.length;
+      }
+    }
+  }
+  return best || pole.tabs[0];
 }
 
 // Entrées de pôle pour la barre latérale (lien = premier onglet).
@@ -91,5 +120,5 @@ export const FINANCE_SIDEBAR_POLES = FINANCE_POLES.map((p) => ({
   label: p.label,
   icon: p.icon,
   path: p.tabs[0].path,
-  paths: p.tabs.map((t) => t.path),
+  paths: leafPaths(p),
 }));

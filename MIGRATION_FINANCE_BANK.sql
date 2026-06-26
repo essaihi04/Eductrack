@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS bank_statement (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   school_id       UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
   account_label   TEXT,
+  bank_name       TEXT,
   period_start    DATE,
   period_end      DATE,
   opening_balance NUMERIC(14,2),
@@ -19,6 +20,8 @@ CREATE TABLE IF NOT EXISTS bank_statement (
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_bank_statement_school ON bank_statement(school_id);
+-- Nom de la banque détecté par l'IA lors de l'import (relevés déjà existants)
+ALTER TABLE bank_statement ADD COLUMN IF NOT EXISTS bank_name TEXT;
 
 -- 2. Transaction bancaire (ligne du releve)
 CREATE TABLE IF NOT EXISTS bank_transaction (
