@@ -82,7 +82,7 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
 // ── Grille mois × service réutilisable ───────────────────────────────────────
 // sel : { 'month:category' -> { checked, amount } }. Les services déjà payés
 // (remaining<=0) sont verrouillés et marqués payés.
-function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, onCancelService, onAddService, onRestoreService }) {
+function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, onCancelService, onAddService, onRestoreService, serviceCatalog }) {
   const amtCls = compact ? 'w-16 px-1.5 py-1 text-xs' : 'w-28 px-2 py-1 text-sm';
   // Ajout d'un service : mois en cours d'ajout + catégorie + montant.
   const [addMonth, setAddMonth] = useState(null);
@@ -90,14 +90,21 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
   const [addAmount, setAddAmount] = useState('');
   const [adding, setAdding] = useState(false);
 
+  // Catalogue des services proposés à l'ajout : les services réellement
+  // enregistrés dans le plan de l'élève (noms personnalisés) si fournis,
+  // sinon repli sur les catégories génériques.
+  const catalog = (serviceCatalog && serviceCatalog.length) ? serviceCatalog : Object.entries(CATEGORY_LABELS);
+
   const openAdd = (month, presentCats) => {
-    const firstFree = Object.keys(CATEGORY_LABELS).find(c => !presentCats.has(c)) || '';
+    const firstFree = (catalog.find(([c]) => !presentCats.has(c)) || [''])[0];
     setAddMonth(month); setAddCat(firstFree); setAddAmount('');
   };
   const submitAdd = async (month) => {
     if (!addCat) return;
     setAdding(true);
-    try { await onAddService(month, addCat, addAmount); setAddMonth(null); }
+    // Transmet le nom enregistré du service pour conserver le libellé exact.
+    const name = (catalog.find(([c]) => c === addCat) || [])[1];
+    try { await onAddService(month, addCat, addAmount, name); setAddMonth(null); }
     finally { setAdding(false); }
   };
 
@@ -106,7 +113,7 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
       {(months || []).map(m => {
         const head = MONTH_HEAD[m.status] || MONTH_HEAD.unpaid;
         const presentCats = new Set(m.services.map(s => s.category).filter(Boolean));
-        const freeCats = Object.entries(CATEGORY_LABELS).filter(([c]) => !presentCats.has(c));
+        const freeCats = catalog.filter(([c]) => !presentCats.has(c));
         return (
           <div key={m.month} className="border border-gray-200 rounded-lg overflow-hidden">
             <div className={`flex items-center justify-between px-3 py-1.5 text-sm border-b ${head}`}>
@@ -306,11 +313,22 @@ function CollectTab({ student, academicYear, onChanged }) {
     } catch (e) { alert('Erreur: ' + e.message); }
   };
 
+  // Catalogue des services enregistrés dans le plan de l'élève (catégorie → nom
+  // personnalisé), reconstruit depuis les mois. Sert à proposer à l'ajout les
+  // vrais noms de services déjà enregistrés plutôt que des catégories génériques.
+  const serviceCatalog = useMemo(() => {
+    const map = new Map();
+    (data?.months || []).forEach(m => (m.services || []).forEach(svc => {
+      if (svc.category && !map.has(svc.category)) map.set(svc.category, serviceLabel(svc));
+    }));
+    return Array.from(map.entries());
+  }, [data]);
+
   // Ajoute (facture) un service à un mois — montant auto (plan) ou manuel.
-  const addServiceToMonth = async (month, category, amount) => {
+  const addServiceToMonth = async (month, category, amount, name) => {
     try {
       await financeApi.addService(student.id, {
-        academic_year: academicYear, month, category,
+        academic_year: academicYear, month, category, name: name || undefined,
         amount: amount !== '' ? Number(amount) : undefined,
       });
       await load();
@@ -379,7 +397,8 @@ function CollectTab({ student, academicYear, onChanged }) {
       </div>
 
       <MonthsServicesGrid months={data.months} sel={sel} onToggle={toggle} onAmount={setAmount}
-        onCancelService={cancelService} onAddService={addServiceToMonth} onRestoreService={restoreService} />
+        onCancelService={cancelService} onAddService={addServiceToMonth} onRestoreService={restoreService}
+        serviceCatalog={serviceCatalog} />
 
       {/* Liste live + encaissement */}
       {checkedItems.length > 0 && (
