@@ -290,7 +290,7 @@ function DocumentsSection({ employeeId }) {
             <FileText className="w-4 h-4 text-gray-400 shrink-0" />
             <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 shrink-0">{(DOC_TYPES.find(([k]) => k === d.doc_type) || [, 'Autre'])[1]}</span>
             <span className="text-gray-700 truncate flex-1">{d.label || 'Document'}</span>
-            <a href={fileUrl(d.file_url)} target="_blank" rel="noreferrer" className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-1 text-xs"><ExternalLink className="w-3 h-3" /> Voir</a>
+            <a href={fileUrl(d.view_url || d.file_url)} target="_blank" rel="noreferrer" className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-1 text-xs"><ExternalLink className="w-3 h-3" /> Voir</a>
             <button onClick={() => remove(d.id)} className="p-1 hover:bg-red-50 rounded"><X className="w-3.5 h-3.5 text-red-500" /></button>
           </div>
         ))}

@@ -13,7 +13,18 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
-import { hrUpload, hrFileUrl, deleteHrFileByUrl } from '../utils/hrFiles.js';
+import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PUBLIC, BUCKET_PRIVATE } from '../utils/storage.js';
+
+const hrUpload = memoryUpload(10);
+// Extrait le chemin objet d'une URL publique Supabase (pour suppression).
+const publicPathFromUrl = (url) => {
+  if (!url) return null;
+  const marker = `/${BUCKET_PUBLIC}/`;
+  const i = url.indexOf(marker);
+  return i >= 0 ? url.slice(i + marker.length) : null;
+};
+// Un file_url RH privé est un "path" (pas /uploads ni http) -> à signer.
+const isPrivatePath = (u) => u && !/^https?:\/\//i.test(u) && !u.startsWith('/uploads');
 
 const router = express.Router();
 router.use(authenticate);
@@ -209,9 +220,9 @@ router.delete('/payroll/employees/:id', async (req, res) => {
     const schoolId = getSchoolId(req);
     // Supprime les fichiers (photo + documents) du disque avant la ligne
     const { data: emp } = await supabaseAdmin.from('finance_employee').select('photo_url').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
-    if (emp?.photo_url) deleteHrFileByUrl(emp.photo_url);
+    if (emp?.photo_url) await removeObject(BUCKET_PUBLIC, publicPathFromUrl(emp.photo_url));
     const { data: docs } = await supabaseAdmin.from('finance_employee_document').select('file_url').eq('employee_id', req.params.id);
-    (docs || []).forEach((d) => deleteHrFileByUrl(d.file_url));
+    for (const d of (docs || [])) if (isPrivatePath(d.file_url)) await removeObject(BUCKET_PRIVATE, d.file_url);
     const { error } = await supabaseAdmin.from('finance_employee').delete().eq('id', req.params.id).eq('school_id', schoolId);
     if (error) throw error;
     res.json({ success: true });
@@ -224,11 +235,11 @@ router.post('/payroll/employees/:id/photo', hrUpload.single('file'), async (req,
     const schoolId = getSchoolId(req);
     if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
     const { data: emp } = await supabaseAdmin.from('finance_employee').select('photo_url').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
-    if (!emp) { deleteHrFileByUrl(hrFileUrl(req.file)); return res.status(404).json({ error: 'Employé introuvable' }); }
-    if (emp.photo_url) deleteHrFileByUrl(emp.photo_url);
-    const url = hrFileUrl(req.file);
-    await supabaseAdmin.from('finance_employee').update({ photo_url: url, updated_at: new Date().toISOString() }).eq('id', req.params.id).eq('school_id', schoolId);
-    res.json({ photo_url: url });
+    if (!emp) return res.status(404).json({ error: 'Employé introuvable' });
+    if (emp.photo_url) await removeObject(BUCKET_PUBLIC, publicPathFromUrl(emp.photo_url));
+    const { publicUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: `hr/${schoolId}/photos`, file: req.file, prefix: 'photo' });
+    await supabaseAdmin.from('finance_employee').update({ photo_url: publicUrl, updated_at: new Date().toISOString() }).eq('id', req.params.id).eq('school_id', schoolId);
+    res.json({ photo_url: publicUrl });
   } catch (e) { console.error('POST photo:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
@@ -236,7 +247,7 @@ router.delete('/payroll/employees/:id/photo', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { data: emp } = await supabaseAdmin.from('finance_employee').select('photo_url').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
-    if (emp?.photo_url) deleteHrFileByUrl(emp.photo_url);
+    if (emp?.photo_url) await removeObject(BUCKET_PUBLIC, publicPathFromUrl(emp.photo_url));
     await supabaseAdmin.from('finance_employee').update({ photo_url: null }).eq('id', req.params.id).eq('school_id', schoolId);
     res.json({ success: true });
   } catch (e) { console.error('DELETE photo:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
@@ -248,7 +259,13 @@ router.get('/payroll/employees/:id/documents', async (req, res) => {
     const schoolId = getSchoolId(req);
     const { data } = await supabaseAdmin.from('finance_employee_document')
       .select('*').eq('employee_id', req.params.id).eq('school_id', schoolId).order('created_at', { ascending: false });
-    res.json({ documents: data || [] });
+    // URL d'accès : signée (bucket privé) ou legacy /uploads servie statiquement
+    const documents = [];
+    for (const d of (data || [])) {
+      const view_url = isPrivatePath(d.file_url) ? await signedUrl(d.file_url, 3600) : d.file_url;
+      documents.push({ ...d, view_url });
+    }
+    res.json({ documents });
   } catch (e) { console.error('GET documents:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
@@ -257,14 +274,15 @@ router.post('/payroll/employees/:id/documents', hrUpload.single('file'), async (
     const schoolId = getSchoolId(req);
     if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
     const { data: emp } = await supabaseAdmin.from('finance_employee').select('id').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
-    if (!emp) { deleteHrFileByUrl(hrFileUrl(req.file)); return res.status(404).json({ error: 'Employé introuvable' }); }
+    if (!emp) return res.status(404).json({ error: 'Employé introuvable' });
     const doc_type = ['diploma', 'cin', 'contract', 'cv', 'other'].includes(req.body.doc_type) ? req.body.doc_type : 'other';
+    const { path: objectPath } = await uploadBuffer({ bucket: BUCKET_PRIVATE, folder: `hr/${schoolId}/${req.params.id}`, file: req.file, prefix: doc_type });
     const { data, error } = await supabaseAdmin.from('finance_employee_document').insert({
       school_id: schoolId, employee_id: req.params.id, doc_type, label: req.body.label || null,
-      file_url: hrFileUrl(req.file), mime: req.file.mimetype,
+      file_url: objectPath, mime: req.file.mimetype,
     }).select().single();
     if (error) throw error;
-    res.status(201).json({ document: data });
+    res.status(201).json({ document: { ...data, view_url: await signedUrl(objectPath, 3600) } });
   } catch (e) { console.error('POST document:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
@@ -272,7 +290,7 @@ router.delete('/payroll/employees/:id/documents/:docId', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { data: doc } = await supabaseAdmin.from('finance_employee_document').select('file_url').eq('id', req.params.docId).eq('school_id', schoolId).maybeSingle();
-    if (doc?.file_url) deleteHrFileByUrl(doc.file_url);
+    if (doc?.file_url && isPrivatePath(doc.file_url)) await removeObject(BUCKET_PRIVATE, doc.file_url);
     await supabaseAdmin.from('finance_employee_document').delete().eq('id', req.params.docId).eq('school_id', schoolId);
     res.json({ success: true });
   } catch (e) { console.error('DELETE document:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
