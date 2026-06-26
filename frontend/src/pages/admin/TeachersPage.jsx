@@ -5,6 +5,59 @@ import { Avatar, StatusPill, toneFor, TeacherCard, DetailDrawer } from '../../co
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
+const BLANK_HR = { category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true };
+
+// Section RH/paie partagée (création + édition d'un prof) -> finance_employee
+function HRFields({ hr, onChange }) {
+  const h = { ...BLANK_HR, ...(hr || {}) };
+  const set = (patch) => onChange({ ...h, ...patch });
+  const hourly = h.pay_mode === 'hourly';
+  const cls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm';
+  return (
+    <div className="border-t border-gray-200 pt-3 mt-1 space-y-3">
+      <p className="text-xs font-semibold text-gray-500 uppercase">Paie / RH (optionnel)</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Type de contrat</label>
+          <select value={h.employment_type} onChange={(e) => set({ employment_type: e.target.value })} className={cls}>
+            <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Mode de rémunération</label>
+          <select value={h.pay_mode} onChange={(e) => set({ pay_mode: e.target.value })} className={cls}>
+            <option value="fixed">Salaire fixe</option><option value="hourly">À l'heure</option>
+          </select>
+        </div>
+        {!hourly && (
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Salaire mensuel brut</label>
+            <input type="number" step="0.01" value={h.base_salary} onChange={(e) => set({ base_salary: e.target.value })} className={cls} />
+          </div>
+        )}
+        {hourly && <>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Taux horaire</label>
+            <input type="number" step="0.01" value={h.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Heures/mois (défaut)</label>
+            <input type="number" step="1" value={h.default_monthly_hours} onChange={(e) => set({ default_monthly_hours: e.target.value })} className={cls} />
+          </div>
+        </>}
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">Mode de paiement</label>
+          <select value={h.payment_method} onChange={(e) => set({ payment_method: e.target.value })} className={cls}>
+            <option value="bank">Virement bancaire</option><option value="cash">Espèce</option>
+          </select>
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={!!h.cnss_subject} onChange={(e) => set({ cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
+      {hourly && <p className="text-xs text-gray-400">À l'heure : les heures réalisées (suivi des séances) rempliront le bulletin de paie automatiquement.</p>}
+    </div>
+  );
+}
+
 const TeachersPage = () => {
   const { profile } = useAuth();
   const [teachers, setTeachers] = useState([]);
@@ -30,13 +83,15 @@ const TeachersPage = () => {
   const [editFormData, setEditFormData] = useState({
     firstName: '',
     lastName: '',
-    phone: ''
+    phone: '',
+    hr: { ...BLANK_HR }
   });
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     phone: '',
-    subjectId: ''
+    subjectId: '',
+    hr: { ...BLANK_HR }
   });
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -168,7 +223,8 @@ const TeachersPage = () => {
           firstName: formData.firstName,
           lastName: formData.lastName,
           phone: formData.phone || null,
-          subjectId: formData.subjectId || null
+          subjectId: formData.subjectId || null,
+          hr: formData.hr
         })
       });
 
@@ -180,7 +236,7 @@ const TeachersPage = () => {
           email: data.generatedEmail || data.email,
           password: data.password || 'Prof@2025'
         });
-        setFormData({ firstName: '', lastName: '', phone: '', subjectId: '' });
+        setFormData({ firstName: '', lastName: '', phone: '', subjectId: '', hr: { ...BLANK_HR } });
         fetchData();
       } else {
         alert(data.error || 'Erreur lors de la création');
@@ -447,7 +503,8 @@ const TeachersPage = () => {
     setEditFormData({
       firstName: teacher.first_name || '',
       lastName: teacher.last_name || '',
-      phone: teacher.phone || ''
+      phone: teacher.phone || '',
+      hr: { ...BLANK_HR, ...(teacher.hr || {}) }
     });
   };
 
@@ -590,6 +647,7 @@ const TeachersPage = () => {
                 />
                 <p className="text-xs text-gray-500 mt-1">Format: +212 6XX XXX XXX</p>
               </div>
+              <HRFields hr={editFormData.hr} onChange={(hr) => setEditFormData({ ...editFormData, hr })} />
               <div className="pt-2 border-t border-gray-200 flex gap-3">
                 <button
                   type="button"
@@ -876,6 +934,7 @@ const TeachersPage = () => {
                   </select>
                 </div>
               </div>
+              <HRFields hr={formData.hr} onChange={(hr) => setFormData({ ...formData, hr })} />
               <p className="text-xs text-gray-500">
                 L'email et le mot de passe seront générés automatiquement ({profile?.school?.name ? `prénomnom@${profile.school.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')}.ma` : 'prénomnom@école.ma'}).
               </p>

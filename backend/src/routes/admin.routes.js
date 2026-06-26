@@ -3609,6 +3609,24 @@ router.delete('/subjects/:id', async (req, res) => {
 // ==================== PROFESSEURS ====================
 
 // Récupérer tous les professeurs
+// Synchronise une fiche de paie (finance_employee) liée à un prof. Appelé à la
+// création/édition d'un prof quand des détails RH sont fournis (body.hr).
+const HR_NUM = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours']);
+async function syncTeacherEmployee(schoolId, profileId, fullName, hr) {
+  if (!schoolId || !profileId || !hr) return;
+  const fields = ['category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number'];
+  const patch = {};
+  for (const f of fields) if (hr[f] !== undefined) patch[f] = HR_NUM.has(f) ? (Number(hr[f]) || 0) : hr[f];
+  if (Object.keys(patch).length === 0) return;
+  const { data: existing } = await supabaseAdmin.from('finance_employee')
+    .select('id').eq('school_id', schoolId).eq('profile_id', profileId).maybeSingle();
+  if (existing) {
+    await supabaseAdmin.from('finance_employee').update({ ...patch, full_name: fullName, updated_at: new Date().toISOString() }).eq('id', existing.id);
+  } else {
+    await supabaseAdmin.from('finance_employee').insert({ school_id: schoolId, profile_id: profileId, full_name: fullName, role_label: 'Enseignant', is_active: true, ...patch });
+  }
+}
+
 router.get('/teachers', async (req, res) => {
   try {
     let query = supabaseAdmin
@@ -3675,11 +3693,25 @@ router.get('/teachers', async (req, res) => {
       }
     }
 
+    // Fiches de paie liées (RH) par prof
+    const hrByTeacher = {};
+    if (teacherIds.length > 0) {
+      const CHUNK = 200;
+      for (let i = 0; i < teacherIds.length; i += CHUNK) {
+        const chunk = teacherIds.slice(i, i + CHUNK);
+        const { data: emps } = await supabaseAdmin.from('finance_employee')
+          .select('category, employment_type, pay_mode, base_salary, hourly_rate, default_monthly_hours, payment_method, cnss_subject, cnss_number, profile_id')
+          .eq('school_id', getSchoolId(req)).in('profile_id', chunk);
+        (emps || []).forEach((e) => { if (e.profile_id) hrByTeacher[e.profile_id] = e; });
+      }
+    }
+
     const withHours = (data || []).map(t => ({
       ...t,
       // arrondi à 0,5 h près pour un affichage lisible
       weekly_hours: Math.round(((hoursByTeacher[t.id] || 0) / 60) * 2) / 2,
       subject_ids: subjectsByTeacher[t.id] || [],
+      hr: hrByTeacher[t.id] || null,
     }));
 
     res.json(withHours);
@@ -3781,6 +3813,9 @@ router.post('/teachers', async (req, res) => {
         });
     }
 
+    // Synchroniser la fiche de paie (RH) si des détails sont fournis
+    try { await syncTeacherEmployee(getSchoolId(req), authData.user.id, `${firstName} ${lastName}`.trim(), req.body.hr); } catch (e) { console.warn('syncTeacherEmployee (create):', e.message); }
+
     res.status(201).json({ ...profile, password, generatedEmail: email });
   } catch (error) {
     console.error('Erreur:', error);
@@ -3813,6 +3848,9 @@ router.put('/teachers/:id', async (req, res) => {
 
     if (profileError) throw profileError;
     if (!profile) return res.status(404).json({ error: 'Professeur non trouvé' });
+
+    // Synchroniser la fiche de paie (RH) si des détails sont fournis
+    try { await syncTeacherEmployee(getSchoolId(req), id, `${firstName} ${lastName}`.trim(), req.body.hr); } catch (e) { console.warn('syncTeacherEmployee (update):', e.message); }
 
     res.json(profile);
   } catch (error) {
