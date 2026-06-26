@@ -13,6 +13,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
+import { hrUpload, hrFileUrl, deleteHrFileByUrl } from '../utils/hrFiles.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -144,9 +145,10 @@ router.put('/payroll/config', async (req, res) => {
 // ============================================================
 // EMPLOYÉS
 // ============================================================
-const EMP_FIELDS = ['full_name', 'role_label', 'category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'is_active', 'profile_id', 'hire_date', 'end_date', 'paid_months'];
-const NUM_EMP_FIELDS = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours']);
-const DATE_EMP_FIELDS = new Set(['hire_date', 'end_date']);
+const EMP_FIELDS = ['full_name', 'role_label', 'category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'is_active', 'profile_id', 'hire_date', 'end_date', 'paid_months',
+  'cin', 'birth_date', 'birth_place', 'address', 'phone', 'email', 'iban', 'marital_status', 'children_count', 'weekly_target_hours'];
+const NUM_EMP_FIELDS = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours', 'children_count', 'weekly_target_hours']);
+const DATE_EMP_FIELDS = new Set(['hire_date', 'end_date', 'birth_date']);
 
 // Un employé est-il à payer pour ce mois (date d'entrée/sortie + mois cochés) ?
 function employeePaidForMonth(emp, year, month) {
@@ -205,10 +207,119 @@ router.put('/payroll/employees/:id', async (req, res) => {
 router.delete('/payroll/employees/:id', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
+    // Supprime les fichiers (photo + documents) du disque avant la ligne
+    const { data: emp } = await supabaseAdmin.from('finance_employee').select('photo_url').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (emp?.photo_url) deleteHrFileByUrl(emp.photo_url);
+    const { data: docs } = await supabaseAdmin.from('finance_employee_document').select('file_url').eq('employee_id', req.params.id);
+    (docs || []).forEach((d) => deleteHrFileByUrl(d.file_url));
     const { error } = await supabaseAdmin.from('finance_employee').delete().eq('id', req.params.id).eq('school_id', schoolId);
     if (error) throw error;
     res.json({ success: true });
   } catch (e) { console.error('DELETE employee:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// ── Photo de l'employé ────────────────────────────────────────────────────
+router.post('/payroll/employees/:id/photo', hrUpload.single('file'), async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+    const { data: emp } = await supabaseAdmin.from('finance_employee').select('photo_url').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (!emp) { deleteHrFileByUrl(hrFileUrl(req.file)); return res.status(404).json({ error: 'Employé introuvable' }); }
+    if (emp.photo_url) deleteHrFileByUrl(emp.photo_url);
+    const url = hrFileUrl(req.file);
+    await supabaseAdmin.from('finance_employee').update({ photo_url: url, updated_at: new Date().toISOString() }).eq('id', req.params.id).eq('school_id', schoolId);
+    res.json({ photo_url: url });
+  } catch (e) { console.error('POST photo:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.delete('/payroll/employees/:id/photo', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: emp } = await supabaseAdmin.from('finance_employee').select('photo_url').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (emp?.photo_url) deleteHrFileByUrl(emp.photo_url);
+    await supabaseAdmin.from('finance_employee').update({ photo_url: null }).eq('id', req.params.id).eq('school_id', schoolId);
+    res.json({ success: true });
+  } catch (e) { console.error('DELETE photo:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// ── Documents (diplômes, CIN, contrat, CV…) ───────────────────────────────
+router.get('/payroll/employees/:id/documents', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data } = await supabaseAdmin.from('finance_employee_document')
+      .select('*').eq('employee_id', req.params.id).eq('school_id', schoolId).order('created_at', { ascending: false });
+    res.json({ documents: data || [] });
+  } catch (e) { console.error('GET documents:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/payroll/employees/:id/documents', hrUpload.single('file'), async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!req.file) return res.status(400).json({ error: 'Fichier requis' });
+    const { data: emp } = await supabaseAdmin.from('finance_employee').select('id').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (!emp) { deleteHrFileByUrl(hrFileUrl(req.file)); return res.status(404).json({ error: 'Employé introuvable' }); }
+    const doc_type = ['diploma', 'cin', 'contract', 'cv', 'other'].includes(req.body.doc_type) ? req.body.doc_type : 'other';
+    const { data, error } = await supabaseAdmin.from('finance_employee_document').insert({
+      school_id: schoolId, employee_id: req.params.id, doc_type, label: req.body.label || null,
+      file_url: hrFileUrl(req.file), mime: req.file.mimetype,
+    }).select().single();
+    if (error) throw error;
+    res.status(201).json({ document: data });
+  } catch (e) { console.error('POST document:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.delete('/payroll/employees/:id/documents/:docId', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: doc } = await supabaseAdmin.from('finance_employee_document').select('file_url').eq('id', req.params.docId).eq('school_id', schoolId).maybeSingle();
+    if (doc?.file_url) deleteHrFileByUrl(doc.file_url);
+    await supabaseAdmin.from('finance_employee_document').delete().eq('id', req.params.docId).eq('school_id', schoolId);
+    res.json({ success: true });
+  } catch (e) { console.error('DELETE document:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// ── Matières du prof lié (réutilise teacher_subjects) ─────────────────────
+router.get('/payroll/subjects', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data } = await supabaseAdmin.from('subjects').select('id, name').eq('school_id', schoolId).order('name');
+    res.json({ subjects: data || [] });
+  } catch (e) { console.error('GET subjects:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+async function employeeProfileId(schoolId, empId) {
+  const { data: emp } = await supabaseAdmin.from('finance_employee').select('profile_id').eq('id', empId).eq('school_id', schoolId).maybeSingle();
+  return emp?.profile_id || null;
+}
+
+router.get('/payroll/employees/:id/subjects', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const profileId = await employeeProfileId(schoolId, req.params.id);
+    if (!profileId) return res.json({ subject_ids: [] });
+    const { data } = await supabaseAdmin.from('teacher_subjects').select('subject_id').eq('teacher_id', profileId);
+    res.json({ subject_ids: (data || []).map((r) => r.subject_id), profile_id: profileId });
+  } catch (e) { console.error('GET emp subjects:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.post('/payroll/employees/:id/subjects/:subjectId', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const profileId = await employeeProfileId(schoolId, req.params.id);
+    if (!profileId) return res.status(400).json({ error: 'Employé non lié à un compte prof' });
+    const { data: exist } = await supabaseAdmin.from('teacher_subjects').select('id').eq('teacher_id', profileId).eq('subject_id', req.params.subjectId).maybeSingle();
+    if (!exist) await supabaseAdmin.from('teacher_subjects').insert({ teacher_id: profileId, subject_id: req.params.subjectId, school_id: schoolId });
+    res.json({ success: true });
+  } catch (e) { console.error('POST emp subject:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+router.delete('/payroll/employees/:id/subjects/:subjectId', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const profileId = await employeeProfileId(schoolId, req.params.id);
+    if (profileId) await supabaseAdmin.from('teacher_subjects').delete().eq('teacher_id', profileId).eq('subject_id', req.params.subjectId);
+    res.json({ success: true });
+  } catch (e) { console.error('DELETE emp subject:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
 // ============================================================

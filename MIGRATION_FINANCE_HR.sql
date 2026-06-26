@@ -20,6 +20,38 @@ ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS end_date DATE;
 -- Mois payés (1-12) ; vide/null = tous les mois de l'année scolaire
 ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS paid_months JSONB;
 
+-- Dossier RH : photo, identité, contact, bancaire, situation, charge prof
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS photo_url TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS cin TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS birth_date DATE;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS birth_place TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS phone TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS iban TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS marital_status TEXT;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS children_count INTEGER DEFAULT 0;
+ALTER TABLE finance_employee ADD COLUMN IF NOT EXISTS weekly_target_hours NUMERIC(7,2) DEFAULT 0;
+
+-- Pièces jointes du dossier (diplômes, CIN, contrat, CV, autres)
+CREATE TABLE IF NOT EXISTS finance_employee_document (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  school_id   UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  employee_id UUID NOT NULL REFERENCES finance_employee(id) ON DELETE CASCADE,
+  doc_type    TEXT NOT NULL DEFAULT 'other' CHECK (doc_type IN ('diploma','cin','contract','cv','other')),
+  label       TEXT,
+  file_url    TEXT NOT NULL,
+  mime        TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_finance_emp_doc_employee ON finance_employee_document(employee_id);
+
+ALTER TABLE finance_employee_document ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "finance_read_own_school" ON finance_employee_document;
+CREATE POLICY "finance_read_own_school" ON finance_employee_document FOR SELECT
+  USING (school_id IN (SELECT school_id FROM profiles WHERE id = auth.uid())
+         OR (SELECT role FROM profiles WHERE id = auth.uid()) = 'super_admin');
+
 -- Contraintes (en DO pour rester idempotent)
 DO $$ BEGIN
   ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_category_chk

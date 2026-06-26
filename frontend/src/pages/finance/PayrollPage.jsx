@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Wallet, Users, Plus, Trash2, Check, ArrowLeft, Save, Settings, Banknote, Coins, History, Pencil, CreditCard, Clock } from 'lucide-react';
-import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
+import { useState, useEffect, useRef } from 'react';
+import { Wallet, Users, Plus, Trash2, Check, ArrowLeft, Save, Settings, Banknote, Coins, History, Pencil, CreditCard, Clock, Upload, FileText, ExternalLink, Camera, X } from 'lucide-react';
+import { financeApi, formatMAD, formatDate, fileUrl } from '../../lib/financeApi';
 import { PageHeader, Drawer, Button, Field } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
@@ -76,7 +76,8 @@ function EmployeesTab() {
   const [edit, setEdit] = useState(null);
   const [payEmp, setPayEmp] = useState(null);
   const [histEmp, setHistEmp] = useState(null);
-  const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true, profile_id: '', hire_date: '', end_date: '', paid_months: [] };
+  const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true, profile_id: '', hire_date: '', end_date: '', paid_months: [],
+    cin: '', birth_date: '', birth_place: '', address: '', phone: '', email: '', iban: '', marital_status: '', children_count: 0, weekly_target_hours: 0, photo_url: null };
   const [form, setForm] = useState(blank);
 
   useEffect(() => { load(); financeApi.listPayrollTeachers().then(d => setTeachers(d.teachers || [])).catch(() => {}); }, []);
@@ -114,83 +115,216 @@ function EmployeesTab() {
       {payEmp && <EmployeePayDrawer employee={payEmp} onClose={() => setPayEmp(null)} onDone={load} />}
       {histEmp && <EmployeeHistoryDrawer employee={histEmp} onClose={() => setHistEmp(null)} />}
 
-      <Drawer open={showForm} onClose={() => setShowForm(false)} title={`${edit ? 'Modifier' : 'Nouvel'} employé`}
-        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button><Button color="purple" onClick={save} disabled={!form.full_name}>Enregistrer</Button></>}>
-        <Field label="Nom complet" required>
-          <input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Catégorie">
-            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-              {CATEGORIES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </Field>
-          <Field label="Fonction (libre)">
-            <input value={form.role_label || ''} onChange={e => setForm({ ...form, role_label: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" placeholder="Prof. de maths…" />
-          </Field>
-          <Field label="Type de contrat">
-            <select value={form.employment_type} onChange={e => setForm({ ...form, employment_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-              <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
-            </select>
-          </Field>
-          <Field label="Mode de rémunération">
-            <select value={form.pay_mode} onChange={e => setForm({ ...form, pay_mode: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-              <option value="fixed">Salaire fixe</option><option value="hourly">À l'heure</option>
-            </select>
-          </Field>
-          {!hourly && (
-            <Field label="Salaire mensuel brut">
-              <input type="number" step="0.01" value={form.base_salary} onChange={e => setForm({ ...form, base_salary: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-            </Field>
-          )}
-          {hourly && <>
-            <Field label="Taux horaire">
-              <input type="number" step="0.01" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-            </Field>
-            <Field label="Heures / mois (par défaut)">
-              <input type="number" step="1" value={form.default_monthly_hours} onChange={e => setForm({ ...form, default_monthly_hours: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-            </Field>
-          </>}
-          <Field label="Mode de paiement habituel">
-            <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-              <option value="bank">Virement bancaire</option><option value="cash">Espèce</option>
-            </select>
-          </Field>
-          <Field label="N° CNSS">
-            <input value={form.cnss_number || ''} onChange={e => setForm({ ...form, cnss_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-          </Field>
-          <Field label="Date d'entrée">
-            <input type="date" value={form.hire_date || ''} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-          </Field>
-          <Field label="Date de sortie (optionnel)">
-            <input type="date" value={form.end_date || ''} onChange={e => setForm({ ...form, end_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
-          </Field>
-        </div>
-        <Field label="Mois payés">
-          <div className="flex flex-wrap gap-1.5">
-            {ORDER.map(m => {
-              const pm = form.paid_months || [];
-              const on = pm.includes(m);
-              return <button type="button" key={m} onClick={() => setForm({ ...form, paid_months: on ? pm.filter(x => x !== m) : [...pm, m] })}
-                className={`px-2 py-1 text-xs rounded border ${on ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{MONTHS[m - 1].slice(0, 4)}</button>;
-            })}
+      <Drawer open={showForm} onClose={() => setShowForm(false)} title={`${edit ? 'Dossier' : 'Nouvel'} employé`} width="max-w-2xl"
+        footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Fermer</Button><Button color="purple" onClick={save} disabled={!form.full_name}>Enregistrer</Button></>}>
+        <div className="space-y-5">
+          {/* ── Identité ── */}
+          <div className="flex gap-4 items-start">
+            {edit && <EmployeePhoto employee={edit} photoUrl={form.photo_url} onChange={(url) => { setForm({ ...form, photo_url: url }); load(); }} />}
+            <div className="flex-1 space-y-3">
+              <Field label="Nom complet" required>
+                <input value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Catégorie">
+                  <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                    {CATEGORIES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                </Field>
+                <Field label="Fonction (libre)">
+                  <input value={form.role_label || ''} onChange={e => setForm({ ...form, role_label: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" placeholder="Prof. de maths…" />
+                </Field>
+              </div>
+            </div>
           </div>
-          <p className="text-xs text-gray-400 mt-1">Vide = payé tous les mois. Cochez pour limiter (ex. Sept→Juin, entrée/sortie en cours d'année).</p>
-        </Field>
-        {hourly && (
-          <Field label="Compte prof lié (heures réalisées)">
-            <select value={form.profile_id || ''} onChange={e => setForm({ ...form, profile_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-              <option value="">— Aucun (saisie manuelle des heures) —</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            <p className="text-xs text-gray-400 mt-1">Lié à un prof, les heures réalisées (séances du suivi) remplissent automatiquement le bulletin.</p>
-          </Field>
-        )}
-        <div className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.cnss_subject} onChange={e => setForm({ ...form, cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
-          <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} /> Actif</label>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="N° CIN"><input value={form.cin || ''} onChange={e => setForm({ ...form, cin: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+            <Field label="Date de naissance"><input type="date" value={form.birth_date || ''} onChange={e => setForm({ ...form, birth_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+            <Field label="Lieu de naissance"><input value={form.birth_place || ''} onChange={e => setForm({ ...form, birth_place: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+            <Field label="Téléphone"><input value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+            <Field label="Email"><input value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+            <Field label="Adresse"><input value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+          </div>
+
+          {/* ── Contrat & paie ── */}
+          <div className="border-t border-gray-200 pt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Contrat & paie</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Type de contrat">
+                <select value={form.employment_type} onChange={e => setForm({ ...form, employment_type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
+                </select>
+              </Field>
+              <Field label="Mode de rémunération">
+                <select value={form.pay_mode} onChange={e => setForm({ ...form, pay_mode: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="fixed">Salaire fixe</option><option value="hourly">À l'heure</option>
+                </select>
+              </Field>
+              {!hourly && (
+                <Field label="Salaire mensuel brut">
+                  <input type="number" step="0.01" value={form.base_salary} onChange={e => setForm({ ...form, base_salary: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </Field>
+              )}
+              {hourly && <>
+                <Field label="Taux horaire">
+                  <input type="number" step="0.01" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </Field>
+                <Field label="Heures / mois (par défaut)">
+                  <input type="number" step="1" value={form.default_monthly_hours} onChange={e => setForm({ ...form, default_monthly_hours: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                </Field>
+              </>}
+              <Field label="Mode de paiement habituel">
+                <select value={form.payment_method} onChange={e => setForm({ ...form, payment_method: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="bank">Virement bancaire</option><option value="cash">Espèce</option>
+                </select>
+              </Field>
+              <Field label="RIB / IBAN"><input value={form.iban || ''} onChange={e => setForm({ ...form, iban: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+              <Field label="Situation familiale">
+                <select value={form.marital_status || ''} onChange={e => setForm({ ...form, marital_status: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="">—</option><option value="celibataire">Célibataire</option><option value="marie">Marié(e)</option><option value="divorce">Divorcé(e)</option><option value="veuf">Veuf(ve)</option>
+                </select>
+              </Field>
+              <Field label="Nb d'enfants"><input type="number" step="1" value={form.children_count} onChange={e => setForm({ ...form, children_count: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+              <Field label="N° CNSS"><input value={form.cnss_number || ''} onChange={e => setForm({ ...form, cnss_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+              <Field label="Date d'entrée"><input type="date" value={form.hire_date || ''} onChange={e => setForm({ ...form, hire_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+              <Field label="Date de sortie (optionnel)"><input type="date" value={form.end_date || ''} onChange={e => setForm({ ...form, end_date: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+            </div>
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Mois payés</label>
+              <div className="flex flex-wrap gap-1.5">
+                {ORDER.map(m => {
+                  const pm = form.paid_months || [];
+                  const on = pm.includes(m);
+                  return <button type="button" key={m} onClick={() => setForm({ ...form, paid_months: on ? pm.filter(x => x !== m) : [...pm, m] })}
+                    className={`px-2 py-1 text-xs rounded border ${on ? 'bg-purple-600 text-white border-purple-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{MONTHS[m - 1].slice(0, 4)}</button>;
+                })}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Vide = payé tous les mois. Cochez pour limiter (ex. Sept→Juin).</p>
+            </div>
+            {hourly && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Compte prof lié (heures réalisées)</label>
+                <select value={form.profile_id || ''} onChange={e => setForm({ ...form, profile_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                  <option value="">— Aucun (saisie manuelle des heures) —</option>
+                  {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Lié à un prof, les heures réalisées (séances du suivi) remplissent le bulletin.</p>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-4 mt-3">
+              <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.cnss_subject} onChange={e => setForm({ ...form, cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
+              <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} /> Actif</label>
+            </div>
+          </div>
+
+          {/* ── Enseignement (prof lié) ── */}
+          {edit && form.profile_id && <TeachingSection employeeId={edit.id} form={form} setForm={setForm} />}
+
+          {/* ── Documents ── */}
+          {edit
+            ? <DocumentsSection employeeId={edit.id} />
+            : <p className="text-xs text-gray-400 border-t border-gray-200 pt-4">📎 Enregistrez l'employé pour ajouter sa photo et ses documents (diplômes, CIN, contrat…).</p>}
         </div>
       </Drawer>
+    </div>
+  );
+}
+
+// Photo de l'employé (upload / suppression)
+function EmployeePhoto({ employee, photoUrl, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const upload = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    try { const fd = new FormData(); fd.append('file', file); const r = await financeApi.uploadEmployeePhoto(employee.id, fd); onChange(r.photo_url); }
+    catch (e) { alert('Erreur: ' + e.message); } finally { setBusy(false); }
+  };
+  const remove = async () => { setBusy(true); try { await financeApi.deleteEmployeePhoto(employee.id); onChange(null); } catch (e) { alert(e.message); } finally { setBusy(false); } };
+  return (
+    <div className="shrink-0 text-center">
+      <div className="w-24 h-24 rounded-xl bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center">
+        {photoUrl ? <img src={fileUrl(photoUrl)} alt="" className="w-full h-full object-cover" /> : <Camera className="w-7 h-7 text-gray-300" />}
+      </div>
+      <label className={`mt-1 inline-flex items-center gap-1 text-xs cursor-pointer ${busy ? 'opacity-50' : 'text-purple-600 hover:text-purple-800'}`}>
+        <Upload className="w-3 h-3" /> {photoUrl ? 'Changer' : 'Photo'}
+        <input type="file" accept="image/*" className="hidden" disabled={busy} onChange={e => upload(e.target.files?.[0])} />
+      </label>
+      {photoUrl && <button onClick={remove} className="block mx-auto text-xs text-gray-400 hover:text-red-500">Retirer</button>}
+    </div>
+  );
+}
+
+const DOC_TYPES = [['diploma', 'Diplôme'], ['cin', 'CIN'], ['contract', 'Contrat'], ['cv', 'CV'], ['other', 'Autre']];
+// Documents du dossier (upload / liste / suppression)
+function DocumentsSection({ employeeId }) {
+  const [docs, setDocs] = useState([]);
+  const [docType, setDocType] = useState('diploma');
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef();
+  const load = () => financeApi.listEmployeeDocuments(employeeId).then(d => setDocs(d.documents || [])).catch(() => {});
+  useEffect(() => { load(); }, [employeeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const add = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) return alert('Choisissez un fichier (image ou PDF).');
+    setBusy(true);
+    try { const fd = new FormData(); fd.append('file', file); fd.append('doc_type', docType); fd.append('label', label); await financeApi.uploadEmployeeDocument(employeeId, fd); setLabel(''); if (fileRef.current) fileRef.current.value = ''; load(); }
+    catch (e) { alert('Erreur: ' + e.message); } finally { setBusy(false); }
+  };
+  const remove = async (id) => { if (!confirm('Supprimer ce document ?')) return; try { await financeApi.deleteEmployeeDocument(employeeId, id); load(); } catch (e) { alert(e.message); } };
+  return (
+    <div className="border-t border-gray-200 pt-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Documents</p>
+      <div className="flex flex-wrap items-end gap-2 mb-3">
+        <select value={docType} onChange={e => setDocType(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
+          {DOC_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Libellé (optionnel)" className="px-2 py-2 border border-gray-300 rounded-lg text-sm flex-1 min-w-[120px]" />
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" className="text-xs" />
+        <button onClick={add} disabled={busy} className="flex items-center gap-1 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50"><Upload className="w-4 h-4" /> Ajouter</button>
+      </div>
+      <div className="space-y-1.5">
+        {docs.length === 0 && <p className="text-xs text-gray-400">Aucun document.</p>}
+        {docs.map(d => (
+          <div key={d.id} className="flex items-center gap-2 text-sm bg-gray-50 rounded-lg px-3 py-2">
+            <FileText className="w-4 h-4 text-gray-400 shrink-0" />
+            <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600 shrink-0">{(DOC_TYPES.find(([k]) => k === d.doc_type) || [, 'Autre'])[1]}</span>
+            <span className="text-gray-700 truncate flex-1">{d.label || 'Document'}</span>
+            <a href={fileUrl(d.file_url)} target="_blank" rel="noreferrer" className="text-purple-600 hover:text-purple-800 inline-flex items-center gap-1 text-xs"><ExternalLink className="w-3 h-3" /> Voir</a>
+            <button onClick={() => remove(d.id)} className="p-1 hover:bg-red-50 rounded"><X className="w-3.5 h-3.5 text-red-500" /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Enseignement : matières + charge hebdo cible (prof lié)
+function TeachingSection({ employeeId, form, setForm }) {
+  const [subjects, setSubjects] = useState([]);
+  const [mine, setMine] = useState([]);
+  const load = () => financeApi.listEmployeeSubjects(employeeId).then(d => setMine(d.subject_ids || [])).catch(() => {});
+  useEffect(() => { financeApi.listSubjects().then(d => setSubjects(d.subjects || [])).catch(() => {}); load(); }, [employeeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggle = async (sid) => {
+    try { if (mine.includes(sid)) await financeApi.removeEmployeeSubject(employeeId, sid); else await financeApi.addEmployeeSubject(employeeId, sid); load(); }
+    catch (e) { alert(e.message); }
+  };
+  return (
+    <div className="border-t border-gray-200 pt-4">
+      <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Enseignement</p>
+      <Field label="Charge hebdomadaire cible (heures à enseigner / semaine)">
+        <input type="number" step="0.5" value={form.weekly_target_hours} onChange={e => setForm({ ...form, weekly_target_hours: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+      </Field>
+      <label className="block text-xs font-medium text-gray-700 mb-1 mt-3">Matières enseignées</label>
+      <div className="flex flex-wrap gap-1.5">
+        {subjects.length === 0 && <p className="text-xs text-gray-400">Aucune matière configurée dans l'école.</p>}
+        {subjects.map(s => {
+          const on = mine.includes(s.id);
+          return <button type="button" key={s.id} onClick={() => toggle(s.id)}
+            className={`px-2.5 py-1 text-xs rounded-full border ${on ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{s.name}</button>;
+        })}
+      </div>
+      <p className="text-xs text-gray-400 mt-2">Les heures réalisées sont calculées depuis le suivi des séances (bulletin de paie).</p>
     </div>
   );
 }
@@ -202,7 +336,9 @@ function EmployeeCard({ e, onEdit, onPay, onHistory, onDelete }) {
   return (
     <div className={`bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-3 ${e.is_active ? '' : 'opacity-60'}`}>
       <div className="flex items-start gap-3">
-        <div className="w-11 h-11 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-semibold shrink-0">{initials}</div>
+        <div className="w-11 h-11 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-semibold shrink-0 overflow-hidden">
+          {e.photo_url ? <img src={fileUrl(e.photo_url)} alt="" className="w-full h-full object-cover" /> : initials}
+        </div>
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-gray-800 truncate">{e.full_name}</p>
           <p className="text-xs text-gray-500 truncate">{catLabel(e.category)}{e.role_label ? ` · ${e.role_label}` : ''}</p>

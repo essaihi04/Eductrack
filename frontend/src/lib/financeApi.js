@@ -160,6 +160,16 @@ export const financeApi = {
   // Passerelle suivi des profs -> heures réalisées
   listPayrollTeachers: () => request('/api/finance/payroll/teachers'),
   recomputePayrollHours: (id) => request(`/api/finance/payroll/runs/${id}/recompute-hours`, { method: 'POST' }),
+  // Dossier RH : photo, documents, matières
+  uploadEmployeePhoto: (id, formData) => uploadRequest(`/api/finance/payroll/employees/${id}/photo`, formData),
+  deleteEmployeePhoto: (id) => request(`/api/finance/payroll/employees/${id}/photo`, { method: 'DELETE' }),
+  listEmployeeDocuments: (id) => request(`/api/finance/payroll/employees/${id}/documents`),
+  uploadEmployeeDocument: (id, formData) => uploadRequest(`/api/finance/payroll/employees/${id}/documents`, formData),
+  deleteEmployeeDocument: (id, docId) => request(`/api/finance/payroll/employees/${id}/documents/${docId}`, { method: 'DELETE' }),
+  listSubjects: () => request('/api/finance/payroll/subjects'),
+  listEmployeeSubjects: (id) => request(`/api/finance/payroll/employees/${id}/subjects`),
+  addEmployeeSubject: (id, subjectId) => request(`/api/finance/payroll/employees/${id}/subjects/${subjectId}`, { method: 'POST' }),
+  removeEmployeeSubject: (id, subjectId) => request(`/api/finance/payroll/employees/${id}/subjects/${subjectId}`, { method: 'DELETE' }),
 
   // ── Prêts / leasing (Phase 3) ──────────────────────────────────────────
   listLoans: () => request('/api/finance/loans'),
@@ -212,6 +222,9 @@ export const formatDate = (d) => {
   const date = new Date(d);
   return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
+
+// URL absolue d'un fichier servi par le backend (/uploads/...)
+export const fileUrl = (u) => (u ? (u.startsWith('http') ? u : `${apiUrl}${u}`) : '');
 
 export const CATEGORY_LABELS = {
   registration: 'Inscription',
