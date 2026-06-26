@@ -52,19 +52,16 @@ CREATE POLICY "finance_read_own_school" ON finance_employee_document FOR SELECT
   USING (school_id IN (SELECT school_id FROM profiles WHERE id = auth.uid())
          OR (SELECT role FROM profiles WHERE id = auth.uid()) = 'super_admin');
 
--- Contraintes (en DO pour rester idempotent)
-DO $$ BEGIN
-  ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_category_chk
-    CHECK (category IN ('enseignant','assistant','administratif','chauffeur','agent_service','autre'));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_paymode_chk
-    CHECK (pay_mode IN ('fixed','hourly'));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN
-  ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_paymethod_chk
-    CHECK (payment_method IN ('cash','bank'));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Contraintes (DROP IF EXISTS + ADD = idempotent, sans dollar-quoting)
+ALTER TABLE finance_employee DROP CONSTRAINT IF EXISTS finance_employee_category_chk;
+ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_category_chk
+  CHECK (category IN ('enseignant','assistant','administratif','chauffeur','agent_service','autre'));
+ALTER TABLE finance_employee DROP CONSTRAINT IF EXISTS finance_employee_paymode_chk;
+ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_paymode_chk
+  CHECK (pay_mode IN ('fixed','hourly'));
+ALTER TABLE finance_employee DROP CONSTRAINT IF EXISTS finance_employee_paymethod_chk;
+ALTER TABLE finance_employee ADD CONSTRAINT finance_employee_paymethod_chk
+  CHECK (payment_method IN ('cash','bank'));
 
 -- 2. Lignes de paie : heures + paiement
 ALTER TABLE finance_payroll_line ADD COLUMN IF NOT EXISTS hours NUMERIC(7,2) DEFAULT 0;
@@ -74,10 +71,9 @@ ALTER TABLE finance_payroll_line ADD COLUMN IF NOT EXISTS paid BOOLEAN DEFAULT f
 ALTER TABLE finance_payroll_line ADD COLUMN IF NOT EXISTS paid_date DATE;
 ALTER TABLE finance_payroll_line ADD COLUMN IF NOT EXISTS payment_method TEXT;
 ALTER TABLE finance_payroll_line ADD COLUMN IF NOT EXISTS expense_id UUID;
-DO $$ BEGIN
-  ALTER TABLE finance_payroll_line ADD CONSTRAINT finance_payroll_line_paymethod_chk
-    CHECK (payment_method IS NULL OR payment_method IN ('cash','bank'));
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE finance_payroll_line DROP CONSTRAINT IF EXISTS finance_payroll_line_paymethod_chk;
+ALTER TABLE finance_payroll_line ADD CONSTRAINT finance_payroll_line_paymethod_chk
+  CHECK (payment_method IS NULL OR payment_method IN ('cash','bank'));
 
 -- 3. Config paie par ecole (taux CNSS/AMO + bareme IR)
 CREATE TABLE IF NOT EXISTS finance_payroll_config (
