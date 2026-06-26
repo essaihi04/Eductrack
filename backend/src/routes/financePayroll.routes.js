@@ -478,11 +478,11 @@ router.get('/payroll/payments', async (req, res) => {
     const ids = (runs || []).map((r) => r.id);
     if (!ids.length) return res.json({ payments: [] });
     const { data: lines } = await supabaseAdmin.from('finance_payroll_line')
-      .select('employee_name, salary, net_salary, paid, paid_date, payment_method, run_id').in('run_id', ids);
+      .select('employee_id, employee_name, salary, net_salary, paid, paid_date, payment_method, run_id').in('run_id', ids);
     const payments = (lines || []).map((l) => {
       const r = runMap.get(l.run_id) || {};
       return {
-        employee_name: l.employee_name, year: r.year, month: r.month,
+        employee_id: l.employee_id, employee_name: l.employee_name, year: r.year, month: r.month,
         salary: l.salary, net_salary: l.net_salary, paid: l.paid, paid_date: l.paid_date, payment_method: l.payment_method,
       };
     }).sort((a, b) => (b.year - a.year) || (b.month - a.month) || a.employee_name.localeCompare(b.employee_name));

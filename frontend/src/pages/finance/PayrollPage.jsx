@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wallet, Users, Plus, Trash2, Check, ArrowLeft, Save, Settings, Banknote, Coins, History } from 'lucide-react';
+import { Wallet, Users, Plus, Trash2, Check, ArrowLeft, Save, Settings, Banknote, Coins, History, Pencil, CreditCard, Clock } from 'lucide-react';
 import { financeApi, formatMAD, formatDate } from '../../lib/financeApi';
 import { PageHeader, Drawer, Button, Field } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
@@ -74,6 +74,8 @@ function EmployeesTab() {
   const [teachers, setTeachers] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [edit, setEdit] = useState(null);
+  const [payEmp, setPayEmp] = useState(null);
+  const [histEmp, setHistEmp] = useState(null);
   const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true, profile_id: '' };
   const [form, setForm] = useState(blank);
 
@@ -96,30 +98,21 @@ function EmployeesTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-500 flex items-center gap-1"><Users className="w-4 h-4" /> {list.length} employé(s)</p>
+        <p className="text-sm text-gray-500 flex items-center gap-1"><Users className="w-4 h-4" /> {list.length} salarié(s)</p>
         <Button color="purple" icon={Plus} onClick={openNew}>Nouvel employé</Button>
       </div>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-            <tr><th className="px-4 py-3 text-left">Nom</th><th className="px-4 py-3 text-left">Catégorie</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-right">Rémunération</th><th className="px-4 py-3 text-center">Paiement</th><th className="px-4 py-3 text-center">Actif</th><th></th></tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {list.length === 0 && <tr><td colSpan="7" className="px-4 py-8 text-center text-gray-400">Aucun employé</td></tr>}
-            {list.map(e => (
-              <tr key={e.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => openEdit(e)}>
-                <td className="px-4 py-3 font-medium text-gray-800">{e.full_name}{e.role_label ? <span className="text-gray-400 font-normal"> · {e.role_label}</span> : ''}</td>
-                <td className="px-4 py-3 text-gray-600">{catLabel(e.category)}</td>
-                <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full ${e.employment_type === 'permanent' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>{e.employment_type === 'permanent' ? 'Permanent' : 'Vacataire'}</span></td>
-                <td className="px-4 py-3 text-right text-gray-700">{e.pay_mode === 'hourly' ? `${formatMAD(e.hourly_rate)}/h × ${e.default_monthly_hours || 0}h` : formatMAD(e.base_salary)}</td>
-                <td className="px-4 py-3 text-center text-xs text-gray-600">{e.payment_method === 'cash' ? 'Espèce' : 'Banque'}</td>
-                <td className="px-4 py-3 text-center">{e.is_active ? '✓' : '—'}</td>
-                <td className="px-4 py-3"><button onClick={(ev) => { ev.stopPropagation(); remove(e.id); }} className="p-1.5 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {list.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 px-4 py-10 text-center text-gray-400">Aucun salarié. Ajoutez un employé ou créez-le depuis la fiche prof.</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {list.map(e => (
+            <EmployeeCard key={e.id} e={e}
+              onEdit={() => openEdit(e)} onPay={() => setPayEmp(e)} onHistory={() => setHistEmp(e)} onDelete={() => remove(e.id)} />
+          ))}
+        </div>
+      )}
+      {payEmp && <EmployeePayDrawer employee={payEmp} onClose={() => setPayEmp(null)} onDone={load} />}
+      {histEmp && <EmployeeHistoryDrawer employee={histEmp} onClose={() => setHistEmp(null)} />}
 
       <Drawer open={showForm} onClose={() => setShowForm(false)} title={`${edit ? 'Modifier' : 'Nouvel'} employé`}
         footer={<><Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button><Button color="purple" onClick={save} disabled={!form.full_name}>Enregistrer</Button></>}>
@@ -182,6 +175,130 @@ function EmployeesTab() {
         </div>
       </Drawer>
     </div>
+  );
+}
+
+// Carte salarié avec actions
+function EmployeeCard({ e, onEdit, onPay, onHistory, onDelete }) {
+  const initials = (e.full_name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const remun = e.pay_mode === 'hourly' ? `${formatMAD(e.hourly_rate)}/h × ${e.default_monthly_hours || 0}h` : `${formatMAD(e.base_salary)}/mois`;
+  return (
+    <div className={`bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-3 ${e.is_active ? '' : 'opacity-60'}`}>
+      <div className="flex items-start gap-3">
+        <div className="w-11 h-11 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-semibold shrink-0">{initials}</div>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-gray-800 truncate">{e.full_name}</p>
+          <p className="text-xs text-gray-500 truncate">{catLabel(e.category)}{e.role_label ? ` · ${e.role_label}` : ''}</p>
+        </div>
+        <span className={`text-[11px] px-2 py-0.5 rounded-full shrink-0 ${e.employment_type === 'permanent' ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>{e.employment_type === 'permanent' ? 'Permanent' : 'Vacataire'}</span>
+      </div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-gray-700 font-medium">{remun}</span>
+        <span className="text-xs inline-flex items-center gap-1 text-gray-500">{e.payment_method === 'cash' ? <><Coins className="w-3 h-3" /> Espèce</> : <><Banknote className="w-3 h-3" /> Banque</>}</span>
+      </div>
+      <div className="flex items-center gap-1 pt-2 border-t border-gray-100">
+        <button onClick={onEdit} className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50"><Pencil className="w-3.5 h-3.5" /> Modifier</button>
+        <button onClick={onPay} className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"><CreditCard className="w-3.5 h-3.5" /> Payer</button>
+        <button onClick={onHistory} className="flex items-center justify-center gap-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50" title="Historique de paiement"><Clock className="w-3.5 h-3.5" /></button>
+        <button onClick={onDelete} className="flex items-center justify-center px-2 py-1.5 text-xs border border-red-200 text-red-500 rounded-lg hover:bg-red-50" title="Supprimer"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+    </div>
+  );
+}
+
+// Payer un salarié pour un mois (crée/ouvre le bulletin et paie sa ligne)
+function EmployeePayDrawer({ employee, onClose, onDone }) {
+  const now = new Date();
+  const defaultAcad = now.getMonth() + 1 >= 9 ? `${now.getFullYear()}-${now.getFullYear() + 1}` : `${now.getFullYear() - 1}-${now.getFullYear()}`;
+  const [acad, setAcad] = useState(defaultAcad);
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [method, setMethod] = useState(employee.payment_method || 'bank');
+  const [date, setDate] = useState(now.toISOString().slice(0, 10));
+  const [busy, setBusy] = useState(false);
+
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      const y = calYearFor(acad, month);
+      const d = await financeApi.createPayrollRun(y, month);
+      const line = (d.lines || []).find(l => l.employee_id === employee.id);
+      if (!line) { alert('Ce salarié n’apparaît pas dans le bulletin de ce mois (employé inactif ?).'); return; }
+      if (line.paid) { alert('Déjà payé pour ce mois.'); onDone?.(); onClose(); return; }
+      await financeApi.payPayrollLine(d.run.id, line.id, { method, date });
+      alert('Paiement enregistré.'); onDone?.(); onClose();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Drawer open onClose={onClose} title={`Payer — ${employee.full_name}`}
+      footer={<><Button variant="secondary" onClick={onClose}>Annuler</Button><Button color="purple" onClick={confirm} disabled={busy}>Confirmer</Button></>}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Année scolaire">
+            <select value={acad} onChange={e => setAcad(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </Field>
+          <Field label="Mois">
+            <select value={month} onChange={e => setMonth(Number(e.target.value))} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              {ORDER.map(m => <option key={m} value={m}>{MONTHS[m - 1]} {calYearFor(acad, m)}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Mode de paiement">
+          <div className="flex gap-2">
+            <button onClick={() => setMethod('bank')} className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 border rounded-lg text-sm ${method === 'bank' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-gray-300'}`}><Banknote className="w-4 h-4" /> Banque</button>
+            <button onClick={() => setMethod('cash')} className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 border rounded-lg text-sm ${method === 'cash' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-gray-300'}`}><Coins className="w-4 h-4" /> Espèce</button>
+          </div>
+        </Field>
+        <Field label="Date de paiement"><input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg" /></Field>
+        <p className="text-xs text-gray-500">{method === 'cash' ? 'Espèce → une dépense sera créée dans « Dépenses et charges ».' : 'Banque → la charge entrera via le relevé bancaire.'} Le bulletin du mois est créé automatiquement s’il n’existe pas.</p>
+      </div>
+    </Drawer>
+  );
+}
+
+// Historique de paiement d'un salarié
+function EmployeeHistoryDrawer({ employee, onClose }) {
+  const now = new Date();
+  const defaultAcad = now.getMonth() + 1 >= 9 ? `${now.getFullYear()}-${now.getFullYear() + 1}` : `${now.getFullYear() - 1}-${now.getFullYear()}`;
+  const [acad, setAcad] = useState(defaultAcad);
+  const [rows, setRows] = useState([]);
+  useEffect(() => { financeApi.listPayrollPayments(acad).then(d => setRows((d.payments || []).filter(p => p.employee_id === employee.id))).catch(() => setRows([])); }, [acad, employee.id]);
+  const totalPaid = rows.filter(r => r.paid).reduce((a, r) => a + Number(r.net_salary || 0), 0);
+  const totalDue = rows.reduce((a, r) => a + Number(r.net_salary || 0), 0);
+  return (
+    <Drawer open onClose={onClose} title={`Historique — ${employee.full_name}`}
+      footer={<Button variant="secondary" onClick={onClose}>Fermer</Button>}>
+      <div className="space-y-3">
+        <Field label="Année scolaire">
+          <select value={acad} onChange={e => setAcad(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+            {yearOptions().map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </Field>
+        <div className="flex gap-2 text-xs">
+          <span className="px-2 py-1 rounded-full bg-green-100 text-green-700">Payé : {formatMAD(totalPaid)}</span>
+          <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700">Reste : {formatMAD(totalDue - totalPaid)}</span>
+        </div>
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600 text-xs uppercase"><tr><th className="px-3 py-2 text-left">Mois</th><th className="px-3 py-2 text-right">Net</th><th className="px-3 py-2 text-center">Statut</th><th className="px-3 py-2 text-left">Date</th></tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.length === 0 && <tr><td colSpan="4" className="px-3 py-6 text-center text-gray-400">Aucun bulletin cette année</td></tr>}
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td className="px-3 py-2 text-gray-600">{MONTHS[r.month - 1]} {r.year}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{formatMAD(r.net_salary)}</td>
+                  <td className="px-3 py-2 text-center"><span className={`text-xs px-2 py-0.5 rounded-full ${r.paid ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{r.paid ? (r.payment_method === 'cash' ? 'Espèce' : 'Banque') : 'Non payé'}</span></td>
+                  <td className="px-3 py-2 text-gray-500">{r.paid_date ? formatDate(r.paid_date) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Drawer>
   );
 }
 
