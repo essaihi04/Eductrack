@@ -500,7 +500,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
     await markProcessed(incomingMsgId);
     return;
   }
-  const photoUrl = saveProfilePhotoBuffer(buffer, image.mimetype);
+  const photoUrl = await saveProfilePhotoBuffer(buffer, image.mimetype);
 
   const state = State.getState(phone);
   const selected = state?.studentId ? children.find((c) => c.id === state.studentId) : null;
@@ -1192,7 +1192,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     const input = normalizeDigits(String(text || '').trim());
 
     if (PHOTO_NO_RE.test(input)) {
-      deleteProfilePhotoByUrl(photoUrl);
+      await deleteProfilePhotoByUrl(photoUrl);
       State.setState(phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
       if (state.studentId) State.setMenu(phone, 'main');
       else State.resetState(phone);

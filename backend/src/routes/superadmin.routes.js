@@ -9,27 +9,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireSuperAdmin } from '../middleware/auth.js';
+import { uploadBuffer, removeObject, BUCKET_PUBLIC } from '../utils/storage.js';
 
 const router = express.Router();
 
-// Configuration multer pour upload de logos
-const logoStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = join(__dirname, '../../uploads/logos');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `logo-${uniqueSuffix}${ext}`);
-  }
-});
-
+// Upload de logos -> Supabase Storage (bucket public, durable)
 const logoUpload = multer({
-  storage: logoStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 Mo max
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp'];
@@ -41,6 +27,7 @@ const logoUpload = multer({
     }
   }
 });
+const logoPathFromUrl = (url) => { const m = `/${BUCKET_PUBLIC}/`; const i = (url || '').indexOf(m); return i >= 0 ? url.slice(i + m.length) : null; };
 
 router.use(authenticate);
 router.use(requireSuperAdmin);
@@ -277,13 +264,11 @@ router.post('/schools/:id/logo', logoUpload.single('logo'), async (req, res) => 
       .single();
 
     if (oldSchool?.logo_url) {
-      const oldPath = oldSchool.logo_url.replace(/^\//, '');
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
-      }
+      const oldPath = logoPathFromUrl(oldSchool.logo_url);
+      if (oldPath) await removeObject(BUCKET_PUBLIC, oldPath);
     }
 
-    const logoUrl = `/uploads/logos/${req.file.filename}`;
+    const { publicUrl: logoUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: 'logos', file: req.file, prefix: 'logo' });
 
     const { data: school, error } = await supabaseAdmin
       .from('schools')

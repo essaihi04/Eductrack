@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
 import { getSemesterBounds } from '../services/bulletins/calculator.js';
-import { profilePhotoUpload, PROFILE_PHOTO_WEB_PATH } from '../utils/profilePhoto.js';
+import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 
 const router = express.Router();
 
@@ -2403,7 +2403,7 @@ router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (re
     const { data: student, error: checkErr } = await check.single();
     if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
 
-    const avatar_url = `${PROFILE_PHOTO_WEB_PATH}/${req.file.filename}`;
+    const avatar_url = await uploadProfilePhotoFile(req.file);
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .update({ avatar_url })

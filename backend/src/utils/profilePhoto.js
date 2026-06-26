@@ -1,81 +1,50 @@
 /**
- * Upload des photos de profil élève (remplace l'avatar emoji).
+ * Photos de profil (élèves) — stockées sur Supabase Storage (bucket public),
+ * durable. L'URL publique absolue est enregistrée dans profiles.avatar_url.
  *
  * Utilisé par :
  *  - POST /api/students/me/photo          (élève, sa propre photo)
  *  - POST /api/parent/children/:id/photo  (parent, photo de son enfant)
  *  - chatbot WhatsApp (photo envoyée par le parent)
- *
- * Les fichiers sont stockés dans uploads/profile-photos et servis
- * statiquement via /uploads (voir server.js). L'URL relative est
- * enregistrée dans profiles.avatar_url.
  */
-
 import multer from 'multer';
-import path, { dirname, join } from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import path from 'path';
 import { supabaseAdmin } from '../config/supabase.js';
+import { uploadBuffer, removeObject, BUCKET_PUBLIC } from './storage.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-export const PROFILE_PHOTO_DIR = join(__dirname, '../../uploads/profile-photos');
-export const PROFILE_PHOTO_WEB_PATH = '/uploads/profile-photos';
-
-function ensureDir() {
-  if (!fs.existsSync(PROFILE_PHOTO_DIR)) fs.mkdirSync(PROFILE_PHOTO_DIR, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    ensureDir();
-    cb(null, PROFILE_PHOTO_DIR);
-  },
-  filename: (req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `pp-${unique}${path.extname(file.originalname).toLowerCase()}`);
-  },
-});
+const PHOTO_FOLDER = 'profile-photos';
 
 export const profilePhotoUpload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ok = ['.jpg', '.jpeg', '.png', '.webp'].includes(
-      path.extname(file.originalname).toLowerCase()
-    );
+    const ok = ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file.originalname || '').toLowerCase())
+      || /image\/(jpe?g|png|webp)/.test(file.mimetype || '');
     cb(ok ? null : new Error('Seules les images JPG/PNG/WEBP sont autorisées'), ok);
   },
 });
 
-/**
- * Écrit un buffer image (ex: reçu via WhatsApp) dans le dossier des photos
- * de profil et retourne l'URL web relative (/uploads/profile-photos/...).
- */
-export function saveProfilePhotoBuffer(buffer, mimetype = 'image/jpeg') {
-  ensureDir();
+/** Upload d'un fichier multer (mémoire) -> URL publique. */
+export async function uploadProfilePhotoFile(file) {
+  const { publicUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: PHOTO_FOLDER, file, prefix: 'pp' });
+  return publicUrl;
+}
+
+/** Upload d'un buffer (ex: reçu via WhatsApp) -> URL publique. */
+export async function saveProfilePhotoBuffer(buffer, mimetype = 'image/jpeg') {
   const ext = mimetype.includes('png') ? '.png' : mimetype.includes('webp') ? '.webp' : '.jpg';
-  const fileName = `pp-wa-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
-  fs.writeFileSync(join(PROFILE_PHOTO_DIR, fileName), buffer);
-  return `${PROFILE_PHOTO_WEB_PATH}/${fileName}`;
+  const { publicUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: PHOTO_FOLDER, file: { buffer, mimetype, originalname: `wa${ext}` }, prefix: 'pp-wa' });
+  return publicUrl;
 }
 
-/** Supprime un fichier photo de profil à partir de son URL relative. */
-export function deleteProfilePhotoByUrl(relUrl) {
-  try {
-    if (!relUrl || !relUrl.startsWith(PROFILE_PHOTO_WEB_PATH)) return;
-    const filePath = join(PROFILE_PHOTO_DIR, path.basename(relUrl));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  } catch (e) {
-    console.warn('[profilePhoto] suppression impossible:', e.message);
-  }
+/** Supprime une photo de profil à partir de son URL (Supabase public ; legacy ignoré). */
+export async function deleteProfilePhotoByUrl(url) {
+  const marker = `/${BUCKET_PUBLIC}/`;
+  const i = (url || '').indexOf(marker);
+  if (i >= 0) await removeObject(BUCKET_PUBLIC, url.slice(i + marker.length));
 }
 
-/**
- * Met à jour profiles.avatar_url d'un élève.
- * @returns {Promise<boolean>}
- */
+/** Met à jour profiles.avatar_url d'un élève. */
 export async function setStudentAvatarUrl(studentId, avatarUrl) {
   const { error } = await supabaseAdmin
     .from('profiles')
