@@ -157,6 +157,9 @@ export const financeApi = {
   // Config paie (taux CNSS/AMO + barème IR)
   getPayrollConfig: () => request('/api/finance/payroll/config'),
   updatePayrollConfig: (data) => request('/api/finance/payroll/config', { method: 'PUT', body: data }),
+  // Passerelle suivi des profs -> heures réalisées
+  listPayrollTeachers: () => request('/api/finance/payroll/teachers'),
+  recomputePayrollHours: (id) => request(`/api/finance/payroll/runs/${id}/recompute-hours`, { method: 'POST' }),
 
   // ── Prêts / leasing (Phase 3) ──────────────────────────────────────────
   listLoans: () => request('/api/finance/loans'),

@@ -79,7 +79,47 @@ function computeCnssIr(brut, config, cnssSubject = true) {
   return { cnss_amo, ir, net: round2(b - cnss_amo - ir) };
 }
 
-const grossOf = (emp) => (emp.pay_mode === 'hourly' ? num(emp.hourly_rate) * num(emp.default_monthly_hours) : num(emp.base_salary));
+const grossOf = (emp, hours) => (emp.pay_mode === 'hourly' ? num(emp.hourly_rate) * num(hours != null ? hours : emp.default_monthly_hours) : num(emp.base_salary));
+
+// ── Heures réalisées (séances) par enseignant pour un mois ────────────────
+const HHMMtoMin = (t) => { if (!t) return null; const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m || 0); };
+async function realizedHoursByTeacher(schoolId, year, month) {
+  const start = `${year}-${String(month).padStart(2, '0')}-01`;
+  const end = `${year}-${String(month).padStart(2, '0')}-31`;
+  const { data: sessions } = await supabaseAdmin
+    .from('sessions').select('teacher_id, start_time, end_time, date')
+    .eq('school_id', schoolId).gte('date', start).lte('date', end);
+  const map = {};
+  for (const s of (sessions || [])) {
+    if (!s.teacher_id) continue;
+    const a = HHMMtoMin(s.start_time); const b = HHMMtoMin(s.end_time);
+    const mins = a != null && b != null && b > a ? b - a : 0;
+    if (!mins) continue;
+    map[s.teacher_id] = (map[s.teacher_id] || 0) + mins;
+  }
+  Object.keys(map).forEach((k) => { map[k] = round2(map[k] / 60); });
+  return map; // { profile_id: heures }
+}
+
+// Liste des profils enseignants (pour lier un employé à un compte prof)
+router.get('/payroll/teachers', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data } = await supabaseAdmin.from('profiles')
+      .select('id, first_name, last_name, role').eq('school_id', schoolId).eq('role', 'teacher').order('last_name');
+    res.json({ teachers: (data || []).map((p) => ({ id: p.id, name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Enseignant' })) });
+  } catch (e) { console.error('GET teachers:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// Heures réalisées d'un mois (par profil enseignant)
+router.get('/payroll/realized-hours', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const year = parseInt(req.query.year, 10); const month = parseInt(req.query.month, 10);
+    if (!year || !month) return res.status(400).json({ error: 'year, month requis' });
+    res.json({ hours: await realizedHoursByTeacher(schoolId, year, month) });
+  } catch (e) { console.error('GET realized-hours:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
 
 router.get('/payroll/config', async (req, res) => {
   try {
@@ -104,7 +144,7 @@ router.put('/payroll/config', async (req, res) => {
 // ============================================================
 // EMPLOYÉS
 // ============================================================
-const EMP_FIELDS = ['full_name', 'role_label', 'category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'is_active'];
+const EMP_FIELDS = ['full_name', 'role_label', 'category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'is_active', 'profile_id'];
 const NUM_EMP_FIELDS = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours']);
 
 router.get('/payroll/employees', async (req, res) => {
@@ -200,14 +240,17 @@ router.post('/payroll/runs', async (req, res) => {
     if (error) throw error;
 
     const config = await getOrCreatePayrollConfig(schoolId);
+    const realized = await realizedHoursByTeacher(schoolId, year, month);
     const { data: employees } = await supabaseAdmin.from('finance_employee')
       .select('*').eq('school_id', schoolId).eq('is_active', true);
     let lines = [];
     if (employees && employees.length) {
       const rows = employees.map((e) => {
-        const hours = e.pay_mode === 'hourly' ? num(e.default_monthly_hours) : 0;
+        // Heures réalisées du prof lié (sinon heures/mois par défaut)
+        const realizedH = e.profile_id != null ? realized[e.profile_id] : undefined;
+        const hours = e.pay_mode === 'hourly' ? num(realizedH != null ? realizedH : e.default_monthly_hours) : 0;
         const hourly_rate = num(e.hourly_rate);
-        const salary = round2(grossOf(e));
+        const salary = round2(grossOf(e, e.pay_mode === 'hourly' ? hours : undefined));
         const { cnss_amo, ir, net } = computeCnssIr(salary, config, e.cnss_subject !== false);
         return {
           run_id: run.id, employee_id: e.id, employee_name: e.full_name,
@@ -266,6 +309,41 @@ router.put('/payroll/runs/:id/lines', async (req, res) => {
     const { data: fresh } = await supabaseAdmin.from('finance_payroll_run').select('*').eq('id', run.id).single();
     res.json({ success: true, run: fresh });
   } catch (e) { console.error('PUT run lines:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
+});
+
+// Recalcule les heures réalisées (séances) des lignes horaires liées à un prof
+router.post('/payroll/runs/:id/recompute-hours', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: run } = await supabaseAdmin.from('finance_payroll_run').select('*').eq('id', req.params.id).eq('school_id', schoolId).maybeSingle();
+    if (!run) return res.status(404).json({ error: 'Bulletin introuvable' });
+    const config = await getOrCreatePayrollConfig(schoolId);
+    const realized = await realizedHoursByTeacher(schoolId, run.year, run.month);
+    const { data: lines } = await supabaseAdmin.from('finance_payroll_line').select('*').eq('run_id', run.id);
+    const empIds = [...new Set((lines || []).map((l) => l.employee_id).filter(Boolean))];
+    const empMap = new Map();
+    if (empIds.length) {
+      const { data: emps } = await supabaseAdmin.from('finance_employee').select('id, profile_id, hourly_rate, pay_mode').in('id', empIds);
+      (emps || []).forEach((e) => empMap.set(e.id, e));
+    }
+    let updated = 0;
+    for (const l of (lines || [])) {
+      if (l.paid) continue;
+      const emp = l.employee_id && empMap.get(l.employee_id);
+      if (!emp || emp.pay_mode !== 'hourly' || emp.profile_id == null) continue;
+      const h = realized[emp.profile_id];
+      if (h == null) continue;
+      const rate = num(l.hourly_rate) || num(emp.hourly_rate);
+      const salary = round2(h * rate);
+      const auto = computeCnssIr(salary, config, true);
+      await supabaseAdmin.from('finance_payroll_line')
+        .update({ hours: h, hourly_rate: rate, salary, cnss_amo: auto.cnss_amo, ir: auto.ir, net_salary: auto.net })
+        .eq('id', l.id).eq('run_id', run.id);
+      updated += 1;
+    }
+    await recomputeTotals(run.id, schoolId);
+    res.json({ success: true, updated });
+  } catch (e) { console.error('recompute-hours:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 
 // Ajoute une ligne libre (employé hors liste)

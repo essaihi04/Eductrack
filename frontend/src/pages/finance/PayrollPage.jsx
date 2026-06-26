@@ -71,20 +71,22 @@ function ConfigDrawer({ open, onClose }) {
 // ── Employés ───────────────────────────────────────────────────────────────
 function EmployeesTab() {
   const [list, setList] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [edit, setEdit] = useState(null);
-  const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true };
+  const blank = { full_name: '', role_label: '', category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, cnss_number: '', is_active: true, profile_id: '' };
   const [form, setForm] = useState(blank);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); financeApi.listPayrollTeachers().then(d => setTeachers(d.teachers || [])).catch(() => {}); }, []);
   const load = async () => { try { const d = await financeApi.listEmployees(); setList(d.employees || []); } catch (e) { console.error(e); } };
 
   const openNew = () => { setEdit(null); setForm(blank); setShowForm(true); };
   const openEdit = (e) => { setEdit(e); setForm({ ...blank, ...e }); setShowForm(true); };
   const save = async () => {
     try {
-      if (edit) await financeApi.updateEmployee(edit.id, form);
-      else await financeApi.createEmployee(form);
+      const payload = { ...form, profile_id: form.profile_id || null };
+      if (edit) await financeApi.updateEmployee(edit.id, payload);
+      else await financeApi.createEmployee(payload);
       setShowForm(false); load();
     } catch (e) { alert('Erreur: ' + e.message); }
   };
@@ -165,6 +167,15 @@ function EmployeesTab() {
             <input value={form.cnss_number || ''} onChange={e => setForm({ ...form, cnss_number: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
           </Field>
         </div>
+        {hourly && (
+          <Field label="Compte prof lié (heures réalisées)">
+            <select value={form.profile_id || ''} onChange={e => setForm({ ...form, profile_id: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              <option value="">— Aucun (saisie manuelle des heures) —</option>
+              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">Lié à un prof, les heures réalisées (séances du suivi) remplissent automatiquement le bulletin.</p>
+          </Field>
+        )}
         <div className="flex flex-wrap gap-4">
           <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.cnss_subject} onChange={e => setForm({ ...form, cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
           <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })} /> Actif</label>
@@ -213,6 +224,7 @@ function PayrollTab() {
     } catch (e) { alert('Erreur: ' + e.message); }
   };
   const unpay = async (line) => { try { await financeApi.unpayPayrollLine(run.id, line.id); await openRun(run.id); loadRuns(); } catch (e) { alert(e.message); } };
+  const recomputeHours = async () => { try { const r = await financeApi.recomputePayrollHours(run.id); await openRun(run.id); loadRuns(); alert(`${r.updated} ligne(s) mise(s) à jour avec les heures réalisées.`); } catch (e) { alert(e.message); } };
   const removeRun = async (id) => { if (!confirm('Supprimer ce bulletin et ses dépenses espèce liées ?')) return; try { await financeApi.deletePayrollRun(id); if (run?.id === id) setRun(null); loadRuns(); } catch (e) { alert(e.message); } };
 
   if (run) {
@@ -221,6 +233,7 @@ function PayrollTab() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <button onClick={() => { setRun(null); loadRuns(); }} className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"><ArrowLeft className="w-4 h-4" /> Retour</button>
           <div className="flex items-center gap-2">
+            <button onClick={recomputeHours} className="flex items-center gap-1 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50" title="Importer les heures réalisées depuis le suivi des séances"><History className="w-4 h-4" /> Recalculer les heures</button>
             <button onClick={saveLines} disabled={saving} className="flex items-center gap-1 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"><Save className="w-4 h-4" /> Enregistrer</button>
             {nUnpaid > 0 && <button onClick={() => setPayTarget({ all: true })} className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700"><Check className="w-4 h-4" /> Tout payer ({nUnpaid})</button>}
           </div>
