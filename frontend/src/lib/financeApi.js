@@ -148,9 +148,15 @@ export const financeApi = {
   savePayrollLines: (id, lines) => request(`/api/finance/payroll/runs/${id}/lines`, { method: 'PUT', body: { lines } }),
   addPayrollLine: (id, data) => request(`/api/finance/payroll/runs/${id}/lines`, { method: 'POST', body: data }),
   deletePayrollLine: (id, lineId) => request(`/api/finance/payroll/runs/${id}/lines/${lineId}`, { method: 'DELETE' }),
-  postPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}/post`, { method: 'POST' }),
-  unpostPayrollRun: (id) => request(`/api/finance/payroll/runs/${id}/unpost`, { method: 'POST' }),
   deletePayrollRun: (id) => request(`/api/finance/payroll/runs/${id}`, { method: 'DELETE' }),
+  // Paiement des salaires (espèce -> dépense ; banque -> via relevé)
+  payPayrollLine: (id, lineId, data) => request(`/api/finance/payroll/runs/${id}/lines/${lineId}/pay`, { method: 'POST', body: data }),
+  unpayPayrollLine: (id, lineId) => request(`/api/finance/payroll/runs/${id}/lines/${lineId}/unpay`, { method: 'POST' }),
+  payAllPayroll: (id, data) => request(`/api/finance/payroll/runs/${id}/pay-all`, { method: 'POST', body: data || {} }),
+  listPayrollPayments: (academicYear) => request('/api/finance/payroll/payments', { query: { academic_year: academicYear } }),
+  // Config paie (taux CNSS/AMO + barème IR)
+  getPayrollConfig: () => request('/api/finance/payroll/config'),
+  updatePayrollConfig: (data) => request('/api/finance/payroll/config', { method: 'PUT', body: data }),
 
   // ── Prêts / leasing (Phase 3) ──────────────────────────────────────────
   listLoans: () => request('/api/finance/loans'),
