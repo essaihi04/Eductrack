@@ -58,6 +58,13 @@ export async function removeObject(bucket, objectPath) {
   catch (e) { console.warn('[storage] remove:', e.message); }
 }
 
+/** Télécharge un objet en Buffer (via service_role). */
+export async function downloadObject(bucket, objectPath) {
+  const { data, error } = await supabaseAdmin.storage.from(bucket).download(objectPath);
+  if (error) throw new Error(`Download échoué: ${error.message}`);
+  return Buffer.from(await data.arrayBuffer());
+}
+
 /** URL signée temporaire pour un fichier du bucket privé. */
 export async function signedUrl(objectPath, expiresIn = 3600) {
   if (!objectPath) return null;

@@ -14,21 +14,12 @@ import { getStatus as getWhatsAppStatus } from '../services/whatsapp/index.js';
 
 const router = express.Router();
 
-// Configuration de multer pour l'upload de fichiers
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = join(__dirname, '../../uploads/documents');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `doc-${uniqueSuffix}${ext}`);
-  }
-});
+import { uploadBuffer, removeObject, downloadObject, BUCKET_PRIVATE } from '../utils/storage.js';
+
+// Documents pédagogiques -> Supabase Storage (bucket privé, durable).
+// file_path stocke le chemin objet (legacy = chemin disque absolu).
+const isDiskPath = (p) => !p || path.isAbsolute(p);
+const storage = multer.memoryStorage();
 
 const uploadSingleDocument = (req, res, next) => {
   upload.single('file')(req, res, (err) => {
@@ -308,6 +299,9 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
       }
     }
 
+    // Upload du fichier sur Supabase (bucket privé), une seule fois
+    const { path: uploadedPath } = await uploadBuffer({ bucket: BUCKET_PRIVATE, folder: `documents/${req.user.school_id || 'school'}`, file: req.file, prefix: 'doc' });
+
     const createdDocuments = [];
 
     for (const targetClassId of targetClassIds) {
@@ -334,7 +328,7 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
         document_type: documentType,
         description: description || null,
         file_name: req.file.originalname,
-        file_path: req.file.path,
+        file_path: uploadedPath,
         file_size: req.file.size,
         file_type: req.file.mimetype,
         total_students: students ? students.length : 0
@@ -511,8 +505,8 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
 
               const sentPhones = new Set();
 
-              // Importer la fonction d'envoi de fichier
-              const { sendWhatsAppFile } = await import('../services/whatsappChatbot.js');
+              // Importer la fonction d'envoi de fichier (buffer mémoire)
+              const { sendWhatsAppFileBuffer } = await import('../services/whatsappChatbot.js');
 
               for (const phoneValue of parentPhones) {
                 const phone = String(phoneValue || '').replace(/\s+/g, '');
@@ -520,8 +514,8 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
                 sentPhones.add(phone);
                 const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
 
-                // Envoyer le fichier avec la légende
-                const fileSent = await sendWhatsAppFile(e164Phone, req.file.path, messageCaption, schoolId, {
+                // Envoyer le fichier (depuis le buffer en mémoire) avec la légende
+                const fileSent = await sendWhatsAppFileBuffer(e164Phone, req.file.buffer, req.file.originalname, req.file.mimetype, messageCaption, schoolId, {
                   category: 'pedagogical',
                   senderId: req.user.id,
                   recipientFilter: {
@@ -596,9 +590,11 @@ router.delete('/:id', authorize('teacher'), async (req, res) => {
       return res.status(404).json({ error: 'Document non trouvé' });
     }
 
-    // Supprimer le fichier physique
-    if (fs.existsSync(document.file_path)) {
-      fs.unlinkSync(document.file_path);
+    // Supprimer le fichier (Supabase privé ou disque legacy)
+    if (isDiskPath(document.file_path)) {
+      if (document.file_path && fs.existsSync(document.file_path)) fs.unlinkSync(document.file_path);
+    } else {
+      await removeObject(BUCKET_PRIVATE, document.file_path);
     }
 
     // Supprimer le document de la base de données
@@ -631,8 +627,8 @@ router.get('/:id/download', authorize('teacher', 'student'), async (req, res) =>
       return res.status(404).json({ error: 'Document non trouvé' });
     }
 
-    // Vérifier que le fichier existe
-    if (!fs.existsSync(document.file_path)) {
+    // Vérifier que le fichier existe (disque legacy uniquement)
+    if (isDiskPath(document.file_path) && !fs.existsSync(document.file_path)) {
       return res.status(404).json({ error: 'Fichier non trouvé' });
     }
 
@@ -666,8 +662,14 @@ router.get('/:id/download', authorize('teacher', 'student'), async (req, res) =>
         });
     }
 
-    // Envoyer le fichier
-    res.download(document.file_path, document.file_name);
+    // Envoyer le fichier (disque legacy ou Supabase privé)
+    if (isDiskPath(document.file_path)) {
+      return res.download(document.file_path, document.file_name);
+    }
+    const buf = await downloadObject(BUCKET_PRIVATE, document.file_path);
+    res.setHeader('Content-Disposition', `attachment; filename="${(document.file_name || 'document').replace(/"/g, '')}"`);
+    if (document.file_type) res.setHeader('Content-Type', document.file_type);
+    res.send(buf);
   } catch (error) {
     console.error('Erreur:', error);
     res.status(500).json({ error: 'Erreur lors du téléchargement' });

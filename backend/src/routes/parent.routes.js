@@ -398,7 +398,8 @@ router.get('/children/:childId/documents/:docId/download', loadChild, async (req
       return res.status(403).json({ error: 'Accès refusé à ce document' });
     }
 
-    if (!doc.file_path || !fs.existsSync(doc.file_path)) {
+    const isDisk = !doc.file_path || path.isAbsolute(doc.file_path);
+    if (isDisk && (!doc.file_path || !fs.existsSync(doc.file_path))) {
       return res.status(404).json({ error: 'Fichier non trouvé sur le serveur' });
     }
 
@@ -417,7 +418,12 @@ router.get('/children/:childId/documents/:docId/download', loadChild, async (req
       `${inline ? 'inline' : 'attachment'}; filename="${safeName}"`
     );
 
-    fs.createReadStream(doc.file_path).pipe(res);
+    if (isDisk) {
+      fs.createReadStream(doc.file_path).pipe(res);
+    } else {
+      const { downloadObject, BUCKET_PRIVATE } = await import('../utils/storage.js');
+      res.send(await downloadObject(BUCKET_PRIVATE, doc.file_path));
+    }
   } catch (e) {
     console.error('[parent] document download error', e);
     res.status(500).json({ error: e.message });

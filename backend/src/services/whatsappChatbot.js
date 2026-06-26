@@ -191,6 +191,31 @@ export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId,
 }
 
 /**
+ * Envoi d'un fichier WhatsApp depuis un buffer (fichier stocké sur Supabase,
+ * plus sur disque). Même journalisation que sendWhatsAppFile.
+ */
+export async function sendWhatsAppFileBuffer(phoneNumber, buffer, fileName, mimetype, caption, schoolId, opts = {}) {
+  try {
+    if (!getStatus(schoolId).connected) {
+      await logWhatsAppSend({ schoolId, phoneNumber, content: caption || '', messageType: 'document', fileName, category: opts.category, senderId: opts.senderId, parentId: opts.parentId, recipientFilter: opts.recipientFilter, status: 'failed', errorMessage: 'Session WhatsApp non connectée' });
+      return false;
+    }
+    const ext = path.extname(fileName || '').toLowerCase().slice(1);
+    let type = 'document';
+    let mt = mimetype || 'application/octet-stream';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) { type = 'image'; mt = `image/${ext === 'jpg' ? 'jpeg' : ext}`; }
+    else if (['mp4', 'mov', 'webm'].includes(ext)) { type = 'video'; mt = `video/${ext}`; }
+    else if (ext === 'pdf') mt = 'application/pdf';
+    const result = await sendMediaBuffer(schoolId, phoneNumber, buffer, { type, fileName, mimetype: mt, caption });
+    await logWhatsAppSend({ schoolId, phoneNumber, content: caption || '', messageType: type, fileName, category: opts.category, senderId: opts.senderId, parentId: opts.parentId, recipientFilter: opts.recipientFilter, status: result.success ? 'sent' : 'failed', errorMessage: result.success ? null : (result.message || 'Erreur envoi fichier') });
+    return !!result.success;
+  } catch (e) {
+    console.error('[whatsapp] Erreur envoi fichier (buffer):', e);
+    return false;
+  }
+}
+
+/**
  * @deprecated — Wasender n'est plus utilisé. Cette fonction renvoie toujours null.
  * Conservée pour ne pas casser les imports legacy (à supprimer après migration complète).
  */
