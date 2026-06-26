@@ -3611,15 +3611,16 @@ router.delete('/subjects/:id', async (req, res) => {
 // Récupérer tous les professeurs
 // Synchronise une fiche de paie (finance_employee) liée à un prof. Appelé à la
 // création/édition d'un prof quand des détails RH sont fournis (body.hr).
-const HR_NUM = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours']);
+const HR_NUM = new Set(['base_salary', 'hourly_rate', 'default_monthly_hours', 'children_count', 'weekly_target_hours']);
 async function syncTeacherEmployee(schoolId, profileId, fullName, hr) {
   if (!schoolId || !profileId || !hr) return;
-  const fields = ['category', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'hire_date', 'end_date', 'paid_months'];
+  const fields = ['category', 'role_label', 'employment_type', 'pay_mode', 'base_salary', 'hourly_rate', 'default_monthly_hours', 'payment_method', 'cnss_subject', 'cnss_number', 'hire_date', 'end_date', 'paid_months',
+    'cin', 'birth_date', 'birth_place', 'address', 'iban', 'marital_status', 'children_count', 'weekly_target_hours', 'is_active'];
   const patch = {};
   for (const f of fields) {
     if (hr[f] === undefined) continue;
     if (HR_NUM.has(f)) patch[f] = Number(hr[f]) || 0;
-    else if (f === 'hire_date' || f === 'end_date') patch[f] = hr[f] || null;
+    else if (f === 'hire_date' || f === 'end_date' || f === 'birth_date') patch[f] = hr[f] || null;
     else if (f === 'paid_months') patch[f] = Array.isArray(hr[f]) ? hr[f].map(Number) : null;
     else patch[f] = hr[f];
   }
@@ -3706,7 +3707,7 @@ router.get('/teachers', async (req, res) => {
       for (let i = 0; i < teacherIds.length; i += CHUNK) {
         const chunk = teacherIds.slice(i, i + CHUNK);
         const { data: emps } = await supabaseAdmin.from('finance_employee')
-          .select('category, employment_type, pay_mode, base_salary, hourly_rate, default_monthly_hours, payment_method, cnss_subject, cnss_number, profile_id')
+          .select('category, role_label, employment_type, pay_mode, base_salary, hourly_rate, default_monthly_hours, payment_method, cnss_subject, cnss_number, hire_date, end_date, paid_months, cin, birth_date, birth_place, address, iban, marital_status, children_count, weekly_target_hours, is_active, profile_id')
           .eq('school_id', getSchoolId(req)).in('profile_id', chunk);
         (emps || []).forEach((e) => { if (e.profile_id) hrByTeacher[e.profile_id] = e; });
       }

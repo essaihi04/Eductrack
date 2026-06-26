@@ -5,8 +5,14 @@ import { Avatar, StatusPill, toneFor, TeacherCard, DetailDrawer } from '../../co
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
-const BLANK_HR = { category: 'enseignant', employment_type: 'permanent', pay_mode: 'fixed', base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank', cnss_subject: true, hire_date: '', end_date: '', paid_months: [] };
+const BLANK_HR = {
+  category: 'enseignant', role_label: 'Enseignant', employment_type: 'permanent', pay_mode: 'fixed',
+  base_salary: 0, hourly_rate: 0, default_monthly_hours: 0, payment_method: 'bank',
+  cnss_subject: true, cnss_number: '', is_active: true, hire_date: '', end_date: '', paid_months: [],
+  cin: '', birth_date: '', birth_place: '', address: '', iban: '', marital_status: '', children_count: 0, weekly_target_hours: 0,
+};
 const HR_MONTHS = [['9', 'Sept'], ['10', 'Oct'], ['11', 'Nov'], ['12', 'Déc'], ['1', 'Jan'], ['2', 'Fév'], ['3', 'Mar'], ['4', 'Avr'], ['5', 'Mai'], ['6', 'Juin'], ['7', 'Juil'], ['8', 'Août']];
+const HR_CATEGORIES = [['enseignant', 'Enseignant'], ['assistant', 'Assistant(e)'], ['administratif', 'Administratif'], ['chauffeur', 'Chauffeur'], ['agent_service', 'Agent de service'], ['autre', 'Autre']];
 
 // Section RH/paie partagée (création + édition d'un prof) -> finance_employee
 function HRFields({ hr, onChange }) {
@@ -14,66 +20,137 @@ function HRFields({ hr, onChange }) {
   const set = (patch) => onChange({ ...h, ...patch });
   const hourly = h.pay_mode === 'hourly';
   const cls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm';
+  const lbl = 'block text-xs text-gray-600 mb-1';
   return (
-    <div className="border-t border-gray-200 pt-3 mt-1 space-y-3">
-      <p className="text-xs font-semibold text-gray-500 uppercase">Paie / RH (optionnel)</p>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">Type de contrat</label>
-          <select value={h.employment_type} onChange={(e) => set({ employment_type: e.target.value })} className={cls}>
-            <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">Mode de rémunération</label>
-          <select value={h.pay_mode} onChange={(e) => set({ pay_mode: e.target.value })} className={cls}>
-            <option value="fixed">Salaire fixe</option><option value="hourly">À l'heure</option>
-          </select>
-        </div>
-        {!hourly && (
-          <div>
-            <label className="block text-xs text-gray-600 mb-1">Salaire mensuel brut</label>
-            <input type="number" step="0.01" value={h.base_salary} onChange={(e) => set({ base_salary: e.target.value })} className={cls} />
-          </div>
-        )}
-        {hourly && <>
-          <div>
-            <label className="block text-xs text-gray-600 mb-1">Taux horaire</label>
-            <input type="number" step="0.01" value={h.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={cls} />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-600 mb-1">Heures/mois (défaut)</label>
-            <input type="number" step="1" value={h.default_monthly_hours} onChange={(e) => set({ default_monthly_hours: e.target.value })} className={cls} />
-          </div>
-        </>}
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">Mode de paiement</label>
-          <select value={h.payment_method} onChange={(e) => set({ payment_method: e.target.value })} className={cls}>
-            <option value="bank">Virement bancaire</option><option value="cash">Espèce</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">Date d'entrée</label>
-          <input type="date" value={h.hire_date || ''} onChange={(e) => set({ hire_date: e.target.value })} className={cls} />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-600 mb-1">Date de sortie (optionnel)</label>
-          <input type="date" value={h.end_date || ''} onChange={(e) => set({ end_date: e.target.value })} className={cls} />
-        </div>
-      </div>
+    <div className="space-y-4">
+      {/* ── Identité ── */}
       <div>
-        <label className="block text-xs text-gray-600 mb-1">Mois payés (vide = tous)</label>
-        <div className="flex flex-wrap gap-1.5">
-          {HR_MONTHS.map(([m, lbl]) => {
-            const pm = (h.paid_months || []).map(Number);
-            const on = pm.includes(Number(m));
-            return <button type="button" key={m} onClick={() => set({ paid_months: on ? pm.filter(x => x !== Number(m)) : [...pm, Number(m)] })}
-              className={`px-2 py-1 text-xs rounded border ${on ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{lbl}</button>;
-          })}
+        <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Identité</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={lbl}>Catégorie</label>
+            <select value={h.category} onChange={(e) => set({ category: e.target.value })} className={cls}>
+              {HR_CATEGORIES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>Fonction (libre)</label>
+            <input value={h.role_label || ''} onChange={(e) => set({ role_label: e.target.value })} placeholder="Prof. de maths…" className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>N° CIN</label>
+            <input value={h.cin || ''} onChange={(e) => set({ cin: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>Date de naissance</label>
+            <input type="date" value={h.birth_date || ''} onChange={(e) => set({ birth_date: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>Lieu de naissance</label>
+            <input value={h.birth_place || ''} onChange={(e) => set({ birth_place: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>Situation familiale</label>
+            <select value={h.marital_status || ''} onChange={(e) => set({ marital_status: e.target.value })} className={cls}>
+              <option value="">—</option><option value="celibataire">Célibataire</option><option value="marie">Marié(e)</option><option value="divorce">Divorcé(e)</option><option value="veuf">Veuf(ve)</option>
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>Nb d'enfants</label>
+            <input type="number" step="1" value={h.children_count} onChange={(e) => set({ children_count: e.target.value })} className={cls} />
+          </div>
+          <div className="col-span-2">
+            <label className={lbl}>Adresse</label>
+            <input value={h.address || ''} onChange={(e) => set({ address: e.target.value })} className={cls} />
+          </div>
         </div>
       </div>
-      <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={!!h.cnss_subject} onChange={(e) => set({ cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
-      {hourly && <p className="text-xs text-gray-400">À l'heure : les heures réalisées (suivi des séances) rempliront le bulletin de paie automatiquement.</p>}
+
+      {/* ── Contrat & paie ── */}
+      <div className="border-t border-gray-200 pt-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Contrat & paie</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={lbl}>Type de contrat</label>
+            <select value={h.employment_type} onChange={(e) => set({ employment_type: e.target.value })} className={cls}>
+              <option value="permanent">Permanent</option><option value="vacataire">Vacataire</option>
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>Mode de rémunération</label>
+            <select value={h.pay_mode} onChange={(e) => set({ pay_mode: e.target.value })} className={cls}>
+              <option value="fixed">Salaire fixe</option><option value="hourly">À l'heure</option>
+            </select>
+          </div>
+          {!hourly && (
+            <div>
+              <label className={lbl}>Salaire mensuel brut</label>
+              <input type="number" step="0.01" value={h.base_salary} onChange={(e) => set({ base_salary: e.target.value })} className={cls} />
+            </div>
+          )}
+          {hourly && <>
+            <div>
+              <label className={lbl}>Taux horaire</label>
+              <input type="number" step="0.01" value={h.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={cls} />
+            </div>
+            <div>
+              <label className={lbl}>Heures/mois (défaut)</label>
+              <input type="number" step="1" value={h.default_monthly_hours} onChange={(e) => set({ default_monthly_hours: e.target.value })} className={cls} />
+            </div>
+          </>}
+          <div>
+            <label className={lbl}>Mode de paiement</label>
+            <select value={h.payment_method} onChange={(e) => set({ payment_method: e.target.value })} className={cls}>
+              <option value="bank">Virement bancaire</option><option value="cash">Espèce</option>
+            </select>
+          </div>
+          <div>
+            <label className={lbl}>RIB / IBAN</label>
+            <input value={h.iban || ''} onChange={(e) => set({ iban: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>N° CNSS</label>
+            <input value={h.cnss_number || ''} onChange={(e) => set({ cnss_number: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>Date d'entrée</label>
+            <input type="date" value={h.hire_date || ''} onChange={(e) => set({ hire_date: e.target.value })} className={cls} />
+          </div>
+          <div>
+            <label className={lbl}>Date de sortie (optionnel)</label>
+            <input type="date" value={h.end_date || ''} onChange={(e) => set({ end_date: e.target.value })} className={cls} />
+          </div>
+        </div>
+        <div className="mt-3">
+          <label className={lbl}>Mois payés (vide = tous)</label>
+          <div className="flex flex-wrap gap-1.5">
+            {HR_MONTHS.map(([m, lblM]) => {
+              const pm = (h.paid_months || []).map(Number);
+              const on = pm.includes(Number(m));
+              return <button type="button" key={m} onClick={() => set({ paid_months: on ? pm.filter(x => x !== Number(m)) : [...pm, Number(m)] })}
+                className={`px-2 py-1 text-xs rounded border ${on ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{lblM}</button>;
+            })}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={!!h.cnss_subject} onChange={(e) => set({ cnss_subject: e.target.checked })} /> Assujetti CNSS/AMO</label>
+          <label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={!!h.is_active} onChange={(e) => set({ is_active: e.target.checked })} /> Actif</label>
+        </div>
+      </div>
+
+      {/* ── Enseignement ── */}
+      <div className="border-t border-gray-200 pt-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Enseignement</p>
+        <div>
+          <label className={lbl}>Charge hebdomadaire cible (heures à enseigner / semaine)</label>
+          <input type="number" step="0.5" value={h.weekly_target_hours} onChange={(e) => set({ weekly_target_hours: e.target.value })} className={cls} />
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          {hourly
+            ? 'À l\'heure : les heures réalisées (suivi des séances) rempliront le bulletin de paie automatiquement.'
+            : 'Les matières enseignées se gèrent sur la fiche du prof. La photo et les documents (CIN, diplôme, contrat) s\'ajoutent dans Finance ▸ Paie & RH.'}
+        </p>
+      </div>
     </div>
   );
 }
