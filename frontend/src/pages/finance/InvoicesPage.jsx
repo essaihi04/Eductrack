@@ -100,22 +100,22 @@ export default function InvoicesPage() {
   }), { total: 0, paid: 0, due: 0 });
 
   const columns = [
-    { key: 'number', header: 'N°', render: (i) => <span className="font-mono text-xs text-gray-700">{i.invoice_number}</span> },
-    { key: 'student', header: 'Élève', render: (i) => <span className="font-medium text-gray-800">{i.student?.first_name} {i.student?.last_name}</span> },
-    { key: 'class', header: 'Classe', render: (i) => <span className="text-gray-600">{i.student?.classes?.name || '—'}</span> },
-    { key: 'period', header: 'Période', render: (i) => <span className="text-gray-600">{i.period_label || '—'}</span> },
-    { key: 'total', header: 'Total', align: 'right', render: (i) => <Money value={i.total} /> },
-    { key: 'paid', header: 'Payé', align: 'right', render: (i) => <Money value={i.amount_paid} tone="green" /> },
-    { key: 'due', header: 'Reste', align: 'right', render: (i) => <span className="text-orange-600 font-medium tabular-nums">{formatMAD(i.amount_due)}</span> },
-    { key: 'due_date', header: 'Échéance', render: (i) => <span className="text-gray-600">{formatDate(i.due_date)}</span> },
-    { key: 'status', header: 'Statut', render: (i) => <Badge tone={STATUS_TONE[i.status] || 'gray'}>{STATUS_LABELS[i.status] || i.status}</Badge> },
-    { key: 'actions', header: 'Actions', align: 'right', render: (i) => (
-      <div className="flex justify-end gap-1">
-        <button onClick={(e) => { e.stopPropagation(); viewDetail(i.id); }} className="p-1.5 hover:bg-gray-100 rounded" title="Voir">
+    { key: 'number', header: 'N°', width: '11%', truncate: true, render: (i) => <span className="font-mono text-gray-700" title={i.invoice_number}>{i.invoice_number}</span> },
+    { key: 'student', header: 'Élève', width: '16%', truncate: true, render: (i) => <span className="font-medium text-gray-800">{i.student?.first_name} {i.student?.last_name}</span> },
+    { key: 'class', header: 'Classe', width: '9%', truncate: true, render: (i) => <span className="text-gray-600">{i.student?.classes?.name || '—'}</span> },
+    { key: 'period', header: 'Période', width: '12%', truncate: true, render: (i) => <span className="text-gray-600" title={i.period_label || ''}>{i.period_label || '—'}</span> },
+    { key: 'total', header: 'Total', align: 'right', width: '10%', render: (i) => <Money value={i.total} /> },
+    { key: 'paid', header: 'Payé', align: 'right', width: '10%', render: (i) => <Money value={i.amount_paid} tone="green" /> },
+    { key: 'due', header: 'Reste', align: 'right', width: '10%', render: (i) => <span className="text-orange-600 font-medium tabular-nums">{formatMAD(i.amount_due)}</span> },
+    { key: 'due_date', header: 'Échéance', width: '10%', render: (i) => <span className="text-gray-600 whitespace-nowrap">{formatDate(i.due_date)}</span> },
+    { key: 'status', header: 'Statut', width: '8%', render: (i) => <Badge tone={STATUS_TONE[i.status] || 'gray'}>{STATUS_LABELS[i.status] || i.status}</Badge> },
+    { key: 'actions', header: '', align: 'right', width: '64px', render: (i) => (
+      <div className="flex justify-end gap-0.5">
+        <button onClick={(e) => { e.stopPropagation(); viewDetail(i.id); }} className="p-1 hover:bg-gray-100 rounded" title="Voir">
           <Eye className="w-4 h-4 text-gray-500" />
         </button>
         {i.status !== 'cancelled' && i.status !== 'paid' && (
-          <button onClick={(e) => { e.stopPropagation(); cancelInvoice(i.id); }} className="p-1.5 hover:bg-red-50 rounded" title="Annuler">
+          <button onClick={(e) => { e.stopPropagation(); cancelInvoice(i.id); }} className="p-1 hover:bg-red-50 rounded" title="Annuler">
             <Ban className="w-4 h-4 text-red-500" />
           </button>
         )}
@@ -159,7 +159,7 @@ export default function InvoicesPage() {
           className="px-3 py-2 border border-gray-300 rounded-lg" title="Au" />
       </FilterBar>
 
-      <DataTable columns={columns} rows={filteredBySearch} empty="Aucune facture" onRowClick={(i) => viewDetail(i.id)} />
+      <DataTable columns={columns} rows={filteredBySearch} empty="Aucune facture" onRowClick={(i) => viewDetail(i.id)} compact />
 
       <Drawer open={showGenerate} onClose={() => setShowGenerate(false)} title="Génération mensuelle"
         footer={

@@ -87,14 +87,20 @@ export function FilterBar({ children }) {
 
 // Tableau de données générique, piloté par des colonnes.
 // columns: [{ key, header, align, className, render?(row) }]
-export function DataTable({ columns, rows, rowKey = (r) => r.id, empty = 'Aucune donnée', onRowClick }) {
+// `compact` resserre le tableau (padding réduit + largeurs fixes) pour que
+// beaucoup de colonnes tiennent sans défilement horizontal. Une colonne peut
+// définir `width` (ex. '14%' ou 90) et `truncate` pour couper son texte.
+export function DataTable({ columns, rows, rowKey = (r) => r.id, empty = 'Aucune donnée', onRowClick, compact = false }) {
+  const cellPad = compact ? 'px-2.5 py-2' : 'px-4 py-3';
+  const headPad = compact ? 'px-2.5 py-2' : 'px-4 py-3';
   return (
     <div className="bg-card border border-border rounded-xl overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className={`w-full ${compact ? 'text-xs table-fixed' : 'text-sm'}`}>
         <thead className="bg-muted/40 text-muted-foreground text-xs uppercase tracking-wide">
           <tr>
             {columns.map((c) => (
-              <th key={c.key} className={`px-4 py-3 font-medium ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.thClassName || ''}`}>
+              <th key={c.key} style={c.width ? { width: typeof c.width === 'number' ? `${c.width}px` : c.width } : undefined}
+                className={`${headPad} font-medium ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.thClassName || ''}`}>
                 {c.header}
               </th>
             ))}
@@ -111,7 +117,7 @@ export function DataTable({ columns, rows, rowKey = (r) => r.id, empty = 'Aucune
               className={`hover:bg-muted/30 ${onRowClick ? 'cursor-pointer' : ''}`}
             >
               {columns.map((c) => (
-                <td key={c.key} className={`px-4 py-3 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
+                <td key={c.key} className={`${cellPad} ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.truncate ? 'truncate' : ''} ${c.className || ''}`}>
                   {c.render ? c.render(row) : row[c.key]}
                 </td>
               ))}
