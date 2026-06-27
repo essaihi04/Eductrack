@@ -480,7 +480,7 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
 
   const toggleMember = (id) => setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const memberIds = new Set(members.map(m => m.id));
-  const searchResults = search.trim().length >= 2
+  const searchResults = search.trim().length >= 1
     ? allStudents.filter(s => !memberIds.has(s.id) && fullName(s).toLowerCase().includes(search.toLowerCase())).slice(0, 6)
     : [];
   const addMember = (s) => {
