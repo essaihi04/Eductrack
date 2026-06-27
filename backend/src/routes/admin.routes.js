@@ -5,6 +5,7 @@ import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.j
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
 import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
+import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
 
 const router = express.Router();
 
@@ -2441,6 +2442,93 @@ router.delete('/students/:id', async (req, res) => {
   }
 });
 
+// ── Photo de profil d'un enseignant (fiche prof) ──────────────────────────
+// Stockée dans profiles.avatar_url (= photo affichée sur la carte du prof).
+router.post('/teachers/:id/photo', profilePhotoUpload.single('photo'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!req.file) return res.status(400).json({ error: 'Aucune image fournie' });
+    let check = supabaseAdmin.from('profiles').select('id, school_id').eq('id', id).eq('role', 'teacher');
+    check = applySchoolFilter(check, req);
+    const { data: teacher, error: checkErr } = await check.single();
+    if (checkErr || !teacher) return res.status(404).json({ error: 'Professeur introuvable' });
+
+    const avatar_url = await uploadProfilePhotoFile(req.file);
+    const { data, error } = await supabaseAdmin.from('profiles')
+      .update({ avatar_url }).eq('id', id).select('id, avatar_url').single();
+    if (error) throw error;
+    res.json(data);
+  } catch (e) {
+    console.error('Erreur upload photo prof (admin):', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
+router.delete('/teachers/:id/photo', async (req, res) => {
+  try {
+    const { id } = req.params;
+    let check = supabaseAdmin.from('profiles').select('id').eq('id', id).eq('role', 'teacher');
+    check = applySchoolFilter(check, req);
+    const { data: teacher } = await check.single();
+    if (!teacher) return res.status(404).json({ error: 'Professeur introuvable' });
+    await supabaseAdmin.from('profiles').update({ avatar_url: null }).eq('id', id);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Erreur suppression photo prof (admin):', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
+// ── Documents administratifs d'un enseignant (CIN, diplôme, contrat…) ──────
+const teacherDocUpload = memoryUpload(20);
+
+router.get('/teachers/:id/documents', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data } = await supabaseAdmin.from('teacher_documents')
+      .select('*').eq('teacher_id', req.params.id).eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+    const documents = [];
+    for (const d of (data || [])) documents.push({ ...d, view_url: await signedUrl(d.file_url, 3600) });
+    res.json({ documents });
+  } catch (e) {
+    console.error('GET teacher documents:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+router.post('/teachers/:id/documents', teacherDocUpload.single('file'), async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier fourni' });
+    const doc_type = req.body.doc_type || 'other';
+    const label = req.body.label || '';
+    const { path: objectPath } = await uploadBuffer({ bucket: BUCKET_PRIVATE, folder: `teachers/${schoolId}/${req.params.id}`, file: req.file, prefix: doc_type });
+    const { data, error } = await supabaseAdmin.from('teacher_documents').insert({
+      school_id: schoolId, teacher_id: req.params.id, doc_type, label, file_url: objectPath,
+    }).select().single();
+    if (error) throw error;
+    res.status(201).json({ document: { ...data, view_url: await signedUrl(objectPath, 3600) } });
+  } catch (e) {
+    console.error('POST teacher document:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+router.delete('/teachers/:id/documents/:docId', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data: doc } = await supabaseAdmin.from('teacher_documents')
+      .select('file_url').eq('id', req.params.docId).eq('school_id', schoolId).maybeSingle();
+    if (doc?.file_url) await removeObject(BUCKET_PRIVATE, doc.file_url);
+    await supabaseAdmin.from('teacher_documents').delete().eq('id', req.params.docId).eq('school_id', schoolId);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('DELETE teacher document:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
 // Supprimer un professeur
 router.delete('/teachers/:id', async (req, res) => {
   try {
@@ -2509,6 +2597,16 @@ router.delete('/teachers/:id', async (req, res) => {
 
     if (documentsError) {
       console.error('[DELETE Teacher] Erreur suppression documents:', documentsError);
+    }
+
+    // Supprimer les pièces administratives (CIN, diplôme…) + leurs fichiers
+    try {
+      const { data: adminDocs } = await supabaseAdmin
+        .from('teacher_documents').select('file_url').eq('teacher_id', id);
+      for (const d of (adminDocs || [])) { if (d.file_url) await removeObject(BUCKET_PRIVATE, d.file_url); }
+      await supabaseAdmin.from('teacher_documents').delete().eq('teacher_id', id);
+    } catch (e) {
+      console.error('[DELETE Teacher] Erreur suppression teacher_documents:', e.message);
     }
 
     // Supprimer le profil
