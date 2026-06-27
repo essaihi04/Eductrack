@@ -182,6 +182,10 @@ const ClassesPage = () => {
   const [classTeachers, setClassTeachers] = useState({});
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0, message: '' });
+  // Prévisualisation avant import des élèves (détails : total / nouveaux / déjà présents / classe cible)
+  const [importPreview, setImportPreview] = useState(null);
+  // Récapitulatif après import (à fermer ; la fermeture rafraîchit la page)
+  const [importRecap, setImportRecap] = useState(null);
   const [deletingClassId, setDeletingClassId] = useState(null);
   const [deleteStatus, setDeleteStatus] = useState({ type: '', message: '' });
   const [editingClassId, setEditingClassId] = useState(null);
@@ -805,8 +809,63 @@ const ClassesPage = () => {
         return;
       }
 
-      setImportProgress({ current: 60, total: 100, message: 'Envoi des données au serveur...' });
+      setImportProgress({ current: 70, total: 100, message: 'Vérification des élèves existants...' });
 
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const token = session?.access_token;
+
+      // Dry-run : on demande au serveur le détail (nouveaux / déjà présents) SANS rien créer,
+      // pour afficher une prévisualisation avant l'import réel.
+      const res = await fetch(`${apiUrl}/api/admin/students/import`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ students, classId, dryRun: true })
+      });
+
+      if (!res.ok) {
+        alert('Erreur lors de l\'analyse du fichier');
+        setIsImporting(false);
+        setImportProgress({ current: 0, total: 0, message: '' });
+        e.target.value = '';
+        return;
+      }
+
+      const preview = await res.json();
+      const summary = preview.summary || { new: students.length, existing: 0, total: students.length };
+      const targetClass = classes.find(c => c.id === classId);
+
+      setImportProgress({ current: 100, total: 100, message: 'Analyse terminée' });
+      // Ouvre la modale de prévisualisation ; l'import réel se fera à la confirmation.
+      setImportPreview({
+        classId,
+        className: targetClass?.name || '—',
+        fileName: file.name,
+        students,
+        summary,
+        newStudents: preview.newStudents || [],
+        existingStudents: preview.existingStudents || [],
+      });
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, message: '' });
+      e.target.value = '';
+    } catch (error) {
+      console.error('Error importing Excel:', error);
+      alert('Erreur lors de la lecture du fichier Excel: ' + error.message);
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, message: '' });
+    }
+  };
+
+  // Confirme et lance l'import réel des élèves prévisualisés, puis ouvre le récapitulatif.
+  const confirmImport = async () => {
+    if (!importPreview) return;
+    const { students, classId } = importPreview;
+    setIsImporting(true);
+    setImportProgress({ current: 20, total: 100, message: 'Création des comptes élèves...' });
+    try {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
 
@@ -821,69 +880,53 @@ const ClassesPage = () => {
 
       setImportProgress({ current: 80, total: 100, message: 'Traitement des comptes utilisateurs...' });
 
-      if (res.ok) {
-        const result = await res.json();
-        
-        setImportProgress({ current: 90, total: 100, message: 'Stockage des identifiants...' });
-
-        // Stocker les mots de passe générés dans localStorage
-        const importedStudents = result.students || [];
-        const passwordMap = {};
-        importedStudents.forEach(student => {
-          if (student.password !== '********') {
-            passwordMap[student.id] = student.password;
-          }
-        });
-        
-        // Récupérer les mots de passe existants et les fusionner
-        const existingPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
-        const updatedPasswords = { ...existingPasswords, ...passwordMap };
-        localStorage.setItem('studentPasswords', JSON.stringify(updatedPasswords));
-        
-        const otherSchoolCount = result.otherSchoolCount || 0;
-        const summary = result.summary || { 
-          new: importedStudents.length, 
-          existing: 0, 
-          errors: 0, 
-          otherSchool: otherSchoolCount,
-          total: students.length 
-        };
-        
-        console.log(`✓ ${summary.new} nouvel(s) élève(s) créé(s)`);
-        console.log(`✓ ${summary.existing} élève(s) existaient déjà`);
-        console.log(`⚠️ ${otherSchoolCount} élève(s) dans d'autres écoles (ignorés)`);
-        console.log(`✓ Mots de passe stockés pour ${Object.keys(passwordMap).length} élève(s)`);
-        
-        setImportProgress({ current: 100, total: 100, message: 'Importation terminée !' });
-        
-        setTimeout(() => {
-          let message = `📊 **Rapport d'importation**\n\n`;
-          message += `✅ **${summary.new}** nouvel(s) élève(s) créé(s)\n`;
-          if (summary.existing > 0) {
-            message += `ℹ️ **${summary.existing}** élève(s) existaient déjà\n`;
-          }
-          if (otherSchoolCount > 0) {
-            message += `⚠️ **${otherSchoolCount}** élève(s) appartiennent à une autre école (non importés)\n`;
-          }
-          if (summary.errors > 0) {
-            message += `❌ **${summary.errors}** erreur(s)\n`;
-          }
-          message += `\n📋 **Total traité**: ${summary.total} élève(s)`;
-          
-          alert(message);
-          setIsImporting(false);
-          setImportProgress({ current: 0, total: 0, message: '' });
-          e.target.value = '';
-        }, 1000);
-      } else {
+      if (!res.ok) {
         alert('Erreur lors de l\'import');
         setIsImporting(false);
+        setImportProgress({ current: 0, total: 0, message: '' });
+        return;
       }
-    } catch (error) {
-      console.error('Error importing Excel:', error);
-      alert('Erreur lors de la lecture du fichier Excel: ' + error.message);
+
+      const result = await res.json();
+
+      // Stocker les mots de passe générés dans localStorage
+      const importedStudents = result.students || [];
+      const passwordMap = {};
+      importedStudents.forEach(student => {
+        if (student.password !== '********') {
+          passwordMap[student.id] = student.password;
+        }
+      });
+      const existingPasswords = JSON.parse(localStorage.getItem('studentPasswords') || '{}');
+      localStorage.setItem('studentPasswords', JSON.stringify({ ...existingPasswords, ...passwordMap }));
+
+      const summary = result.summary || {
+        new: importedStudents.length, existing: 0, errors: 0, total: students.length
+      };
+
+      setImportProgress({ current: 100, total: 100, message: 'Importation terminée !' });
       setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, message: '' });
+      // Bascule de la prévisualisation vers le récapitulatif (à fermer → rafraîchit la page).
+      setImportPreview(null);
+      setImportRecap({
+        className: importPreview.className,
+        fileName: importPreview.fileName,
+        summary,
+        errors: result.errors || [],
+      });
+    } catch (error) {
+      console.error('Error importing students:', error);
+      alert('Erreur lors de l\'import: ' + error.message);
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, message: '' });
     }
+  };
+
+  // Fermeture du récapitulatif → rafraîchit la page pour refléter les nouveaux effectifs.
+  const closeImportRecap = () => {
+    setImportRecap(null);
+    window.location.reload();
   };
 
   const downloadArabicTemplate = () => {
@@ -2558,6 +2601,130 @@ const ClassesPage = () => {
               )}
             </Card>
           )}
+        </div>
+      )}
+
+      {/* Modale de PRÉVISUALISATION avant import des élèves */}
+      {importPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-blue-600" />
+                Vérification avant import
+              </h3>
+              <button onClick={() => setImportPreview(null)} className="text-gray-400 hover:text-gray-600" disabled={isImporting}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-4 overflow-y-auto space-y-4">
+              <div className="text-sm text-gray-600 space-y-1">
+                <div className="flex justify-between"><span>Fichier</span><span className="font-medium text-gray-900 truncate ml-2">{importPreview.fileName}</span></div>
+                <div className="flex justify-between"><span>Classe cible</span><span className="font-medium text-gray-900">{importPreview.className}</span></div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-center">
+                  <div className="text-2xl font-bold text-gray-900">{importPreview.summary.total}</div>
+                  <div className="text-xs text-gray-500 mt-1">Total dans le fichier</div>
+                </div>
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center">
+                  <div className="text-2xl font-bold text-green-700">{importPreview.summary.new}</div>
+                  <div className="text-xs text-green-600 mt-1">Nouveaux à créer</div>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center">
+                  <div className="text-2xl font-bold text-amber-700">{importPreview.summary.existing}</div>
+                  <div className="text-xs text-amber-600 mt-1">Déjà présents</div>
+                </div>
+              </div>
+
+              {importPreview.summary.new === 0 && (
+                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  Aucun nouvel élève à créer : tous les élèves du fichier existent déjà.
+                </p>
+              )}
+
+              {importPreview.newStudents.length > 0 && (
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-green-700 font-medium">Voir les {importPreview.newStudents.length} nouveaux élève(s)</summary>
+                  <ul className="mt-2 max-h-40 overflow-y-auto border rounded-lg divide-y">
+                    {importPreview.newStudents.map((s, i) => (
+                      <li key={i} className="px-3 py-1.5 text-gray-700">{s.first_name} {s.last_name}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t flex justify-end gap-3">
+              <button
+                onClick={() => setImportPreview(null)}
+                disabled={isImporting}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmImport}
+                disabled={isImporting || importPreview.summary.new === 0}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isImporting ? 'Import en cours...' : `Importer ${importPreview.summary.new} élève(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale de RÉCAPITULATIF après import — à fermer (rafraîchit la page) */}
+      {importRecap && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b flex items-center gap-2">
+              <Check className="w-5 h-5 text-green-600" />
+              <h3 className="text-lg font-bold">Importation terminée</h3>
+            </div>
+
+            <div className="px-6 py-4 space-y-4">
+              <div className="text-sm text-gray-600 space-y-1">
+                <div className="flex justify-between"><span>Classe</span><span className="font-medium text-gray-900">{importRecap.className}</span></div>
+                <div className="flex justify-between"><span>Fichier</span><span className="font-medium text-gray-900 truncate ml-2">{importRecap.fileName}</span></div>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between items-center px-3 py-2 rounded-lg bg-green-50 border border-green-200">
+                  <span className="text-green-700">Nouveaux élèves créés</span>
+                  <span className="font-bold text-green-700">{importRecap.summary.new}</span>
+                </div>
+                {importRecap.summary.existing > 0 && (
+                  <div className="flex justify-between items-center px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
+                    <span className="text-amber-700">Déjà présents (ignorés)</span>
+                    <span className="font-bold text-amber-700">{importRecap.summary.existing}</span>
+                  </div>
+                )}
+                {importRecap.summary.errors > 0 && (
+                  <div className="flex justify-between items-center px-3 py-2 rounded-lg bg-red-50 border border-red-200">
+                    <span className="text-red-700">Erreurs</span>
+                    <span className="font-bold text-red-700">{importRecap.summary.errors}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center px-3 py-2 rounded-lg bg-gray-50 border border-gray-200">
+                  <span className="text-gray-600">Total traité</span>
+                  <span className="font-bold text-gray-900">{importRecap.summary.total}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t flex justify-end">
+              <button
+                onClick={closeImportRecap}
+                className="px-5 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

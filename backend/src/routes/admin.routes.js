@@ -4596,10 +4596,42 @@ router.delete('/classes/:classId/timetable/:slotId', async (req, res) => {
 // Importer des élèves via Excel
 router.post('/students/import', async (req, res) => {
   try {
-    const { students, classId } = req.body;
+    const { students, classId, dryRun } = req.body;
 
     if (!Array.isArray(students) || students.length === 0) {
       return res.status(400).json({ error: 'Données invalides' });
+    }
+
+    // Mode prévisualisation : on détecte seulement les nouveaux vs déjà présents,
+    // sans rien créer. Sert à afficher un récapitulatif avant l'import réel.
+    if (dryRun) {
+      const previewNew = [];
+      const previewExisting = [];
+      for (const student of students) {
+        const { email, firstName, lastName } = student;
+        const { data: existingProfile } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email, first_name, last_name')
+          .eq('email', email)
+          .eq('role', 'student')
+          .single();
+        if (existingProfile) {
+          previewExisting.push(existingProfile);
+        } else {
+          previewNew.push({ email, first_name: firstName, last_name: lastName });
+        }
+      }
+      return res.json({
+        dryRun: true,
+        newStudents: previewNew,
+        existingStudents: previewExisting,
+        summary: {
+          new: previewNew.length,
+          existing: previewExisting.length,
+          errors: 0,
+          total: students.length
+        }
+      });
     }
 
     const createdStudents = [];
