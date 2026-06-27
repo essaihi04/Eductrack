@@ -3122,6 +3122,28 @@ router.get('/classes', async (req, res) => {
   }
 });
 
+// Liste légère des élèves d'une classe (photo, nom, n° de classement = import_order),
+// triée selon l'ordre du fichier d'import. Sert au tiroir « Gestion des classes »
+// pour afficher et ouvrir la fiche d'un élève (interconnexion avec la page Élèves).
+router.get('/classes/:classId/students', async (req, res) => {
+  try {
+    let q = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, avatar_url, gender, import_order, email, massar_code')
+      .eq('role', 'student')
+      .eq('class_id', req.params.classId)
+      .order('import_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+    q = applySchoolFilter(q, req);
+    const { data, error } = await q;
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    console.error('Erreur GET class students:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // Créer une classe
 router.post('/classes', async (req, res) => {
   try {

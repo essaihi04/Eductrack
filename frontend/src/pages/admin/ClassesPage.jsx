@@ -186,6 +186,9 @@ const ClassesPage = () => {
   const [importPreview, setImportPreview] = useState(null);
   // Récapitulatif après import (à fermer ; la fermeture rafraîchit la page)
   const [importRecap, setImportRecap] = useState(null);
+  // Élèves de la classe ouverte dans le tiroir (photo, nom, n° de classement)
+  const [classStudents, setClassStudents] = useState([]);
+  const [classStudentsLoading, setClassStudentsLoading] = useState(false);
   const [deletingClassId, setDeletingClassId] = useState(null);
   const [deleteStatus, setDeleteStatus] = useState({ type: '', message: '' });
   const [editingClassId, setEditingClassId] = useState(null);
@@ -438,6 +441,30 @@ const ClassesPage = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Charge les élèves de la classe quand on ouvre son tiroir (liste cliquable).
+  useEffect(() => {
+    if (!expandedClass) { setClassStudents([]); return; }
+    let cancelled = false;
+    (async () => {
+      setClassStudentsLoading(true);
+      try {
+        const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+        const token = session?.access_token;
+        const res = await fetch(`${apiUrl}/api/admin/classes/${expandedClass}/students`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!cancelled) setClassStudents(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Erreur chargement élèves de la classe:', err);
+        if (!cancelled) setClassStudents([]);
+      } finally {
+        if (!cancelled) setClassStudentsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [expandedClass]);
 
   const fetchData = async () => {
     try {
@@ -1731,6 +1758,46 @@ const ClassesPage = () => {
               )}
               <p className="text-[11px] text-muted-foreground mt-2">
                 Cliquez sur un professeur pour l'assigner ou le retirer de cette classe.
+              </p>
+            </div>
+
+            {/* ── Élèves de la classe (cliquables → fiche éditable, page Élèves) ── */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-medium text-sm">Élèves</h4>
+                <span className="text-xs text-muted-foreground">
+                  {classStudentsLoading ? 'Chargement…' : `${classStudents.length} élève(s)`}
+                </span>
+              </div>
+              {classStudentsLoading ? (
+                <p className="text-sm text-muted-foreground">Chargement des élèves…</p>
+              ) : classStudents.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Aucun élève dans cette classe.</p>
+              ) : (
+                <div className="border rounded-lg divide-y max-h-80 overflow-y-auto">
+                  {classStudents.map((s, idx) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => navigate(`/students?student=${s.id}`)}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors"
+                      title="Voir / modifier la fiche de l'élève"
+                    >
+                      <span className="w-6 text-xs font-semibold text-muted-foreground text-right flex-shrink-0">
+                        {s.import_order ?? idx + 1}
+                      </span>
+                      <Avatar name={`${s.first_name} ${s.last_name}`} src={s.avatar_url} gender={s.gender} size="sm" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium truncate">{s.first_name} {s.last_name}</span>
+                        <span className="block text-xs text-muted-foreground truncate">{s.massar_code || s.email}</span>
+                      </span>
+                      <Edit2 className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground mt-2">
+                Cliquez sur un élève pour ouvrir sa fiche et la modifier (page Élèves).
               </p>
             </div>
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
@@ -21,6 +22,7 @@ const StudentsPage = () => {
   const [selectedStudents, setSelectedStudents] = useState(new Set());
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState({
     className: '',
     level: '',
@@ -324,6 +326,19 @@ const StudentsPage = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Interconnexion avec la page Classes : ?student=<id> ouvre directement la fiche
+  // de l'élève (et nettoie l'URL ensuite pour ne pas la rouvrir au prochain rendu).
+  useEffect(() => {
+    const targetId = searchParams.get('student');
+    if (!targetId || students.length === 0) return;
+    const found = students.find(s => s.id === targetId);
+    if (found) {
+      setActiveStudent(found);
+      searchParams.delete('student');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [students, searchParams]);
 
   const fetchData = async () => {
     try {
