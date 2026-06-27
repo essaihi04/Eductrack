@@ -3187,6 +3187,97 @@ router.get('/classes/:classId/students', async (req, res) => {
   }
 });
 
+// Abréviation courte d'une matière (FR/MATH/PC/SVT…) à partir de son nom (FR ou AR).
+const subjectAbbr = (name) => {
+  const n = String(name || '').toLowerCase();
+  const rules = [
+    [/(fran|فرنس)/, 'FR'], [/(math|رياض)/, 'MATH'], [/(phys|chim|فيزياء|فزياء)/, 'PC'],
+    [/(svt|vie et|بيولوج|الحياة|الأرض)/, 'SVT'], [/(arab|عرب)/, 'AR'],
+    [/(angl|english|انجليز|إنجليز)/, 'ANG'], [/(hist|géo|geo|تاريخ|جغراف)/, 'HG'],
+    [/(philo|فلسف)/, 'PHILO'], [/(info|حاسوب|معلوم)/, 'INFO'], [/(islam|إسلام)/, 'ISL'],
+    [/(eps|sport|البدني)/, 'EPS'], [/(eco|اقتصاد|gestion|تدبير)/, 'ECO'],
+  ];
+  for (const [re, ab] of rules) if (re.test(n)) return ab;
+  return String(name || '').replace(/\s+/g, '').slice(0, 4).toUpperCase() || '—';
+};
+
+// Statistiques par élève d'une classe : nb d'absences, performance (%),
+// courbe d'évolution sur 7 jours (tendance), et matière la plus faible.
+// Source : session_tracking (présence + mini_eval) joint aux séances (date, matière).
+router.get('/classes/:classId/students-stats', async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const days = Math.min(parseInt(req.query.days) || 90, 365);
+    const end = new Date();
+    const start = new Date(end.getTime() - days * 86400000);
+    const iso = d => d.toISOString().split('T')[0];
+
+    let q = supabaseAdmin
+      .from('session_tracking')
+      .select('student_id, presence, mini_eval, sessions!inner(date, class_id, school_id, subject:subjects(name))')
+      .eq('sessions.class_id', classId)
+      .gte('sessions.date', iso(start))
+      .lte('sessions.date', iso(end));
+    q = applySchoolFilter(q, req, 'sessions.school_id');
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const sevenAgo = iso(new Date(end.getTime() - 7 * 86400000));
+    const num = v => (typeof v === 'number' ? v : parseFloat(v));
+
+    const byStudent = {};
+    for (const r of (data || [])) {
+      const id = r.student_id;
+      if (!id) continue;
+      const s = byStudent[id] || (byStudent[id] = { absences: 0, evals: [], bySubject: {}, byDay7: {} });
+      if (r.presence === 'absent') s.absences++;
+      const ev = num(r.mini_eval);
+      if (!isNaN(ev)) {
+        s.evals.push(ev);
+        const subj = r.sessions?.subject?.name;
+        if (subj) {
+          const b = s.bySubject[subj] || (s.bySubject[subj] = { sum: 0, n: 0 });
+          b.sum += ev; b.n++;
+        }
+        const d = r.sessions?.date;
+        if (d && d >= sevenAgo) {
+          const g = s.byDay7[d] || (s.byDay7[d] = { sum: 0, n: 0 });
+          g.sum += ev; g.n++;
+        }
+      }
+    }
+
+    // mini_eval est noté sur 20 → conversion en pourcentage (×5).
+    const pct = v => Math.round(Math.max(0, Math.min(100, v * 5)));
+    const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+    const result = {};
+    for (const [id, s] of Object.entries(byStudent)) {
+      const performance = s.evals.length ? pct(avg(s.evals)) : null;
+      // Courbe 7 jours : moyenne quotidienne (en %), triée par date.
+      const trend = Object.keys(s.byDay7).sort()
+        .map(d => pct(s.byDay7[d].sum / s.byDay7[d].n));
+      let trendDir = 'flat';
+      if (trend.length >= 2) {
+        const delta = trend[trend.length - 1] - trend[0];
+        trendDir = delta > 5 ? 'up' : delta < -5 ? 'down' : 'flat';
+      }
+      // Matière la plus faible (moyenne la plus basse, en %).
+      let weak = null;
+      for (const [subj, b] of Object.entries(s.bySubject)) {
+        const m = b.sum / b.n;
+        if (!weak || m < weak.raw) weak = { subject: subj, abbr: subjectAbbr(subj), avg: pct(m), raw: m };
+      }
+      if (weak) delete weak.raw;
+      result[id] = { absences: s.absences, performance, trend, trendDir, weakSubject: weak };
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Erreur GET class students-stats:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // Créer une classe
 router.post('/classes', async (req, res) => {
   try {

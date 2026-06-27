@@ -169,6 +169,30 @@ const parseMassarInfoEleve = (workbook) => {
   return { className, rows };
 };
 
+// Mini-courbe d'évolution (7 jours). Couleur selon la tendance : vert (hausse),
+// rouge (baisse), gris (stable). Affiche un trait plat si <2 points.
+const Sparkline = ({ points = [], dir = 'flat', width = 46, height = 16 }) => {
+  const color = dir === 'up' ? '#16a34a' : dir === 'down' ? '#dc2626' : '#9ca3af';
+  if (!points.length) {
+    return <svg width={width} height={height} aria-hidden="true"><line x1="2" y1={height / 2} x2={width - 2} y2={height / 2} stroke="#d1d5db" strokeWidth="1.5" strokeDasharray="2 2" /></svg>;
+  }
+  const min = Math.min(...points), max = Math.max(...points);
+  const span = max - min || 1;
+  const stepX = points.length > 1 ? (width - 4) / (points.length - 1) : 0;
+  const coords = points.map((p, i) => {
+    const x = 2 + i * stepX;
+    const y = height - 2 - ((p - min) / span) * (height - 4);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return (
+    <svg width={width} height={height} aria-hidden="true">
+      {points.length === 1
+        ? <circle cx={width / 2} cy={height / 2} r="2" fill={color} />
+        : <polyline points={coords.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />}
+    </svg>
+  );
+};
+
 const ClassesPage = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
@@ -189,6 +213,8 @@ const ClassesPage = () => {
   // Élèves de la classe ouverte dans le tiroir (photo, nom, n° de classement)
   const [classStudents, setClassStudents] = useState([]);
   const [classStudentsLoading, setClassStudentsLoading] = useState(false);
+  // Stats par élève (absences, performance, courbe 7j, matière faible), clé = id élève
+  const [classStudentStats, setClassStudentStats] = useState({});
   const [deletingClassId, setDeletingClassId] = useState(null);
   const [deleteStatus, setDeleteStatus] = useState({ type: '', message: '' });
   const [editingClassId, setEditingClassId] = useState(null);
@@ -442,23 +468,29 @@ const ClassesPage = () => {
     fetchData();
   }, []);
 
-  // Charge les élèves de la classe quand on ouvre son tiroir (liste cliquable).
+  // Charge les élèves de la classe + leurs stats quand on ouvre son tiroir.
   useEffect(() => {
-    if (!expandedClass) { setClassStudents([]); return; }
+    if (!expandedClass) { setClassStudents([]); setClassStudentStats({}); return; }
     let cancelled = false;
     (async () => {
       setClassStudentsLoading(true);
       try {
         const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
         const token = session?.access_token;
-        const res = await fetch(`${apiUrl}/api/admin/classes/${expandedClass}/students`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        if (!cancelled) setClassStudents(Array.isArray(data) ? data : []);
+        const headers = { 'Authorization': `Bearer ${token}` };
+        const [studRes, statsRes] = await Promise.all([
+          fetch(`${apiUrl}/api/admin/classes/${expandedClass}/students`, { headers }),
+          fetch(`${apiUrl}/api/admin/classes/${expandedClass}/students-stats`, { headers }),
+        ]);
+        const studData = await studRes.json();
+        const statsData = statsRes.ok ? await statsRes.json() : {};
+        if (!cancelled) {
+          setClassStudents(Array.isArray(studData) ? studData : []);
+          setClassStudentStats(statsData && typeof statsData === 'object' ? statsData : {});
+        }
       } catch (err) {
         console.error('Erreur chargement élèves de la classe:', err);
-        if (!cancelled) setClassStudents([]);
+        if (!cancelled) { setClassStudents([]); setClassStudentStats({}); }
       } finally {
         if (!cancelled) setClassStudentsLoading(false);
       }
@@ -1782,8 +1814,13 @@ const ClassesPage = () => {
               ) : classStudents.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Aucun élève dans cette classe.</p>
               ) : (
-                <div className="border rounded-lg divide-y max-h-80 overflow-y-auto">
-                  {classStudents.map((s, idx) => (
+                <div className="border rounded-lg divide-y max-h-96 overflow-y-auto">
+                  {classStudents.map((s, idx) => {
+                    const st = classStudentStats[s.id] || {};
+                    const perf = st.performance;
+                    const perfColor = perf == null ? 'text-gray-400'
+                      : perf >= 50 ? 'text-green-600' : perf >= 35 ? 'text-amber-600' : 'text-red-600';
+                    return (
                     <button
                       key={s.id}
                       type="button"
@@ -1797,11 +1834,21 @@ const ClassesPage = () => {
                       <Avatar name={`${s.first_name} ${s.last_name}`} src={s.avatar_url} gender={s.gender} size="sm" />
                       <span className="flex-1 min-w-0">
                         <span className="block text-sm font-medium truncate">{s.first_name} {s.last_name}</span>
-                        <span className="block text-xs text-muted-foreground truncate">{s.massar_code || s.email}</span>
+                        <span className="flex items-center gap-2 mt-0.5 text-[11px]">
+                          <span className="text-gray-500" title="Absences">🚫 {st.absences ?? 0}</span>
+                          <span className={perfColor} title="Performance">{perf == null ? '—' : `${perf}%`}</span>
+                          <Sparkline points={st.trend || []} dir={st.trendDir || 'flat'} />
+                          {st.weakSubject && (
+                            <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-semibold" title={`Matière faible : ${st.weakSubject.subject} (${st.weakSubject.avg}%)`}>
+                              {st.weakSubject.abbr}
+                            </span>
+                          )}
+                        </span>
                       </span>
                       <Edit2 className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
               <p className="text-[11px] text-muted-foreground mt-2">
