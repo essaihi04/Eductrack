@@ -35,46 +35,48 @@ function schoolHeader(school) {
 }
 
 // Styles communs aux deux documents.
+// Compactés pour que les DEUX exemplaires tiennent sur une seule page A4.
 const BASE_STYLES = `
   *{box-sizing:border-box}
-  body{font-family:Arial,sans-serif;margin:0;color:#1f2937}
-  .sheet{padding:18px 26px}
+  body{font-family:Arial,sans-serif;margin:0;color:#1f2937;font-size:11px}
+  .sheet{padding:8px 20px}
   .copy{position:relative}
-  .copy-tag{position:absolute;top:0;right:0;font-size:0.7em;font-weight:bold;letter-spacing:.5px;color:#6b7280;border:1px solid #d1d5db;border-radius:10px;padding:2px 10px;text-transform:uppercase}
-  h1{margin:0;font-size:1.5em}
-  h2{margin:0 0 4px;font-size:1.1em}
-  h3{margin:14px 0 6px;color:#374151;font-size:0.95em}
-  .school-header{display:flex;align-items:center;gap:14px;padding-bottom:10px;border-bottom:2px solid var(--accent);margin-bottom:12px}
-  .school-header .logo{width:64px;height:64px;object-fit:contain}
+  .copy-tag{position:absolute;top:0;right:0;font-size:0.65em;font-weight:bold;letter-spacing:.5px;color:#6b7280;border:1px solid #d1d5db;border-radius:10px;padding:1px 8px;text-transform:uppercase}
+  h1{margin:0;font-size:1.35em}
+  h2{margin:0 0 2px;font-size:1.05em}
+  h3{margin:8px 0 3px;color:#374151;font-size:0.9em}
+  .school-header{display:flex;align-items:center;gap:10px;padding-bottom:5px;border-bottom:2px solid var(--accent);margin-bottom:6px}
+  .school-header .logo{width:46px;height:46px;object-fit:contain}
   .school-info h2{color:var(--accent)}
-  .school-info p{margin:1px 0;font-size:0.8em;color:#555}
-  .doc-title{text-align:center;margin:10px 0}
+  .school-info p{margin:0;font-size:0.78em;color:#555}
+  .doc-title{text-align:center;margin:5px 0}
   .doc-title h1{color:var(--accent)}
-  .doc-title p{color:#666;margin:3px 0;font-size:0.9em}
-  .meta{display:flex;flex-wrap:wrap;gap:8px;background:#f9fafb;padding:10px;border-radius:6px;margin:10px 0;font-size:0.82em}
-  .meta div{flex:1;min-width:120px}
-  .meta strong{display:block;color:#6b7280;font-size:0.85em;text-transform:uppercase;margin-bottom:1px}
-  table{width:100%;border-collapse:collapse;margin-top:6px}
-  th{background:var(--accent);color:#fff;padding:6px 8px;text-align:left;font-size:0.8em}
-  td{padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:0.85em}
-  .totals{margin-top:10px;margin-left:auto;width:62%}
-  .totals .row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dotted #e5e7eb;font-size:0.88em}
-  .totals .total-line{font-weight:bold;font-size:1.05em;color:var(--accent);border-top:2px solid var(--accent);padding-top:7px;margin-top:3px}
+  .doc-title p{color:#666;margin:2px 0;font-size:0.88em}
+  .meta{display:flex;flex-wrap:wrap;gap:6px;background:#f9fafb;padding:6px 8px;border-radius:6px;margin:5px 0;font-size:0.8em}
+  .meta div{flex:1;min-width:110px}
+  .meta strong{display:block;color:#6b7280;font-size:0.82em;text-transform:uppercase;margin-bottom:0}
+  table{width:100%;border-collapse:collapse;margin-top:4px}
+  th{background:var(--accent);color:#fff;padding:3px 7px;text-align:left;font-size:0.78em}
+  td{padding:3px 7px;border-bottom:1px solid #e5e7eb;font-size:0.82em}
+  .totals{margin-top:6px;margin-left:auto;width:60%}
+  .totals .row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dotted #e5e7eb;font-size:0.85em}
+  .totals .total-line{font-weight:bold;font-size:1em;color:var(--accent);border-top:2px solid var(--accent);padding-top:4px;margin-top:2px}
   .totals .remaining{font-weight:bold;color:#dc2626}
-  .signatures{display:flex;gap:30px;margin-top:26px}
+  .signatures{display:flex;gap:24px;margin-top:12px}
   .signatures .sig{flex:1;text-align:center}
-  .signatures .sig .line{height:46px;border-bottom:1px solid #9ca3af;margin-bottom:4px}
-  .signatures .sig .label{font-size:0.8em;color:#374151;font-weight:bold}
-  .signatures .sig .name{font-size:0.75em;color:#6b7280}
-  .footer{margin-top:16px;padding-top:10px;border-top:1px solid #ccc;font-size:0.72em;color:#666;text-align:center}
-  .cut{border:none;border-top:1px dashed #9ca3af;margin:14px 0 0;position:relative;text-align:center}
-  .cut span{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:#fff;padding:0 8px;font-size:0.7em;color:#9ca3af}
-  .badge{display:inline-block;padding:2px 9px;border-radius:12px;font-size:0.72em;font-weight:bold;text-transform:uppercase}
+  .signatures .sig .line{height:28px;border-bottom:1px solid #9ca3af;margin-bottom:3px}
+  .signatures .sig .label{font-size:0.78em;color:#374151;font-weight:bold}
+  .signatures .sig .name{font-size:0.72em;color:#6b7280}
+  .footer{margin-top:8px;padding-top:5px;border-top:1px solid #ccc;font-size:0.68em;color:#666;text-align:center}
+  .cut{border:none;border-top:1px dashed #9ca3af;margin:8px 0 0;position:relative;text-align:center}
+  .cut span{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:#fff;padding:0 8px;font-size:0.68em;color:#9ca3af}
+  .badge{display:inline-block;padding:1px 8px;border-radius:12px;font-size:0.7em;font-weight:bold;text-transform:uppercase}
   .badge-paid{background:#d1fae5;color:#065f46}
   .badge-issued{background:#dbeafe;color:#1e40af}
   .badge-overdue{background:#fee2e2;color:#991b1b}
   .badge-partial{background:#fef3c7;color:#92400e}
-  @media print { .sheet{padding:10px 16px} @page{margin:8mm} }
+  .copy{page-break-inside:avoid;break-inside:avoid}
+  @media print { .sheet{padding:6px 14px} @page{margin:6mm} }
 `;
 
 // Ouvre une fenêtre d'impression contenant deux exemplaires séparés par une
