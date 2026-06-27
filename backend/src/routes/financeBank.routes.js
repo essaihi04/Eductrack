@@ -25,6 +25,22 @@ const getSchoolId = (req) => {
   return req.user.school_id || null;
 };
 const num = (v) => Number(v) || 0;
+// Normalise une date renvoyée par l'IA vers YYYY-MM-DD. Accepte YYYY-MM-DD,
+// DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY (année sur 2 ou 4 chiffres). Renvoie null
+// si le format est inexploitable. L'IA renvoie souvent du JJ/MM/AAAA malgré la
+// consigne : on ne doit donc pas jeter ces lignes.
+const normalizeDate = (v) => {
+  const s = String(v || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) {
+    let [, dd, mm, yy] = m;
+    if (yy.length === 2) yy = '20' + yy;
+    dd = dd.padStart(2, '0'); mm = mm.padStart(2, '0');
+    if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) return `${yy}-${mm}-${dd}`;
+  }
+  return null;
+};
 const ymFromDate = (dateStr) => {
   const d = new Date(dateStr); const year = d.getFullYear(); const month = d.getMonth() + 1;
   return { year, month, academic_year: month >= 9 ? `${year}-${year + 1}` : `${year - 1}-${year}` };
@@ -93,7 +109,7 @@ async function structureTransactionsWithLLM(text) {
     const bankName = (!Array.isArray(parsed) && parsed.bank_name) ? String(parsed.bank_name).slice(0, 120).trim() : '';
     const transactions = arr
       .map((t) => ({
-        txn_date: /^\d{4}-\d{2}-\d{2}$/.test(t.txn_date) ? t.txn_date : null,
+        txn_date: normalizeDate(t.txn_date),
         label: String(t.label || 'Opération').slice(0, 180),
         amount: Math.abs(num(t.amount)),
         direction: t.direction === 'credit' ? 'credit' : 'debit',
@@ -260,14 +276,22 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
       candidates = r.transactions; method = r.method; detectedBank = r.bankName || '';
     }
 
-    // Nom de banque détecté par l'IA : on le mémorise, et on l'utilise comme
-    // libellé du compte si l'admin n'a pas saisi de nom précis ("Banque" par défaut).
+    // Enrichissement après extraction : nom de banque détecté par l'IA + période
+    // déduite des opérations si l'admin ne l'a pas saisie. On ne met à jour que
+    // les champs vraiment trouvés/manquants.
     let finalStatement = statement;
+    const patch = {};
     if (detectedBank) {
-      const patch = { bank_name: detectedBank };
+      patch.bank_name = detectedBank;
       if (!account_label || account_label.trim() === '' || account_label.trim() === 'Banque') {
         patch.account_label = detectedBank;
       }
+    }
+    // Période : min/max des dates d'opérations, seulement si non fournie au formulaire.
+    const dates = candidates.map((t) => t.txn_date).filter(Boolean).sort();
+    if (!period_start && dates.length) patch.period_start = dates[0];
+    if (!period_end && dates.length) patch.period_end = dates[dates.length - 1];
+    if (Object.keys(patch).length) {
       const { data: upd } = await supabaseAdmin.from('bank_statement')
         .update(patch).eq('id', statement.id).select().single();
       if (upd) finalStatement = upd;

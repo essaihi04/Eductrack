@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Wallet, Users, Plus, Trash2, Check, ArrowLeft, Save, Settings, Banknote, Coins, History, Pencil, CreditCard, Clock, Upload, FileText, ExternalLink, Camera, X } from 'lucide-react';
+import { Wallet, Users, Plus, Trash2, Check, ArrowLeft, Save, Settings, Banknote, Coins, History, Pencil, CreditCard, Clock, Upload, FileText, ExternalLink, Camera, X, Printer } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, fileUrl } from '../../lib/financeApi';
 import { PageHeader, Drawer, Button, Field } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { toDashYear } from '../../lib/schoolYear';
+import { printPayrollReceipt } from '../../lib/printDocs';
 
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const ORDER = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
@@ -458,6 +460,7 @@ function EmployeeHistoryDrawer({ employee, onClose }) {
 // ── Bulletins de paie ────────────────────────────────────────────────────
 function PayrollTab() {
   const { year: activeYear } = useYear();
+  const { school, profile } = useAuth();
   const [year, setYear] = useState(toDashYear(activeYear) || currentAcademicYear());
   const [runs, setRuns] = useState([]);
   const [newMonth, setNewMonth] = useState(ORDER[0]);
@@ -494,6 +497,12 @@ function PayrollTab() {
     } catch (e) { alert('Erreur: ' + e.message); }
   };
   const unpay = async (line) => { try { await financeApi.unpayPayrollLine(run.id, line.id); await openRun(run.id); loadRuns(); } catch (e) { alert(e.message); } };
+  // Reçu de paiement en double exemplaire (École + Employé), avec signatures.
+  const printReceipt = (l) => printPayrollReceipt({
+    employeeName: l.employee_name, month: run.month, year: run.year,
+    salary: l.salary, cnss_amo: l.cnss_amo, ir: l.ir, net_salary: l.net_salary,
+    payment_method: l.payment_method, paid_date: l.paid_date,
+  }, { school, financeManagerName: profile?.full_name });
   const recomputeHours = async () => { try { const r = await financeApi.recomputePayrollHours(run.id); await openRun(run.id); loadRuns(); alert(`${r.updated} ligne(s) mise(s) à jour avec les heures réalisées.`); } catch (e) { alert(e.message); } };
   const removeRun = async (id) => { if (!confirm('Supprimer ce bulletin et ses dépenses espèce liées ?')) return; try { await financeApi.deletePayrollRun(id); if (run?.id === id) setRun(null); loadRuns(); } catch (e) { alert(e.message); } };
 
@@ -543,6 +552,7 @@ function PayrollTab() {
                       {l.paid
                         ? <span className="inline-flex items-center gap-1">
                             <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">{l.payment_method === 'cash' ? 'Payé espèce' : 'Payé banque'} {l.paid_date ? `· ${formatDate(l.paid_date)}` : ''}</span>
+                            <button onClick={() => printReceipt(l)} className="text-xs inline-flex items-center gap-0.5 text-purple-600 hover:text-purple-800" title="Imprimer le reçu (double exemplaire)"><Printer className="w-3 h-3" /> Reçu</button>
                             <button onClick={() => unpay(l)} className="text-xs text-gray-400 hover:text-gray-700">Annuler</button>
                           </span>
                         : <button onClick={() => setPayTarget({ line: l })} className="text-xs inline-flex items-center gap-1 text-green-600 hover:text-green-800"><Check className="w-3 h-3" /> Marquer payé</button>}
@@ -633,10 +643,16 @@ function PayDrawer({ target, onClose, onConfirm, run, unpaidCount }) {
 // ── Suivi des paiements ──────────────────────────────────────────────────
 function PaymentsTab() {
   const { year: activeYear } = useYear();
+  const { school, profile } = useAuth();
   const [year, setYear] = useState(toDashYear(activeYear) || currentAcademicYear());
   const [payments, setPayments] = useState([]);
   useEffect(() => { load(); }, [year]);
   const load = async () => { try { const d = await financeApi.listPayrollPayments(year); setPayments(d.payments || []); } catch (e) { console.error(e); } };
+  const printReceipt = (p) => printPayrollReceipt({
+    employeeName: p.employee_name, month: p.month, year: p.year,
+    salary: p.salary, cnss_amo: p.cnss_amo, ir: p.ir, net_salary: p.net_salary,
+    payment_method: p.payment_method, paid_date: p.paid_date,
+  }, { school, financeManagerName: profile?.full_name });
   const totalNet = payments.reduce((a, p) => a + Number(p.net_salary || 0), 0);
   const totalPaid = payments.filter(p => p.paid).reduce((a, p) => a + Number(p.net_salary || 0), 0);
 
@@ -654,10 +670,10 @@ function PaymentsTab() {
       <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-            <tr><th className="px-4 py-3 text-left">Mois</th><th className="px-4 py-3 text-left">Employé</th><th className="px-4 py-3 text-right">Net</th><th className="px-4 py-3 text-center">Statut</th><th className="px-4 py-3 text-center">Mode</th><th className="px-4 py-3 text-left">Date</th></tr>
+            <tr><th className="px-4 py-3 text-left">Mois</th><th className="px-4 py-3 text-left">Employé</th><th className="px-4 py-3 text-right">Net</th><th className="px-4 py-3 text-center">Statut</th><th className="px-4 py-3 text-center">Mode</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-center">Reçu</th></tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {payments.length === 0 && <tr><td colSpan="6" className="px-4 py-8 text-center text-gray-400"><History className="w-5 h-5 inline mr-1" /> Aucun paiement pour cette année</td></tr>}
+            {payments.length === 0 && <tr><td colSpan="7" className="px-4 py-8 text-center text-gray-400"><History className="w-5 h-5 inline mr-1" /> Aucun paiement pour cette année</td></tr>}
             {payments.map((p, i) => (
               <tr key={i} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-600">{MONTHS[p.month - 1]} {p.year}</td>
@@ -666,6 +682,11 @@ function PaymentsTab() {
                 <td className="px-4 py-3 text-center"><span className={`text-xs px-2 py-0.5 rounded-full ${p.paid ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{p.paid ? 'Payé' : 'Non payé'}</span></td>
                 <td className="px-4 py-3 text-center text-xs text-gray-600">{p.paid ? (p.payment_method === 'cash' ? 'Espèce' : 'Banque') : '—'}</td>
                 <td className="px-4 py-3 text-gray-500">{p.paid_date ? formatDate(p.paid_date) : '—'}</td>
+                <td className="px-4 py-3 text-center">
+                  {p.paid
+                    ? <button onClick={() => printReceipt(p)} className="text-xs inline-flex items-center gap-0.5 text-purple-600 hover:text-purple-800" title="Imprimer le reçu (double exemplaire)"><Printer className="w-3.5 h-3.5" /> Reçu</button>
+                    : <span className="text-gray-300">—</span>}
+                </td>
               </tr>
             ))}
           </tbody>
