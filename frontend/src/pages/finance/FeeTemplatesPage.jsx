@@ -14,7 +14,7 @@ const SCHOOL_MONTHS = [
 
 const defaultItem = () => ({
   category: 'tuition',
-  name: '',
+  name: CATEGORY_LABELS['tuition'] || 'Scolarité',
   amount: 0,
   recurrence: 'monthly',
   due_month: null,
@@ -163,6 +163,8 @@ export default function FeeTemplatesPage() {
   const updateItem = (idx, field, value) => {
     const items = [...editing.items];
     items[idx] = { ...items[idx], [field]: value };
+    // Le nom du frais suit le service choisi (la colonne « Nom du frais » a été retirée).
+    if (field === 'category') items[idx].name = CATEGORY_LABELS[value] || value;
     setEditing({ ...editing, items });
   };
 
@@ -529,10 +531,9 @@ export default function FeeTemplatesPage() {
                   {/* En-têtes de colonnes */}
                   <div className="grid grid-cols-12 gap-2 px-3 text-xs font-medium text-gray-500">
                     <span className="col-span-3">Service</span>
-                    <span className="col-span-2">Nom du frais</span>
                     <span className="col-span-2">Montant</span>
                     <span className="col-span-2">Récurrence</span>
-                    <span className="col-span-2">Période</span>
+                    <span className="col-span-4">Période</span>
                     <span className="col-span-1" />
                   </div>
                   {editing.items.map((it, idx) => (
@@ -541,9 +542,6 @@ export default function FeeTemplatesPage() {
                         className="col-span-3 px-2 py-1.5 text-sm border border-gray-300 rounded">
                         {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
-                      <input type="text" value={it.name} onChange={e => updateItem(idx, 'name', e.target.value)}
-                        placeholder="Nom du frais"
-                        className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded" />
                       <input type="number" value={it.amount} onChange={e => updateItem(idx, 'amount', e.target.value)}
                         placeholder="Montant"
                         className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded" />
@@ -551,8 +549,8 @@ export default function FeeTemplatesPage() {
                         className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded">
                         {Object.entries(RECURRENCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
-                      {/* Période — toujours col-span-2 pour garder l'alignement */}
-                      <div className="col-span-2">
+                      {/* Période — col-span-4 pour afficher les mois en entier */}
+                      <div className="col-span-4">
                         {it.recurrence === 'monthly' ? (
                           <div className="flex items-center gap-1">
                             <select value={it.start_month || 9} onChange={e => updateItem(idx, 'start_month', Number(e.target.value))}
