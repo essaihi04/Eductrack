@@ -1743,11 +1743,17 @@ const ClassesPage = () => {
           <h1 className="text-3xl font-bold">Gestion des Classes</h1>
           <div className="flex gap-3 mt-2 text-sm text-muted-foreground">
             <span>{classes.length} classe(s)</span>
-            <span>·</span>
-            <span>{classes.filter(c => normalizeSchoolType(c.school_type) === 'college').length} collège</span>
-            <span>·</span>
-            <span>{classes.filter(c => normalizeSchoolType(c.school_type) === 'lycee').length} lycée</span>
-            {uncategorized.length > 0 && <><span>·</span><span className="text-orange-600">{uncategorized.length} non classifiée(s)</span></>}
+            {[
+              ['maternelle', 'maternelle'],
+              ['primaire', 'primaire'],
+              ['college', 'collège'],
+              ['lycee', 'lycée'],
+            ].map(([key, label]) => {
+              const n = classes.filter(c => normalizeSchoolType(c.school_type) === key).length;
+              if (!n) return null;
+              return <span key={key}>· {n} {label}</span>;
+            })}
+            {uncategorized.length > 0 && <span className="text-orange-600">· {uncategorized.length} non classifiée(s)</span>}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -2395,7 +2401,12 @@ const ClassesPage = () => {
                   onClick={() => toggleGroup(typeGroupKey)}
                 >
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    typeKey === 'college' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'
+                    {
+                      maternelle: 'bg-pink-100 text-pink-600',
+                      primaire: 'bg-green-100 text-green-600',
+                      college: 'bg-blue-100 text-blue-600',
+                      lycee: 'bg-purple-100 text-purple-600',
+                    }[typeKey] || 'bg-purple-100 text-purple-600'
                   }`}>
                     <TypeIcon className="w-5 h-5" />
                   </div>
