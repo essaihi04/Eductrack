@@ -1705,6 +1705,15 @@ const ClassesPage = () => {
   const renderClassDrawerBody = (cls) => {
     if (!cls) return null;
     const isEditing = editingClassId === cls.id;
+    // Médailles top 3 par performance : or / argent / cuivre.
+    const ranked = classStudents
+      .map(s => ({ id: s.id, perf: classStudentStats[s.id]?.performance }))
+      .filter(x => x.perf != null)
+      .sort((a, b) => b.perf - a.perf);
+    const medalById = {};
+    if (ranked[0]) medalById[ranked[0].id] = { bg: '#FFD700', fg: '#5b4500', label: '1er' };   // or
+    if (ranked[1]) medalById[ranked[1].id] = { bg: '#C0C0C0', fg: '#3a3a3a', label: '2e' };     // argent
+    if (ranked[2]) medalById[ranked[2].id] = { bg: '#B87333', fg: '#ffffff', label: '3e' };     // cuivre
     return (
       <div className="space-y-4">
         {/* Edit form */}
@@ -1820,22 +1829,40 @@ const ClassesPage = () => {
                     const perf = st.performance;
                     const perfColor = perf == null ? 'text-gray-400'
                       : perf >= 50 ? 'text-green-600' : perf >= 35 ? 'text-amber-600' : 'text-red-600';
+                    const medal = medalById[s.id];
+                    // Couleur de ligne selon le niveau de problème (absences/comportement/perf).
+                    const rowTint =
+                      st.level === 'red' ? 'border-l-4 border-red-500 bg-red-50/50'
+                      : st.level === 'orange' ? 'border-l-4 border-amber-400 bg-amber-50/40'
+                      : st.level === 'green' ? 'border-l-4 border-green-500 bg-green-50/30'
+                      : 'border-l-4 border-transparent';
                     return (
                     <button
                       key={s.id}
                       type="button"
                       onClick={() => navigate(`/students?student=${s.id}`)}
-                      className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors"
+                      className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors ${rowTint}`}
                       title="Voir / modifier la fiche de l'élève"
                     >
-                      <span className="w-6 text-xs font-semibold text-muted-foreground text-right flex-shrink-0">
-                        {s.import_order ?? idx + 1}
-                      </span>
+                      {medal ? (
+                        <span
+                          className="w-6 h-6 flex items-center justify-center rounded-full text-[10px] font-bold flex-shrink-0 shadow-sm"
+                          style={{ backgroundColor: medal.bg, color: medal.fg }}
+                          title={`Classement performance : ${medal.label}`}
+                        >
+                          {s.import_order ?? idx + 1}
+                        </span>
+                      ) : (
+                        <span className="w-6 text-xs font-semibold text-muted-foreground text-right flex-shrink-0">
+                          {s.import_order ?? idx + 1}
+                        </span>
+                      )}
                       <Avatar name={`${s.first_name} ${s.last_name}`} src={s.avatar_url} gender={s.gender} size="sm" />
                       <span className="flex-1 min-w-0">
                         <span className="block text-sm font-medium truncate">{s.first_name} {s.last_name}</span>
                         <span className="flex items-center gap-2 mt-0.5 text-[11px]">
                           <span className="text-gray-500" title="Absences">🚫 {st.absences ?? 0}</span>
+                          <span className={(st.behavior ?? 0) > 0 ? 'text-orange-600' : 'text-gray-400'} title="Incidents de comportement">💢 {st.behavior ?? 0}</span>
                           <span className={perfColor} title="Performance">{perf == null ? '—' : `${perf}%`}</span>
                           <Sparkline points={st.trend || []} dir={st.trendDir || 'flat'} />
                           {st.weakSubject && (

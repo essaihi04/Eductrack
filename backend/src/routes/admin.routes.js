@@ -3214,7 +3214,7 @@ router.get('/classes/:classId/students-stats', async (req, res) => {
 
     let q = supabaseAdmin
       .from('session_tracking')
-      .select('student_id, presence, mini_eval, sessions!inner(date, class_id, school_id, subject:subjects(name))')
+      .select('student_id, presence, mini_eval, sleeping, phone_use, attitude, discipline, homework, participation, sessions!inner(date, class_id, school_id, subject:subjects(name))')
       .eq('sessions.class_id', classId)
       .gte('sessions.date', iso(start))
       .lte('sessions.date', iso(end));
@@ -3229,8 +3229,16 @@ router.get('/classes/:classId/students-stats', async (req, res) => {
     for (const r of (data || [])) {
       const id = r.student_id;
       if (!id) continue;
-      const s = byStudent[id] || (byStudent[id] = { absences: 0, evals: [], bySubject: {}, byDay7: {} });
+      const s = byStudent[id] || (byStudent[id] = { total: 0, absences: 0, behavior: 0, evals: [], bySubject: {}, byDay7: {} });
+      s.total++;
       if (r.presence === 'absent') s.absences++;
+      // Incidents de comportement (chaque type compte pour 1).
+      if (r.sleeping === true) s.behavior++;
+      if (r.phone_use === true) s.behavior++;
+      if (r.attitude === 'perturbateur') s.behavior++;
+      if (r.discipline === 'bavarre') s.behavior++;
+      if (r.homework === false) s.behavior++;
+      if (r.participation === 'faible') s.behavior++;
       const ev = num(r.mini_eval);
       if (!isNaN(ev)) {
         s.evals.push(ev);
@@ -3268,7 +3276,25 @@ router.get('/classes/:classId/students-stats', async (req, res) => {
         if (!weak || m < weak.raw) weak = { subject: subj, abbr: subjectAbbr(subj), avg: pct(m), raw: m };
       }
       if (weak) delete weak.raw;
-      result[id] = { absences: s.absences, performance, trend, trendDir, weakSubject: weak };
+
+      // Niveau global (couleur de ligne) à partir des absences, du comportement
+      // et de la performance, normalisés par le nombre de séances suivies.
+      const total = s.total || 1;
+      const risk =
+        (s.absences / total) * 40 +
+        (s.behavior / total) * 30 +
+        (performance != null ? (100 - performance) / 100 : 0) * 30;
+      let level = 'gray';
+      if (s.total > 0) {
+        const perfBad = performance != null && performance < 35;
+        const perfOk = performance != null && performance >= 50;
+        if (risk >= 25 || perfBad) level = 'red';
+        else if (risk >= 12 || (performance != null && performance < 50)) level = 'orange';
+        else if (perfOk || s.absences === 0) level = 'green';
+        else level = 'orange';
+      }
+
+      result[id] = { absences: s.absences, behavior: s.behavior, performance, trend, trendDir, weakSubject: weak, level };
     }
 
     res.json(result);
