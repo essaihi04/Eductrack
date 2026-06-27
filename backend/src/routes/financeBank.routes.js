@@ -300,12 +300,21 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
     candidates = await applyRulesTo(schoolId, candidates);
     candidates = await aiCategorizeTransactions(schoolId, candidates);
     let inserted = [];
+    let insertError = null;
     if (candidates.length) {
-      const rows = candidates.map((t) => ({ ...t, school_id: schoolId, statement_id: statement.id }));
-      const { data } = await supabaseAdmin.from('bank_transaction').insert(rows).select();
+      // On n'insère que les colonnes réellement présentes dans bank_transaction
+      // (l'IA / les règles peuvent ajouter d'autres clés -> sinon l'insert échoue).
+      const rows = candidates.map((t) => ({
+        school_id: schoolId, statement_id: statement.id,
+        txn_date: t.txn_date, label: t.label, amount: t.amount, direction: t.direction,
+        account_id: t.account_id || null,
+        status: t.status || (t.account_id ? 'categorized' : 'unmatched'),
+      }));
+      const { data, error: insErr } = await supabaseAdmin.from('bank_transaction').insert(rows).select();
+      if (insErr) { insertError = insErr; console.error('[bank] insert transactions échoué:', insErr.message, insErr.details || '', insErr.hint || ''); }
       inserted = data || [];
     }
-    res.status(201).json({ statement: finalStatement, transactions: inserted, parsed: candidates.length, method, detected_bank: detectedBank });
+    res.status(201).json({ statement: finalStatement, transactions: inserted, parsed: candidates.length, method, detected_bank: detectedBank, insert_error: insertError?.message || null });
   } catch (e) { console.error('POST statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 

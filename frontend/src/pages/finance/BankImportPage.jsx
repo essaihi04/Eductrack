@@ -58,7 +58,13 @@ function StatementsTab({ accounts }) {
       const d = await financeApi.uploadStatement(fd);
       if (fileRef.current) fileRef.current.value = '';
       load();
-      if (!d.parsed) alert('Relevé importé mais aucune ligne détectée. Ajoutez-les manuellement ou réessayez avec un PDF plus net.');
+      if (d.insert_error) {
+        // Lignes lues mais refusées à l'enregistrement (souvent : table/contrainte
+        // BDD). On affiche l'erreur réelle pour pouvoir corriger.
+        alert(`${d.parsed} ligne(s) lue(s) mais non enregistrée(s).\n\nErreur base de données :\n${d.insert_error}\n\nVérifiez que la migration MIGRATION_FINANCE_BANK.sql est appliquée.`);
+      } else if (!d.parsed) {
+        alert('Relevé importé mais aucune ligne détectée. Ajoutez-les manuellement ou réessayez avec un PDF plus net.');
+      }
       setSel({ statement: d.statement, transactions: d.transactions });
     }
     catch (e) { alert('Erreur: ' + e.message); }
