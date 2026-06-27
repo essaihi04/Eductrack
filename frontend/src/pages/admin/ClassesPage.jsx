@@ -785,7 +785,10 @@ const ClassesPage = () => {
             email,
             password,
             firstName: firstName,
-            lastName: lastName
+            lastName: lastName,
+            // Enregistrer le code Massar (clé de matching pour l'import des parents),
+            // pas seulement dans l'email. studentId = رقم التلميذ du fichier.
+            massarCode: String(studentId).trim()
           });
         }
 

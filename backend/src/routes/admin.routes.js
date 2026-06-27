@@ -1257,7 +1257,7 @@ router.post('/parents/import', async (req, res) => {
 
     let studentsQuery = supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, class_id, massar_code')
+      .select('id, first_name, last_name, class_id, massar_code, email')
       .eq('role', 'student');
     if (isGlobal) {
       // Liste globale : restreindre à l'école de l'admin (sécurité), match par code Massar.
@@ -1281,6 +1281,11 @@ router.post('/parents/import', async (req, res) => {
       byId.set(s.id, s);
       const code = String(s.massar_code || '').trim().toUpperCase();
       if (code) byMassar.set(code, s);
+      // Repli : pour les élèves importés sans colonne massar_code renseignée,
+      // le code Massar est présent dans l'email (codemassar@ecole.ma). On l'indexe
+      // aussi comme clé de matching (le commit backfille ensuite massar_code).
+      const emailCode = String(s.email || '').split('@')[0].trim().toUpperCase();
+      if (emailCode && !byMassar.has(emailCode)) byMassar.set(emailCode, s);
     }
 
     const results = [];
