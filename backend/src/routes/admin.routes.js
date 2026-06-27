@@ -135,6 +135,21 @@ const normalizeName = (value) =>
 // Nettoie les espaces parasites (tabulations, espaces multiples) d'un nom.
 const cleanSpaces = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 
+// Clé de matching « tolérante » pour rapprocher un élève par son nom quand le code
+// Massar est absent ou différent (import des parents). Indépendante de l'ordre
+// nom/prénom et de l'article défini « ال » (ex. « النحال اية » ≡ « اية نحال »).
+// N.B. : volontairement séparée de normalizeName (utilisé ailleurs pour les notes/matières).
+const looseNameKey = (value) => {
+  const norm = normalizeName(value); // diacritiques, hamza, ة→ه, ى→ي, ponctuation…
+  if (!norm) return '';
+  return norm
+    .split(' ')
+    .map(t => t.replace(/^ال/, '')) // retire l'article défini en tête de chaque mot
+    .filter(Boolean)
+    .sort()                         // ordre nom/prénom indifférent
+    .join(' ');
+};
+
 // D\u00e9duit { first_name, last_name } depuis le nom complet officiel Massar
 // (format \u00ab \u0627\u0644\u0646\u0633\u0628 \u0627\u0644\u0625\u0633\u0645 \u00bb = NOM puis Pr\u00e9nom dans une seule colonne).
 // Conserve le pr\u00e9nom actuel s'il correspond \u00e0 la fin du nom Massar (g\u00e8re les
@@ -404,7 +419,13 @@ router.get('/students', async (req, res) => {
     let query = supabaseAdmin
       .from('profiles')
       .select('*')
-      .eq('role', 'student');
+      .eq('role', 'student')
+      // Ordre verrouillé sur la position du fichier Excel (import_order), groupé par
+      // classe. import_order est re-synchronisé à chaque (ré)import → place stable même
+      // après 1000 mises à jour. created_at sert de repli pour les élèves sans position.
+      .order('class_id', { ascending: true })
+      .order('import_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
     query = applySchoolFilter(query, req);
     // Filtre de scope pour pedagogical_manager
     const scopedStuIds = await getScopedClassIds(req);
@@ -1272,7 +1293,9 @@ router.post('/parents/import', async (req, res) => {
     const studentsIndex = (students || []).map(s => {
       const full = normalizeName(`${s.last_name} ${s.first_name}`);
       const fullRev = normalizeName(`${s.first_name} ${s.last_name}`);
-      return { ...s, full, fullRev };
+      // Clé tolérante (ordre + article « ال » ignorés) pour le repli de matching.
+      const loose = looseNameKey(`${s.last_name} ${s.first_name}`);
+      return { ...s, full, fullRev, loose };
     });
     // Index par code Massar (clé fiable du fichier officiel Massar « Tuteur »)
     const byMassar = new Map();
@@ -1324,6 +1347,18 @@ router.post('/parents/import', async (req, res) => {
           matches = studentsIndex.filter(s => s.full === needle || s.fullRev === needle);
           if (matches.length > 0) break;
         }
+        // 3) Repli tolérant : nom inversé et/ou article « ال » divergent, ou code Massar
+        //    absent du fichier (ligne sans code). Matching par ensemble de mots.
+        //    Si plusieurs élèves partagent la clé → marqué « ambiguous » (résolution manuelle).
+        if (matches.length === 0) {
+          const looseNeedles = [row?.student_full_name, row?.student_full_name_ar]
+            .map(looseNameKey)
+            .filter(Boolean);
+          for (const needle of looseNeedles) {
+            matches = studentsIndex.filter(s => s.loose && s.loose === needle);
+            if (matches.length > 0) break;
+          }
+        }
       }
 
       if (matches.length === 1) {
@@ -1331,7 +1366,7 @@ router.post('/parents/import', async (req, res) => {
         results.push({
           row: { ...row, phone_1: phone1 },
           matchStatus: 'matched',
-          student: { id: matchedStudent.id, first_name: matchedStudent.first_name, last_name: matchedStudent.last_name, massar_code: matchedStudent.massar_code || null },
+          student: { id: matchedStudent.id, first_name: matchedStudent.first_name, last_name: matchedStudent.last_name, massar_code: matchedStudent.massar_code || null, email: matchedStudent.email || null },
           actionsPreview: ['upsert_parent', 'upsert_contact', 'upsert_link']
         });
       } else if (matches.length > 1) {
@@ -1362,15 +1397,19 @@ router.post('/parents/import', async (req, res) => {
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
 
-      // Renseigner / mettre à jour le code Massar de l'élève si le fichier en fournit un
-      // et que l'élève n'en a pas (ou un code différent). Utile quand l'élève a été
-      // matché par son nom (liste KoolSchool) mais n'avait pas encore de code Massar.
+      // GARDER LE CODE MASSAR PRÉEXISTANT : on ne remplit la colonne que si elle est
+      // vide, et on privilégie TOUJOURS le code propre à l'élève (présent dans son
+      // email = son identité Massar d'origine) plutôt que celui du fichier, qui peut
+      // diverger. On n'écrase jamais un code déjà renseigné.
       const rowMassar = String(r.row.massar_code || '').trim().toUpperCase();
       const currentMassar = String(r.student.massar_code || '').trim().toUpperCase();
-      if (rowMassar && rowMassar !== currentMassar) {
+      const emailMassar = String(r.student.email || '').split('@')[0].trim().toUpperCase();
+      // Code à inscrire si la colonne est vide : email (préexistant) sinon fichier.
+      const codeToSet = emailMassar || rowMassar;
+      if (!currentMassar && codeToSet) {
         const { error: massarUpdateError } = await supabaseAdmin
           .from('profiles')
-          .update({ massar_code: rowMassar })
+          .update({ massar_code: codeToSet })
           .eq('id', r.student.id);
         if (massarUpdateError) throw massarUpdateError;
         massarBackfilled++;
@@ -4643,9 +4682,12 @@ router.post('/students/import', async (req, res) => {
     const existingStudents = [];
     const errors = [];
 
-    for (const student of students) {
+    for (let i = 0; i < students.length; i++) {
+      const student = students[i];
       const { email, password, firstName, lastName, massarCode } = student;
       const [emailLocalPart, emailDomainPart] = String(email || '').split('@');
+      // Position de l'élève dans le fichier (1-based) = ordre d'affichage verrouillé.
+      const importOrder = i + 1;
 
       // Vérifier si l'élève existe déjà
       const { data: existingProfile } = await supabaseAdmin
@@ -4657,6 +4699,12 @@ router.post('/students/import', async (req, res) => {
 
       if (existingProfile) {
         console.log(`[Import] Élève existant: ${email}`);
+        // Re-synchroniser sa position sur le fichier courant (même après 1000 réimports,
+        // l'élève garde EXACTEMENT la place qu'il occupe dans le fichier Excel).
+        await supabaseAdmin
+          .from('profiles')
+          .update({ import_order: importOrder })
+          .eq('id', existingProfile.id);
         existingStudents.push({
           ...existingProfile,
           password: '********' // Masquer le mot de passe pour les élèves existants
@@ -4695,7 +4743,8 @@ router.post('/students/import', async (req, res) => {
           role: 'student',
           class_id: classId || null,
           school_id: getSchoolId(req),
-          massar_code: massarCode || null
+          massar_code: massarCode || null,
+          import_order: importOrder
         })
         .select()
         .single();

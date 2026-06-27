@@ -220,9 +220,12 @@ const parseKoolSchool = (workbook) => {
     const r = raw[i];
     if (!r) continue;
     const massar = String(r[colCode] || '').trim().toUpperCase();
-    if (!massar) continue;
     const studentName = colName !== -1 ? String(r[colName] || '').trim() : '';
     const studentNameAr = colNameAr !== -1 ? String(r[colNameAr] || '').trim() : '';
+    // On accepte les lignes SANS code Massar tant qu'un nom permet le matching
+    // (cas réel : élève présent dans le fichier KoolSchool mais colonne code vide).
+    // On ne saute que les lignes totalement vides.
+    if (!massar && !studentName && !studentNameAr) continue;
 
     // Le fichier ne fournit pas de nom de parent → on utilise le nom de l'élève (la famille).
     const seen = new Set();
