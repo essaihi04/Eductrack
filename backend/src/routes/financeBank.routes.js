@@ -233,6 +233,60 @@ async function applyRulesTo(schoolId, transactions) {
   });
 }
 
+// ── Anti-doublon : exclut les lignes qui feraient double comptage ─────────
+// Trois cas couverts :
+//  1. Doublon dans le même fichier (même date + libellé + montant).
+//  2. Ligne déjà importée auparavant (même date + libellé + montant en base).
+//     -> non réimportée du tout.
+//  3. Charge déjà comptabilisée ailleurs, même date + montant :
+//     - school_expenses (paie en espèce, dépense manuelle, import déjà posté),
+//     - finance_ledger_entry (échéance prêt/leasing/impôt payée dans sa page).
+//     -> importée mais marquée « ignorée » (visible, réversible) pour ne pas
+//        compter deux fois la même dépense dans la matrice Prévisionnel/Réel.
+// Renvoie { candidates, report:{ reimported:[], crossModule:[] } }.
+async function dedupeCandidates(schoolId, candidates) {
+  const report = { reimported: [], crossModule: [] };
+  if (!candidates.length) return { candidates, report };
+
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const amt = (a) => Number(a || 0).toFixed(2);
+  const txKey = (t) => `${t.txn_date}|${norm(t.label)}|${amt(t.amount)}`;
+  const dateAmtKey = (d, a) => `${d}|${amt(a)}`;
+
+  // Lignes déjà présentes (re-import exact).
+  const { data: existingTx } = await supabaseAdmin.from('bank_transaction')
+    .select('txn_date, label, amount').eq('school_id', schoolId);
+  const existingTxSet = new Set((existingTx || []).map(txKey));
+
+  // Charges déjà comptabilisées ailleurs, dans la plage de dates du relevé.
+  const dates = candidates.map((c) => c.txn_date).filter(Boolean).sort();
+  const minD = dates[0]; const maxD = dates[dates.length - 1];
+  const chargeSet = new Set();
+  if (minD && maxD) {
+    const { data: exp } = await supabaseAdmin.from('school_expenses')
+      .select('expense_date, amount').eq('school_id', schoolId).gte('expense_date', minD).lte('expense_date', maxD);
+    (exp || []).forEach((e) => chargeSet.add(dateAmtKey(e.expense_date, e.amount)));
+    const { data: led } = await supabaseAdmin.from('finance_ledger_entry')
+      .select('entry_date, amount').eq('school_id', schoolId).gte('entry_date', minD).lte('entry_date', maxD);
+    (led || []).forEach((l) => chargeSet.add(dateAmtKey(l.entry_date, l.amount)));
+  }
+
+  const kept = [];
+  const seen = new Set();
+  for (const c of candidates) {
+    const k = txKey(c);
+    if (seen.has(k) || existingTxSet.has(k)) { report.reimported.push(c); continue; } // cas 1 & 2
+    seen.add(k);
+    if (c.direction === 'debit' && chargeSet.has(dateAmtKey(c.txn_date, c.amount))) { // cas 3
+      kept.push({ ...c, status: 'ignored' });
+      report.crossModule.push(c);
+      continue;
+    }
+    kept.push(c);
+  }
+  return { candidates: kept, report };
+}
+
 // ============================================================
 // RELEVÉS
 // ============================================================
@@ -297,6 +351,11 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
       if (upd) finalStatement = upd;
     }
 
+    // Anti-doublon : retire les ré-imports exacts, marque « ignoré » les lignes
+    // déjà comptabilisées ailleurs (prêt/impôt/paie/dépense) — pas de double comptage.
+    const { candidates: deduped, report: dupReport } = await dedupeCandidates(schoolId, candidates);
+    candidates = deduped;
+
     candidates = await applyRulesTo(schoolId, candidates);
     candidates = await aiCategorizeTransactions(schoolId, candidates);
     let inserted = [];
@@ -314,7 +373,12 @@ router.post('/bank/statements', upload.single('file'), async (req, res) => {
       if (insErr) { insertError = insErr; console.error('[bank] insert transactions échoué:', insErr.message, insErr.details || '', insErr.hint || ''); }
       inserted = data || [];
     }
-    res.status(201).json({ statement: finalStatement, transactions: inserted, parsed: candidates.length, method, detected_bank: detectedBank, insert_error: insertError?.message || null });
+    res.status(201).json({
+      statement: finalStatement, transactions: inserted, parsed: candidates.length, method,
+      detected_bank: detectedBank, insert_error: insertError?.message || null,
+      dup_reimported: dupReport.reimported.length,
+      dup_crossmodule: dupReport.crossModule.length,
+    });
   } catch (e) { console.error('POST statement:', e); res.status(500).json({ error: 'Erreur serveur', details: e.message }); }
 });
 

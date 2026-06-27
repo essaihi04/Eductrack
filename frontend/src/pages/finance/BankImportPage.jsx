@@ -62,8 +62,14 @@ function StatementsTab({ accounts }) {
         // Lignes lues mais refusées à l'enregistrement (souvent : table/contrainte
         // BDD). On affiche l'erreur réelle pour pouvoir corriger.
         alert(`${d.parsed} ligne(s) lue(s) mais non enregistrée(s).\n\nErreur base de données :\n${d.insert_error}\n\nVérifiez que la migration MIGRATION_FINANCE_BANK.sql est appliquée.`);
-      } else if (!d.parsed) {
+      } else if (!d.parsed && !d.dup_reimported) {
         alert('Relevé importé mais aucune ligne détectée. Ajoutez-les manuellement ou réessayez avec un PDF plus net.');
+      } else if (d.dup_reimported || d.dup_crossmodule) {
+        // Anti-doublon : on prévient de ce qui a été exclu / ignoré.
+        const parts = [];
+        if (d.dup_reimported) parts.push(`• ${d.dup_reimported} ligne(s) déjà présente(s) (même date, libellé et montant) → non réimportée(s).`);
+        if (d.dup_crossmodule) parts.push(`• ${d.dup_crossmodule} ligne(s) déjà comptabilisée(s) ailleurs (prêt/impôt/paie/dépense, même date et montant) → importée(s) mais marquée(s) « Ignoré » pour éviter le double comptage.`);
+        alert(`Import terminé.\nAnti-doublon :\n${parts.join('\n')}\n\nVous pouvez « Rétablir » une ligne ignorée si c'est une vraie dépense distincte.`);
       }
       setSel({ statement: d.statement, transactions: d.transactions });
     }
