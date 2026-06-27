@@ -1646,6 +1646,14 @@ const ClassesPage = () => {
         count={studentCount}
         boys={cls.boys_count}
         girls={cls.girls_count}
+        teachers={(classTeachers[cls.id] || []).map(ct => {
+          const p = ct.profiles || {};
+          return {
+            name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.email || '—',
+            photo: p.avatar_url,
+            subject: p.subject || p.subjects?.name,
+          };
+        })}
         onClick={() => setExpandedClass(cls.id)}
         actions={[
           { icon: CreditCard, label: massarCoverage[cls.id]?.withSecret > 0 ? 'Réimporter les codes Massar' : 'Importer les codes Massar', tone: 'purple', onClick: () => openMassarModalForClass(cls) },

@@ -2367,6 +2367,49 @@ router.post('/students', async (req, res) => {
 });
 
 // Modifier un élève (fiche d'inscription) — édition des champs profil
+// Déplacement groupé d'élèves vers une autre classe.
+// Body: { studentIds: [...], classId } — classId null = retirer de toute classe.
+// IMPORTANT : déclarée AVANT '/students/:id' sinon Express matcherait id='bulk-move'.
+router.put('/students/bulk-move', async (req, res) => {
+  try {
+    const { studentIds, classId } = req.body;
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({ error: 'studentIds requis' });
+    }
+
+    // La classe cible doit appartenir à l'école du demandeur (sauf si on détache).
+    if (classId) {
+      let classCheck = supabaseAdmin.from('classes').select('id').eq('id', classId);
+      classCheck = applySchoolFilter(classCheck, req);
+      const { data: cls, error: clsErr } = await classCheck.single();
+      if (clsErr || !cls) return res.status(404).json({ error: 'Classe cible introuvable' });
+    }
+
+    // On ne déplace que les élèves du périmètre école du demandeur.
+    let scope = supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('role', 'student')
+      .in('id', studentIds);
+    scope = applySchoolFilter(scope, req);
+    const { data: allowed, error: scopeErr } = await scope;
+    if (scopeErr) throw scopeErr;
+    const allowedIds = (allowed || []).map(s => s.id);
+    if (allowedIds.length === 0) return res.status(404).json({ error: 'Aucun élève déplaçable' });
+
+    const { error: updErr } = await supabaseAdmin
+      .from('profiles')
+      .update({ class_id: classId || null, updated_at: new Date().toISOString() })
+      .in('id', allowedIds);
+    if (updErr) throw updErr;
+
+    res.json({ success: true, moved: allowedIds.length, skipped: studentIds.length - allowedIds.length });
+  } catch (error) {
+    console.error('Erreur PUT /students/bulk-move:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 router.put('/students/:id', async (req, res) => {
   try {
     const { id } = req.params;

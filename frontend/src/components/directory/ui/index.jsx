@@ -360,8 +360,63 @@ export function FieldRow({ label, value, mono }) {
 // Composants présentationnels : ils reçoivent des props génériques (pas d'objet
 // Supabase brut), pour rester découplés de la logique métier des pages.
 
+// Survol interactif : pastilles photo des profs assignés + panneau flottant
+// listant chaque prof (photo + nom) au passage de la souris.
+function ClassTeachersHover({ teachers = [] }) {
+  if (!teachers.length) {
+    return (
+      <div className="mt-2 text-xs text-muted-foreground italic">Aucun prof assigné</div>
+    );
+  }
+  const shown = teachers.slice(0, 5);
+  const extra = teachers.length - shown.length;
+  return (
+    <div className="group/profs relative mt-2 inline-flex">
+      {/* Pastilles photo empilées + compteur */}
+      <div
+        className="flex items-center gap-1.5 cursor-default"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex -space-x-2">
+          {shown.map((t, i) => (
+            <div key={i} className="ring-2 ring-card rounded-full">
+              <Avatar name={t.name} src={t.photo} size="sm" />
+            </div>
+          ))}
+          {extra > 0 && (
+            <div className="w-8 h-8 rounded-full bg-muted text-muted-foreground ring-2 ring-card flex items-center justify-center text-xs font-medium flex-shrink-0">
+              +{extra}
+            </div>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {teachers.length} prof{teachers.length > 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Panneau flottant : visible au survol */}
+      <div className="invisible opacity-0 group-hover/profs:visible group-hover/profs:opacity-100 transition-opacity duration-150 absolute z-30 bottom-full left-0 mb-2 w-60 max-h-64 overflow-y-auto rounded-xl border border-border bg-card shadow-xl p-2">
+        <div className="px-1.5 pb-1.5 mb-1 border-b border-border text-xs font-semibold text-foreground">
+          Professeurs assignés
+        </div>
+        <div className="space-y-0.5">
+          {teachers.map((t, i) => (
+            <div key={i} className="flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-accent">
+              <Avatar name={t.name} src={t.photo} size="sm" />
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-foreground truncate">{t.name || '—'}</div>
+                {t.subject && <div className="text-xs text-muted-foreground truncate">{t.subject}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Carte Classe : avatar coloré, effectif, split G/F, barre d'actions rapides.
-export function ClassCard({ name, section, subtitle, count, boys, girls, actions = [], menu, onClick }) {
+export function ClassCard({ name, section, subtitle, count, boys, girls, teachers, actions = [], menu, onClick }) {
   const accent = toneFor(`${name}${section || ''}`);
   return (
     <EntityCard accent={accent} onClick={onClick}
@@ -375,6 +430,7 @@ export function ClassCard({ name, section, subtitle, count, boys, girls, actions
       {subtitle && <div className="text-xs text-muted-foreground truncate">{subtitle}</div>}
       {count != null && <div className="text-xs text-muted-foreground mt-0.5">{count} élèves</div>}
       {(boys != null || girls != null) && <GenderSplit boys={boys || 0} girls={girls || 0} className="mt-2" />}
+      {teachers != null && <ClassTeachersHover teachers={teachers} />}
       {actions.length > 0 && <div className="mt-3"><ActionIconBar actions={actions} /></div>}
     </EntityCard>
   );
