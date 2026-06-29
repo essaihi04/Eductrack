@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import Sidebar from './Sidebar';
 import MobileNav from './MobileNav';
 import DomainTabs from './DomainTabs';
@@ -11,6 +12,10 @@ const DashboardLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const location = useLocation();
+  const { profile } = useAuth();
+  // Thème « Campus » réservé au personnel (admin, profs, direction…).
+  // Les élèves et parents conservent le thème par défaut.
+  const isStaff = profile && !['student', 'parent'].includes(profile.role);
 
   // Détecter l'orientation du téléphone
   useEffect(() => {
@@ -50,7 +55,7 @@ const DashboardLayout = () => {
                          location.pathname.includes('/teacher/rapide');
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className={`min-h-screen bg-background ${isStaff ? 'theme-school' : ''}`}>
       {/* Sidebar desktop - Masquée en mode paysage sur les pages de suivi */}
       {!(isLandscape && isTrackingPage) && (
         <div className="hidden md:block">

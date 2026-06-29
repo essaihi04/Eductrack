@@ -67,7 +67,7 @@ const YearSelectionPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
+    <div className="theme-school min-h-screen bg-gradient-to-b from-sky-50 to-white">
       {/* En-tête */}
       <header className="flex items-center justify-between px-4 md:px-8 h-16 border-b border-border bg-white/60 backdrop-blur">
         <div className="flex items-center gap-3">
