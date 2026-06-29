@@ -970,23 +970,43 @@ L'administration de ${schoolName}`;
     return 'neutral';
   };
 
-  // Ouvre la modale de recherche des écoles associées.
+  // Ouvre la modale et liste d'emblée les élèves des établissements associés.
   const openCrossModal = () => {
     setCrossSearch(''); setCrossLevelFilter(''); setCrossResults([]);
     setCrossOpen(true);
+    runCrossSearch('', '');
   };
 
   // Recherche par nom ET/OU par niveau (ex : lister tous les 6AP du primaire associé).
+  // Sans critère → liste tous les élèves des établissements associés.
   const runCrossSearch = async (q, level) => {
     const name = (q ?? crossSearch).trim();
     const lvl = level ?? crossLevelFilter;
-    if (name.length < 2 && !lvl) { setCrossResults([]); return; }
     setCrossSearching(true);
     try {
       setCrossResults(await enrollmentsApi.crossSchoolSearch(name, lvl));
     } catch (e) {
       console.error('Recherche inter-écoles:', e);
       setCrossResults([]);
+    } finally {
+      setCrossSearching(false);
+    }
+  };
+
+  // Réinscrit en masse tout un niveau d'un établissement associé (ex : tous les 6AP).
+  const reinscribeWholeLevel = async () => {
+    if (!crossLevelFilter) return;
+    const next = nextLevel(crossLevelFilter) || crossLevelFilter;
+    if (!window.confirm(`Réinscrire TOUS les élèves de niveau ${crossLevelFilter} des établissements associés vers ${next} (année ${year}) ? Ils seront déplacés vers cet établissement.`)) return;
+    setCrossSearching(true);
+    try {
+      const r = await enrollmentsApi.reinscribeLevel({ source_level: crossLevelFilter, academic_year: year });
+      await fetchData();
+      await refreshActiveIds();
+      setCrossOpen(false);
+      alert(`${r.count} élève(s) de ${r.source_level} réinscrit(s) en ${r.target_level} pour ${r.academic_year}.`);
+    } catch (e) {
+      alert(e.message || 'Erreur lors de la réinscription en masse');
     } finally {
       setCrossSearching(false);
     }
@@ -2150,16 +2170,24 @@ L'administration de ${schoolName}`;
                 </select>
               </div>
               <p className="text-[11px] text-gray-400 -mt-2">
-                Cherchez par nom, ou choisissez un niveau pour lister tous les élèves de ce niveau dans les établissements associés (ex : tous les 6AP du primaire). Cliquez un élève pour le réinscrire ici.
+                Liste les élèves des établissements associés. Filtrez par niveau (ex : 6AP) puis cliquez un élève, ou utilisez « Réinscrire tout le niveau » pour récupérer toute la promotion.
               </p>
 
+              {crossLevelFilter && (
+                <button
+                  onClick={reinscribeWholeLevel}
+                  disabled={crossSearching}
+                  className="w-full flex items-center justify-center gap-2 bg-violet-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-violet-700 disabled:opacity-50"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Réinscrire tout le niveau {crossLevelFilter} → {nextLevel(crossLevelFilter) || crossLevelFilter} ({crossResults.length})
+                </button>
+              )}
+
               <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
-                {crossSearching && <div className="p-3 text-sm text-gray-500">Recherche…</div>}
-                {!crossSearching && (crossSearch.trim().length >= 2 || crossLevelFilter) && crossResults.length === 0 && (
-                  <div className="p-3 text-sm text-gray-500">Aucun élève trouvé dans les établissements associés.</div>
-                )}
-                {!crossSearching && crossSearch.trim().length < 2 && !crossLevelFilter && (
-                  <div className="p-3 text-sm text-gray-400">Tapez un nom ou choisissez un niveau pour afficher les élèves.</div>
+                {crossSearching && <div className="p-3 text-sm text-gray-500">Chargement…</div>}
+                {!crossSearching && crossResults.length === 0 && (
+                  <div className="p-3 text-sm text-gray-500">Aucun élève dans les établissements associés (ou aucun pour ce filtre).</div>
                 )}
                 {crossResults.map((s) => (
                   <button key={s.id} onClick={() => openReinscribeFromCross(s)}

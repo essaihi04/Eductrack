@@ -430,25 +430,22 @@ router.get('/cross-school/search', async (req, res) => {
     const allowed = await getAllowedSchoolIds(req);
     const otherSchools = allowed.filter((id) => id !== activeSchool);
     if (otherSchools.length === 0) return res.json([]);
-    // Sans aucun critère (ni nom ni niveau), on n'inonde pas la liste.
-    if (!q && !level) return res.json([]);
 
-    // Filtre par niveau → jointure interne sur la classe pour ne garder que les
-    // élèves de ce niveau (ex : tous les 6AP du primaire associé).
-    const useInner = !!level;
+    // On liste les élèves des établissements associés (parcours par défaut).
+    // Le filtre par niveau est appliqué côté serveur en JS (robuste, sans
+    // dépendre d'un filtre PostgREST sur ressource imbriquée).
     let query = supabaseAdmin
       .from('profiles')
       .select(`
         id, first_name, last_name, massar_code, avatar, avatar_url, school_id,
-        class:classes${useInner ? '!inner' : ''}(id, name, level, filiere),
+        class:classes(id, name, level, filiere),
         school:schools(id, name)
       `)
       .eq('role', 'student')
       .in('school_id', otherSchools)
       .order('last_name', { ascending: true })
-      .limit(100);
+      .limit(level ? 800 : 120);
 
-    if (level) query = query.eq('class.level', level);
     if (q) {
       const pattern = `%${q}%`;
       query = query.or(`first_name.ilike.${pattern},last_name.ilike.${pattern},massar_code.ilike.${pattern}`);
@@ -457,7 +454,9 @@ router.get('/cross-school/search', async (req, res) => {
     const { data, error } = await query;
     if (error) throw error;
 
-    const results = (data || []).map((s) => ({
+    let rows = data || [];
+    if (level) rows = rows.filter((s) => (s.class?.level || '').toUpperCase() === level);
+    const results = rows.slice(0, 120).map((s) => ({
       ...s,
       current_level: s.class?.level || null,
       suggested_level: nextLevel(s.class?.level),
@@ -537,6 +536,67 @@ router.post('/reinscribe', requireSchoolAdmin, async (req, res) => {
     res.json({ success: true, student_id, class_id: classId, level: targetLevel, academic_year: year, status, cross_school: isCrossSchool });
   } catch (e) {
     console.error('POST /enrollments/reinscribe:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+// --- POST /api/enrollments/cross-school/reinscribe-level -------------------
+// Réinscrit EN MASSE tous les élèves d'un niveau donné d'un établissement
+// associé vers l'école active (déménagement), promus au niveau suivant.
+// Ex : tous les 6AP du primaire → 1AC au collège, en un clic.
+// body: { source_level, academic_year?, target_level? }
+router.post('/cross-school/reinscribe-level', requireSchoolAdmin, async (req, res) => {
+  try {
+    const activeSchool = getSchoolId(req);
+    if (!activeSchool) return res.status(400).json({ error: 'school_id requis' });
+    const sourceLevel = (req.body.source_level || '').trim().toUpperCase();
+    if (!sourceLevel) return res.status(400).json({ error: 'source_level requis' });
+
+    const allowed = await getAllowedSchoolIds(req);
+    const otherSchools = allowed.filter((id) => id !== activeSchool);
+    if (otherSchools.length === 0) return res.status(400).json({ error: 'Aucun établissement associé' });
+
+    const year = req.body.academic_year || currentYear();
+    const targetLevel = (req.body.target_level || nextLevel(sourceLevel) || sourceLevel || '').toUpperCase();
+
+    // Élèves du niveau source dans les établissements associés.
+    const { data: students, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, school_id, class_id, class:classes(id, level)')
+      .eq('role', 'student')
+      .in('school_id', otherSchools)
+      .limit(1000);
+    if (error) throw error;
+
+    const matching = (students || []).filter((s) => (s.class?.level || '').toUpperCase() === sourceLevel);
+
+    let count = 0;
+    const errors = [];
+    for (const s of matching) {
+      const prevClassId = s.class_id || null;
+      const { error: updErr } = await supabaseAdmin
+        .from('profiles')
+        .update({ school_id: activeSchool, class_id: null, level: targetLevel })
+        .eq('id', s.id);
+      if (updErr) { errors.push({ student_id: s.id, error: updErr.message }); continue; }
+      const { error: enrErr } = await supabaseAdmin
+        .from('student_enrollments')
+        .upsert({
+          school_id: activeSchool,
+          student_id: s.id,
+          class_id: null,
+          academic_year: year,
+          status: 'NI',
+          previous_class_id: prevClassId,
+          created_by: req.user.id,
+        }, { onConflict: 'student_id,academic_year' });
+      if (enrErr) { errors.push({ student_id: s.id, error: enrErr.message }); continue; }
+      count += 1;
+    }
+
+    res.json({ success: true, count, source_level: sourceLevel, target_level: targetLevel, academic_year: year, errors });
+  } catch (e) {
+    console.error('POST /enrollments/cross-school/reinscribe-level:', e);
     res.status(500).json({ error: 'Erreur serveur', details: e.message });
   }
 });
