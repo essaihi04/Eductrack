@@ -492,34 +492,18 @@ router.post('/cross-school/transfer', requireSchoolAdmin, async (req, res) => {
 
     const year = currentYear();
 
-    // 3) Classe cible dans l'école active (fournie, sinon trouvée/créée).
-    let classId = target_class_id || null;
-    if (!classId) {
-      const { data: existing } = await supabaseAdmin
-        .from('classes')
-        .select('id')
-        .eq('school_id', activeSchool)
-        .eq('academic_year', year)
-        .eq('level', targetLevel)
-        .limit(1);
-      if (existing && existing.length > 0) {
-        classId = existing[0].id;
-      } else {
-        const { data: created, error: cErr } = await supabaseAdmin
-          .from('classes')
-          .insert({ name: targetLevel, level: targetLevel, academic_year: year, school_id: activeSchool })
-          .select()
-          .single();
-        if (cErr || !created) throw cErr || new Error('Création de la classe cible impossible');
-        classId = created.id;
-      }
-    }
+    // 3) Classe cible : UNIQUEMENT si une classe existante est explicitement choisie.
+    //    Sinon, on promeut l'élève au NIVEAU seul (sans créer de classe) — l'admin
+    //    créera/affectera les classes plus tard.
+    const classId = target_class_id || null;
 
-    // 4) Déménagement : l'école et la classe courantes du profil deviennent celles du lycée.
+    // 4) Déménagement : l'élève rejoint l'école active, promu au niveau cible.
+    //    Le niveau est stocké sur le profil (profiles.level) pour qu'il soit connu
+    //    même sans classe affectée.
     const prevClassId = student.class_id || null;
     const { error: updErr } = await supabaseAdmin
       .from('profiles')
-      .update({ school_id: activeSchool, class_id: classId })
+      .update({ school_id: activeSchool, class_id: classId, level: targetLevel })
       .eq('id', student_id);
     if (updErr) throw updErr;
 

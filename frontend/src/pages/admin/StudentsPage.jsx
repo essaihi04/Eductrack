@@ -2114,14 +2114,19 @@ L'administration de ${schoolName}`;
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Classe d'accueil (optionnel — sinon créée/choisie automatiquement)</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Classe d'accueil (optionnel)</label>
                     <select value={crossClassId} onChange={(e) => setCrossClassId(e.target.value)}
                       className="w-full px-3 py-2 border rounded-lg text-sm">
-                      <option value="">Automatique (niveau {crossLevel || '—'})</option>
+                      <option value="">Niveau seul — à affecter à une classe plus tard</option>
                       {classes
                         .filter((c) => !crossLevel || c.level === crossLevel)
                         .map((c) => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
                     </select>
+                    {!crossClassId && (
+                      <p className="text-[11px] text-gray-400 mt-1">
+                        Aucune classe ne sera créée : l'élève est promu au niveau {crossLevel || '—'}. Vous l'affecterez à une classe depuis la page Classes.
+                      </p>
+                    )}
                   </div>
 
                   <p className="text-xs text-gray-500">
