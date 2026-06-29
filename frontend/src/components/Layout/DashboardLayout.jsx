@@ -5,6 +5,7 @@ import MobileNav from './MobileNav';
 import DomainTabs from './DomainTabs';
 import NotificationsBell from '../NotificationsBell';
 import YearSelector from '../YearSelector';
+import SchoolSwitcher from '../SchoolSwitcher';
 
 const DashboardLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -83,6 +84,7 @@ const DashboardLayout = () => {
           </button>
           <span className="font-bold text-primary text-lg">Eductrack</span>
           <div className="flex items-center gap-2">
+            <SchoolSwitcher />
             <YearSelector />
             <NotificationsBell />
           </div>
@@ -110,6 +112,7 @@ const DashboardLayout = () => {
             <Outlet />
           </div>
           <div className="ml-4 hidden md:flex items-center gap-3">
+            <SchoolSwitcher />
             <YearSelector />
             <NotificationsBell />
           </div>

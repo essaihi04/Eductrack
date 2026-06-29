@@ -9,10 +9,13 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
+import { enrollmentsApi } from '../../lib/enrollmentsApi';
+import { LEVEL_ORDER } from '../../lib/levelProgression';
 
 const StudentsPage = () => {
-  const { profile } = useAuth();
+  const { profile, availableSchools } = useAuth();
   const { year } = useYear();
+  const isMultiSchool = (availableSchools?.length || 0) > 1;
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -25,6 +28,16 @@ const StudentsPage = () => {
   const [moveSearch, setMoveSearch] = useState('');
   const [moveTargetId, setMoveTargetId] = useState('');
   const [moving, setMoving] = useState(false);
+  // Modale « Inscrire un élève d'un autre établissement » (compte multi-écoles)
+  const [crossOpen, setCrossOpen] = useState(false);
+  const [crossSearch, setCrossSearch] = useState('');
+  const [crossResults, setCrossResults] = useState([]);
+  const [crossSearching, setCrossSearching] = useState(false);
+  const [crossSelected, setCrossSelected] = useState(null); // élève choisi
+  const [crossLevel, setCrossLevel] = useState(''); // niveau cible (modifiable)
+  const [crossClassId, setCrossClassId] = useState(''); // classe cible existante (optionnel)
+  const [crossBusy, setCrossBusy] = useState(false);
+  const [crossMsg, setCrossMsg] = useState(null); // { type, text }
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer
   const [searchParams, setSearchParams] = useSearchParams();
@@ -923,6 +936,53 @@ L'administration de ${schoolName}`;
     }
   };
 
+  // --- Réinscription inter-établissements (compte multi-écoles) -------------
+  const openCrossModal = () => {
+    setCrossSearch(''); setCrossResults([]); setCrossSelected(null);
+    setCrossLevel(''); setCrossClassId(''); setCrossMsg(null);
+    setCrossOpen(true);
+  };
+
+  const runCrossSearch = async (q) => {
+    setCrossSearch(q);
+    setCrossSelected(null);
+    if (!q || q.trim().length < 2) { setCrossResults([]); return; }
+    setCrossSearching(true);
+    try {
+      setCrossResults(await enrollmentsApi.crossSchoolSearch(q.trim()));
+    } catch (e) {
+      console.error('Recherche inter-écoles:', e);
+      setCrossResults([]);
+    } finally {
+      setCrossSearching(false);
+    }
+  };
+
+  const pickCrossStudent = (s) => {
+    setCrossSelected(s);
+    setCrossLevel(s.suggested_level || s.current_level || '');
+    setCrossClassId('');
+  };
+
+  const submitCrossTransfer = async () => {
+    if (!crossSelected) return;
+    setCrossBusy(true); setCrossMsg(null);
+    try {
+      const payload = { student_id: crossSelected.id };
+      if (crossClassId) payload.target_class_id = crossClassId;
+      else if (crossLevel) payload.target_level = crossLevel;
+      const r = await enrollmentsApi.crossSchoolTransfer(payload);
+      setCrossMsg({ type: 'ok', text: `${crossSelected.first_name} ${crossSelected.last_name} réinscrit(e) en ${r.level} (${r.academic_year}).` });
+      await fetchData();
+      // Réinitialise pour permettre d'enchaîner d'autres élèves.
+      setCrossSelected(null); setCrossSearch(''); setCrossResults([]);
+    } catch (e) {
+      setCrossMsg({ type: 'err', text: e.message || 'Erreur lors de la réinscription' });
+    } finally {
+      setCrossBusy(false);
+    }
+  };
+
   const sendBulkCredentialsToParents = async () => {
     if (selectedStudents.size === 0) {
       alert('Aucun élève sélectionné');
@@ -1274,6 +1334,16 @@ L'administration de ${schoolName}`;
                     <Send className="w-3.5 h-3.5" />
                     Identifiants WhatsApp
                   </button>
+                  {isMultiSchool && (
+                    <button
+                      onClick={openCrossModal}
+                      title="Inscrire un élève venant d'un autre établissement du compte (réinscription avec promotion de niveau)"
+                      className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-700"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      Inscrire d'un autre établissement
+                    </button>
+                  )}
                   <button
                     onClick={() => { resetForm(); setShowForm(true); }}
                     className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -1958,6 +2028,123 @@ L'administration de ${schoolName}`;
           </div>
         );
       })()}
+
+      {/* Modale : inscrire un élève d'un autre établissement (compte multi-écoles) */}
+      {crossOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => { if (!crossBusy) setCrossOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5 text-violet-600" />
+                <h3 className="font-semibold">Inscrire un élève d'un autre établissement</h3>
+              </div>
+              <button onClick={() => { if (!crossBusy) setCrossOpen(false); }} className="p-1 rounded hover:bg-gray-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {crossMsg && (
+                <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${crossMsg.type === 'ok' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                  {crossMsg.type === 'ok' ? <Check className="w-4 h-4 mt-0.5 shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />}
+                  <span>{crossMsg.text}</span>
+                </div>
+              )}
+
+              {/* Recherche */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Rechercher l'élève par nom</label>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
+                  <input
+                    autoFocus
+                    value={crossSearch}
+                    onChange={(e) => runCrossSearch(e.target.value)}
+                    placeholder="Nom, prénom ou code Massar…"
+                    className="w-full pl-8 pr-3 py-2 border rounded-lg text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Résultats */}
+              {!crossSelected && (
+                <div className="border rounded-lg divide-y max-h-56 overflow-y-auto">
+                  {crossSearching && <div className="p-3 text-sm text-gray-500">Recherche…</div>}
+                  {!crossSearching && crossSearch.trim().length >= 2 && crossResults.length === 0 && (
+                    <div className="p-3 text-sm text-gray-500">Aucun élève trouvé dans les autres établissements.</div>
+                  )}
+                  {crossResults.map((s) => (
+                    <button key={s.id} onClick={() => pickCrossStudent(s)}
+                      className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm truncate">{s.first_name} {s.last_name}</div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {s.school?.name || 'Établissement'}{s.class?.name ? ` · ${s.class.name}` : ''}{s.current_level ? ` (${s.current_level})` : ''}
+                        </div>
+                      </div>
+                      {s.suggested_level && (
+                        <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {s.suggested_level}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Élève sélectionné + niveau cible */}
+              {crossSelected && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-violet-50 border border-violet-200">
+                    <div>
+                      <div className="font-semibold text-sm">{crossSelected.first_name} {crossSelected.last_name}</div>
+                      <div className="text-xs text-gray-600">
+                        {crossSelected.school?.name}{crossSelected.current_level ? ` · ${crossSelected.current_level}` : ''}
+                      </div>
+                    </div>
+                    <button onClick={() => setCrossSelected(null)} className="text-xs text-violet-700 underline">Changer</button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Niveau d'inscription (proposé automatiquement)</label>
+                    <select value={crossLevel} onChange={(e) => { setCrossLevel(e.target.value); setCrossClassId(''); }}
+                      className="w-full px-3 py-2 border rounded-lg text-sm">
+                      {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Classe d'accueil (optionnel — sinon créée/choisie automatiquement)</label>
+                    <select value={crossClassId} onChange={(e) => setCrossClassId(e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg text-sm">
+                      <option value="">Automatique (niveau {crossLevel || '—'})</option>
+                      {classes
+                        .filter((c) => !crossLevel || c.level === crossLevel)
+                        .map((c) => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
+                    </select>
+                  </div>
+
+                  <p className="text-xs text-gray-500">
+                    L'élève sera <strong>déplacé</strong> vers cet établissement (il quittera son école d'origine).
+                    Ses parents et son code Massar sont conservés.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 p-4 border-t">
+              <button onClick={() => setCrossOpen(false)} disabled={crossBusy}
+                className="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
+                Fermer
+              </button>
+              <button onClick={submitCrossTransfer} disabled={crossBusy || !crossSelected}
+                className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5">
+                {crossBusy ? 'Réinscription…' : <><Check className="w-4 h-4" /> Réinscrire</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

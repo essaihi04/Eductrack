@@ -54,6 +54,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [school, setSchool] = useState(null);
+  const [availableSchools, setAvailableSchools] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -101,12 +102,33 @@ export const AuthProvider = ({ children }) => {
 
       const data = await response.json();
       setProfile(data.profile);
-      setSchool(data.school || null);
+      setSchool(data.profile?.school || data.school || null);
+      setAvailableSchools(data.available_schools || []);
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Bascule l'école active du compte (multi-établissements) puis recharge le profil.
+  const switchSchool = async (schoolId) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) throw new Error('Session expirée');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${apiUrl}/api/auth/switch-school`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ school_id: schoolId }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Changement d’école impossible');
+    }
+    await fetchProfile(session.user.id);
   };
 
   const signIn = async (email, password) => {
@@ -171,12 +193,15 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setProfile(null);
     setSchool(null);
+    setAvailableSchools([]);
   };
 
   const value = {
     user,
     profile,
     school,
+    availableSchools,
+    switchSchool,
     loading,
     signIn,
     signUp,

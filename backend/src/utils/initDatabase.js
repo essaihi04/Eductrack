@@ -117,6 +117,37 @@ export const initializeMissingTables = async () => {
       console.log('✓ Table student_enrollments créée + backfill effectué');
     }
 
+    // Vérifier si account_schools existe (écoles pilotables par un compte admin)
+    const { data: accountSchoolsExists } = await supabaseAdmin
+      .from('account_schools')
+      .select('id')
+      .limit(1);
+
+    if (!accountSchoolsExists) {
+      console.log('Création de la table account_schools...');
+      await supabaseAdmin.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.account_schools (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            user_id   UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+            school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(user_id, school_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_account_schools_user ON public.account_schools(user_id);
+          CREATE INDEX IF NOT EXISTS idx_account_schools_school ON public.account_schools(school_id);
+
+          -- Backfill : chaque admin existant a accès à son école courante.
+          INSERT INTO public.account_schools (user_id, school_id)
+          SELECT id, school_id FROM public.profiles
+          WHERE role IN ('admin', 'school_admin', 'pedagogical_director')
+            AND school_id IS NOT NULL
+          ON CONFLICT (user_id, school_id) DO NOTHING;
+        `
+      });
+      console.log('✓ Table account_schools créée + backfill effectué');
+    }
+
     console.log('✓ Vérification des tables terminée');
   } catch (error) {
     console.error('Erreur lors de l\'initialisation des tables:', error);

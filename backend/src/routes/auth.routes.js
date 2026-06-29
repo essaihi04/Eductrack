@@ -165,9 +165,62 @@ router.get('/me', async (req, res) => {
       school = schoolData;
     }
 
-    res.json({ user, profile: { ...profile, school } });
+    // Écoles que ce compte peut piloter (multi-établissements sur un même compte).
+    // On y inclut toujours l'école active courante.
+    let available_schools = [];
+    const { data: links } = await supabaseAdmin
+      .from('account_schools')
+      .select('school:schools(id, name, code, logo_url)')
+      .eq('user_id', user.id);
+    const byId = new Map();
+    (links || []).forEach((l) => { if (l.school) byId.set(l.school.id, l.school); });
+    if (school) byId.set(school.id, school);
+    available_schools = Array.from(byId.values());
+
+    res.json({ user, profile: { ...profile, school }, available_schools });
   } catch (error) {
     console.error('Erreur:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Basculer l'école active du compte (multi-établissements).
+// Met à jour profiles.school_id : toutes les routes scopées sur req.user.school_id suivent.
+router.post('/switch-school', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Token manquant' });
+
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ error: 'Token invalide' });
+
+    const { school_id } = req.body;
+    if (!school_id) return res.status(400).json({ error: 'school_id requis' });
+
+    // Ensemble des écoles autorisées = account_schools ∪ école active courante.
+    const { data: profile } = await supabaseAdmin
+      .from('profiles').select('school_id').eq('id', user.id).single();
+    const { data: links } = await supabaseAdmin
+      .from('account_schools').select('school_id').eq('user_id', user.id);
+    const allowed = new Set([
+      ...(profile?.school_id ? [profile.school_id] : []),
+      ...((links || []).map((l) => l.school_id)),
+    ]);
+
+    if (!allowed.has(school_id)) {
+      return res.status(403).json({ error: 'Accès à cette école non autorisé' });
+    }
+
+    const { error: updErr } = await supabaseAdmin
+      .from('profiles').update({ school_id }).eq('id', user.id);
+    if (updErr) throw updErr;
+
+    const { data: school } = await supabaseAdmin
+      .from('schools').select('id, name, code, logo_url').eq('id', school_id).single();
+
+    res.json({ success: true, school });
+  } catch (error) {
+    console.error('Erreur switch-school:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

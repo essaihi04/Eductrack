@@ -13,6 +13,16 @@ const getSchoolId = (req) => {
   return req.user.school_id || null;
 };
 
+// Écoles que le compte peut piloter = account_schools ∪ école active courante.
+const getAllowedSchoolIds = async (req) => {
+  const ids = new Set();
+  if (req.user.school_id) ids.add(req.user.school_id);
+  const { data } = await supabaseAdmin
+    .from('account_schools').select('school_id').eq('user_id', req.user.id);
+  (data || []).forEach((r) => r.school_id && ids.add(r.school_id));
+  return Array.from(ids);
+};
+
 // Année scolaire courante au format slash "YYYY/YYYY" (rentrée en septembre).
 const currentYear = () => {
   const now = new Date();
@@ -404,6 +414,132 @@ router.post('/reset', requireSchoolAdmin, async (req, res) => {
     res.json({ success: true, year, reverted, deleted: (enrollments || []).length });
   } catch (e) {
     console.error('POST /enrollments/reset:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+// --- GET /api/enrollments/cross-school/search?q= ---------------------------
+// Recherche d'élèves dans les AUTRES écoles du compte (pour réinscription
+// inter-établissements, ex: trouver un 6AP du primaire depuis le lycée).
+router.get('/cross-school/search', async (req, res) => {
+  try {
+    const activeSchool = getSchoolId(req);
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+
+    const allowed = await getAllowedSchoolIds(req);
+    const otherSchools = allowed.filter((id) => id !== activeSchool);
+    if (otherSchools.length === 0) return res.json([]);
+
+    const pattern = `%${q}%`;
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select(`
+        id, first_name, last_name, massar_code, avatar, avatar_url, school_id,
+        class:classes(id, name, level, filiere),
+        school:schools(id, name)
+      `)
+      .eq('role', 'student')
+      .in('school_id', otherSchools)
+      .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},massar_code.ilike.${pattern}`)
+      .limit(20);
+    if (error) throw error;
+
+    const results = (data || []).map((s) => ({
+      ...s,
+      current_level: s.class?.level || null,
+      suggested_level: nextLevel(s.class?.level),
+    }));
+    res.json(results);
+  } catch (e) {
+    console.error('GET /enrollments/cross-school/search:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
+// --- POST /api/enrollments/cross-school/transfer ---------------------------
+// Déménage un élève d'une autre école du compte vers l'école active, en le
+// promouvant au niveau suivant (ou un niveau choisi). Parents et code Massar
+// (indépendants de l'école) sont conservés.
+// body: { student_id, target_class_id?, target_level? }
+router.post('/cross-school/transfer', requireSchoolAdmin, async (req, res) => {
+  try {
+    const activeSchool = getSchoolId(req);
+    if (!activeSchool) return res.status(400).json({ error: 'school_id requis' });
+    const { student_id, target_class_id } = req.body;
+    if (!student_id) return res.status(400).json({ error: 'student_id requis' });
+
+    // 1) L'élève doit appartenir à une autre école autorisée du compte.
+    const allowed = await getAllowedSchoolIds(req);
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('id, school_id, class_id, class:classes(id, level, filiere)')
+      .eq('id', student_id)
+      .eq('role', 'student')
+      .single();
+    if (!student) return res.status(404).json({ error: 'Élève introuvable' });
+    if (!allowed.includes(student.school_id)) {
+      return res.status(403).json({ error: 'Cet élève n’appartient pas à un établissement de votre compte' });
+    }
+    if (student.school_id === activeSchool) {
+      return res.status(400).json({ error: 'Élève déjà dans l’école active' });
+    }
+
+    // 2) Niveau cible : explicite, sinon promotion automatique (6AP → 1AC).
+    const srcLevel = student.class?.level || null;
+    const targetLevel = (req.body.target_level || nextLevel(srcLevel) || srcLevel || '').toUpperCase();
+    if (!targetLevel) return res.status(400).json({ error: 'Impossible de déterminer le niveau cible' });
+
+    const year = currentYear();
+
+    // 3) Classe cible dans l'école active (fournie, sinon trouvée/créée).
+    let classId = target_class_id || null;
+    if (!classId) {
+      const { data: existing } = await supabaseAdmin
+        .from('classes')
+        .select('id')
+        .eq('school_id', activeSchool)
+        .eq('academic_year', year)
+        .eq('level', targetLevel)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        classId = existing[0].id;
+      } else {
+        const { data: created, error: cErr } = await supabaseAdmin
+          .from('classes')
+          .insert({ name: targetLevel, level: targetLevel, academic_year: year, school_id: activeSchool })
+          .select()
+          .single();
+        if (cErr || !created) throw cErr || new Error('Création de la classe cible impossible');
+        classId = created.id;
+      }
+    }
+
+    // 4) Déménagement : l'école et la classe courantes du profil deviennent celles du lycée.
+    const prevClassId = student.class_id || null;
+    const { error: updErr } = await supabaseAdmin
+      .from('profiles')
+      .update({ school_id: activeSchool, class_id: classId })
+      .eq('id', student_id);
+    if (updErr) throw updErr;
+
+    // 5) Inscription dans l'école active (nouveau dans cet établissement → NI).
+    const { error: enrErr } = await supabaseAdmin
+      .from('student_enrollments')
+      .upsert({
+        school_id: activeSchool,
+        student_id,
+        class_id: classId,
+        academic_year: year,
+        status: 'NI',
+        previous_class_id: prevClassId,
+        created_by: req.user.id,
+      }, { onConflict: 'student_id,academic_year' });
+    if (enrErr) throw enrErr;
+
+    res.json({ success: true, student_id, class_id: classId, level: targetLevel, academic_year: year });
+  } catch (e) {
+    console.error('POST /enrollments/cross-school/transfer:', e);
     res.status(500).json({ error: 'Erreur serveur', details: e.message });
   }
 });

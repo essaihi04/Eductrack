@@ -37,4 +37,7 @@ export const enrollmentsApi = {
   reinscription: (payload) => request('/api/enrollments/reinscription', { method: 'POST', body: payload }),
   autoReinscription: (fromYear, options) => request('/api/enrollments/auto-reinscription', { method: 'POST', body: { from_year: fromYear, options } }),
   reset: (year) => request('/api/enrollments/reset', { method: 'POST', body: { year } }),
+  // Réinscription inter-établissements (compte multi-écoles)
+  crossSchoolSearch: (q) => request('/api/enrollments/cross-school/search', { query: { q } }),
+  crossSchoolTransfer: (payload) => request('/api/enrollments/cross-school/transfer', { method: 'POST', body: payload }),
 };

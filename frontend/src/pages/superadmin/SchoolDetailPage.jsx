@@ -5,7 +5,7 @@ import {
   School, ArrowLeft, Users, GraduationCap, BookOpen, Calendar,
   TrendingUp, TrendingDown, Shield, UserPlus, X, RefreshCw,
   CheckCircle, AlertTriangle, Eye, Phone, Moon, Activity,
-  Upload, Trash2, ImageIcon
+  Upload, Trash2, ImageIcon, Building2, Link, Unlink
 } from 'lucide-react';
 import {
   LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip,
@@ -31,6 +31,10 @@ const SchoolDetailPage = () => {
   const [newAdmin, setNewAdmin] = useState({ email: '', password: '', firstName: '', lastName: '' });
   const [creatingAdmin, setCreatingAdmin] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  // Établissements rattachés à chaque admin (multi-écoles)
+  const [allSchools, setAllSchools] = useState([]); // toutes les écoles de la plateforme
+  const [adminLinkedSchools, setAdminLinkedSchools] = useState({}); // { userId: [school...] }
+  const [expandedAdminLinks, setExpandedAdminLinks] = useState(null); // userId dont on affiche le panneau
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -147,6 +151,47 @@ const SchoolDetailPage = () => {
     } catch (err) {
       console.error('Erreur suppression logo:', err);
     }
+  };
+
+  // Charge les écoles rattachées à un admin (et toutes les écoles pour le select)
+  const loadAdminLinks = async (userId) => {
+    const token = await getToken();
+    const headers = { Authorization: `Bearer ${token}` };
+    const [linksRes, allRes] = await Promise.all([
+      fetch(`${apiUrl}/api/superadmin/admins/${userId}/schools`, { headers }),
+      fetch(`${apiUrl}/api/superadmin/schools`, { headers }),
+    ]);
+    const linksData = await linksRes.json();
+    const allData = await allRes.json();
+    setAdminLinkedSchools((prev) => ({ ...prev, [userId]: linksData.schools || [] }));
+    setAllSchools(allData.schools || []);
+    setExpandedAdminLinks(userId);
+  };
+
+  const handleLinkSchool = async (userId, schoolId) => {
+    if (!schoolId) return;
+    const token = await getToken();
+    await fetch(`${apiUrl}/api/superadmin/admins/${userId}/schools`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId }),
+    });
+    await loadAdminLinks(userId);
+  };
+
+  const handleUnlinkSchool = async (userId, sId) => {
+    if (!confirm('Détacher cette école du compte ?')) return;
+    const token = await getToken();
+    const res = await fetch(`${apiUrl}/api/superadmin/admins/${userId}/schools/${sId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.error || 'Impossible de détacher l'école active du compte');
+      return;
+    }
+    await loadAdminLinks(userId);
   };
 
   const pColor = (pct, good = 70, warn = 50) =>
@@ -414,25 +459,83 @@ const SchoolDetailPage = () => {
           {admins.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">Aucun administrateur assigné</p>
           ) : (
-            admins.map(admin => (
-              <div key={admin.id} className="flex items-center justify-between p-3 bg-muted/20 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                    <Shield className="w-4 h-4 text-indigo-600" />
+            admins.map(admin => {
+              const isExpanded = expandedAdminLinks === admin.id;
+              const linked = adminLinkedSchools[admin.id] || [];
+              const linkableSchools = allSchools.filter(
+                (s) => !linked.some((l) => l.id === s.id)
+              );
+              return (
+                <div key={admin.id} className="rounded-lg border border-border overflow-hidden">
+                  <div className="flex items-center justify-between p-3 bg-muted/20">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
+                        <Shield className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{admin.first_name} {admin.last_name}</p>
+                        <p className="text-xs text-muted-foreground">{admin.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => isExpanded ? setExpandedAdminLinks(null) : loadAdminLinks(admin.id)}
+                        title="Établissements rattachés"
+                        className="flex items-center gap-1 text-xs text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition"
+                      >
+                        <Building2 className="w-3.5 h-3.5" />
+                        Établissements
+                      </button>
+                      <button
+                        onClick={() => handleRemoveAdmin(admin.id)}
+                        className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded transition"
+                      >
+                        Retirer
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium">{admin.first_name} {admin.last_name}</p>
-                    <p className="text-xs text-muted-foreground">{admin.email}</p>
-                  </div>
+
+                  {isExpanded && (
+                    <div className="border-t border-border p-3 bg-white space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Établissements pilotables par ce compte</p>
+                      {linked.length === 0 && (
+                        <p className="text-xs text-muted-foreground">Aucun établissement rattaché. L'école active courante est toujours accessible.</p>
+                      )}
+                      {linked.map((s) => (
+                        <div key={s.id} className="flex items-center justify-between py-1.5 px-2 rounded bg-muted/30">
+                          <div className="flex items-center gap-2">
+                            {s.logo_url
+                              ? <img src={s.logo_url} alt="" className="w-5 h-5 rounded object-cover" />
+                              : <Building2 className="w-4 h-4 text-indigo-500" />}
+                            <span className="text-sm">{s.name}</span>
+                          </div>
+                          <button onClick={() => handleUnlinkSchool(admin.id, s.id)}
+                            title="Détacher"
+                            className="text-red-500 hover:bg-red-50 p-1 rounded">
+                            <Unlink className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      {linkableSchools.length > 0 && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <Building2 className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <select
+                            defaultValue=""
+                            onChange={(e) => { handleLinkSchool(admin.id, e.target.value); e.target.value = ''; }}
+                            className="flex-1 px-2 py-1.5 border rounded-lg text-xs"
+                          >
+                            <option value="" disabled>Rattacher une autre école…</option>
+                            {linkableSchools.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => handleRemoveAdmin(admin.id)}
-                  className="text-xs text-red-600 hover:bg-red-50 px-2 py-1 rounded transition"
-                >
-                  Retirer
-                </button>
-              </div>
-            ))
+              );
+            })
           )}
         </CardContent>
       </Card>

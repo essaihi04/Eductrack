@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useYear } from '../contexts/YearContext';
 import { enrollmentsApi } from '../lib/enrollmentsApi';
 import { nextYearStr } from '../lib/schoolYear';
+import SchoolSwitcher from '../components/SchoolSwitcher';
 
 const ADMIN_ROLES = ['admin', 'school_admin', 'pedagogical_director'];
 
@@ -75,9 +76,12 @@ const YearSelectionPage = () => {
             : <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center"><GraduationCap className="w-5 h-5 text-primary" /></div>}
           <span className="font-bold text-lg">{school?.name || 'EduTrack'}</span>
         </div>
-        <button onClick={() => signOut()} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <LogOut className="w-4 h-4" /> Déconnexion
-        </button>
+        <div className="flex items-center gap-3">
+          <SchoolSwitcher />
+          <button onClick={() => signOut()} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <LogOut className="w-4 h-4" /> Déconnexion
+          </button>
+        </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8 md:py-12 space-y-8">

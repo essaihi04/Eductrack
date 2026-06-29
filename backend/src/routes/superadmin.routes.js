@@ -718,6 +718,92 @@ router.get('/global-stats', async (req, res) => {
 });
 
 // ============================================================
+// ÉCOLES RATTACHÉES À UN COMPTE (multi-établissements)
+// ============================================================
+
+// Lister les écoles rattachées à un compte admin
+router.get('/admins/:userId/schools', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('account_schools')
+      .select('school:schools(id, name, code, logo_url)')
+      .eq('user_id', userId);
+    if (error) throw error;
+    res.json({ schools: (data || []).map((r) => r.school).filter(Boolean) });
+  } catch (error) {
+    console.error('Erreur liste écoles rattachées:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Rattacher une école à un compte admin
+router.post('/admins/:userId/schools', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { school_id } = req.body;
+    if (!school_id) return res.status(400).json({ error: 'school_id requis' });
+
+    const { data: school } = await supabaseAdmin
+      .from('schools').select('id, name').eq('id', school_id).single();
+    if (!school) return res.status(404).json({ error: 'École introuvable' });
+
+    const { error } = await supabaseAdmin
+      .from('account_schools')
+      .upsert({ user_id: userId, school_id }, { onConflict: 'user_id,school_id' });
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_log').insert({
+      user_id: req.user.id,
+      school_id,
+      action: 'link_school_to_account',
+      target_type: 'profile',
+      target_id: userId,
+      details: { school_id, schoolName: school.name },
+    });
+
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('Erreur rattachement école:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Détacher une école d'un compte admin (jamais l'école active courante du profil)
+router.delete('/admins/:userId/schools/:schoolId', async (req, res) => {
+  try {
+    const { userId, schoolId } = req.params;
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles').select('school_id').eq('id', userId).single();
+    if (profile?.school_id === schoolId) {
+      return res.status(400).json({ error: "Impossible de détacher l'école active courante du compte" });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('account_schools')
+      .delete()
+      .eq('user_id', userId)
+      .eq('school_id', schoolId);
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_log').insert({
+      user_id: req.user.id,
+      school_id: schoolId,
+      action: 'unlink_school_from_account',
+      target_type: 'profile',
+      target_id: userId,
+      details: { school_id: schoolId },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur détachement école:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ============================================================
 // AUDIT LOG
 // ============================================================
 
