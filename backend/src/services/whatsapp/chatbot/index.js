@@ -1632,8 +1632,35 @@ async function markProcessed(incomingMsgId) {
 // Adapter Baileys (callback fourni à baileysClient.startSession)
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Déballe les enveloppes de message WhatsApp. Quand un chat a les « messages
+ * éphémères » (disparition automatique) activés, ou pour les « view once » et
+ * les documents légendés, Baileys imbrique le vrai contenu sous un conteneur :
+ *   m.ephemeralMessage.message.locationMessage
+ *   m.viewOnceMessage.message.imageMessage
+ *   m.documentWithCaptionMessage.message.documentMessage
+ * Sans déballage, m.locationMessage / m.imageMessage sont undefined → aucune
+ * détection (silence total). On déballe récursivement jusqu'au contenu réel.
+ */
+function unwrapMessage(message) {
+  let m = message || {};
+  for (let i = 0; i < 5; i += 1) {
+    const inner =
+      m.ephemeralMessage?.message ||
+      m.viewOnceMessage?.message ||
+      m.viewOnceMessageV2?.message ||
+      m.viewOnceMessageV2Extension?.message ||
+      m.documentWithCaptionMessage?.message ||
+      m.editedMessage?.message ||
+      null;
+    if (!inner) break;
+    m = inner;
+  }
+  return m;
+}
+
 export async function handleBaileysIncoming({ schoolId, msg, sock }) {
-  const m = msg.message || {};
+  const m = unwrapMessage(msg.message);
   const text =
     m.conversation ||
     m.extendedTextMessage?.text ||
