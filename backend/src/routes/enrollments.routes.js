@@ -425,24 +425,36 @@ router.get('/cross-school/search', async (req, res) => {
   try {
     const activeSchool = getSchoolId(req);
     const q = (req.query.q || '').trim();
-    if (!q) return res.json([]);
+    const level = (req.query.level || '').trim().toUpperCase();
 
     const allowed = await getAllowedSchoolIds(req);
     const otherSchools = allowed.filter((id) => id !== activeSchool);
     if (otherSchools.length === 0) return res.json([]);
+    // Sans aucun critère (ni nom ni niveau), on n'inonde pas la liste.
+    if (!q && !level) return res.json([]);
 
-    const pattern = `%${q}%`;
-    const { data, error } = await supabaseAdmin
+    // Filtre par niveau → jointure interne sur la classe pour ne garder que les
+    // élèves de ce niveau (ex : tous les 6AP du primaire associé).
+    const useInner = !!level;
+    let query = supabaseAdmin
       .from('profiles')
       .select(`
         id, first_name, last_name, massar_code, avatar, avatar_url, school_id,
-        class:classes(id, name, level, filiere),
+        class:classes${useInner ? '!inner' : ''}(id, name, level, filiere),
         school:schools(id, name)
       `)
       .eq('role', 'student')
       .in('school_id', otherSchools)
-      .or(`first_name.ilike.${pattern},last_name.ilike.${pattern},massar_code.ilike.${pattern}`)
-      .limit(20);
+      .order('last_name', { ascending: true })
+      .limit(100);
+
+    if (level) query = query.eq('class.level', level);
+    if (q) {
+      const pattern = `%${q}%`;
+      query = query.or(`first_name.ilike.${pattern},last_name.ilike.${pattern},massar_code.ilike.${pattern}`);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
 
     const results = (data || []).map((s) => ({

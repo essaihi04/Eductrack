@@ -37,8 +37,8 @@ export const enrollmentsApi = {
   reinscription: (payload) => request('/api/enrollments/reinscription', { method: 'POST', body: payload }),
   autoReinscription: (fromYear, options) => request('/api/enrollments/auto-reinscription', { method: 'POST', body: { from_year: fromYear, options } }),
   reset: (year) => request('/api/enrollments/reset', { method: 'POST', body: { year } }),
-  // Recherche d'élèves dans les écoles associées (pour réinscription inter-écoles)
-  crossSchoolSearch: (q) => request('/api/enrollments/cross-school/search', { query: { q } }),
+  // Recherche d'élèves dans les écoles associées (par nom et/ou par niveau)
+  crossSchoolSearch: (q, level) => request('/api/enrollments/cross-school/search', { query: { q, level } }),
   // Réinscription d'un élève (propre école = RI, école associée = déménagement NI)
   reinscribe: (payload) => request('/api/enrollments/reinscribe', { method: 'POST', body: payload }),
 };

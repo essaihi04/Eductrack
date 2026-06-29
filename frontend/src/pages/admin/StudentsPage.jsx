@@ -31,6 +31,7 @@ const StudentsPage = () => {
   // Modale de recherche « Récupérer un élève d'un autre établissement »
   const [crossOpen, setCrossOpen] = useState(false);
   const [crossSearch, setCrossSearch] = useState('');
+  const [crossLevelFilter, setCrossLevelFilter] = useState('');
   const [crossResults, setCrossResults] = useState([]);
   const [crossSearching, setCrossSearching] = useState(false);
   // Modale unifiée de réinscription (propre école OU école associée)
@@ -971,16 +972,18 @@ L'administration de ${schoolName}`;
 
   // Ouvre la modale de recherche des écoles associées.
   const openCrossModal = () => {
-    setCrossSearch(''); setCrossResults([]);
+    setCrossSearch(''); setCrossLevelFilter(''); setCrossResults([]);
     setCrossOpen(true);
   };
 
-  const runCrossSearch = async (q) => {
-    setCrossSearch(q);
-    if (!q || q.trim().length < 2) { setCrossResults([]); return; }
+  // Recherche par nom ET/OU par niveau (ex : lister tous les 6AP du primaire associé).
+  const runCrossSearch = async (q, level) => {
+    const name = (q ?? crossSearch).trim();
+    const lvl = level ?? crossLevelFilter;
+    if (name.length < 2 && !lvl) { setCrossResults([]); return; }
     setCrossSearching(true);
     try {
-      setCrossResults(await enrollmentsApi.crossSchoolSearch(q.trim()));
+      setCrossResults(await enrollmentsApi.crossSchoolSearch(name, lvl));
     } catch (e) {
       console.error('Recherche inter-écoles:', e);
       setCrossResults([]);
@@ -2125,27 +2128,38 @@ L'administration de ${schoolName}`;
             </div>
 
             <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Rechercher l'élève par nom</label>
-                <div className="relative">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
                   <input
                     autoFocus
                     value={crossSearch}
-                    onChange={(e) => runCrossSearch(e.target.value)}
+                    onChange={(e) => { setCrossSearch(e.target.value); runCrossSearch(e.target.value, crossLevelFilter); }}
                     placeholder="Nom, prénom ou code Massar…"
                     className="w-full pl-8 pr-3 py-2 border rounded-lg text-sm"
                   />
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Recherche dans les établissements associés à votre compte. Choisissez un élève pour le réinscrire ici.
-                </p>
+                <select
+                  value={crossLevelFilter}
+                  onChange={(e) => { setCrossLevelFilter(e.target.value); runCrossSearch(crossSearch, e.target.value); }}
+                  className="border rounded-lg text-sm px-2 py-2 w-32"
+                  title="Filtrer par niveau"
+                >
+                  <option value="">Niveau…</option>
+                  {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                </select>
               </div>
+              <p className="text-[11px] text-gray-400 -mt-2">
+                Cherchez par nom, ou choisissez un niveau pour lister tous les élèves de ce niveau dans les établissements associés (ex : tous les 6AP du primaire). Cliquez un élève pour le réinscrire ici.
+              </p>
 
               <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
                 {crossSearching && <div className="p-3 text-sm text-gray-500">Recherche…</div>}
-                {!crossSearching && crossSearch.trim().length >= 2 && crossResults.length === 0 && (
-                  <div className="p-3 text-sm text-gray-500">Aucun élève trouvé dans les autres établissements.</div>
+                {!crossSearching && (crossSearch.trim().length >= 2 || crossLevelFilter) && crossResults.length === 0 && (
+                  <div className="p-3 text-sm text-gray-500">Aucun élève trouvé dans les établissements associés.</div>
+                )}
+                {!crossSearching && crossSearch.trim().length < 2 && !crossLevelFilter && (
+                  <div className="p-3 text-sm text-gray-400">Tapez un nom ou choisissez un niveau pour afficher les élèves.</div>
                 )}
                 {crossResults.map((s) => (
                   <button key={s.id} onClick={() => openReinscribeFromCross(s)}
