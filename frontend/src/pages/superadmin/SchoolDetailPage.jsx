@@ -188,7 +188,7 @@ const SchoolDetailPage = () => {
     });
     if (!res.ok) {
       const err = await res.json();
-      alert(err.error || 'Impossible de détacher l'école active du compte');
+      alert(err.error || "Impossible de détacher l'école active du compte");
       return;
     }
     await loadAdminLinks(userId);
