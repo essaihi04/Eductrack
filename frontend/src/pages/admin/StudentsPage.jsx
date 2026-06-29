@@ -10,7 +10,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
-import { LEVEL_ORDER } from '../../lib/levelProgression';
+import { LEVEL_ORDER, nextLevel } from '../../lib/levelProgression';
 
 const StudentsPage = () => {
   const { profile, availableSchools } = useAuth();
@@ -28,16 +28,19 @@ const StudentsPage = () => {
   const [moveSearch, setMoveSearch] = useState('');
   const [moveTargetId, setMoveTargetId] = useState('');
   const [moving, setMoving] = useState(false);
-  // Modale « Inscrire un élève d'un autre établissement » (compte multi-écoles)
+  // Modale de recherche « Récupérer un élève d'un autre établissement »
   const [crossOpen, setCrossOpen] = useState(false);
   const [crossSearch, setCrossSearch] = useState('');
   const [crossResults, setCrossResults] = useState([]);
   const [crossSearching, setCrossSearching] = useState(false);
-  const [crossSelected, setCrossSelected] = useState(null); // élève choisi
-  const [crossLevel, setCrossLevel] = useState(''); // niveau cible (modifiable)
-  const [crossClassId, setCrossClassId] = useState(''); // classe cible existante (optionnel)
-  const [crossBusy, setCrossBusy] = useState(false);
-  const [crossMsg, setCrossMsg] = useState(null); // { type, text }
+  // Modale unifiée de réinscription (propre école OU école associée)
+  const [reinscribeTarget, setReinscribeTarget] = useState(null); // { id, name, school_name, current_level, suggested_level, isCross }
+  const [reinscribeLevel, setReinscribeLevel] = useState('');
+  const [reinscribeClassId, setReinscribeClassId] = useState('');
+  const [reinscribeBusy, setReinscribeBusy] = useState(false);
+  const [reinscribeMsg, setReinscribeMsg] = useState(null); // { type, text }
+  // Identifiants des élèves réinscrits (statut RI/NI) pour l'année active.
+  const [activeIds, setActiveIds] = useState(new Set());
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer
   const [searchParams, setSearchParams] = useSearchParams();
@@ -205,14 +208,10 @@ const StudentsPage = () => {
   // Fonction pour filtrer les élèves
   const getFilteredStudents = () => {
     return students.filter(student => {
-      // Filtre par année scolaire active : l'élève est retenu si sa classe appartient à
-      // l'année active. Les élèves sans classe (non affectés) restent toujours visibles.
-      if (student.class_id) {
-        const studentClass = classes.find(c => c.id === student.class_id);
-        if (studentClass && studentClass.academic_year && studentClass.academic_year !== year) {
-          return false;
-        }
-      }
+      // Année scolaire : on n'exclut plus les élèves d'une autre année. Ceux qui
+      // ne sont pas réinscrits dans l'année active sont affichés comme « candidats »
+      // (badge « non réinscrit ») via studentYearStatus(), pour permettre leur
+      // réinscription depuis cette page.
 
       // Filtre par classe (ID exact ou "unassigned" pour les élèves sans classe)
       if (filters.className) {
@@ -344,6 +343,24 @@ const StudentsPage = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Réinscriptions de l'année active (source de vérité pour le statut « actif »).
+  const refreshActiveIds = async () => {
+    try {
+      const rows = await enrollmentsApi.list(year);
+      const ids = (rows || [])
+        .filter((r) => r.status !== 'NR')
+        .map((r) => r.student_id || r.student?.id)
+        .filter(Boolean);
+      setActiveIds(new Set(ids));
+    } catch {
+      setActiveIds(new Set());
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin) refreshActiveIds();
+  }, [year, isAdmin]);
 
   // Interconnexion avec la page Classes : ?student=<id> ouvre directement la fiche
   // de l'élève (et nettoie l'URL ensuite pour ne pas la rouvrir au prochain rendu).
@@ -936,16 +953,30 @@ L'administration de ${schoolName}`;
     }
   };
 
-  // --- Réinscription inter-établissements (compte multi-écoles) -------------
+  // --- Réinscription (propre école + écoles associées) ----------------------
+
+  // Statut d'un élève vis-à-vis de l'année active : 'active' (réinscrit / classe
+  // de l'année), 'candidate' (était dans une autre année, pas réinscrit) ou
+  // 'neutral' (sans classe, non concerné).
+  const studentYearStatus = (student) => {
+    if (activeIds.has(student.id)) return 'active';
+    if (student.class_id) {
+      const cls = classes.find((c) => c.id === student.class_id);
+      const cy = cls?.academic_year;
+      if (cy && cy === year) return 'active';
+      if (cy && cy !== year) return 'candidate';
+    }
+    return 'neutral';
+  };
+
+  // Ouvre la modale de recherche des écoles associées.
   const openCrossModal = () => {
-    setCrossSearch(''); setCrossResults([]); setCrossSelected(null);
-    setCrossLevel(''); setCrossClassId(''); setCrossMsg(null);
+    setCrossSearch(''); setCrossResults([]);
     setCrossOpen(true);
   };
 
   const runCrossSearch = async (q) => {
     setCrossSearch(q);
-    setCrossSelected(null);
     if (!q || q.trim().length < 2) { setCrossResults([]); return; }
     setCrossSearching(true);
     try {
@@ -958,28 +989,56 @@ L'administration de ${schoolName}`;
     }
   };
 
-  const pickCrossStudent = (s) => {
-    setCrossSelected(s);
-    setCrossLevel(s.suggested_level || s.current_level || '');
-    setCrossClassId('');
+  // Prépare la modale de réinscription pour un élève de la PROPRE école (candidat).
+  const openReinscribe = (s) => {
+    const cls = classes.find((c) => c.id === s.class_id);
+    const curLevel = s.level || cls?.level || '';
+    setReinscribeTarget({
+      id: s.id,
+      name: `${s.first_name} ${s.last_name}`,
+      school_name: null,
+      current_level: curLevel,
+      suggested_level: nextLevel(curLevel),
+      isCross: false,
+    });
+    setReinscribeLevel(nextLevel(curLevel) || curLevel || '');
+    setReinscribeClassId('');
+    setReinscribeMsg(null);
   };
 
-  const submitCrossTransfer = async () => {
-    if (!crossSelected) return;
-    setCrossBusy(true); setCrossMsg(null);
+  // Idem depuis un résultat de recherche d'une école associée.
+  const openReinscribeFromCross = (s) => {
+    setReinscribeTarget({
+      id: s.id,
+      name: `${s.first_name} ${s.last_name}`,
+      school_name: s.school?.name || null,
+      current_level: s.current_level,
+      suggested_level: s.suggested_level,
+      isCross: true,
+    });
+    setReinscribeLevel(s.suggested_level || s.current_level || '');
+    setReinscribeClassId('');
+    setReinscribeMsg(null);
+    setCrossOpen(false);
+  };
+
+  const submitReinscribe = async () => {
+    if (!reinscribeTarget) return;
+    setReinscribeBusy(true); setReinscribeMsg(null);
     try {
-      const payload = { student_id: crossSelected.id };
-      if (crossClassId) payload.target_class_id = crossClassId;
-      else if (crossLevel) payload.target_level = crossLevel;
-      const r = await enrollmentsApi.crossSchoolTransfer(payload);
-      setCrossMsg({ type: 'ok', text: `${crossSelected.first_name} ${crossSelected.last_name} réinscrit(e) en ${r.level} (${r.academic_year}).` });
+      const payload = { student_id: reinscribeTarget.id, academic_year: year };
+      if (reinscribeClassId) payload.target_class_id = reinscribeClassId;
+      else if (reinscribeLevel) payload.target_level = reinscribeLevel;
+      const r = await enrollmentsApi.reinscribe(payload);
       await fetchData();
-      // Réinitialise pour permettre d'enchaîner d'autres élèves.
-      setCrossSelected(null); setCrossSearch(''); setCrossResults([]);
+      await refreshActiveIds();
+      const name = reinscribeTarget.name;
+      setReinscribeTarget(null);
+      alert(`${name} réinscrit(e) en ${r.level} pour ${r.academic_year}.`);
     } catch (e) {
-      setCrossMsg({ type: 'err', text: e.message || 'Erreur lors de la réinscription' });
+      setReinscribeMsg({ type: 'err', text: e.message || 'Erreur lors de la réinscription' });
     } finally {
-      setCrossBusy(false);
+      setReinscribeBusy(false);
     }
   };
 
@@ -1337,11 +1396,11 @@ L'administration de ${schoolName}`;
                   {isMultiSchool && (
                     <button
                       onClick={openCrossModal}
-                      title="Inscrire un élève venant d'un autre établissement du compte (réinscription avec promotion de niveau)"
+                      title="Récupérer un élève d'un établissement associé pour le réinscrire ici (avec promotion de niveau)"
                       className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-700"
                     >
                       <ArrowRightLeft className="w-3.5 h-3.5" />
-                      Inscrire d'un autre établissement
+                      Récupérer d'un autre établissement
                     </button>
                   )}
                   <button
@@ -1666,45 +1725,65 @@ L'administration de ${schoolName}`;
                       {parentStatus(s)}{locationStatus(s)}
                     </div>
                   );
+                  // Badge + bouton pour un élève non réinscrit (candidat).
+                  const candidateStatus = (s) => (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <StatusPill tone="red" icon={AlertTriangle}>Non réinscrit</StatusPill>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openReinscribe(s); }}
+                        className="text-xs bg-violet-600 text-white px-2 py-1 rounded hover:bg-violet-700 flex items-center gap-1"
+                      >
+                        <ArrowRightLeft className="w-3 h-3" /> Réinscrire
+                      </button>
+                    </div>
+                  );
 
                   if (viewMode === 'grid') {
                     return (
                       <CardGrid min={180}>
-                        {list.map((student) => (
-                          <StudentCard
-                            key={student.id}
-                            name={`${student.first_name} ${student.last_name}`}
-                            photo={student.avatar_url}
-                            gender={student.gender || ''}
-                            classLabel={classLabel(student)}
-                            status={cardStatus(student)}
-                            selectable={isAdmin}
-                            selected={selectedStudents.has(student.id)}
-                            onToggleSelect={() => toggleStudentSelection(student.id)}
-                            onClick={() => setActiveStudent(student)}
-                          />
-                        ))}
+                        {list.map((student) => {
+                          const isCandidate = studentYearStatus(student) === 'candidate';
+                          return (
+                            <div key={student.id} className={isCandidate ? 'opacity-90 grayscale-[35%]' : ''}>
+                              <StudentCard
+                                name={`${student.first_name} ${student.last_name}`}
+                                photo={student.avatar_url}
+                                gender={student.gender || ''}
+                                className={classLabel(student)}
+                                status={isCandidate ? candidateStatus(student) : cardStatus(student)}
+                                selectable={isAdmin && !isCandidate}
+                                selected={selectedStudents.has(student.id)}
+                                onToggleSelect={() => toggleStudentSelection(student.id)}
+                                onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
+                              />
+                            </div>
+                          );
+                        })}
                       </CardGrid>
                     );
                   }
 
                   return (
                     <div>
-                      {list.map((student) => (
-                        <StudentRow
-                          key={student.id}
-                          name={`${student.first_name} ${student.last_name}`}
-                          photo={student.avatar_url}
-                          gender={student.gender || ''}
-                          classLabel={classLabel(student)}
-                          sub={student.email}
-                          status={cardStatus(student)}
-                          selectable={isAdmin}
-                          selected={selectedStudents.has(student.id)}
-                          onToggleSelect={() => toggleStudentSelection(student.id)}
-                          onClick={() => setActiveStudent(student)}
-                        />
-                      ))}
+                      {list.map((student) => {
+                        const isCandidate = studentYearStatus(student) === 'candidate';
+                        return (
+                          <div key={student.id} className={isCandidate ? 'opacity-90 grayscale-[35%]' : ''}>
+                            <StudentRow
+                              name={`${student.first_name} ${student.last_name}`}
+                              photo={student.avatar_url}
+                              gender={student.gender || ''}
+                              className={classLabel(student)}
+                              sub={student.email}
+                              status={isCandidate ? candidateStatus(student) : cardStatus(student)}
+                              selectable={isAdmin && !isCandidate}
+                              selected={selectedStudents.has(student.id)}
+                              onToggleSelect={() => toggleStudentSelection(student.id)}
+                              onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -2029,31 +2108,23 @@ L'administration de ${schoolName}`;
         );
       })()}
 
-      {/* Modale : inscrire un élève d'un autre établissement (compte multi-écoles) */}
+      {/* Modale : récupérer un élève d'un établissement associé (recherche par nom) */}
       {crossOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => { if (!crossBusy) setCrossOpen(false); }}>
+          onClick={() => setCrossOpen(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b">
               <div className="flex items-center gap-2">
                 <ArrowRightLeft className="w-5 h-5 text-violet-600" />
-                <h3 className="font-semibold">Inscrire un élève d'un autre établissement</h3>
+                <h3 className="font-semibold">Récupérer un élève d'un autre établissement</h3>
               </div>
-              <button onClick={() => { if (!crossBusy) setCrossOpen(false); }} className="p-1 rounded hover:bg-gray-100">
+              <button onClick={() => setCrossOpen(false)} className="p-1 rounded hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-4 space-y-4">
-              {crossMsg && (
-                <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${crossMsg.type === 'ok' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-700'}`}>
-                  {crossMsg.type === 'ok' ? <Check className="w-4 h-4 mt-0.5 shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />}
-                  <span>{crossMsg.text}</span>
-                </div>
-              )}
-
-              {/* Recherche */}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Rechercher l'élève par nom</label>
                 <div className="relative">
@@ -2066,85 +2137,114 @@ L'administration de ${schoolName}`;
                     className="w-full pl-8 pr-3 py-2 border rounded-lg text-sm"
                   />
                 </div>
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Recherche dans les établissements associés à votre compte. Choisissez un élève pour le réinscrire ici.
+                </p>
               </div>
 
-              {/* Résultats */}
-              {!crossSelected && (
-                <div className="border rounded-lg divide-y max-h-56 overflow-y-auto">
-                  {crossSearching && <div className="p-3 text-sm text-gray-500">Recherche…</div>}
-                  {!crossSearching && crossSearch.trim().length >= 2 && crossResults.length === 0 && (
-                    <div className="p-3 text-sm text-gray-500">Aucun élève trouvé dans les autres établissements.</div>
-                  )}
-                  {crossResults.map((s) => (
-                    <button key={s.id} onClick={() => pickCrossStudent(s)}
-                      className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{s.first_name} {s.last_name}</div>
-                        <div className="text-xs text-gray-500 truncate">
-                          {s.school?.name || 'Établissement'}{s.class?.name ? ` · ${s.class.name}` : ''}{s.current_level ? ` (${s.current_level})` : ''}
-                        </div>
+              <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
+                {crossSearching && <div className="p-3 text-sm text-gray-500">Recherche…</div>}
+                {!crossSearching && crossSearch.trim().length >= 2 && crossResults.length === 0 && (
+                  <div className="p-3 text-sm text-gray-500">Aucun élève trouvé dans les autres établissements.</div>
+                )}
+                {crossResults.map((s) => (
+                  <button key={s.id} onClick={() => openReinscribeFromCross(s)}
+                    className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{s.first_name} {s.last_name}</div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {s.school?.name || 'Établissement'}{s.class?.name ? ` · ${s.class.name}` : ''}{s.current_level ? ` (${s.current_level})` : ''}
                       </div>
-                      {s.suggested_level && (
-                        <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {s.suggested_level}</span>
-                      )}
-                    </button>
-                  ))}
+                    </div>
+                    {s.suggested_level && (
+                      <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {s.suggested_level}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 p-4 border-t">
+              <button onClick={() => setCrossOpen(false)}
+                className="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale unifiée : confirmer la réinscription (niveau + classe optionnelle) */}
+      {reinscribeTarget && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => { if (!reinscribeBusy) setReinscribeTarget(null); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b">
+              <div className="flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5 text-violet-600" />
+                <h3 className="font-semibold">Réinscrire — {year}</h3>
+              </div>
+              <button onClick={() => { if (!reinscribeBusy) setReinscribeTarget(null); }} className="p-1 rounded hover:bg-gray-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {reinscribeMsg && (
+                <div className={`flex items-start gap-2 p-3 rounded-lg text-sm ${reinscribeMsg.type === 'ok' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{reinscribeMsg.text}</span>
                 </div>
               )}
 
-              {/* Élève sélectionné + niveau cible */}
-              {crossSelected && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-violet-50 border border-violet-200">
-                    <div>
-                      <div className="font-semibold text-sm">{crossSelected.first_name} {crossSelected.last_name}</div>
-                      <div className="text-xs text-gray-600">
-                        {crossSelected.school?.name}{crossSelected.current_level ? ` · ${crossSelected.current_level}` : ''}
-                      </div>
-                    </div>
-                    <button onClick={() => setCrossSelected(null)} className="text-xs text-violet-700 underline">Changer</button>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Niveau d'inscription (proposé automatiquement)</label>
-                    <select value={crossLevel} onChange={(e) => { setCrossLevel(e.target.value); setCrossClassId(''); }}
-                      className="w-full px-3 py-2 border rounded-lg text-sm">
-                      {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Classe d'accueil (optionnel)</label>
-                    <select value={crossClassId} onChange={(e) => setCrossClassId(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg text-sm">
-                      <option value="">Niveau seul — à affecter à une classe plus tard</option>
-                      {classes
-                        .filter((c) => !crossLevel || c.level === crossLevel)
-                        .map((c) => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
-                    </select>
-                    {!crossClassId && (
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        Aucune classe ne sera créée : l'élève est promu au niveau {crossLevel || '—'}. Vous l'affecterez à une classe depuis la page Classes.
-                      </p>
-                    )}
-                  </div>
-
-                  <p className="text-xs text-gray-500">
-                    L'élève sera <strong>déplacé</strong> vers cet établissement (il quittera son école d'origine).
-                    Ses parents et son code Massar sont conservés.
-                  </p>
+              <div className="p-3 rounded-lg bg-violet-50 border border-violet-200">
+                <div className="font-semibold text-sm">{reinscribeTarget.name}</div>
+                <div className="text-xs text-gray-600">
+                  {reinscribeTarget.school_name ? `${reinscribeTarget.school_name} · ` : ''}
+                  {reinscribeTarget.current_level ? `Niveau actuel : ${reinscribeTarget.current_level}` : 'Niveau actuel inconnu'}
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Niveau de réinscription (proposé automatiquement)</label>
+                <select value={reinscribeLevel} onChange={(e) => { setReinscribeLevel(e.target.value); setReinscribeClassId(''); }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm">
+                  {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Classe d'accueil (optionnel)</label>
+                <select value={reinscribeClassId} onChange={(e) => setReinscribeClassId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm">
+                  <option value="">Niveau seul — à affecter à une classe plus tard</option>
+                  {classes
+                    .filter((c) => (!reinscribeLevel || c.level === reinscribeLevel) && (!c.academic_year || c.academic_year === year))
+                    .map((c) => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
+                </select>
+                {!reinscribeClassId && (
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Aucune classe ne sera créée : l'élève est promu au niveau {reinscribeLevel || '—'}. Vous l'affecterez à une classe depuis la page Classes.
+                  </p>
+                )}
+              </div>
+
+              {reinscribeTarget.isCross && (
+                <p className="text-xs text-gray-500">
+                  Cet élève vient d'un établissement associé : il sera <strong>déplacé</strong> ici (il quittera son école d'origine). Ses parents et son code Massar sont conservés.
+                </p>
               )}
             </div>
 
             <div className="flex justify-end gap-2 p-4 border-t">
-              <button onClick={() => setCrossOpen(false)} disabled={crossBusy}
+              <button onClick={() => setReinscribeTarget(null)} disabled={reinscribeBusy}
                 className="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50">
-                Fermer
+                Annuler
               </button>
-              <button onClick={submitCrossTransfer} disabled={crossBusy || !crossSelected}
+              <button onClick={submitReinscribe} disabled={reinscribeBusy}
                 className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 disabled:opacity-50 flex items-center gap-1.5">
-                {crossBusy ? 'Réinscription…' : <><Check className="w-4 h-4" /> Réinscrire</>}
+                {reinscribeBusy ? 'Réinscription…' : <><Check className="w-4 h-4" /> Réinscrire</>}
               </button>
             </div>
           </div>

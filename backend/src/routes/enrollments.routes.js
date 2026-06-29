@@ -161,7 +161,7 @@ router.get('/', async (req, res) => {
     let q = supabaseAdmin
       .from('student_enrollments')
       .select(`
-        id, status, academic_year, class_id, previous_class_id,
+        id, status, academic_year, student_id, class_id, previous_class_id,
         student:profiles!student_enrollments_student_id_fkey(id, first_name, last_name, massar_code, avatar, avatar_url),
         class:classes!student_enrollments_class_id_fkey(id, name, level, filiere)
       `)
@@ -457,19 +457,25 @@ router.get('/cross-school/search', async (req, res) => {
   }
 });
 
-// --- POST /api/enrollments/cross-school/transfer ---------------------------
-// Déménage un élève d'une autre école du compte vers l'école active, en le
-// promouvant au niveau suivant (ou un niveau choisi). Parents et code Massar
-// (indépendants de l'école) sont conservés.
-// body: { student_id, target_class_id?, target_level? }
-router.post('/cross-school/transfer', requireSchoolAdmin, async (req, res) => {
+// --- POST /api/enrollments/reinscribe --------------------------------------
+// Réinscrit un élève dans l'école active pour l'année cible, promu au niveau
+// suivant (ou un niveau choisi), SANS créer de classe (sauf si une classe
+// existante est explicitement fournie).
+//   - élève de la PROPRE école active   → statut RI (réinscrit)
+//   - élève d'une école ASSOCIÉE        → déménagement vers l'école active (NI)
+// Parents et code Massar (indépendants de l'école) sont conservés.
+// body: { student_id, academic_year?, target_class_id?, target_level? }
+router.post('/reinscribe', requireSchoolAdmin, async (req, res) => {
   try {
     const activeSchool = getSchoolId(req);
     if (!activeSchool) return res.status(400).json({ error: 'school_id requis' });
     const { student_id, target_class_id } = req.body;
     if (!student_id) return res.status(400).json({ error: 'student_id requis' });
 
-    // 1) L'élève doit appartenir à une autre école autorisée du compte.
+    // Année cible = celle envoyée par le front (année active), sinon année courante.
+    const year = req.body.academic_year || currentYear();
+
+    // 1) L'élève doit appartenir à une école autorisée du compte (propre ou associée).
     const allowed = await getAllowedSchoolIds(req);
     const { data: student } = await supabaseAdmin
       .from('profiles')
@@ -481,25 +487,20 @@ router.post('/cross-school/transfer', requireSchoolAdmin, async (req, res) => {
     if (!allowed.includes(student.school_id)) {
       return res.status(403).json({ error: 'Cet élève n’appartient pas à un établissement de votre compte' });
     }
-    if (student.school_id === activeSchool) {
-      return res.status(400).json({ error: 'Élève déjà dans l’école active' });
-    }
+
+    const isCrossSchool = student.school_id !== activeSchool;
+    const status = isCrossSchool ? 'NI' : 'RI';
 
     // 2) Niveau cible : explicite, sinon promotion automatique (6AP → 1AC).
     const srcLevel = student.class?.level || null;
     const targetLevel = (req.body.target_level || nextLevel(srcLevel) || srcLevel || '').toUpperCase();
     if (!targetLevel) return res.status(400).json({ error: 'Impossible de déterminer le niveau cible' });
 
-    const year = currentYear();
-
-    // 3) Classe cible : UNIQUEMENT si une classe existante est explicitement choisie.
-    //    Sinon, on promeut l'élève au NIVEAU seul (sans créer de classe) — l'admin
-    //    créera/affectera les classes plus tard.
+    // 3) Classe cible : uniquement si une classe existante est choisie ; sinon
+    //    niveau seul (class_id null) — l'admin affectera la classe plus tard.
     const classId = target_class_id || null;
 
-    // 4) Déménagement : l'élève rejoint l'école active, promu au niveau cible.
-    //    Le niveau est stocké sur le profil (profiles.level) pour qu'il soit connu
-    //    même sans classe affectée.
+    // 4) Mise à jour du profil : école active (si déménagement), classe et niveau.
     const prevClassId = student.class_id || null;
     const { error: updErr } = await supabaseAdmin
       .from('profiles')
@@ -507,7 +508,7 @@ router.post('/cross-school/transfer', requireSchoolAdmin, async (req, res) => {
       .eq('id', student_id);
     if (updErr) throw updErr;
 
-    // 5) Inscription dans l'école active (nouveau dans cet établissement → NI).
+    // 5) Inscription pour l'année cible dans l'école active.
     const { error: enrErr } = await supabaseAdmin
       .from('student_enrollments')
       .upsert({
@@ -515,15 +516,15 @@ router.post('/cross-school/transfer', requireSchoolAdmin, async (req, res) => {
         student_id,
         class_id: classId,
         academic_year: year,
-        status: 'NI',
+        status,
         previous_class_id: prevClassId,
         created_by: req.user.id,
       }, { onConflict: 'student_id,academic_year' });
     if (enrErr) throw enrErr;
 
-    res.json({ success: true, student_id, class_id: classId, level: targetLevel, academic_year: year });
+    res.json({ success: true, student_id, class_id: classId, level: targetLevel, academic_year: year, status, cross_school: isCrossSchool });
   } catch (e) {
-    console.error('POST /enrollments/cross-school/transfer:', e);
+    console.error('POST /enrollments/reinscribe:', e);
     res.status(500).json({ error: 'Erreur serveur', details: e.message });
   }
 });
