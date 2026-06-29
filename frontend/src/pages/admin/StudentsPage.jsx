@@ -32,6 +32,8 @@ const StudentsPage = () => {
   const [crossOpen, setCrossOpen] = useState(false);
   const [crossSearch, setCrossSearch] = useState('');
   const [crossLevelFilter, setCrossLevelFilter] = useState('');
+  const [crossLevels, setCrossLevels] = useState([]); // vrais niveaux des écoles associées
+  const [crossTargetLevel, setCrossTargetLevel] = useState(''); // niveau cible pour la réinscription en masse
   const [crossResults, setCrossResults] = useState([]);
   const [crossSearching, setCrossSearching] = useState(false);
   // Modale unifiée de réinscription (propre école OU école associée)
@@ -971,10 +973,12 @@ L'administration de ${schoolName}`;
   };
 
   // Ouvre la modale et liste d'emblée les élèves des établissements associés.
-  const openCrossModal = () => {
-    setCrossSearch(''); setCrossLevelFilter(''); setCrossResults([]);
+  const openCrossModal = async () => {
+    setCrossSearch(''); setCrossLevelFilter(''); setCrossTargetLevel(''); setCrossResults([]);
     setCrossOpen(true);
     runCrossSearch('', '');
+    try { const { levels } = await enrollmentsApi.crossSchoolLevels(); setCrossLevels(levels || []); }
+    catch { setCrossLevels([]); }
   };
 
   // Recherche par nom ET/OU par niveau (ex : lister tous les 6AP du primaire associé).
@@ -996,11 +1000,11 @@ L'administration de ${schoolName}`;
   // Réinscrit en masse tout un niveau d'un établissement associé (ex : tous les 6AP).
   const reinscribeWholeLevel = async () => {
     if (!crossLevelFilter) return;
-    const next = nextLevel(crossLevelFilter) || crossLevelFilter;
+    const next = crossTargetLevel || nextLevel(crossLevelFilter) || crossLevelFilter;
     if (!window.confirm(`Réinscrire TOUS les élèves de niveau ${crossLevelFilter} des établissements associés vers ${next} (année ${year}) ? Ils seront déplacés vers cet établissement.`)) return;
     setCrossSearching(true);
     try {
-      const r = await enrollmentsApi.reinscribeLevel({ source_level: crossLevelFilter, academic_year: year });
+      const r = await enrollmentsApi.reinscribeLevel({ source_level: crossLevelFilter, target_level: next, academic_year: year });
       await fetchData();
       await refreshActiveIds();
       setCrossOpen(false);
@@ -2161,27 +2165,43 @@ L'administration de ${schoolName}`;
                 </div>
                 <select
                   value={crossLevelFilter}
-                  onChange={(e) => { setCrossLevelFilter(e.target.value); runCrossSearch(crossSearch, e.target.value); }}
-                  className="border rounded-lg text-sm px-2 py-2 w-32"
+                  onChange={(e) => {
+                    const lvl = e.target.value;
+                    setCrossLevelFilter(lvl);
+                    setCrossTargetLevel(nextLevel(lvl) || '');
+                    runCrossSearch(crossSearch, lvl);
+                  }}
+                  className="border rounded-lg text-sm px-2 py-2 w-36"
                   title="Filtrer par niveau"
                 >
                   <option value="">Niveau…</option>
-                  {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                  {(crossLevels.length ? crossLevels : LEVEL_ORDER).map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
                 </select>
               </div>
               <p className="text-[11px] text-gray-400 -mt-2">
-                Liste les élèves des établissements associés. Filtrez par niveau (ex : 6AP) puis cliquez un élève, ou utilisez « Réinscrire tout le niveau » pour récupérer toute la promotion.
+                Liste les élèves des établissements associés. Filtrez par niveau puis cliquez un élève, ou utilisez « Réinscrire tout le niveau » pour récupérer toute la promotion.
               </p>
 
               {crossLevelFilter && (
-                <button
-                  onClick={reinscribeWholeLevel}
-                  disabled={crossSearching}
-                  className="w-full flex items-center justify-center gap-2 bg-violet-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-violet-700 disabled:opacity-50"
-                >
-                  <ArrowRightLeft className="w-4 h-4" />
-                  Réinscrire tout le niveau {crossLevelFilter} → {nextLevel(crossLevelFilter) || crossLevelFilter} ({crossResults.length})
-                </button>
+                <div className="flex items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg p-2">
+                  <span className="text-xs text-violet-800 shrink-0">Niveau cible</span>
+                  <select
+                    value={crossTargetLevel}
+                    onChange={(e) => setCrossTargetLevel(e.target.value)}
+                    className="border rounded-lg text-sm px-2 py-1.5 w-28"
+                  >
+                    <option value="">(même)</option>
+                    {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                  </select>
+                  <button
+                    onClick={reinscribeWholeLevel}
+                    disabled={crossSearching}
+                    className="flex-1 flex items-center justify-center gap-2 bg-violet-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    <ArrowRightLeft className="w-4 h-4" />
+                    Réinscrire tout {crossLevelFilter} → {crossTargetLevel || crossLevelFilter} ({crossResults.length})
+                  </button>
+                </div>
               )}
 
               <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">

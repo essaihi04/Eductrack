@@ -468,6 +468,34 @@ router.get('/cross-school/search', async (req, res) => {
   }
 });
 
+// --- GET /api/enrollments/cross-school/levels ------------------------------
+// Niveaux RÉELS présents chez les élèves des établissements associés.
+// Permet de remplir le menu déroulant avec les vrais codes (ex: 6APG, 3APIC)
+// plutôt qu'une liste standard figée — sinon le filtre ne correspond à rien.
+router.get('/cross-school/levels', async (req, res) => {
+  try {
+    const activeSchool = getSchoolId(req);
+    const allowed = await getAllowedSchoolIds(req);
+    const otherSchools = allowed.filter((id) => id !== activeSchool);
+    if (otherSchools.length === 0) return res.json({ levels: [] });
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('class:classes(level)')
+      .eq('role', 'student')
+      .in('school_id', otherSchools)
+      .limit(3000);
+    if (error) throw error;
+
+    const set = new Set();
+    (data || []).forEach((s) => { const l = s.class?.level; if (l) set.add(l); });
+    res.json({ levels: Array.from(set).sort() });
+  } catch (e) {
+    console.error('GET /enrollments/cross-school/levels:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
 // --- POST /api/enrollments/reinscribe --------------------------------------
 // Réinscrit un élève dans l'école active pour l'année cible, promu au niveau
 // suivant (ou un niveau choisi), SANS créer de classe (sauf si une classe
