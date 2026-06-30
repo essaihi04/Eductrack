@@ -13,13 +13,40 @@ const getSchoolId = (req) => {
   return req.user.school_id || null;
 };
 
-// Écoles que le compte peut piloter = account_schools ∪ école active courante.
+// Écoles que le compte peut piloter, résolues au niveau ÉCOLE (pas au niveau
+// compte) : école active ∪ écoles associées par le super admin à N'IMPORTE QUEL
+// admin de l'école active.
+//
+// Pourquoi niveau école et pas niveau user : le super admin rattache une école
+// associée à un COMPTE admin précis (account_schools.user_id). Si une école a
+// plusieurs admins et que le rattachement a été fait sur un autre compte que
+// celui connecté, la réinscription inter-écoles ne voyait rien. On agrège donc
+// les liens de tous les admins de l'école active → l'association vaut pour toute
+// l'école, quel que soit l'admin connecté.
 const getAllowedSchoolIds = async (req) => {
   const ids = new Set();
-  if (req.user.school_id) ids.add(req.user.school_id);
-  const { data } = await supabaseAdmin
+  const activeSchool = getSchoolId(req) || req.user.school_id;
+  if (activeSchool) ids.add(activeSchool);
+
+  // 1) Liens directs du compte connecté.
+  const { data: own } = await supabaseAdmin
     .from('account_schools').select('school_id').eq('user_id', req.user.id);
-  (data || []).forEach((r) => r.school_id && ids.add(r.school_id));
+  (own || []).forEach((r) => r.school_id && ids.add(r.school_id));
+
+  // 2) Liens créés pour tout autre admin de la même école active.
+  if (activeSchool) {
+    const { data: peers } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('school_id', activeSchool)
+      .in('role', ['school_admin', 'pedagogical_director', 'pedagogical_manager']);
+    const peerIds = (peers || []).map((p) => p.id).filter((id) => id !== req.user.id);
+    if (peerIds.length) {
+      const { data: peerLinks } = await supabaseAdmin
+        .from('account_schools').select('school_id').in('user_id', peerIds);
+      (peerLinks || []).forEach((r) => r.school_id && ids.add(r.school_id));
+    }
+  }
   return Array.from(ids);
 };
 
@@ -438,7 +465,7 @@ router.get('/cross-school/search', async (req, res) => {
       .from('profiles')
       .select(`
         id, first_name, last_name, massar_code, avatar, avatar_url, school_id,
-        class:classes(id, name, level, filiere),
+        class:classes!fk_profiles_class(id, name, level, filiere),
         school:schools(id, name)
       `)
       .eq('role', 'student')
@@ -481,7 +508,7 @@ router.get('/cross-school/levels', async (req, res) => {
 
     const { data, error } = await supabaseAdmin
       .from('profiles')
-      .select('class:classes(level)')
+      .select('class:classes!fk_profiles_class(level)')
       .eq('role', 'student')
       .in('school_id', otherSchools)
       .limit(3000);
@@ -518,7 +545,7 @@ router.post('/reinscribe', requireSchoolAdmin, async (req, res) => {
     const allowed = await getAllowedSchoolIds(req);
     const { data: student } = await supabaseAdmin
       .from('profiles')
-      .select('id, school_id, class_id, class:classes(id, level, filiere)')
+      .select('id, school_id, class_id, class:classes!fk_profiles_class(id, level, filiere)')
       .eq('id', student_id)
       .eq('role', 'student')
       .single();
@@ -590,7 +617,7 @@ router.post('/cross-school/reinscribe-level', requireSchoolAdmin, async (req, re
     // Élèves du niveau source dans les établissements associés.
     const { data: students, error } = await supabaseAdmin
       .from('profiles')
-      .select('id, school_id, class_id, class:classes(id, level)')
+      .select('id, school_id, class_id, class:classes!fk_profiles_class(id, level)')
       .eq('role', 'student')
       .in('school_id', otherSchools)
       .limit(1000);
