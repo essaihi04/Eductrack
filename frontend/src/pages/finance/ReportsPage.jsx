@@ -6,6 +6,8 @@ import {
 import { financeApi, formatMAD, formatDate, METHOD_LABELS, EXPENSE_CATEGORIES } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, Card, Button } from '../../components/finance/ui';
 import { addPrevisionnelSheet, buildMatrix } from './previsionnelSheet';
+import { useAuth } from '../../contexts/AuthContext';
+import { loadLogoForPdf, addLogoToPdf } from '../../lib/schoolLogo';
 
 // Année scolaire courante (sept → août), pour l'onglet Prévisionnel de l'export complet.
 const currentAcademicYear = () => {
@@ -57,6 +59,7 @@ const GRANULARITIES = [
 ];
 
 const ReportsPage = () => {
+  const { profile } = useAuth();
   const [period, setPeriod] = useState('month');
   const [custom, setCustom] = useState({ from: todayISO(), to: todayISO() });
   const [granularity, setGranularity] = useState('day');
@@ -485,8 +488,16 @@ const ReportsPage = () => {
     const M = 14;
     let y = M;
 
+    // Logo de l'école (uploadé par le super admin) en haut à droite.
+    const logo = await loadLogoForPdf(profile?.school);
+    if (logo) addLogoToPdf(doc, logo, pageWidth - M - 18, y - 4, 18, 18);
+
     doc.setFontSize(16); doc.setFont('helvetica', 'bold');
     doc.text('Rapport financier', M, y); y += 7;
+    if (profile?.school?.name) {
+      doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(110);
+      doc.text(profile.school.name, M, y); doc.setTextColor(0); y += 5;
+    }
     doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(110);
     doc.text(`Période : ${formatDate(range.from)} — ${formatDate(range.to)}`, M, y);
     doc.text(`Édité le ${formatDate(todayISO())}`, pageWidth - M, y, { align: 'right' });

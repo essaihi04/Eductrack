@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { getEstablishmentConfig } from '../establishmentHeader.js';
+import { drawSchoolLogo } from '../schoolLogo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ARABIC_FONT_PATH = path.join(__dirname, '..', 'whatsapp', 'chatbot', 'fonts', 'NotoNaskhArabic-Regular.ttf');
@@ -163,16 +164,29 @@ export function generateControlReportPdf({ control, cls, subjectName, students, 
       doc.rect(0, 0, PAGE_W, BANNER_H).fill(C.primaryDk);
       doc.rect(0, BANNER_H - 4, PAGE_W, 4).fill(C.primary);
 
+      // Logo de l'école (uploadé par le super admin) sur fond blanc, à gauche.
+      let textX = MARGIN;
+      if (est.logoBuffer) {
+        const LW = 56, LH = BANNER_H - 24;
+        doc.save();
+        doc.roundedRect(MARGIN, 10, LW, LH, 6).fill('#ffffff');
+        doc.restore();
+        if (drawSchoolLogo(doc, est.logoBuffer, MARGIN + 4, 14, { fit: [LW - 8, LH - 8], align: 'center', valign: 'center' })) {
+          textX = MARGIN + LW + 12;
+        }
+      }
+      const textW = PAGE_W - MARGIN - 170 - textX;
+
       doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14);
-      smartText(doc, est.establishment || cls?.name || 'Établissement', MARGIN, 14, { width: CONTENT_W - 170 });
+      smartText(doc, est.establishment || cls?.name || 'Établissement', textX, 14, { width: textW });
 
       let hy = 33;
       doc.font('Helvetica').fontSize(7.5).fillColor('#bfdbfe');
-      if (est.academy) { smartText(doc, est.academy, MARGIN, hy, { width: CONTENT_W - 170 }); hy += 10; }
-      if (est.provincial_direction) { smartText(doc, est.provincial_direction, MARGIN, hy, { width: CONTENT_W - 170 }); hy += 10; }
+      if (est.academy) { smartText(doc, est.academy, textX, hy, { width: textW }); hy += 10; }
+      if (est.provincial_direction) { smartText(doc, est.provincial_direction, textX, hy, { width: textW }); hy += 10; }
 
       doc.font('Helvetica-Bold').fontSize(11).fillColor('#ffffff');
-      doc.text('RAPPORT DE CONTRÔLE', MARGIN, Math.max(hy + 2, 62), { width: CONTENT_W - 170 });
+      doc.text('RAPPORT DE CONTRÔLE', textX, Math.max(hy + 2, 62), { width: textW });
 
       // Bloc droit : année + date
       doc.font('Helvetica').fontSize(8.5).fillColor('#dbeafe');

@@ -11,6 +11,7 @@ import PDFDocument from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../../../config/supabase.js';
+import { fetchSchoolLogoBuffer, drawSchoolLogo } from '../../schoolLogo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ARABIC_FONT_PATH = path.join(__dirname, 'fonts', 'NotoNaskhArabic-Regular.ttf');
@@ -147,6 +148,8 @@ export async function fetchInvoiceForPdf(invoiceId) {
     .maybeSingle();
 
   if (error) throw error;
+  // Logo de l'école (uploadé par le super admin) pour l'en-tête du PDF.
+  if (invoice?.school) invoice.school._logoBuffer = await fetchSchoolLogoBuffer(invoice.school.logo_url);
   return invoice;
 }
 
@@ -182,6 +185,9 @@ export function buildInvoicePdfBuffer(invoice) {
       const currency = invoice.currency || 'MAD';
       const remaining = Number(invoice.total || 0) - Number(invoice.amount_paid || 0);
       const status = invoice.status || 'issued';
+
+      // Logo de l'école (uploadé par le super admin) en haut à droite.
+      drawSchoolLogo(doc, school._logoBuffer, 481, 50, { fit: [64, 64], align: 'center', valign: 'center' });
 
       // ───── Header école ─────
       doc.fontSize(20).fillColor('#0f172a');
@@ -352,6 +358,8 @@ export async function fetchBatchForReceipt(batchId) {
   if (!payments || payments.length === 0) return null;
 
   const first = payments[0];
+  // Logo de l'école (uploadé par le super admin) pour l'en-tête du reçu.
+  if (first.school) first.school._logoBuffer = await fetchSchoolLogoBuffer(first.school.logo_url);
   const byStudent = new Map();
   for (const p of payments) {
     const sid = p.student?.id || 'unknown';
@@ -398,6 +406,8 @@ export function buildBatchReceiptPdfBuffer(batch) {
       doc.on('error', reject);
 
       const school = batch.school || {};
+      // Logo de l'école (uploadé par le super admin) en haut à droite.
+      drawSchoolLogo(doc, school._logoBuffer, 481, 50, { fit: [64, 64], align: 'center', valign: 'center' });
       // En-tête école
       doc.fontSize(20).fillColor('#0f172a');
       smartText(doc, school.name || 'École', undefined, undefined, { align: 'left' });

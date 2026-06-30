@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { FileText, Download, Calendar, BookOpen, Pencil, Check, ChevronDown } from 'lucide-react';
+import { loadLogoForPdf, addLogoToPdf } from '../../lib/schoolLogo';
 
 const CahierDeTexte = () => {
   const { profile } = useAuth();
@@ -235,6 +236,9 @@ const CahierDeTexte = () => {
         return;
       }
 
+      // Logo de l'école (uploadé par le super admin) pour l'en-tête.
+      const logo = await loadLogoForPdf(profile?.school);
+
       // Current school year
       const now = new Date();
       const yearStart = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
@@ -263,10 +267,13 @@ const CahierDeTexte = () => {
         // === HEADER ===
         let y = margin;
 
-        // School name placeholder
+        // Logo de l'école en haut à gauche (si disponible).
+        if (logo) addLogoToPdf(doc, logo, margin, y - 4, 18, 18);
+
+        // Nom de l'école (centré)
         doc.setFontSize(12);
         doc.setFont('helvetica', 'bold');
-        doc.text('Établissement Scolaire', pageWidth / 2, y, { align: 'center' });
+        doc.text(profile?.school?.name || 'Établissement Scolaire', pageWidth / 2, y, { align: 'center' });
         y += 8;
 
         // Class + Subject line

@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { getEstablishmentConfig } from '../establishmentHeader.js';
+import { drawSchoolLogo } from '../schoolLogo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ARABIC_FONT_PATH = path.join(__dirname, '..', 'whatsapp', 'chatbot', 'fonts', 'NotoNaskhArabic-Regular.ttf');
@@ -128,13 +129,22 @@ export function generateTimetablePdf({ student, cls, school, timetableSlots, est
       doc.rect(0, 0, PAGE_W, BANNER_H).fill(C.bannerBg);
       doc.rect(0, BANNER_H - 4, PAGE_W, 4).fill(C.bannerStrip);
 
-      // Logo placeholder circle
+      // Logo de l'école (uploadé par le super admin) sur pastille blanche.
+      // À défaut, on retombe sur la pastille verte « EDT ».
       const LOGO_X = MARGIN + 2;
       const LOGO_R = 28;
       const LOGO_CY = BANNER_H / 2 - 2;
-      doc.circle(LOGO_X + LOGO_R, LOGO_CY, LOGO_R).fill(C.bannerStrip);
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(C.bannerBg);
-      doc.text('EDT', LOGO_X + LOGO_R - 14, LOGO_CY - 6, { width: 28, align: 'center' });
+      doc.circle(LOGO_X + LOGO_R, LOGO_CY, LOGO_R).fill('#ffffff');
+      const logoDrawn = est.logoBuffer && drawSchoolLogo(
+        doc, est.logoBuffer,
+        LOGO_X + 6, LOGO_CY - LOGO_R + 6,
+        { fit: [LOGO_R * 2 - 12, LOGO_R * 2 - 12], align: 'center', valign: 'center' }
+      );
+      if (!logoDrawn) {
+        doc.circle(LOGO_X + LOGO_R, LOGO_CY, LOGO_R).fill(C.bannerStrip);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(C.bannerBg);
+        doc.text('EDT', LOGO_X + LOGO_R - 14, LOGO_CY - 6, { width: 28, align: 'center' });
+      }
 
       // Nom de l'établissement (config officielle > nom école)
       const nameX = LOGO_X + LOGO_R * 2 + 12;

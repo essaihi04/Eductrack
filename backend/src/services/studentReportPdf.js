@@ -24,6 +24,7 @@
 import PDFDocument from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { drawSchoolLogo } from './schoolLogo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -449,14 +450,21 @@ function drawDocument(doc, periodData, aiReport) {
   doc.rect(0, 0, PAGE_W, 92).fill(C.primary);
   doc.restore();
 
-  // Logo placeholder (cercle blanc avec initiales école)
-  const initials = (st.schoolName || 'E').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  // Logo de l'école (uploadé par le super admin) sur pastille blanche.
+  // À défaut, on retombe sur les initiales de l'école.
   doc.save();
   doc.circle(MARGIN + 18, 46, 18).fill('#ffffff');
-  doc.font('Helvetica-Bold').fontSize(13).fillColor(C.primary);
-  const tw = doc.widthOfString(initials);
-  doc.text(initials, MARGIN + 18 - tw / 2, 39);
   doc.restore();
+  const logoDrawn = st.logoBuffer && drawSchoolLogo(
+    doc, st.logoBuffer, MARGIN + 4, 32,
+    { fit: [28, 28], align: 'center', valign: 'center' }
+  );
+  if (!logoDrawn) {
+    const initials = (st.schoolName || 'E').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(C.primary);
+    const tw = doc.widthOfString(initials);
+    doc.text(initials, MARGIN + 18 - tw / 2, 39);
+  }
 
   // School + en-tête officiel + title
   const txtX = MARGIN + 50;

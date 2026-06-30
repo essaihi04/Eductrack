@@ -1161,7 +1161,8 @@ async function collectStudentPeriodData(studentId, startDate, endDate, schoolId)
       schoolName: establishment?.establishment || school?.name || '',
       academy: establishment?.academy || '',
       provincialDirection: establishment?.provincial_direction || '',
-      academicYear: student.classes?.academic_year || establishment?.academic_year || ''
+      academicYear: student.classes?.academic_year || establishment?.academic_year || '',
+      logoBuffer: establishment?.logoBuffer || null
     },
     period: { startDate, endDate },
     sessions: sessionDetails,

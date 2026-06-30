@@ -7,6 +7,7 @@
  */
 
 import { supabaseAdmin } from '../config/supabase.js';
+import { fetchSchoolLogoBuffer } from './schoolLogo.js';
 
 /**
  * @param {string} schoolId
@@ -23,11 +24,14 @@ export async function getEstablishmentConfig(schoolId, academicYear) {
   if (schoolId) {
     const { data } = await supabaseAdmin
       .from('schools')
-      .select('id, name, address, phone')
+      .select('id, name, address, phone, logo_url')
       .eq('id', schoolId)
       .single();
     school = data || null;
   }
+
+  // Logo de l'école (uploadé par le super admin) en Buffer pour PDFKit.
+  const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
 
   if (schoolId && academicYear) {
     const { data } = await supabaseAdmin
@@ -46,6 +50,8 @@ export async function getEstablishmentConfig(schoolId, academicYear) {
     establishment:        config?.establishment_label || school?.name || '',
     director_name:        config?.director_name || '',
     academic_year:        academicYear || '',
+    logo_url:             school?.logo_url || '',
+    logoBuffer:           logoBuffer || null,
     school:               school || {},
     config:               config || {},
   };

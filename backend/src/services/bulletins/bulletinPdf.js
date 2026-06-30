@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { computeMention, computeCertification } from './calculator.js';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { fetchSchoolLogoBuffer, drawSchoolLogo } from '../schoolLogo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const _require = createRequire(import.meta.url);
@@ -109,7 +110,7 @@ const EXAM_TYPE_LABELS = {
 export async function generateBulletinPdf({
   student, cls, lines, generalAverage, generalRank, totalStudents,
   classAverage, config = {}, school = {}, academicYear, semester, notes,
-  certification = null
+  certification = null, logoBuffer = null
 }) {
   return new Promise((resolve, reject) => {
     try {
@@ -128,6 +129,10 @@ export async function generateBulletinPdf({
       // ═══════════════════════════════════════════════════════════════
       // EN-TÊTE OFFICIEL
       // ═══════════════════════════════════════════════════════════════
+
+      // Logo de l'école (uploadé par le super admin), centré entre les deux
+      // colonnes de l'en-tête ministériel.
+      drawSchoolLogo(doc, logoBuffer, PAGE_W / 2 - 22, MARGIN - 6, { fit: [44, 44], align: 'center', valign: 'center' });
 
       // Ligne 1 : Royaume du Maroc / المملكة المغربية
       doc.fontSize(9).fillColor(C.primary);
@@ -499,7 +504,7 @@ export async function generateBulletinPdfById(bulletinId, { mode } = {}) {
       .eq('academic_year', bulletin.academic_year)
       .maybeSingle(),
     supabaseAdmin
-      .from('schools').select('id, name, address, phone')
+      .from('schools').select('id, name, address, phone, logo_url')
       .eq('id', bulletin.school_id).single(),
     supabaseAdmin
       .from('bulletins').select('general_average')
@@ -517,6 +522,9 @@ export async function generateBulletinPdfById(bulletinId, { mode } = {}) {
 
   const lines = (bulletin.bulletin_lines || [])
     .sort((a, b) => (a.display_order || 999) - (b.display_order || 999));
+
+  // Logo de l'école (uploadé par le super admin) pour l'en-tête du bulletin.
+  const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
 
   // Certification : recalculée en direct dans le mode demandé (real/simili)
   // pour permettre de télécharger les deux bulletins (réel et simulé).
@@ -545,6 +553,7 @@ export async function generateBulletinPdfById(bulletinId, { mode } = {}) {
     semester: bulletin.semester,
     notes: bulletin.notes,
     certification,
+    logoBuffer,
   });
 
   const rawName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');
