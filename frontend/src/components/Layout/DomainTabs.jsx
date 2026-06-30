@@ -24,7 +24,7 @@ export default function DomainTabs() {
 
   return (
     <div className="-mx-4 md:-mx-8 mb-4 md:mb-6 bg-card border-b border-border">
-      <div className="px-4 md:px-6 pt-6 md:pt-8">
+      <div className="px-4 md:px-6 pt-3 md:pt-4">
         {/* Niveau 1 : groupes du domaine (si plus d'un groupe) */}
         {hasGroups && (
           <nav className="flex items-center gap-1 overflow-x-auto">

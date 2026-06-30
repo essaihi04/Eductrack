@@ -111,19 +111,16 @@ const DashboardLayout = () => {
 
       {/* Main content */}
       <main className={`${!(isLandscape && isTrackingPage) ? 'md:ml-64' : ''} ${isLandscape && isTrackingPage ? 'pt-0' : 'pt-14 md:pt-0'} ${!(isLandscape && isTrackingPage) ? 'pb-20 md:pb-0' : 'pb-0'} ${isLandscape && isTrackingPage ? 'p-2' : 'p-4 md:p-8'}`}>
-        {/* Barre supérieure : onglets de domaine + contrôles de contexte (école,
-            année, notifications) alignés à droite. Le contenu de page occupe
-            ensuite toute la largeur disponible. */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            {!(isLandscape && isTrackingPage) && <DomainTabs />}
-          </div>
-          <div className="hidden md:flex items-center gap-3 shrink-0">
-            <SchoolSwitcher />
-            <YearSelector />
-            <NotificationsBell />
-          </div>
+        {/* Barre supérieure : contrôles de contexte (école, année, notifications)
+            sur leur propre ligne, alignés à droite. Les onglets de domaine
+            occupent ensuite TOUTE la largeur en dessous (pas de colonne étroite
+            → plus de défilement horizontal des onglets). */}
+        <div className="hidden md:flex items-center justify-end gap-3 mb-2">
+          <SchoolSwitcher />
+          <YearSelector />
+          <NotificationsBell />
         </div>
+        {!(isLandscape && isTrackingPage) && <DomainTabs />}
         <Outlet />
       </main>
 
