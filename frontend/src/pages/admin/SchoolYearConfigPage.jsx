@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Save, Calendar, Building2, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Save, Calendar, Building2, RefreshCw, Image as ImageIcon, Upload } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 
 const SchoolYearConfigPage = () => {
@@ -20,10 +20,60 @@ const SchoolYearConfigPage = () => {
   const [msg, setMsg] = useState('');
   const [isDefault, setIsDefault] = useState(false);
 
+  // Logo de l'école (affiché dans tous les PDF)
+  const [schoolName, setSchoolName] = useState('');
+  const [logoUrl, setLogoUrl] = useState(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const getToken = async () => {
     const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
     return session?.access_token;
+  };
+
+  // URL absolue du logo (Supabase = http, sinon préfixe API)
+  const resolveLogo = (url) => {
+    if (!url) return null;
+    return url.startsWith('http') ? url : `${apiUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
+  const fetchLogo = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${apiUrl}/api/bulletins/school-logo`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setSchoolName(data.name || '');
+        setLogoUrl(data.logo_url || null);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const handleLogoUpload = async (file) => {
+    if (!file) return;
+    setLogoUploading(true);
+    setMsg('');
+    try {
+      const token = await getToken();
+      const form = new FormData();
+      form.append('logo', file);
+      const res = await fetch(`${apiUrl}/api/bulletins/school-logo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Échec de l\'upload');
+      const data = await res.json();
+      // Cache-buster pour rafraîchir l'aperçu (même nom Supabase impossible, mais par sécurité)
+      setLogoUrl(data.logo_url ? `${data.logo_url}?t=${Date.now()}` : null);
+      setMsg('✅ Logo mis à jour — il apparaîtra dans tous les PDF');
+    } catch (e) {
+      setMsg(`❌ ${e.message}`);
+    } finally {
+      setLogoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   // Derive default academic year
@@ -37,6 +87,7 @@ const SchoolYearConfigPage = () => {
     const year = defaultYear();
     setConfig(prev => ({ ...prev, academic_year: year }));
     fetchConfig(year);
+    fetchLogo();
   }, []);
 
   const fetchConfig = async (year) => {
@@ -108,6 +159,40 @@ const SchoolYearConfigPage = () => {
         <div className="flex justify-center p-12"><RefreshCw className="w-6 h-6 animate-spin text-gray-400" /></div>
       ) : (
         <>
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2"><ImageIcon className="w-5 h-5" /> Logo de l'école</CardTitle></CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-5 flex-wrap">
+                <div className="w-24 h-24 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 flex items-center justify-center overflow-hidden shrink-0">
+                  {resolveLogo(logoUrl) ? (
+                    <img src={resolveLogo(logoUrl)} alt="Logo" className="w-full h-full object-contain" />
+                  ) : (
+                    <ImageIcon className="w-8 h-8 text-gray-300" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-[220px]">
+                  <p className="text-sm font-medium text-gray-800">{schoolName || 'Votre école'}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 mb-3">
+                    Ce logo apparaît sur tous les documents PDF (bulletins, factures, reçus, rapports, emploi du temps…). Formats : PNG, JPG, SVG, WebP (converti automatiquement).
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef} type="file" accept="image/*" className="hidden"
+                      onChange={e => handleLogoUpload(e.target.files?.[0])}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()} disabled={logoUploading}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                      {logoUploading
+                        ? <><RefreshCw className="w-4 h-4 animate-spin" /> Envoi…</>
+                        : <><Upload className="w-4 h-4" /> {logoUrl ? 'Changer le logo' : 'Importer un logo'}</>}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="w-5 h-5" /> Informations Établissement</CardTitle></CardHeader>
             <CardContent className="space-y-4">

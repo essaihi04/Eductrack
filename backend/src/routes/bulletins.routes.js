@@ -10,7 +10,15 @@
  */
 
 import { Router } from 'express';
+import multer from 'multer';
 import { supabaseAdmin } from '../config/supabase.js';
+import {
+  uploadBuffer,
+  removeObject,
+  BUCKET_PUBLIC,
+  normalizeLogoToPng,
+  logoPathFromPublicUrl,
+} from '../utils/storage.js';
 import {
   authenticate,
   authorize,
@@ -38,6 +46,69 @@ const router = Router();
 // Middleware : toutes les routes nécessitent une authentification
 // ─────────────────────────────────────────────────────────────────────────────
 router.use(authenticate);
+
+const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 Mo max
+  fileFilter: (req, file, cb) => {
+    const ok = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp'].includes(
+      (file.originalname.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
+    );
+    cb(ok ? null : new Error('Type non autorisé. Acceptés : JPG, PNG, GIF, SVG, WebP'), ok);
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 0. LOGO DE L'ÉCOLE (admin) — affiché dans tous les PDF
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /school-logo  → logo actuel (uploadé par le super admin ou l'admin)
+router.get('/school-logo', requireSchoolAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('schools')
+      .select('id, name, logo_url')
+      .eq('id', req.user.school_id)
+      .single();
+    if (error) throw error;
+    res.json({ name: data?.name || '', logo_url: data?.logo_url || null });
+  } catch (e) {
+    console.error('Erreur lecture logo école:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /school-logo  → l'admin upload le logo de son école (converti en PNG)
+router.post('/school-logo', requireSchoolAdmin, logoUpload.single('logo'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier envoyé' });
+    const schoolId = req.user.school_id;
+
+    // Supprime l'ancien logo du stockage si présent
+    const { data: oldSchool } = await supabaseAdmin
+      .from('schools').select('logo_url').eq('id', schoolId).single();
+    if (oldSchool?.logo_url) {
+      const oldPath = logoPathFromPublicUrl(oldSchool.logo_url);
+      if (oldPath) await removeObject(BUCKET_PUBLIC, oldPath);
+    }
+
+    const file = await normalizeLogoToPng(req.file);
+    const { publicUrl: logoUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: 'logos', file, prefix: 'logo' });
+
+    const { data: school, error } = await supabaseAdmin
+      .from('schools')
+      .update({ logo_url: logoUrl })
+      .eq('id', schoolId)
+      .select('id, name, logo_url')
+      .single();
+    if (error) throw error;
+
+    res.json({ school, logo_url: logoUrl });
+  } catch (e) {
+    console.error('Erreur upload logo école (admin):', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. CONFIGURATION ANNÉE SCOLAIRE (admin / direction_pedagogique)

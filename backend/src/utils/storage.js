@@ -10,6 +10,7 @@
  */
 import multer from 'multer';
 import path from 'path';
+import sharp from 'sharp';
 import { supabaseAdmin } from '../config/supabase.js';
 
 export const BUCKET_PUBLIC = 'uploads-public';
@@ -63,6 +64,37 @@ export async function downloadObject(bucket, objectPath) {
   const { data, error } = await supabaseAdmin.storage.from(bucket).download(objectPath);
   if (error) throw new Error(`Download échoué: ${error.message}`);
   return Buffer.from(await data.arrayBuffer());
+}
+
+/**
+ * Normalise un logo d'école en PNG (≤ 512 px). PDFKit ne sait dessiner que du
+ * PNG/JPEG : on convertit donc SVG/WebP/GIF pour garantir l'affichage dans tous
+ * les PDF. En cas d'échec, on retourne le fichier d'origine inchangé.
+ * @param {{ buffer: Buffer, originalname?: string, mimetype?: string }} file
+ */
+export async function normalizeLogoToPng(file) {
+  try {
+    const png = await sharp(file.buffer, { density: 300 })
+      .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer();
+    return {
+      ...file,
+      buffer: png,
+      mimetype: 'image/png',
+      originalname: (file.originalname || 'logo').replace(/\.[^.]+$/, '') + '.png',
+    };
+  } catch (e) {
+    console.warn('[storage] conversion logo PNG échouée, fichier original conservé:', e.message);
+    return file;
+  }
+}
+
+/** Extrait le chemin objet (bucket public) d'une URL publique de logo. */
+export function logoPathFromPublicUrl(url) {
+  const marker = `/${BUCKET_PUBLIC}/`;
+  const i = (url || '').indexOf(marker);
+  return i >= 0 ? url.slice(i + marker.length) : null;
 }
 
 /** URL signée temporaire pour un fichier du bucket privé. */
