@@ -75,6 +75,28 @@ const loggedOutRetryDelay = (attempts) => {
 const MAX_LOGGED_OUT_RETRIES = 6;
 
 /**
+ * Détruit proprement un socket existant AVANT d'en recréer un nouveau.
+ *
+ * ⚠️ Cause racine majeure des déconnexions « 401 / device_removed / conflict » :
+ * lors d'un `connection.close`, l'ancien socket n'était pas démonté → ses
+ * listeners restaient actifs et, si le WebSocket n'était pas totalement fermé,
+ * on se retrouvait avec DEUX sockets sur le même numéro. WhatsApp détecte alors
+ * un doublon d'appareil et force le logout du numéro (cf. issue Baileys #2110).
+ *
+ * On retire tous les listeners et on ferme le WebSocket sans envoyer de logout
+ * (logout = invalidation côté téléphone → réservé à logoutSession()).
+ */
+function destroySocket(sock) {
+  if (!sock) return;
+  try { sock.ev.removeAllListeners('connection.update'); } catch {}
+  try { sock.ev.removeAllListeners('creds.update'); } catch {}
+  try { sock.ev.removeAllListeners('messages.upsert'); } catch {}
+  // end() ferme le WebSocket sans déclencher de logout côté serveur WhatsApp.
+  try { sock.end?.(undefined); } catch {}
+  try { sock.ws?.close?.(); } catch {}
+}
+
+/**
  * Démarre (ou redémarre) une session pour une école.
  */
 export async function startSession(schoolId, { onIncoming } = {}) {
@@ -86,12 +108,42 @@ export async function startSession(schoolId, { onIncoming } = {}) {
     return entry;
   }
 
+  // Verrou anti-reconnexions parallèles : si un startSession est déjà en train
+  // de créer un socket pour cette école, on n'en lance pas un second. Deux
+  // sockets concurrents sur le même numéro = conflit → logout forcé par WhatsApp.
+  if (entry.starting) {
+    console.log(`[baileys][${schoolId}] startSession déjà en cours — ignoré (anti-doublon)`);
+    return entry;
+  }
+  entry.starting = true;
+
+  // Démonte tout socket résiduel (close partiel, reconnexion manuelle…) avant
+  // d'en créer un nouveau, pour ne jamais avoir 2 sockets actifs en parallèle.
+  if (entry.sock) {
+    destroySocket(entry.sock);
+    entry.sock = null;
+  }
+
   entry.status = 'connecting';
   entry.lastError = null;
 
-  const authDir = ensureAuthDir(schoolId);
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
+  let state, saveCreds, version;
+  try {
+    const authDir = ensureAuthDir(schoolId);
+    ({ state, saveCreds } = await useMultiFileAuthState(authDir));
+    ({ version } = await fetchLatestBaileysVersion());
+  } catch (e) {
+    // Init échouée (lecture auth, fetch version réseau…) : on libère le verrou
+    // pour ne pas laisser l'école bloquée, et on replanifie une reconnexion.
+    entry.starting = false;
+    entry.status = 'disconnected';
+    entry.lastError = e.message;
+    entry.reconnectAttempts = (entry.reconnectAttempts || 0) + 1;
+    const delay = reconnectDelay(entry.reconnectAttempts);
+    console.error(`[baileys][${schoolId}] Échec init (${e.message}) — retry dans ${delay}ms`);
+    setTimeout(() => startSession(schoolId, { onIncoming }), delay);
+    return entry;
+  }
 
   const sock = makeWASocket({
     version,
@@ -117,11 +169,19 @@ export async function startSession(schoolId, { onIncoming } = {}) {
   });
 
   entry.sock = sock;
+  // Verrou levé : le socket est créé, ses listeners sont posés juste après.
+  entry.starting = false;
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
+
+    // Ignore tout event provenant d'un socket périmé : si entre-temps un nouveau
+    // socket a été créé pour cette école, `entry.sock` ne pointe plus sur celui-ci.
+    // Sans ce garde, un ancien socket en cours de fermeture pouvait planifier
+    // une 2e reconnexion en parallèle (→ conflit / logout forcé).
+    if (entry.sock !== sock) return;
 
     if (qr) {
       entry.qr = qr;
@@ -251,6 +311,8 @@ export async function startSession(schoolId, { onIncoming } = {}) {
   // Messages entrants → callback fourni par le chatbot
   // On loggue TOUS les événements pour faciliter le debug du chatbot.
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    // Ignore les messages d'un socket périmé (remplacé par une reconnexion).
+    if (entry.sock !== sock) return;
     console.log(`[baileys][${schoolId}] 📨 messages.upsert type=${type} count=${messages?.length || 0}`);
     if (type !== 'notify') {
       console.log(`[baileys][${schoolId}] ⏭️  Ignoré (type≠notify): ${type}`);
@@ -382,6 +444,9 @@ export async function logoutSession(schoolId) {
     } catch (e) {
       console.warn(`[baileys][${schoolId}] Logout error:`, e.message);
     }
+    // Démontage propre des listeners + WebSocket après le logout.
+    destroySocket(entry.sock);
+    entry.sock = null;
   }
   // Purge auth + état (uniquement sur action admin explicite)
   try { fs.rmSync(path.join(AUTH_ROOT, String(schoolId)), { recursive: true, force: true }); } catch {}
