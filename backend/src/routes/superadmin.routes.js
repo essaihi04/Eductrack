@@ -1,6 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
+import sharp from 'sharp';
 import path, { dirname, join } from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -268,7 +269,26 @@ router.post('/schools/:id/logo', logoUpload.single('logo'), async (req, res) => 
       if (oldPath) await removeObject(BUCKET_PUBLIC, oldPath);
     }
 
-    const { publicUrl: logoUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: 'logos', file: req.file, prefix: 'logo' });
+    // Normalise le logo en PNG (≤ 512 px) : SVG/WebP/GIF ne sont pas dessinables
+    // par PDFKit. La conversion garantit l'affichage dans TOUS les PDF. En cas
+    // d'échec, on retombe sur le fichier d'origine.
+    let file = req.file;
+    try {
+      const png = await sharp(req.file.buffer, { density: 300 })
+        .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      file = {
+        ...req.file,
+        buffer: png,
+        mimetype: 'image/png',
+        originalname: (req.file.originalname || 'logo').replace(/\.[^.]+$/, '') + '.png',
+      };
+    } catch (convErr) {
+      console.warn('[logo] conversion PNG échouée, upload du fichier original:', convErr.message);
+    }
+
+    const { publicUrl: logoUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: 'logos', file, prefix: 'logo' });
 
     const { data: school, error } = await supabaseAdmin
       .from('schools')
