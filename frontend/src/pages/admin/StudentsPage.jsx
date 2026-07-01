@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -42,6 +42,7 @@ const StudentsPage = () => {
   const [reinscribeClassId, setReinscribeClassId] = useState('');
   const [reinscribeBusy, setReinscribeBusy] = useState(false);
   const [reinscribeMsg, setReinscribeMsg] = useState(null); // { type, text }
+  const [undoingReinscribe, setUndoingReinscribe] = useState(false); // annulation de réinscription
   // Identifiants des élèves réinscrits (statut RI/NI) pour l'année active.
   const [activeIds, setActiveIds] = useState(new Set());
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
@@ -1069,6 +1070,25 @@ L'administration de ${schoolName}`;
     }
   };
 
+  // Annule la réinscription d'un élève pour l'année active : supprime son
+  // inscription de l'année et le remet dans sa classe/niveau précédents.
+  const undoReinscription = async (student) => {
+    const name = `${student.first_name} ${student.last_name}`;
+    if (!window.confirm(`Annuler la réinscription de ${name} pour ${year} ? L'élève sera remis dans son état précédent (classe et niveau) et son inscription ${year} sera supprimée.`)) return;
+    setUndoingReinscribe(true);
+    try {
+      await enrollmentsApi.undoReinscribe(student.id, year);
+      await fetchData();
+      await refreshActiveIds();
+      setActiveStudent(null);
+      alert(`Réinscription de ${name} annulée pour ${year}.`);
+    } catch (e) {
+      alert(e.message || "Erreur lors de l'annulation de la réinscription");
+    } finally {
+      setUndoingReinscribe(false);
+    }
+  };
+
   const sendBulkCredentialsToParents = async () => {
     if (selectedStudents.size === 0) {
       alert('Aucun élève sélectionné');
@@ -1939,6 +1959,23 @@ L'administration de ${schoolName}`;
                   </button>
                 )}
               </div>
+
+              {/* Annuler la réinscription : remet l'élève dans son état initial */}
+              {isAdmin && studentYearStatus(activeStudent) === 'active' && (
+                <div className="pt-2 mt-1 border-t border-border">
+                  <button
+                    onClick={() => undoReinscription(activeStudent)}
+                    disabled={undoingReinscribe}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                  >
+                    {undoingReinscribe ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                    {undoingReinscribe ? 'Annulation…' : 'Annuler la réinscription'}
+                  </button>
+                  <p className="text-[11px] text-gray-400 mt-1.5 text-center">
+                    Supprime l'inscription {year} et remet l'élève dans sa classe et son niveau précédents.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         )}

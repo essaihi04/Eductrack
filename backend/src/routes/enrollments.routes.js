@@ -595,6 +595,61 @@ router.post('/reinscribe', requireSchoolAdminOrFinance, async (req, res) => {
   }
 });
 
+// --- POST /api/enrollments/reinscribe/undo ---------------------------------
+// Annule la réinscription d'UN élève pour une année : supprime l'inscription
+// et le plan de frais de l'année, et remet l'élève dans sa classe/niveau
+// précédents (état initial). Inverse unitaire de /reinscribe et de /reset.
+// body: { student_id, academic_year? }
+router.post('/reinscribe/undo', requireSchoolAdminOrFinance, async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'school_id requis' });
+    const { student_id } = req.body;
+    if (!student_id) return res.status(400).json({ error: 'student_id requis' });
+    const year = req.body.academic_year || currentYear();
+
+    // Inscription de l'élève pour cette année dans l'école active.
+    const { data: enr } = await supabaseAdmin
+      .from('student_enrollments')
+      .select('id, class_id, previous_class_id')
+      .eq('school_id', schoolId)
+      .eq('academic_year', year)
+      .eq('student_id', student_id)
+      .maybeSingle();
+    if (!enr) return res.status(404).json({ error: 'Aucune réinscription à annuler pour cet élève et cette année' });
+
+    // Remettre le profil dans sa classe précédente (si le profil pointe encore
+    // vers la classe de cette réinscription), avec le niveau correspondant.
+    let reverted = false;
+    const { data: prof } = await supabaseAdmin
+      .from('profiles').select('class_id').eq('id', student_id).maybeSingle();
+    if (prof && enr.class_id && prof.class_id === enr.class_id) {
+      let prevLevel = null;
+      if (enr.previous_class_id) {
+        const { data: prevCls } = await supabaseAdmin
+          .from('classes').select('level').eq('id', enr.previous_class_id).maybeSingle();
+        prevLevel = prevCls?.level || null;
+      }
+      const update = { class_id: enr.previous_class_id || null };
+      if (prevLevel) update.level = prevLevel;
+      await supabaseAdmin.from('profiles').update(update).eq('id', student_id);
+      reverted = true;
+    }
+
+    // Supprimer le plan de frais et l'inscription de l'année.
+    await supabaseAdmin.from('student_fee_plans')
+      .delete().eq('school_id', schoolId).eq('academic_year', toDash(year)).eq('student_id', student_id);
+    const { error: delErr } = await supabaseAdmin
+      .from('student_enrollments').delete().eq('id', enr.id);
+    if (delErr) throw delErr;
+
+    res.json({ success: true, student_id, academic_year: year, reverted });
+  } catch (e) {
+    console.error('POST /enrollments/reinscribe/undo:', e);
+    res.status(500).json({ error: 'Erreur serveur', details: e.message });
+  }
+});
+
 // --- POST /api/enrollments/cross-school/reinscribe-level -------------------
 // Réinscrit EN MASSE tous les élèves d'un niveau donné d'un établissement
 // associé vers l'école active (déménagement), promus au niveau suivant.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Users, Search, Plus, Save, RefreshCw, Check, Copy, ArrowRightLeft, X, AlertTriangle } from 'lucide-react';
+import { Users, Search, Plus, Save, RefreshCw, Check, Copy, ArrowRightLeft, X, AlertTriangle, RotateCcw } from 'lucide-react';
 import { PageHeader, FilterBar, Button, Drawer, Field } from '../../../components/finance/ui';
 import {
   CardGrid, StudentCard, StudentRow, GridListToggle, StatusPill, DetailDrawer, FieldRow,
@@ -66,6 +66,7 @@ export default function InscriptionsStudentsPage() {
   const [reinscribeClassId, setReinscribeClassId] = useState('');
   const [reinscribeBusy, setReinscribeBusy] = useState(false);
   const [reinscribeMsg, setReinscribeMsg] = useState(null); // { type, text }
+  const [undoing, setUndoing] = useState(false); // annulation de réinscription en cours
 
   // Année précédente, dans le même format (slash ou tiret) que l'année active.
   const prevYear = useMemo(() => {
@@ -245,6 +246,23 @@ export default function InscriptionsStudentsPage() {
     </div>
   );
 
+  // Annule la réinscription d'un élève de l'année active : le remet dans son
+  // état précédent (classe/niveau) et supprime son inscription de l'année.
+  const undoReinscription = async (entry) => {
+    const name = `${entry.student?.last_name || ''} ${entry.student?.first_name || ''}`.trim();
+    if (!window.confirm(`Annuler la réinscription de ${name} pour ${year} ? L'élève sera remis dans son état précédent (classe et niveau) et son inscription ${year} sera supprimée.`)) return;
+    setUndoing(true);
+    try {
+      await enrollmentsApi.undoReinscribe(entry.student?.id, year);
+      await load();
+      setActiveEntry(null);
+    } catch (e) {
+      alert(e.message || "Erreur lors de l'annulation de la réinscription");
+    } finally {
+      setUndoing(false);
+    }
+  };
+
   const submitReinscribe = async () => {
     if (!reinscribeTarget) return;
     setReinscribeBusy(true); setReinscribeMsg(null);
@@ -359,6 +377,23 @@ export default function InscriptionsStudentsPage() {
             <FieldRow label="Filière" value={activeEntry.class?.filiere || '—'} />
             <FieldRow label="Statut" value={activeEntry.status === 'RI' ? 'Réinscrit' : activeEntry.status === 'NI' ? 'Nouveau' : 'Non réinscrit'} />
             <FieldRow label="Code Massar" value={activeEntry.student?.massar_code || '—'} mono />
+
+            {/* Annuler la réinscription : remet l'élève dans son état initial */}
+            {(activeEntry.status === 'RI' || activeEntry.status === 'NI') && (
+              <div className="mt-5 pt-4 border-t border-border">
+                <button
+                  onClick={() => undoReinscription(activeEntry)}
+                  disabled={undoing}
+                  className="w-full flex items-center justify-center gap-2 border border-red-300 text-red-600 hover:bg-red-50 px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  {undoing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                  {undoing ? 'Annulation…' : 'Annuler la réinscription'}
+                </button>
+                <p className="text-[11px] text-muted-foreground mt-1.5 text-center">
+                  Supprime l'inscription {year} et remet l'élève dans sa classe et son niveau précédents.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </DetailDrawer>

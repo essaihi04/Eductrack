@@ -43,6 +43,9 @@ export const enrollmentsApi = {
   crossSchoolLevels: () => request('/api/enrollments/cross-school/levels'),
   // Réinscription d'un élève (propre école = RI, école associée = déménagement NI)
   reinscribe: (payload) => request('/api/enrollments/reinscribe', { method: 'POST', body: payload }),
+  // Annule la réinscription d'un élève : supprime l'inscription de l'année et
+  // remet l'élève dans sa classe/niveau précédents (état initial)
+  undoReinscribe: (studentId, academicYear) => request('/api/enrollments/reinscribe/undo', { method: 'POST', body: { student_id: studentId, academic_year: academicYear } }),
   // Réinscription en masse d'un niveau entier depuis un établissement associé
   reinscribeLevel: (payload) => request('/api/enrollments/cross-school/reinscribe-level', { method: 'POST', body: payload }),
 };
