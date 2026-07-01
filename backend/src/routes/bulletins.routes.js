@@ -37,6 +37,7 @@ import {
   isExamLevel
 } from '../services/bulletins/calculator.js';
 import { generateBulletinPdf } from '../services/bulletins/bulletinPdf.js';
+import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
 import { getEstablishmentConfig } from '../services/establishmentHeader.js';
 import { getDefaultYearBounds, getCurrentSemester, getCurrentAcademicYear } from '../services/bulletins/schoolCalendar.js';
 
@@ -916,9 +917,10 @@ router.get('/pdf/:bulletinId', async (req, res) => {
 
     const { data: school } = await supabaseAdmin
       .from('schools')
-      .select('id, name, address, phone')
+      .select('id, name, address, phone, logo_url')
       .eq('id', bulletin.school_id)
       .single();
+    const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
 
     // Classe average (from all bulletins of this class)
     const { data: allBulletins } = await supabaseAdmin
@@ -958,7 +960,8 @@ router.get('/pdf/:bulletinId', async (req, res) => {
       academicYear: bulletin.academic_year,
       semester: bulletin.semester,
       notes: bulletin.notes,
-      certification
+      certification,
+      logoBuffer
     });
 
     const rawName = `${bulletin.profiles?.last_name || ''}_${bulletin.profiles?.first_name || ''}`.replace(/\s+/g, '_');
@@ -1008,9 +1011,10 @@ router.post('/preview', requireSchoolAdmin, async (req, res) => {
 
     const { data: school } = await supabaseAdmin
       .from('schools')
-      .select('id, name, address, phone')
+      .select('id, name, address, phone, logo_url')
       .eq('id', schoolId)
       .single();
+    const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
 
     const pdfBuffer = await generateBulletinPdf({
       student: student || {},
@@ -1024,7 +1028,8 @@ router.post('/preview', requireSchoolAdmin, async (req, res) => {
       school: school || {},
       academicYear: academic_year,
       semester: sem,
-      certification
+      certification,
+      logoBuffer
     });
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -1140,9 +1145,10 @@ router.post('/send-whatsapp', requireSchoolAdmin, async (req, res) => {
 
         const { data: school } = await supabaseAdmin
           .from('schools')
-          .select('id, name, address, phone')
+          .select('id, name, address, phone, logo_url')
           .eq('id', schoolId)
           .single();
+        const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
 
         const { data: lines } = await supabaseAdmin
           .from('bulletin_lines')
@@ -1168,7 +1174,8 @@ router.post('/send-whatsapp', requireSchoolAdmin, async (req, res) => {
           school: school || {},
           academicYear: bulletin.academic_year,
           semester: bulletin.semester,
-          notes: bulletin.notes
+          notes: bulletin.notes,
+          logoBuffer
         });
 
         const jid = parentPhone.replace(/^0/, '212').replace(/^\+/, '') + '@s.whatsapp.net';
