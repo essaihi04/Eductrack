@@ -212,10 +212,11 @@ const StudentsPage = () => {
   // Fonction pour filtrer les élèves
   const getFilteredStudents = () => {
     return students.filter(student => {
-      // Année scolaire : on n'exclut plus les élèves d'une autre année. Ceux qui
-      // ne sont pas réinscrits dans l'année active sont affichés comme « candidats »
-      // (badge « non réinscrit ») via studentYearStatus(), pour permettre leur
-      // réinscription depuis cette page.
+      // Année scolaire : la liste n'affiche que les élèves inscrits/réinscrits
+      // pour l'année active (vide pour une année neuve). Les élèves d'une autre
+      // année (« candidats ») ne s'affichent plus en ligne : ils se réinscrivent
+      // depuis la fenêtre « Réinscription ».
+      if (studentYearStatus(student) === 'candidate') return false;
 
       // Filtre par classe (ID exact ou "unassigned" pour les élèves sans classe)
       if (filters.className) {
@@ -973,10 +974,15 @@ L'administration de ${schoolName}`;
     return 'neutral';
   };
 
+  // Élèves de la propre école inscrits une autre année, pas encore réinscrits
+  // dans l'année active → proposés dans la fenêtre « Réinscription ».
+  const reinscriptionCandidates = students.filter((s) => studentYearStatus(s) === 'candidate');
+
   // Ouvre la modale et liste d'emblée les élèves des établissements associés.
   const openCrossModal = async () => {
     setCrossSearch(''); setCrossLevelFilter(''); setCrossTargetLevel(''); setCrossResults([]);
     setCrossOpen(true);
+    if (!isMultiSchool) return; // seule la section « année précédente » est utile
     runCrossSearch('', '');
     try { const { levels } = await enrollmentsApi.crossSchoolLevels(); setCrossLevels(levels || []); }
     catch { setCrossLevels([]); }
@@ -1032,6 +1038,7 @@ L'administration de ${schoolName}`;
     setReinscribeLevel(nextLevel(curLevel) || curLevel || '');
     setReinscribeClassId('');
     setReinscribeMsg(null);
+    setCrossOpen(false);
   };
 
   // Idem depuis un résultat de recherche d'une école associée.
@@ -1440,16 +1447,14 @@ L'administration de ${schoolName}`;
                     <Send className="w-3.5 h-3.5" />
                     Identifiants WhatsApp
                   </button>
-                  {isMultiSchool && (
-                    <button
-                      onClick={openCrossModal}
-                      title="Récupérer un élève d'un établissement associé pour le réinscrire ici (avec promotion de niveau)"
-                      className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-700"
-                    >
-                      <ArrowRightLeft className="w-3.5 h-3.5" />
-                      Récupérer d'un autre établissement
-                    </button>
-                  )}
+                  <button
+                    onClick={openCrossModal}
+                    title="Réinscrire des élèves de l'année précédente ou d'un établissement associé"
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-700"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    Réinscription{reinscriptionCandidates.length ? ` (${reinscriptionCandidates.length})` : ''}
+                  </button>
                   <button
                     onClick={() => { resetForm(); setShowForm(true); }}
                     className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -2172,7 +2177,7 @@ L'administration de ${schoolName}`;
         );
       })()}
 
-      {/* Modale : récupérer un élève d'un établissement associé (recherche par nom) */}
+      {/* Fenêtre de réinscription : élèves de l'année précédente + établissements associés */}
       {crossOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={() => setCrossOpen(false)}>
@@ -2181,7 +2186,7 @@ L'administration de ${schoolName}`;
             <div className="flex items-center justify-between p-4 border-b">
               <div className="flex items-center gap-2">
                 <ArrowRightLeft className="w-5 h-5 text-violet-600" />
-                <h3 className="font-semibold">Récupérer un élève d'un autre établissement</h3>
+                <h3 className="font-semibold">Réinscription — {year}</h3>
               </div>
               <button onClick={() => setCrossOpen(false)} className="p-1 rounded hover:bg-gray-100">
                 <X className="w-5 h-5" />
@@ -2189,6 +2194,42 @@ L'administration de ${schoolName}`;
             </div>
 
             <div className="p-4 space-y-4">
+              {/* Section 1 — élèves d'une autre année (propre école) non réinscrits */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-700">Élèves non réinscrits</h4>
+                  <span className="text-xs text-gray-400">{reinscriptionCandidates.length}</span>
+                </div>
+                <div className="border rounded-lg divide-y max-h-56 overflow-y-auto">
+                  {reinscriptionCandidates.length === 0 ? (
+                    <div className="p-3 text-sm text-gray-500">Aucun élève à réinscrire depuis une année précédente.</div>
+                  ) : reinscriptionCandidates.map((s) => {
+                    const cls = classes.find((c) => c.id === s.class_id);
+                    const lvl = s.level || cls?.level || '';
+                    const suggested = nextLevel(lvl);
+                    return (
+                      <button key={s.id} onClick={() => openReinscribe(s)}
+                        className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">{s.first_name} {s.last_name}</div>
+                          <div className="text-xs text-gray-500 truncate">
+                            {cls?.name || 'Sans classe'}{lvl ? ` (${lvl})` : ''}
+                          </div>
+                        </div>
+                        {suggested && (
+                          <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {suggested}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {isMultiSchool && (
+              <>
+              <div className="border-t pt-3">
+                <h4 className="text-sm font-semibold text-gray-700">Établissements associés</h4>
+              </div>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
@@ -2261,6 +2302,8 @@ L'administration de ${schoolName}`;
                   </button>
                 ))}
               </div>
+              </>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 p-4 border-t">

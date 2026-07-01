@@ -36,7 +36,6 @@ export default function InscriptionsStudentsPage() {
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [viewMode, setViewMode] = useState('grid');
-  const [showPrevious, setShowPrevious] = useState(true); // afficher les non réinscrits de l'an dernier
   const [activeEntry, setActiveEntry] = useState(null);
   const [ficheBusy, setFicheBusy] = useState(false); // téléchargement de la fiche d'inscription en cours
 
@@ -92,10 +91,10 @@ export default function InscriptionsStudentsPage() {
     [roster],
   );
 
-  // Candidats : élèves inscrits l'an dernier (hors NR) mais pas encore dans
-  // l'année active → à récupérer/réinscrire dans l'année active.
+  // Candidats à réinscrire : élèves inscrits l'an dernier (hors NR) mais pas
+  // encore dans l'année active. Ils n'apparaissent PAS dans la liste (qui ne
+  // montre que les élèves réinscrits) mais dans la fenêtre de réinscription.
   const candidates = useMemo(() => {
-    if (!showPrevious) return [];
     return prevRoster
       .filter((e) => e.status !== 'NR')
       .filter((e) => {
@@ -103,17 +102,19 @@ export default function InscriptionsStudentsPage() {
         return sid && !activeStudentIds.has(sid);
       })
       .map((e) => ({ ...e, _candidate: true }));
-  }, [prevRoster, activeStudentIds, showPrevious]);
+  }, [prevRoster, activeStudentIds]);
 
+  // La liste n'affiche que les élèves réinscrits/inscrits pour l'année active
+  // (vide pour une année neuve tant qu'aucune réinscription n'a été faite).
   const filtered = useMemo(() => {
-    let list = [...roster, ...candidates];
+    let list = [...roster];
     if (classFilter) list = list.filter((e) => e.class_id === classFilter);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((e) => `${e.student?.first_name || ''} ${e.student?.last_name || ''}`.toLowerCase().includes(q));
     }
     return list;
-  }, [roster, candidates, classFilter, search]);
+  }, [roster, classFilter, search]);
 
   const openForm = () => setShowForm(true);
 
@@ -191,20 +192,8 @@ export default function InscriptionsStudentsPage() {
     setReinscribeLevel(nextLevel(lvl) || lvl || '');
     setReinscribeClassId('');
     setReinscribeMsg(null);
+    setCrossOpen(false);
   };
-
-  // Badge + bouton pour un candidat de l'an dernier (non encore réinscrit).
-  const candidatePill = (e) => (
-    <div className="flex flex-col items-center gap-1.5">
-      <StatusPill tone="red" icon={AlertTriangle}>Non réinscrit</StatusPill>
-      <button
-        onClick={(ev) => { ev.stopPropagation(); openReinscribeOwn(e); }}
-        className="text-xs bg-violet-600 text-white px-2 py-1 rounded hover:bg-violet-700 flex items-center gap-1"
-      >
-        <ArrowRightLeft className="w-3 h-3" /> Réinscrire
-      </button>
-    </div>
-  );
 
   // Annule la réinscription d'un élève de l'année active : le remet dans son
   // état précédent (classe/niveau) et supprime son inscription de l'année.
@@ -274,9 +263,9 @@ export default function InscriptionsStudentsPage() {
               variant="secondary"
               icon={ArrowRightLeft}
               onClick={openCrossModal}
-              title="Récupérer un élève d'un établissement associé pour le réinscrire ici"
+              title="Réinscrire des élèves de l'année précédente ou d'un établissement associé"
             >
-              Récupérer d'un autre établissement
+              Réinscription{candidates.length ? ` (${candidates.length})` : ''}
             </Button>
             <Button icon={Plus} onClick={openForm}>Nouvel élève</Button>
           </div>
@@ -301,46 +290,47 @@ export default function InscriptionsStudentsPage() {
           <option value="">Toutes les classes</option>
           {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer select-none px-1" title="Afficher les élèves de l'an dernier pas encore réinscrits">
-          <input type="checkbox" checked={showPrevious} onChange={(e) => setShowPrevious(e.target.checked)} className="accent-violet-600" />
-          Non réinscrits {prevYear ? `(${prevYear})` : ''}
-        </label>
         <GridListToggle value={viewMode} onChange={setViewMode} />
       </FilterBar>
 
       {loading ? (
         <div className="flex justify-center p-10"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-10">Aucun élève trouvé pour {year}.</p>
+        <div className="text-center py-12 space-y-3">
+          <p className="text-sm text-muted-foreground">Aucun élève réinscrit pour {year}.</p>
+          {candidates.length > 0 && (
+            <Button variant="secondary" icon={ArrowRightLeft} onClick={openCrossModal} className="mx-auto">
+              Réinscrire des élèves ({candidates.length} en attente)
+            </Button>
+          )}
+        </div>
       ) : viewMode === 'grid' ? (
         <CardGrid>
           {filtered.map((e) => (
-            <div key={(e._candidate ? 'c' : 'a') + e.id} className={e._candidate ? 'opacity-90 grayscale-[35%]' : ''}>
-              <StudentCard
-                name={`${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim()}
-                className={e.class?.name || 'Sans classe'}
-                photo={e.student?.avatar_url}
-                gender={e.student?.gender || ''}
-                status={e._candidate ? candidatePill(e) : statusPill(e.status)}
-                onClick={() => (e._candidate ? openReinscribeOwn(e) : setActiveEntry(e))}
-              />
-            </div>
+            <StudentCard
+              key={'a' + e.id}
+              name={`${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim()}
+              className={e.class?.name || 'Sans classe'}
+              photo={e.student?.avatar_url}
+              gender={e.student?.gender || ''}
+              status={statusPill(e.status)}
+              onClick={() => setActiveEntry(e)}
+            />
           ))}
         </CardGrid>
       ) : (
         <div>
           {filtered.map((e) => (
-            <div key={(e._candidate ? 'c' : 'a') + e.id} className={e._candidate ? 'opacity-90 grayscale-[35%]' : ''}>
-              <StudentRow
-                name={`${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim()}
-                className={e.class?.name || 'Sans classe'}
-                sub={e.class?.level}
-                photo={e.student?.avatar_url}
-                gender={e.student?.gender || ''}
-                status={e._candidate ? candidatePill(e) : statusPill(e.status)}
-                onClick={() => (e._candidate ? openReinscribeOwn(e) : setActiveEntry(e))}
-              />
-            </div>
+            <StudentRow
+              key={'a' + e.id}
+              name={`${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim()}
+              className={e.class?.name || 'Sans classe'}
+              sub={e.class?.level}
+              photo={e.student?.avatar_url}
+              gender={e.student?.gender || ''}
+              status={statusPill(e.status)}
+              onClick={() => setActiveEntry(e)}
+            />
           ))}
         </div>
       )}
@@ -394,7 +384,7 @@ export default function InscriptionsStudentsPage() {
         onCreated={load}
       />
 
-      {/* Modale : récupérer un élève d'un établissement associé (recherche par nom/niveau) */}
+      {/* Fenêtre de réinscription : élèves de l'année précédente + établissements associés */}
       {crossOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={() => setCrossOpen(false)}>
@@ -403,7 +393,7 @@ export default function InscriptionsStudentsPage() {
             <div className="flex items-center justify-between p-4 border-b">
               <div className="flex items-center gap-2">
                 <ArrowRightLeft className="w-5 h-5 text-violet-600" />
-                <h3 className="font-semibold">Récupérer un élève d'un autre établissement</h3>
+                <h3 className="font-semibold">Réinscription — {year}</h3>
               </div>
               <button onClick={() => setCrossOpen(false)} className="p-1 rounded hover:bg-gray-100">
                 <X className="w-5 h-5" />
@@ -411,6 +401,44 @@ export default function InscriptionsStudentsPage() {
             </div>
 
             <div className="p-4 space-y-4">
+              {/* Section 1 — élèves de l'année précédente (propre école) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-gray-700">
+                    Année précédente{prevYear ? ` (${prevYear})` : ''} · non réinscrits
+                  </h4>
+                  <span className="text-xs text-gray-400">{candidates.length}</span>
+                </div>
+                <div className="border rounded-lg divide-y max-h-56 overflow-y-auto">
+                  {candidates.length === 0 ? (
+                    <div className="p-3 text-sm text-gray-500">Aucun élève de l'année précédente à réinscrire.</div>
+                  ) : candidates.map((e) => {
+                    const lvl = e.class?.level || '';
+                    const suggested = nextLevel(lvl);
+                    return (
+                      <button key={e.student?.id || e.id} onClick={() => openReinscribeOwn(e)}
+                        className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm truncate">
+                            {e.student?.last_name} {e.student?.first_name}
+                          </div>
+                          <div className="text-xs text-gray-500 truncate">
+                            {e.class?.name || 'Sans classe'}{lvl ? ` (${lvl})` : ''}
+                          </div>
+                        </div>
+                        {suggested && (
+                          <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {suggested}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t pt-3">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Établissements associés</h4>
+              </div>
+
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
