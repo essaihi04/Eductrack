@@ -35,4 +35,19 @@ async function request(path, { method = 'GET', body, query } = {}) {
 export const inscriptionsApi = {
   listClasses: (academicYear) => request('/api/inscriptions/classes', { query: { academic_year: academicYear } }),
   createStudent: (payload) => request('/api/inscriptions/students', { method: 'POST', body: payload }),
+  // Photo de l'élève (multipart) — même comportement que la fiche admin.
+  uploadPhoto: async (studentId, file) => {
+    const token = await getToken();
+    const fd = new FormData();
+    fd.append('photo', file);
+    const res = await fetch(`${apiUrl}/api/inscriptions/students/${studentId}/photo`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'Upload de la photo échoué');
+    return d;
+  },
+  // Rattache un ou plusieurs parents à un élève.
+  addParents: (studentId, contacts) =>
+    request(`/api/inscriptions/students/${studentId}/add-parents`, { method: 'POST', body: { contacts } }),
 };

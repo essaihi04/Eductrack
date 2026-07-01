@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Users, Search, Plus, Save, RefreshCw, Check, Copy, ArrowRightLeft, X, AlertTriangle, RotateCcw } from 'lucide-react';
-import { PageHeader, FilterBar, Button, Drawer, Field } from '../../../components/finance/ui';
+import { Users, Search, Plus, RefreshCw, Check, ArrowRightLeft, X, AlertTriangle, RotateCcw } from 'lucide-react';
+import { PageHeader, FilterBar, Button } from '../../../components/finance/ui';
 import {
   CardGrid, StudentCard, StudentRow, GridListToggle, StatusPill, DetailDrawer, FieldRow,
 } from '../../../components/directory/ui';
+import StudentInscriptionModal from '../../../components/students/StudentInscriptionModal';
 import { useYear } from '../../../contexts/YearContext';
 import { enrollmentsApi } from '../../../lib/enrollmentsApi';
 import { inscriptionsApi } from '../../../lib/inscriptionsApi';
-import { generateEmail, generatePassword } from '../../../utils/studentUtils';
 import { LEVEL_ORDER, nextLevel } from '../../../lib/levelProgression';
 import { prevYearStr, toDashYear } from '../../../lib/schoolYear';
 
@@ -18,21 +18,10 @@ function statusPill(status) {
   return <StatusPill tone="red">Non réinscrit</StatusPill>;
 }
 
-const emptyForm = {
-  email: '', password: '',
-  firstName: '', lastName: '', firstNameAr: '', lastNameAr: '',
-  gender: 'M', phone: '', cin: '',
-  dateOfBirth: '', birthPlace: '', classId: '',
-  registrationNumber: '', entryDate: '', massarCode: '',
-  previousSchool: '', previousClass: '',
-  homeAddress: '', quartier: '', homePhone: '',
-};
-
 // Page « Élèves » du pôle Inscriptions (finance) : reprend l'affichage en
-// cartes de la fiche élève admin, sans les éléments pédagogiques (documents,
-// santé, photo, rattachement parent en ligne, envoi WhatsApp des identifiants…).
-// Le responsable financier peut consulter le roster de l'année et inscrire un
-// nouvel élève ; la réinscription se fait dans l'onglet dédié.
+// cartes de la fiche élève admin. La création d'un nouvel élève utilise la même
+// fiche d'inscription complète que l'admin (photo, parents, documents, médical…)
+// via StudentInscriptionModal ; la réinscription se fait dans l'onglet dédié.
 export default function InscriptionsStudentsPage() {
   const { year } = useYear();
   const [roster, setRoster] = useState([]);
@@ -45,11 +34,7 @@ export default function InscriptionsStudentsPage() {
   const [showPrevious, setShowPrevious] = useState(true); // afficher les non réinscrits de l'an dernier
   const [activeEntry, setActiveEntry] = useState(null);
 
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState(emptyForm);
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [created, setCreated] = useState(null); // { email, password } — identifiants à communiquer
+  const [showForm, setShowForm] = useState(false); // modale « Nouvel élève »
 
   // Modale « Récupérer un élève d'un autre établissement » (établissements
   // associés par le super admin) — recopiée de la fiche élève admin.
@@ -124,38 +109,7 @@ export default function InscriptionsStudentsPage() {
     return list;
   }, [roster, candidates, classFilter, search]);
 
-  const openForm = () => {
-    setFormError('');
-    setCreated(null);
-    setFormData(emptyForm);
-    setShowForm(true);
-  };
-
-  const autoFillCredentials = () => {
-    if (!formData.firstName || !formData.lastName) return;
-    setFormData((f) => ({
-      ...f,
-      email: f.email || generateEmail(`${f.firstName}.${f.lastName}`, ''),
-      password: f.password || generatePassword(f.firstName),
-    }));
-  };
-
-  const submitForm = async (e) => {
-    e.preventDefault();
-    setFormError('');
-    if (!formData.firstName || !formData.lastName) { setFormError('Nom et prénom requis'); return; }
-    if (!formData.email || !formData.password) { setFormError('Identifiants (email/mot de passe) requis'); return; }
-    setSubmitting(true);
-    try {
-      const res = await inscriptionsApi.createStudent(formData);
-      setCreated({ email: res.email, password: res.password, name: `${res.first_name} ${res.last_name}` });
-      await load();
-    } catch (e2) {
-      setFormError(e2.message || "Erreur lors de l'inscription");
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const openForm = () => setShowForm(true);
 
   // ── Récupération d'élèves d'un établissement associé ──────────────────────
   // Ouvre la modale et liste d'emblée les élèves des établissements associés.
@@ -398,128 +352,14 @@ export default function InscriptionsStudentsPage() {
         )}
       </DetailDrawer>
 
-      {/* Nouvel élève — champs essentiels uniquement (identité, contact, classe) */}
-      <Drawer
+      {/* Nouvel élève — fiche d'inscription complète (identique à l'admin) */}
+      <StudentInscriptionModal
         open={showForm}
         onClose={() => setShowForm(false)}
-        title="Nouvel élève"
-        footer={created ? (
-          <Button onClick={() => setShowForm(false)}>Fermer</Button>
-        ) : (
-          <>
-            <Button variant="secondary" onClick={() => setShowForm(false)}>Annuler</Button>
-            <Button icon={Save} onClick={submitForm} disabled={submitting}>
-              {submitting ? 'Inscription…' : 'Inscrire'}
-            </Button>
-          </>
-        )}
-      >
-        {created ? (
-          <div className="space-y-3">
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
-              <Check className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>{created.name} a été inscrit(e). Communiquez ces identifiants :</span>
-            </div>
-            <div className="p-3 rounded-lg border border-border bg-muted/30 text-sm space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono">{created.email}</span>
-                <button type="button" onClick={() => navigator.clipboard.writeText(created.email)} className="p-1 hover:bg-accent rounded"><Copy className="w-3.5 h-3.5" /></button>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono">{created.password}</span>
-                <button type="button" onClick={() => navigator.clipboard.writeText(created.password)} className="p-1 hover:bg-accent rounded"><Copy className="w-3.5 h-3.5" /></button>
-              </div>
-            </div>
-            <Button icon={Plus} variant="secondary" onClick={openForm}>Inscrire un autre élève</Button>
-          </div>
-        ) : (
-          <form onSubmit={submitForm} className="space-y-3" onBlur={autoFillCredentials}>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Prénom" required>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.firstName}
-                  onChange={(e) => setFormData((f) => ({ ...f, firstName: e.target.value }))} required />
-              </Field>
-              <Field label="Nom" required>
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.lastName}
-                  onChange={(e) => setFormData((f) => ({ ...f, lastName: e.target.value }))} required />
-              </Field>
-              <Field label="Prénom (arabe)">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.firstNameAr}
-                  onChange={(e) => setFormData((f) => ({ ...f, firstNameAr: e.target.value }))} dir="rtl" />
-              </Field>
-              <Field label="Nom (arabe)">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.lastNameAr}
-                  onChange={(e) => setFormData((f) => ({ ...f, lastNameAr: e.target.value }))} dir="rtl" />
-              </Field>
-              <Field label="Genre">
-                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.gender}
-                  onChange={(e) => setFormData((f) => ({ ...f, gender: e.target.value }))}>
-                  <option value="M">Garçon</option>
-                  <option value="F">Fille</option>
-                </select>
-              </Field>
-              <Field label="Classe">
-                <select className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.classId}
-                  onChange={(e) => setFormData((f) => ({ ...f, classId: e.target.value }))}>
-                  <option value="">— aucune —</option>
-                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Date de naissance">
-                <input type="date" className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.dateOfBirth}
-                  onChange={(e) => setFormData((f) => ({ ...f, dateOfBirth: e.target.value }))} />
-              </Field>
-              <Field label="Lieu de naissance">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.birthPlace}
-                  onChange={(e) => setFormData((f) => ({ ...f, birthPlace: e.target.value }))} />
-              </Field>
-              <Field label="CIN">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.cin}
-                  onChange={(e) => setFormData((f) => ({ ...f, cin: e.target.value }))} />
-              </Field>
-              <Field label="Téléphone">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.phone}
-                  onChange={(e) => setFormData((f) => ({ ...f, phone: e.target.value }))} />
-              </Field>
-              <Field label="Code Massar">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.massarCode}
-                  onChange={(e) => setFormData((f) => ({ ...f, massarCode: e.target.value }))} />
-              </Field>
-              <Field label="N° inscription">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.registrationNumber}
-                  onChange={(e) => setFormData((f) => ({ ...f, registrationNumber: e.target.value }))} />
-              </Field>
-              <Field label="École précédente">
-                <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.previousSchool}
-                  onChange={(e) => setFormData((f) => ({ ...f, previousSchool: e.target.value }))} />
-              </Field>
-            </div>
-
-            <div className="pt-2 border-t border-border">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold text-gray-600">Identifiants</span>
-                <button type="button" onClick={() => setFormData((f) => ({
-                  ...f,
-                  email: generateEmail(`${f.firstName}.${f.lastName}`, ''),
-                  password: generatePassword(f.firstName),
-                }))} className="text-xs text-blue-600 hover:underline">Générer</button>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Email" required>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.email}
-                    onChange={(e) => setFormData((f) => ({ ...f, email: e.target.value }))} required />
-                </Field>
-                <Field label="Mot de passe" required>
-                  <input className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.password}
-                    onChange={(e) => setFormData((f) => ({ ...f, password: e.target.value }))} required />
-                </Field>
-              </div>
-            </div>
-
-            {formError && <p className="text-sm font-medium text-red-600">{formError}</p>}
-          </form>
-        )}
-      </Drawer>
+        classes={classes}
+        academicYear={year}
+        onCreated={load}
+      />
 
       {/* Modale : récupérer un élève d'un établissement associé (recherche par nom/niveau) */}
       {crossOpen && (
