@@ -17,10 +17,11 @@ const Login = () => {
 
   useEffect(() => {
     if (user && profile) {
-      // Les administrateurs passent par l'écran de choix d'année (façon Koolskools) ;
-      // les autres rôles vont directement à leur tableau de bord.
-      const adminRoles = ['admin', 'school_admin', 'pedagogical_director'];
-      navigate(adminRoles.includes(profile.role) ? '/select-year' : '/dashboard', { replace: true });
+      // Les administrateurs ET le responsable financier passent par l'écran de
+      // choix d'année (façon Koolskools) ; les autres rôles vont directement à
+      // leur tableau de bord.
+      const yearSelectRoles = ['admin', 'school_admin', 'pedagogical_director', 'finance_manager'];
+      navigate(yearSelectRoles.includes(profile.role) ? '/select-year' : '/dashboard', { replace: true });
     }
   }, [user, profile, navigate]);
 

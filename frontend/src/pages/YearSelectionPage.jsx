@@ -8,6 +8,10 @@ import { nextYearStr } from '../lib/schoolYear';
 import SchoolSwitcher from '../components/SchoolSwitcher';
 
 const ADMIN_ROLES = ['admin', 'school_admin', 'pedagogical_director'];
+// Rôles autorisés à voir cet écran d'accueil : administrateurs + responsable
+// financier. Le financier choisit son année mais n'a pas les actions de
+// réinscription/réinitialisation (réservées à l'administration).
+const YEAR_SELECT_ROLES = [...ADMIN_ROLES, 'finance_manager'];
 
 const Stat = ({ icon: Icon, label, value, tone }) => (
   <div className="flex flex-col items-center gap-1 p-3 rounded-xl bg-white/70 border border-border min-w-[110px]">
@@ -37,9 +41,11 @@ const YearSelectionPage = () => {
   if (loading) {
     return <div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" /></div>;
   }
-  // Réservé aux administrateurs ; les autres rôles vont directement au tableau de bord.
+  // Réservé aux administrateurs et au responsable financier ; les autres rôles
+  // vont directement au tableau de bord.
   if (!profile) return <Navigate to="/login" replace />;
-  if (!ADMIN_ROLES.includes(profile.role)) return <Navigate to="/dashboard" replace />;
+  if (!YEAR_SELECT_ROLES.includes(profile.role)) return <Navigate to="/dashboard" replace />;
+  const isAdmin = ADMIN_ROLES.includes(profile.role);
 
   const handleAuto = async () => {
     if (!window.confirm(`Créer automatiquement les classes de ${toYear} et y réinscrire tous les élèves de ${year} (niveau promu) ?`)) return;
@@ -118,35 +124,39 @@ const YearSelectionPage = () => {
             </div>
           )}
 
-          {/* Actions de réinscription */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <button
-              onClick={handleAuto}
-              disabled={busy}
-              className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 rounded-xl font-semibold disabled:opacity-50"
-            >
-              {busy ? <RefreshCw className="w-5 h-5 animate-spin" /> : <GraduationCap className="w-5 h-5" />}
-              Tout réinscrire → {toYear}
-            </button>
-            <button
-              onClick={handleReset}
-              disabled={busy}
-              className="flex items-center justify-center gap-2 border border-red-300 text-red-600 hover:bg-red-50 px-4 py-3 rounded-xl font-semibold disabled:opacity-50"
-            >
-              <RotateCcw className="w-5 h-5" /> Réinitialiser {year}
-            </button>
-          </div>
-          <p className="text-xs text-muted-foreground text-center">
-            « Tout réinscrire » crée les classes de {toYear} (niveau promu) et y déplace les élèves,
-            en reconduisant parents, plan de frais et code Massar. Pour des ajustements fins
-            (redoublants, départs), utilisez la page Réinscription.
-          </p>
+          {/* Actions de réinscription — réservées à l'administration */}
+          {isAdmin && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <button
+                  onClick={handleAuto}
+                  disabled={busy}
+                  className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-3 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  {busy ? <RefreshCw className="w-5 h-5 animate-spin" /> : <GraduationCap className="w-5 h-5" />}
+                  Tout réinscrire → {toYear}
+                </button>
+                <button
+                  onClick={handleReset}
+                  disabled={busy}
+                  className="flex items-center justify-center gap-2 border border-red-300 text-red-600 hover:bg-red-50 px-4 py-3 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  <RotateCcw className="w-5 h-5" /> Réinitialiser {year}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground text-center">
+                « Tout réinscrire » crée les classes de {toYear} (niveau promu) et y déplace les élèves,
+                en reconduisant parents, plan de frais et code Massar. Pour des ajustements fins
+                (redoublants, départs), utilisez la page Réinscription.
+              </p>
+            </>
+          )}
         </div>
 
         {/* Entrer dans l'app */}
         <div className="flex justify-center">
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate(isAdmin ? '/dashboard' : '/finance')}
             className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-8 py-3 rounded-xl font-semibold text-lg shadow"
           >
             Entrer dans {year} <ArrowRight className="w-5 h-5" />

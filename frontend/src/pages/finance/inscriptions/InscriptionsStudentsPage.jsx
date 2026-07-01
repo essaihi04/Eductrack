@@ -150,6 +150,7 @@ export default function InscriptionsStudentsPage() {
               name={`${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim()}
               className={e.class?.name || 'Sans classe'}
               photo={e.student?.avatar_url}
+              gender={e.student?.gender || ''}
               status={statusPill(e.status)}
               onClick={() => setActiveEntry(e)}
             />
@@ -164,6 +165,7 @@ export default function InscriptionsStudentsPage() {
               className={e.class?.name || 'Sans classe'}
               sub={e.class?.level}
               photo={e.student?.avatar_url}
+              gender={e.student?.gender || ''}
               status={statusPill(e.status)}
               onClick={() => setActiveEntry(e)}
             />
