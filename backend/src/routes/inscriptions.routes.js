@@ -24,6 +24,14 @@ router.use(requireFinanceAccess);
 
 const getSchoolId = (req) => req.user?.school_id || null;
 
+// Année scolaire courante au format slash "YYYY/YYYY" (rentrée en septembre) —
+// repli si le front n'a pas transmis l'année active.
+const currentYear = () => {
+  const now = new Date();
+  const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${y}/${y + 1}`;
+};
+
 // ── Helpers parents (mêmes règles que la création admin) ─────────────────────
 const splitFullName = (fullName) => {
   const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
@@ -129,6 +137,21 @@ router.post('/students', async (req, res) => {
       try { await supabaseAdmin.auth.admin.deleteUser(authData.user.id); } catch (_) {}
       throw profileError;
     }
+
+    // 3. Inscription de l'année active — SANS ELLE l'élève n'apparaît pas dans la
+    // liste finance (roster = student_enrollments). Statut NI = nouvel inscrit.
+    const academicYear = req.body.academicYear || currentYear();
+    const { error: enrollError } = await supabaseAdmin
+      .from('student_enrollments')
+      .upsert({
+        school_id: schoolId,
+        student_id: profile.id,
+        class_id: classId || null,
+        academic_year: academicYear,
+        status: 'NI',
+        created_by: req.user.id,
+      }, { onConflict: 'student_id,academic_year' });
+    if (enrollError) console.error('Inscription (student_enrollments) échouée:', enrollError);
 
     res.status(201).json({ ...profile, password });
   } catch (error) {

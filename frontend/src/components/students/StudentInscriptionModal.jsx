@@ -102,7 +102,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], a
       const email = (formData.email || '').trim() || generateEmail(`${formData.firstName}.${formData.lastName}`, '');
       const password = (formData.password || '').trim() || generatePassword(formData.firstName);
 
-      let saved = await inscriptionsApi.createStudent({ ...studentFields, email, password });
+      let saved = await inscriptionsApi.createStudent({ ...studentFields, email, password, academicYear });
 
       if (photoFile) {
         try { const { avatar_url } = await inscriptionsApi.uploadPhoto(saved.id, photoFile); saved = { ...saved, avatar_url }; }
