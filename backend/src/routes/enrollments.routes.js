@@ -531,7 +531,7 @@ router.get('/cross-school/levels', async (req, res) => {
 //   - élève d'une école ASSOCIÉE        → déménagement vers l'école active (NI)
 // Parents et code Massar (indépendants de l'école) sont conservés.
 // body: { student_id, academic_year?, target_class_id?, target_level? }
-router.post('/reinscribe', requireSchoolAdmin, async (req, res) => {
+router.post('/reinscribe', requireSchoolAdminOrFinance, async (req, res) => {
   try {
     const activeSchool = getSchoolId(req);
     if (!activeSchool) return res.status(400).json({ error: 'school_id requis' });
@@ -600,7 +600,7 @@ router.post('/reinscribe', requireSchoolAdmin, async (req, res) => {
 // associé vers l'école active (déménagement), promus au niveau suivant.
 // Ex : tous les 6AP du primaire → 1AC au collège, en un clic.
 // body: { source_level, academic_year?, target_level? }
-router.post('/cross-school/reinscribe-level', requireSchoolAdmin, async (req, res) => {
+router.post('/cross-school/reinscribe-level', requireSchoolAdminOrFinance, async (req, res) => {
   try {
     const activeSchool = getSchoolId(req);
     if (!activeSchool) return res.status(400).json({ error: 'school_id requis' });
