@@ -42,6 +42,7 @@ import bulletinsRoutes from './routes/bulletins.routes.js';
 import schoolLifeRoutes from './routes/schoolLife.routes.js';
 import approvalRoutes from './routes/approval.routes.js';
 import enrollmentsRoutes from './routes/enrollments.routes.js';
+import inscriptionsRoutes from './routes/inscriptions.routes.js';
 import { startDailyReportScheduler } from './services/dailyReports.js';
 import { startParentReportScheduler } from './services/parentReportScheduler.js';
 import { startInvoiceScheduler } from './services/invoiceScheduler.js';
@@ -121,6 +122,7 @@ app.use('/api/bulletins', bulletinsRoutes);
 app.use('/api/school-life', schoolLifeRoutes);
 app.use('/api/approvals', approvalRoutes);
 app.use('/api/enrollments', enrollmentsRoutes);
+app.use('/api/inscriptions', inscriptionsRoutes);
 
 // Route de test
 app.get('/api/health', (req, res) => {

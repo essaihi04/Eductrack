@@ -78,6 +78,20 @@ export const requireSchoolAdmin = (req, res, next) => {
   next();
 };
 
+// Comme requireSchoolAdmin, mais autorise AUSSI le responsable financier
+// (finance_manager) : utilisé pour la réinscription pilotée depuis le module
+// finance (le responsable financier peut inscrire/réinscrire les élèves).
+export const requireSchoolAdminOrFinance = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Non authentifié' });
+  }
+  const allowed = ['super_admin', 'admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'finance_manager'];
+  if (!allowed.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès réservé aux administrateurs et responsables financiers' });
+  }
+  next();
+};
+
 // Réservé à admin + directeur pédagogique : peut gérer les responsables pédagogiques (manager)
 // Exclut le pedagogical_manager lui-même (il ne peut pas créer d'autres managers)
 export const requirePedagogicalLeadership = (req, res, next) => {

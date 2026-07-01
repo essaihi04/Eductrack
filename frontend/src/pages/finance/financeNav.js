@@ -4,6 +4,7 @@ import {
   Users, FileText, CreditCard, AlertCircle, Layers, Banknote,
   UserCog, Landmark, Scale,
   ListTree, CalendarRange, Building2,
+  UserPlus, UserCheck,
 } from 'lucide-react';
 
 // Source de navigation finance unique — utilisée par la Sidebar ET le FinanceShell.
@@ -55,6 +56,17 @@ export const FINANCE_POLES = [
     ],
   },
   {
+    key: 'inscriptions',
+    label: 'Inscriptions',
+    icon: UserPlus,
+    color: 'amber',
+    tabs: [
+      { label: 'Tableau de bord', path: '/finance/inscriptions', end: true, icon: LayoutDashboard },
+      { label: 'Élèves', path: '/finance/inscriptions/eleves', icon: Users },
+      { label: 'Réinscription', path: '/finance/inscriptions/reinscription', icon: UserCheck },
+    ],
+  },
+  {
     key: 'comptabilite',
     label: 'Comptabilité',
     icon: BookOpen,
@@ -72,6 +84,7 @@ export const POLE_COLORS = {
   blue: { active: 'bg-blue-600 text-white', soft: 'bg-blue-50 text-blue-700', tab: 'border-blue-600 text-blue-700' },
   green: { active: 'bg-green-600 text-white', soft: 'bg-green-50 text-green-700', tab: 'border-green-600 text-green-700' },
   red: { active: 'bg-red-600 text-white', soft: 'bg-red-50 text-red-700', tab: 'border-red-600 text-red-700' },
+  amber: { active: 'bg-amber-600 text-white', soft: 'bg-amber-50 text-amber-700', tab: 'border-amber-600 text-amber-700' },
   purple: { active: 'bg-purple-600 text-white', soft: 'bg-purple-50 text-purple-700', tab: 'border-purple-600 text-purple-700' },
 };
 

@@ -1,6 +1,6 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate, requireSchoolAdmin } from '../middleware/auth.js';
+import { authenticate, requireSchoolAdmin, requireSchoolAdminOrFinance } from '../middleware/auth.js';
 import { nextLevel, isTerminalLevel } from '../utils/levelProgression.js';
 
 const router = express.Router();
@@ -209,7 +209,7 @@ router.get('/', async (req, res) => {
 // --- POST /api/enrollments/reinscription -----------------------------------
 // Promeut une liste d'élèves de from_year vers to_year.
 // body: { from_year, to_year, mappings:[{student_id, new_class_id, status}], options:{ carryFeePlan, keepMassar } }
-router.post('/reinscription', requireSchoolAdmin, async (req, res) => {
+router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { from_year, to_year, mappings, options = {} } = req.body;

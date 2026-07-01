@@ -64,6 +64,9 @@ import PayrollPage from './pages/finance/PayrollPage';
 import LoansPage from './pages/finance/LoansPage';
 import TaxesPage from './pages/finance/TaxesPage';
 import BankImportPage from './pages/finance/BankImportPage';
+import InscriptionsDashboardPage from './pages/finance/inscriptions/InscriptionsDashboardPage';
+import InscriptionsStudentsPage from './pages/finance/inscriptions/InscriptionsStudentsPage';
+import InscriptionsReinscriptionPage from './pages/finance/inscriptions/InscriptionsReinscriptionPage';
 import TransportDashboard from './pages/transport/TransportDashboard';
 import BusesPage from './pages/transport/BusesPage';
 import BusDetailPage from './pages/transport/BusDetailPage';
@@ -167,6 +170,9 @@ function App() {
               <Route path="loans" element={<LoansPage />} />
               <Route path="taxes" element={<TaxesPage />} />
               <Route path="bank" element={<BankImportPage />} />
+              <Route path="inscriptions" element={<InscriptionsDashboardPage />} />
+              <Route path="inscriptions/eleves" element={<InscriptionsStudentsPage />} />
+              <Route path="inscriptions/reinscription" element={<InscriptionsReinscriptionPage />} />
             </Route>
             <Route path="admin/finance-managers" element={<FinanceManagersPage />} />
             <Route path="admin/pedagogical-managers" element={<PedagogicalManagersPage />} />
