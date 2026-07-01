@@ -75,7 +75,7 @@ router.get('/classes', async (req, res) => {
     if (!schoolId) return res.json([]);
     let q = supabaseAdmin
       .from('classes')
-      .select('id, name, level, filiere, academic_year, capacity')
+      .select('id, name, level, filiere, academic_year')
       .eq('school_id', schoolId)
       .order('name', { ascending: true });
     if (req.query.academic_year) q = q.eq('academic_year', req.query.academic_year);
