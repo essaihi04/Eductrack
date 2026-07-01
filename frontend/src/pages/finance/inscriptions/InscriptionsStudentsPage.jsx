@@ -104,6 +104,45 @@ export default function InscriptionsStudentsPage() {
       .map((e) => ({ ...e, _candidate: true }));
   }, [prevRoster, activeStudentIds]);
 
+  // Liste unifiée de réinscription : élèves non réinscrits de l'année précédente
+  // (propre école) + élèves des établissements associés, filtrés par le même
+  // champ de recherche (nom/Massar) et le même niveau.
+  const mergedReinscribe = useMemo(() => {
+    const q = crossSearch.trim().toLowerCase();
+    const lvl = crossLevelFilter;
+
+    const own = candidates
+      .filter((e) => !lvl || (e.class?.level || '') === lvl)
+      .filter((e) => {
+        if (!q) return true;
+        const name = `${e.student?.last_name || ''} ${e.student?.first_name || ''}`.toLowerCase();
+        const massar = (e.student?.massar_code || '').toLowerCase();
+        return name.includes(q) || massar.includes(q);
+      })
+      .map((e) => {
+        const level = e.class?.level || '';
+        return {
+          key: 'own-' + (e.student?.id || e.id),
+          source: 'own',
+          raw: e,
+          name: `${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim(),
+          sub: `Cette école · ${e.class?.name || 'Sans classe'}${level ? ` (${level})` : ''}`,
+          suggested: nextLevel(level),
+        };
+      });
+
+    const cross = crossResults.map((s) => ({
+      key: 'cross-' + s.id,
+      source: 'cross',
+      raw: s,
+      name: `${s.first_name} ${s.last_name}`.trim(),
+      sub: `${s.school?.name || 'Établissement'}${s.class?.name ? ` · ${s.class.name}` : ''}${s.current_level ? ` (${s.current_level})` : ''}`,
+      suggested: s.suggested_level,
+    }));
+
+    return [...own, ...cross];
+  }, [candidates, crossResults, crossSearch, crossLevelFilter]);
+
   // La liste n'affiche que les élèves réinscrits/inscrits pour l'année active
   // (vide pour une année neuve tant qu'aucune réinscription n'a été faite).
   const filtered = useMemo(() => {
@@ -401,44 +440,7 @@ export default function InscriptionsStudentsPage() {
             </div>
 
             <div className="p-4 space-y-4">
-              {/* Section 1 — élèves de l'année précédente (propre école) */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-semibold text-gray-700">
-                    Année précédente{prevYear ? ` (${prevYear})` : ''} · non réinscrits
-                  </h4>
-                  <span className="text-xs text-gray-400">{candidates.length}</span>
-                </div>
-                <div className="border rounded-lg divide-y max-h-56 overflow-y-auto">
-                  {candidates.length === 0 ? (
-                    <div className="p-3 text-sm text-gray-500">Aucun élève de l'année précédente à réinscrire.</div>
-                  ) : candidates.map((e) => {
-                    const lvl = e.class?.level || '';
-                    const suggested = nextLevel(lvl);
-                    return (
-                      <button key={e.student?.id || e.id} onClick={() => openReinscribeOwn(e)}
-                        className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">
-                            {e.student?.last_name} {e.student?.first_name}
-                          </div>
-                          <div className="text-xs text-gray-500 truncate">
-                            {e.class?.name || 'Sans classe'}{lvl ? ` (${lvl})` : ''}
-                          </div>
-                        </div>
-                        {suggested && (
-                          <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {suggested}</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="border-t pt-3">
-                <h4 className="text-sm font-semibold text-gray-700 mb-2">Établissements associés</h4>
-              </div>
-
+              {/* Recherche + niveau — filtrent les DEUX sources (propre école + associés) */}
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
@@ -466,7 +468,7 @@ export default function InscriptionsStudentsPage() {
                 </select>
               </div>
               <p className="text-[11px] text-gray-400 -mt-2">
-                Liste les élèves des établissements associés par le super admin. Filtrez par niveau puis cliquez un élève, ou utilisez « Réinscrire tout le niveau » pour récupérer toute la promotion.
+                Élèves non réinscrits de l'année précédente et élèves des établissements associés. Filtrez par niveau puis cliquez un élève ; « Réinscrire tout le niveau » récupère toute la promotion des établissements associés.
               </p>
 
               {crossLevelFilter && (
@@ -491,22 +493,24 @@ export default function InscriptionsStudentsPage() {
                 </div>
               )}
 
-              <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
-                {crossSearching && <div className="p-3 text-sm text-gray-500">Chargement…</div>}
-                {!crossSearching && crossResults.length === 0 && (
-                  <div className="p-3 text-sm text-gray-500">Aucun élève dans les établissements associés (ou aucun pour ce filtre).</div>
+              {/* Liste fusionnée : année précédente + établissements associés */}
+              <div className="border rounded-lg divide-y max-h-96 overflow-y-auto">
+                {crossSearching && mergedReinscribe.length === 0 && (
+                  <div className="p-3 text-sm text-gray-500">Chargement…</div>
                 )}
-                {crossResults.map((s) => (
-                  <button key={s.id} onClick={() => openReinscribeFromCross(s)}
+                {!crossSearching && mergedReinscribe.length === 0 && (
+                  <div className="p-3 text-sm text-gray-500">Aucun élève à réinscrire (année précédente ou établissements associés).</div>
+                )}
+                {mergedReinscribe.map((item) => (
+                  <button key={item.key}
+                    onClick={() => (item.source === 'own' ? openReinscribeOwn(item.raw) : openReinscribeFromCross(item.raw))}
                     className="flex items-center gap-3 w-full p-2.5 text-left hover:bg-violet-50">
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{s.first_name} {s.last_name}</div>
-                      <div className="text-xs text-gray-500 truncate">
-                        {s.school?.name || 'Établissement'}{s.class?.name ? ` · ${s.class.name}` : ''}{s.current_level ? ` (${s.current_level})` : ''}
-                      </div>
+                      <div className="font-medium text-sm truncate">{item.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{item.sub}</div>
                     </div>
-                    {s.suggested_level && (
-                      <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {s.suggested_level}</span>
+                    {item.suggested && (
+                      <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full shrink-0">→ {item.suggested}</span>
                     )}
                   </button>
                 ))}
