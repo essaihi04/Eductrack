@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Users, Search, Plus, RefreshCw, Check, ArrowRightLeft, X, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Users, Search, Plus, RefreshCw, Check, ArrowRightLeft, X, AlertTriangle, RotateCcw, Download } from 'lucide-react';
 import { PageHeader, FilterBar, Button } from '../../../components/finance/ui';
 import {
   CardGrid, StudentCard, StudentRow, GridListToggle, StatusPill, DetailDrawer, FieldRow,
 } from '../../../components/directory/ui';
 import StudentInscriptionModal from '../../../components/students/StudentInscriptionModal';
+import { useAuth } from '../../../contexts/AuthContext';
 import { useYear } from '../../../contexts/YearContext';
 import { enrollmentsApi } from '../../../lib/enrollmentsApi';
 import { inscriptionsApi } from '../../../lib/inscriptionsApi';
 import { LEVEL_ORDER, nextLevel } from '../../../lib/levelProgression';
 import { prevYearStr, toDashYear } from '../../../lib/schoolYear';
+import { printInscriptionFiche } from '../../../utils/inscriptionFiche';
 
 // Statut d'inscription d'une ligne de roster (RI/NI/NR) → pastille.
 function statusPill(status) {
@@ -23,6 +25,9 @@ function statusPill(status) {
 // fiche d'inscription complète que l'admin (photo, parents, documents, médical…)
 // via StudentInscriptionModal ; la réinscription se fait dans l'onglet dédié.
 export default function InscriptionsStudentsPage() {
+  const { profile } = useAuth();
+  const school = profile?.school || {};
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const { year } = useYear();
   const [roster, setRoster] = useState([]);
   const [prevRoster, setPrevRoster] = useState([]); // élèves de l'année précédente (candidats à récupérer)
@@ -33,6 +38,7 @@ export default function InscriptionsStudentsPage() {
   const [viewMode, setViewMode] = useState('grid');
   const [showPrevious, setShowPrevious] = useState(true); // afficher les non réinscrits de l'an dernier
   const [activeEntry, setActiveEntry] = useState(null);
+  const [ficheBusy, setFicheBusy] = useState(false); // téléchargement de la fiche d'inscription en cours
 
   const [showForm, setShowForm] = useState(false); // modale « Nouvel élève »
 
@@ -217,6 +223,23 @@ export default function InscriptionsStudentsPage() {
     }
   };
 
+  // Télécharge la fiche d'inscription d'un élève inscrit : récupère le profil
+  // complet (parents, documents, identité…) puis ouvre la même fiche que l'admin.
+  const downloadFiche = async (entry) => {
+    const sid = entry.student_id || entry.student?.id;
+    if (!sid) return;
+    setFicheBusy(true);
+    try {
+      const full = await inscriptionsApi.getStudent(sid);
+      const student = { ...(entry.student || {}), ...full, class_id: entry.class_id ?? full.class_id };
+      printInscriptionFiche({ student, school, classes, apiBase, academicYear: year });
+    } catch (e) {
+      alert(e.message || 'Erreur lors de la récupération de la fiche');
+    } finally {
+      setFicheBusy(false);
+    }
+  };
+
   const submitReinscribe = async () => {
     if (!reinscribeTarget) return;
     setReinscribeBusy(true); setReinscribeMsg(null);
@@ -331,6 +354,16 @@ export default function InscriptionsStudentsPage() {
             <FieldRow label="Filière" value={activeEntry.class?.filiere || '—'} />
             <FieldRow label="Statut" value={activeEntry.status === 'RI' ? 'Réinscrit' : activeEntry.status === 'NI' ? 'Nouveau' : 'Non réinscrit'} />
             <FieldRow label="Code Massar" value={activeEntry.student?.massar_code || '—'} mono />
+
+            {/* Télécharger la fiche d'inscription (identique à l'admin) */}
+            <button
+              onClick={() => downloadFiche(activeEntry)}
+              disabled={ficheBusy}
+              className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {ficheBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              {ficheBusy ? 'Préparation…' : "Télécharger la fiche d'inscription"}
+            </button>
 
             {/* Annuler la réinscription : remet l'élève dans son état initial */}
             {(activeEntry.status === 'RI' || activeEntry.status === 'NI') && (

@@ -137,6 +137,47 @@ router.post('/students', async (req, res) => {
   }
 });
 
+// GET /api/inscriptions/students/:id
+// Fiche complète d'un élève (profil + parents) pour éditer/imprimer la fiche
+// d'inscription côté finance — scopée à l'école du demandeur, mêmes champs que
+// la fiche admin (le roster /enrollments ne renvoie qu'un sous-ensemble).
+router.get('/students/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { id } = req.params;
+    const { data: student, error } = await supabaseAdmin
+      .from('profiles')
+      .select('*')
+      .eq('id', id)
+      .eq('role', 'student')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!student) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
+
+    // Parents liés (mêmes champs que la fiche admin).
+    const { data: links } = await supabaseAdmin
+      .from('parent_students')
+      .select('relationship, parent:profiles!parent_students_parent_id_fkey(first_name, last_name, email, phone, cin, profession, marital_status)')
+      .eq('student_id', id);
+    const parents = (links || []).map((l) => ({
+      first_name: l.parent?.first_name || '',
+      last_name: l.parent?.last_name || '',
+      relationship: l.relationship || null,
+      email: l.parent?.email || null,
+      phone: l.parent?.phone || null,
+      cin: l.parent?.cin || null,
+      profession: l.parent?.profession || null,
+      marital_status: l.parent?.marital_status || null,
+    }));
+
+    res.json({ ...student, parents });
+  } catch (e) {
+    console.error('GET /inscriptions/students/:id:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // POST /api/inscriptions/students/:id/photo
 // Upload de la photo d'un élève (même stockage que l'admin), scopé à l'école.
 router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (req, res) => {

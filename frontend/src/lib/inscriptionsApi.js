@@ -35,6 +35,8 @@ async function request(path, { method = 'GET', body, query } = {}) {
 export const inscriptionsApi = {
   listClasses: (academicYear) => request('/api/inscriptions/classes', { query: { academic_year: academicYear } }),
   createStudent: (payload) => request('/api/inscriptions/students', { method: 'POST', body: payload }),
+  // Fiche complète d'un élève (profil + parents) — pour imprimer la fiche d'inscription.
+  getStudent: (id) => request(`/api/inscriptions/students/${id}`),
   // Photo de l'élève (multipart) — même comportement que la fiche admin.
   uploadPhoto: async (studentId, file) => {
     const token = await getToken();
