@@ -338,14 +338,26 @@ router.post('/attendance', async (req, res) => {
 // Créer une séance
 router.post('/sessions', async (req, res) => {
   try {
-    const { class_id, date, start_time, end_time, topic, notes, subject_id, tracking_options, type } = req.body;
-    const teacherId = req.user.id;
+    const { class_id, date, start_time, end_time, topic, notes, subject_id, tracking_options, type, teacher_id: bodyTeacherId } = req.body;
+    let teacherId = req.user.id;
 
-    // Direction pédagogique : vérifier que la classe est dans son périmètre
+    // Direction pédagogique : vérifier que la classe est dans son périmètre.
+    // De plus, la séance peut être enregistrée AU NOM du prof concerné (celui
+    // du créneau) : ainsi elle apparaît sur le compte du prof et marque son
+    // créneau comme fait. On valide que ce prof intervient bien dans la classe.
     if (isPedagogicalStaff(req.user)) {
       const allowed = await canAccessClassAsTeacher(req, class_id);
       if (!allowed) {
         return res.status(403).json({ error: 'Accès refusé à cette classe' });
+      }
+      if (bodyTeacherId && bodyTeacherId !== req.user.id) {
+        const [{ data: ttRow }, { data: ctRow }] = await Promise.all([
+          supabaseAdmin.from('class_timetable').select('id').eq('class_id', class_id).eq('teacher_id', bodyTeacherId).limit(1),
+          supabaseAdmin.from('class_teachers').select('id').eq('class_id', class_id).eq('teacher_id', bodyTeacherId).limit(1),
+        ]);
+        if ((ttRow && ttRow.length) || (ctRow && ctRow.length)) {
+          teacherId = bodyTeacherId; // prof concerné validé
+        }
       }
     }
 

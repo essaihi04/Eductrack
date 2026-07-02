@@ -55,6 +55,9 @@ const SuiviRapide = () => {
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [students, setStudents] = useState([]);
   const [studentSearch, setStudentSearch] = useState('');
+  // Prof concerné par le créneau sélectionné (utile quand la direction
+  // pédagogique enregistre une séance à la place d'un prof).
+  const [slotTeacherId, setSlotTeacherId] = useState(null);
   const [tracking, setTracking] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -234,7 +237,10 @@ const SuiviRapide = () => {
     const storedSession = loadSessionFromStorage();
     if (!storedSession) return false;
 
-    if (storedSession.teacher_id && storedSession.teacher_id !== profile?.id) {
+    // La direction pédagogique peut reprendre une séance enregistrée au nom
+    // d'un autre prof ; un prof normal ne reprend que ses propres séances.
+    const isPedagogicalStaff = ['pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+    if (!isPedagogicalStaff && storedSession.teacher_id && storedSession.teacher_id !== profile?.id) {
       clearStoredSession();
       return false;
     }
@@ -312,6 +318,8 @@ const SuiviRapide = () => {
     if (slot.subject?.id) {
       setSelectedSubject(slot.subject.id);
     }
+    // Mémorise le prof du créneau : la séance sera enregistrée à son nom.
+    setSlotTeacherId(slot.teacher_id || slot.teacher?.id || null);
     setSessionError('');
   };
 
@@ -642,6 +650,21 @@ const SuiviRapide = () => {
       setSessionLoading(true);
       setSessionError('');
       const token = await getAuthToken();
+
+      // Si la direction pédagogique enregistre à la place d'un prof, on
+      // attribue la séance au prof concerné (créneau sélectionné, ou créneau
+      // de l'emploi du temps correspondant à l'horaire saisi) pour qu'elle
+      // apparaisse bien sur SON compte et marque son créneau comme fait.
+      const isPedagogicalStaff = ['pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+      let onBehalfTeacherId = null;
+      if (isPedagogicalStaff) {
+        onBehalfTeacherId = slotTeacherId;
+        if (!onBehalfTeacherId) {
+          const match = timetableSlots.find(s => s.start_time?.substring(0, 5) === startTime);
+          onBehalfTeacherId = match?.teacher_id || match?.teacher?.id || null;
+        }
+      }
+
       const res = await fetch(`${apiUrl}/api/teacher/sessions`, {
         method: 'POST',
         headers: {
@@ -658,6 +681,8 @@ const SuiviRapide = () => {
           subject_id: selectedSubject || null,
           topic: sessionType === 'control' ? controlName : (lessonTitle || null),
           notes: sessionType === 'control' ? controlDescription : (lessonDescription || null),
+          // Ignoré par le backend pour un prof ; honoré pour la direction pédagogique.
+          teacher_id: onBehalfTeacherId || undefined,
         }),
       });
 
