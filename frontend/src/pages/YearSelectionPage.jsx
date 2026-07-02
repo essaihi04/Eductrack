@@ -9,9 +9,10 @@ import SchoolSwitcher from '../components/SchoolSwitcher';
 
 const ADMIN_ROLES = ['admin', 'school_admin', 'pedagogical_director'];
 // Rôles autorisés à voir cet écran d'accueil : administrateurs + responsable
-// financier. Le financier choisit son année mais n'a pas les actions de
+// financier + responsable pédagogique. Le financier et le responsable
+// pédagogique choisissent leur année mais n'ont pas les actions de
 // réinscription/réinitialisation (réservées à l'administration).
-const YEAR_SELECT_ROLES = [...ADMIN_ROLES, 'finance_manager'];
+const YEAR_SELECT_ROLES = [...ADMIN_ROLES, 'finance_manager', 'pedagogical_manager'];
 
 const Stat = ({ icon: Icon, label, value, tone }) => (
   <div className="flex flex-col items-center gap-1 p-3 rounded-xl bg-white/70 border border-border min-w-[110px]">
@@ -46,6 +47,9 @@ const YearSelectionPage = () => {
   if (!profile) return <Navigate to="/login" replace />;
   if (!YEAR_SELECT_ROLES.includes(profile.role)) return <Navigate to="/dashboard" replace />;
   const isAdmin = ADMIN_ROLES.includes(profile.role);
+  // Où « Entrer dans l'année » redirige : le financier va au module finance,
+  // tous les autres (admins + responsable pédagogique) au tableau de bord.
+  const entryPath = profile.role === 'finance_manager' ? '/finance' : '/dashboard';
 
   const handleAuto = async () => {
     if (!window.confirm(`Créer automatiquement les classes de ${toYear} et y réinscrire tous les élèves de ${year} (niveau promu) ?`)) return;
@@ -156,7 +160,7 @@ const YearSelectionPage = () => {
         {/* Entrer dans l'app */}
         <div className="flex justify-center">
           <button
-            onClick={() => navigate(isAdmin ? '/dashboard' : '/finance')}
+            onClick={() => navigate(entryPath)}
             className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-8 py-3 rounded-xl font-semibold text-lg shadow"
           >
             Entrer dans {year} <ArrowRight className="w-5 h-5" />
