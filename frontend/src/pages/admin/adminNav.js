@@ -21,6 +21,7 @@ import {
 const FULL = ['admin', 'school_admin'];                              // admins complets
 const NON_MANAGER = ['admin', 'school_admin', 'pedagogical_director']; // tout sauf resp. pédagogique
 const ALL_ADMIN = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'];
+const PEDAGO = ['pedagogical_director', 'pedagogical_manager'];       // direction pédagogique seule
 
 // Domaines pilotés par DomainTabs (Finance est géré à part via FinanceShell).
 export const ADMIN_DOMAINS = [
@@ -41,6 +42,18 @@ export const ADMIN_DOMAINS = [
           { label: 'Réinscription', path: '/admin/reinscription', icon: UserCheck, roles: NON_MANAGER },
           { label: 'Matières', path: '/subjects', icon: BookOpen, roles: ALL_ADMIN },
           { label: 'Parents', path: '/parents', icon: Users2, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        // La direction pédagogique peut faire le suivi "comme un prof" :
+        // enregistrer une séance, suivre les élèves, signaler les absences —
+        // utile quand un prof n'a pas fait son travail.
+        key: 'terrain',
+        label: 'Suivi séance',
+        items: [
+          { label: 'Suivi de séance', path: '/teacher/rapide', icon: Calendar, roles: PEDAGO },
+          { label: 'Dashboard classes', path: '/teacher/dashboard', icon: BarChart3, roles: PEDAGO },
+          { label: 'Devoirs', path: '/teacher/devoirs', icon: FileText, roles: PEDAGO },
         ],
       },
       {
