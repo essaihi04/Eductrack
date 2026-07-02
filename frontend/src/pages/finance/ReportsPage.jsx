@@ -4,6 +4,7 @@ import {
   Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, Receipt,
 } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS, EXPENSE_CATEGORIES } from '../../lib/financeApi';
+import { saveBlob } from '../../lib/download';
 import { PageHeader, KpiGrid, KpiCard, Card, Button } from '../../components/finance/ui';
 import { addPrevisionnelSheet, buildMatrix } from './previsionnelSheet';
 import { useAuth } from '../../contexts/AuthContext';
@@ -445,12 +446,7 @@ const ReportsPage = () => {
   const downloadWorkbook = async (wb, name) => {
     const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(url);
+    await saveBlob(blob, name);
   };
 
   // Export Excel : matrice annuelle Prévisionnel/Réel (1er onglet) + détails de la période.
@@ -670,7 +666,7 @@ const ReportsPage = () => {
       console.error('PDF matrice annuelle:', e.message);
     }
 
-    doc.save(`${fileBase}.pdf`);
+    await saveBlob(doc.output('blob'), `${fileBase}.pdf`);
   };
 
   const maxBar = Math.max(1, ...breakdown.flatMap(r => [r.income, r.expense]));

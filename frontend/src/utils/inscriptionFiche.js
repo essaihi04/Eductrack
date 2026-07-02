@@ -1,6 +1,7 @@
 // Fiche d'inscription imprimable (recto + engagement) — extraite telle quelle
 // de la fiche élève admin pour être réutilisée à l'identique côté finance.
 // Ouvre une fenêtre d'impression → « Enregistrer en PDF ».
+import { printHtmlDocument } from '../lib/download';
 
 const DOC_KEYS = [
   ['livret_famille', 'Livret de famille'],
@@ -21,8 +22,6 @@ const currentAcademicYear = () => {
 
 // { student, school, classes, apiBase, academicYear }
 export function printInscriptionFiche({ student, school = {}, classes = [], apiBase = '', academicYear } = {}) {
-  const w = window.open('', '_blank');
-  if (!w) { alert('Veuillez autoriser les pop-ups pour télécharger la fiche.'); return; }
   const yearLabel = academicYear || currentAcademicYear();
   const resolveAsset = (u) => !u ? null : (u.startsWith('http') ? u : `${apiBase}${u.startsWith('/') ? '' : '/'}${u}`);
   const logoSrc = resolveAsset(school.logo_url);
@@ -194,7 +193,5 @@ export function printInscriptionFiche({ student, school = {}, classes = [], apiB
     </div>
 
   </body></html>`;
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 600);
+  printHtmlDocument(html, { title: `Fiche inscription ${student?.first_name || ''} ${student?.last_name || ''}`.trim() });
 }

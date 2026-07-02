@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { openBlob } from './download';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -116,9 +117,7 @@ export const financeApi = {
     const res = await fetch(`${apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    await openBlob(blob, 'document.pdf');
   },
   openInvoicePdf: (id) => financeApi._openPdf(`/api/finance/invoices/${id}/pdf`),
   openBatchReceiptPdf: (batchId) => financeApi._openPdf(`/api/finance/payment-batches/${batchId}/receipt-pdf`),

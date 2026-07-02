@@ -1,6 +1,6 @@
 import express from 'express';
 import { supabaseAdmin, createAuthenticatedClient } from '../config/supabase.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize, isPedagogicalStaff, getTeachingClassIds, canAccessClassAsTeacher } from '../middleware/auth.js';
 import multer from 'multer';
 import XLSX from 'xlsx';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
@@ -103,9 +103,11 @@ async function handlePresenceNotification({ presence, existing, rowId, sessionId
   }
 }
 
-// Middleware pour vérifier que c'est un professeur
+// Professeurs + direction pédagogique (directeur / responsable) : la direction
+// pédagogique peut enregistrer les séances, suivre les élèves et signaler à la
+// place d'un prof qui n'a pas fait son travail (périmètre contrôlé par classe).
 router.use(authenticate);
-router.use(authorize('teacher'));
+router.use(authorize('teacher', 'pedagogical_director', 'pedagogical_manager'));
 
 // ==================== CLASSES DU PROFESSEUR ====================
 
@@ -114,13 +116,26 @@ router.get('/my-classes', async (req, res) => {
   try {
     const teacherId = req.user.id;
 
+    // Direction pédagogique : toutes les classes de son périmètre
+    if (isPedagogicalStaff(req.user)) {
+      const classIds = await getTeachingClassIds(req);
+      if (classIds.length === 0) return res.json([]);
+      const { data: classes, error } = await supabaseAdmin
+        .from('classes')
+        .select('*')
+        .in('id', classIds)
+        .order('name');
+      if (error) throw error;
+      return res.json(classes || []);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('class_teachers')
       .select('class_id, classes(*)')
       .eq('teacher_id', teacherId);
 
     if (error) throw error;
-    
+
     const classes = data.map(ct => ct.classes);
     res.json(classes);
   } catch (error) {
@@ -155,14 +170,8 @@ router.post('/students/:studentId/reset-password', async (req, res) => {
     }
 
     if (student.class_id) {
-      const { data: classTeacher, error: ctError } = await supabaseAdmin
-        .from('class_teachers')
-        .select('id')
-        .eq('class_id', student.class_id)
-        .eq('teacher_id', teacherId)
-        .single();
-
-      if (ctError || !classTeacher) {
+      const allowed = await canAccessClassAsTeacher(req, student.class_id);
+      if (!allowed) {
         return res.status(403).json({ error: 'Accès refusé' });
       }
     }
@@ -185,17 +194,10 @@ router.post('/students/:studentId/reset-password', async (req, res) => {
 router.get('/classes/:classId/students', async (req, res) => {
   try {
     const { classId } = req.params;
-    const teacherId = req.user.id;
 
-    // Vérifier que le professeur est assigné à cette classe
-    const { data: classTeacher, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', classId)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (ctError || !classTeacher) {
+    // Vérifier l'accès à cette classe (prof assigné ou direction pédagogique)
+    const allowed = await canAccessClassAsTeacher(req, classId);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -220,6 +222,15 @@ router.get('/classes/:classId/students', async (req, res) => {
 router.get('/my-subjects', async (req, res) => {
   try {
     const teacherId = req.user.id;
+
+    // Direction pédagogique : toutes les matières de l'école
+    if (isPedagogicalStaff(req.user)) {
+      let q = supabaseAdmin.from('subjects').select('*').order('name');
+      if (req.user.school_id) q = q.eq('school_id', req.user.school_id);
+      const { data: subjects, error } = await q;
+      if (error) throw error;
+      return res.json(subjects || []);
+    }
 
     const { data, error } = await supabaseAdmin
       .from('teacher_subjects')
@@ -276,15 +287,9 @@ router.get('/classes/:classId/attendance/:date', async (req, res) => {
     const { classId, date } = req.params;
     const teacherId = req.user.id;
 
-    // Vérifier que le professeur est assigné à cette classe
-    const { data: classTeacher, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', classId)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (ctError || !classTeacher) {
+    // Vérifier l'accès à cette classe (prof assigné ou direction pédagogique)
+    const allowed = await canAccessClassAsTeacher(req, classId);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -335,6 +340,14 @@ router.post('/sessions', async (req, res) => {
   try {
     const { class_id, date, start_time, end_time, topic, notes, subject_id, tracking_options, type } = req.body;
     const teacherId = req.user.id;
+
+    // Direction pédagogique : vérifier que la classe est dans son périmètre
+    if (isPedagogicalStaff(req.user)) {
+      const allowed = await canAccessClassAsTeacher(req, class_id);
+      if (!allowed) {
+        return res.status(403).json({ error: 'Accès refusé à cette classe' });
+      }
+    }
 
     // Vérifier si une séance existe déjà avec la même date et horaire
     const { data: existingSession, error: checkError } = await supabaseAdmin
@@ -453,14 +466,25 @@ router.get('/sessions/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const teacherId = req.user.id;
 
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('sessions')
       .select('*')
-      .eq('id', sessionId)
-      .eq('teacher_id', teacherId)
-      .single();
+      .eq('id', sessionId);
+
+    // La direction pédagogique accède aux séances de toutes les classes de son périmètre
+    if (!isPedagogicalStaff(req.user)) {
+      query = query.eq('teacher_id', teacherId);
+    }
+
+    const { data, error } = await query.single();
 
     if (error) throw error;
+
+    if (isPedagogicalStaff(req.user)) {
+      const allowed = await canAccessClassAsTeacher(req, data.class_id);
+      if (!allowed) return res.status(403).json({ error: 'Accès refusé' });
+    }
+
     res.json(data);
   } catch (error) {
     console.error('Erreur:', error);
@@ -475,11 +499,26 @@ router.put('/sessions/:sessionId', async (req, res) => {
     const teacherId = req.user.id;
     const { topic, notes } = req.body;
 
-    const { data, error } = await supabaseAdmin
+    let updateQuery = supabaseAdmin
       .from('sessions')
       .update({ topic, notes, updated_at: new Date().toISOString() })
-      .eq('id', sessionId)
-      .eq('teacher_id', teacherId)
+      .eq('id', sessionId);
+
+    if (isPedagogicalStaff(req.user)) {
+      // Vérifier que la séance appartient à une classe du périmètre
+      const { data: existing } = await supabaseAdmin
+        .from('sessions')
+        .select('id, class_id')
+        .eq('id', sessionId)
+        .maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Séance introuvable.' });
+      const allowed = await canAccessClassAsTeacher(req, existing.class_id);
+      if (!allowed) return res.status(403).json({ error: 'Accès refusé' });
+    } else {
+      updateQuery = updateQuery.eq('teacher_id', teacherId);
+    }
+
+    const { data, error } = await updateQuery
       .select()
       .single();
 
@@ -498,15 +537,20 @@ router.delete('/sessions/:sessionId', async (req, res) => {
     const { sessionId } = req.params;
     const teacherId = req.user.id;
 
-    // Vérifier que la séance appartient au professeur
+    // Vérifier que la séance appartient au professeur (ou est dans le
+    // périmètre de la direction pédagogique)
     const { data: session, error: checkError } = await supabaseAdmin
       .from('sessions')
-      .select('id, teacher_id')
+      .select('id, teacher_id, class_id')
       .eq('id', sessionId)
       .single();
 
-    if (!session || session.teacher_id !== teacherId) {
+    if (!session) {
       return res.status(403).json({ error: 'Non autorisé' });
+    }
+    if (session.teacher_id !== teacherId) {
+      const allowed = isPedagogicalStaff(req.user) && await canAccessClassAsTeacher(req, session.class_id);
+      if (!allowed) return res.status(403).json({ error: 'Non autorisé' });
     }
 
     // Supprimer d'abord les enregistrements de suivi associés
@@ -539,6 +583,13 @@ router.get('/classes/:classId/sessions', async (req, res) => {
     const { date } = req.query;
     const teacherId = req.user.id;
 
+    // La direction pédagogique voit les séances de TOUS les profs de la classe
+    // (permet de vérifier si un prof a fait son travail et de compléter à sa place)
+    if (isPedagogicalStaff(req.user)) {
+      const allowed = await canAccessClassAsTeacher(req, classId);
+      if (!allowed) return res.status(403).json({ error: 'Accès refusé' });
+    }
+
     let query = supabaseAdmin
       .from('sessions')
       .select(`
@@ -554,8 +605,11 @@ router.get('/classes/:classId/sessions', async (req, res) => {
           )
         )
       `)
-      .eq('class_id', classId)
-      .eq('teacher_id', teacherId);
+      .eq('class_id', classId);
+
+    if (!isPedagogicalStaff(req.user)) {
+      query = query.eq('teacher_id', teacherId);
+    }
 
     if (date) {
       query = query.eq('date', date);
@@ -595,16 +649,12 @@ router.post('/homework/:homeworkId/submit/:studentId', async (req, res) => {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
-    // Vérifier que le professeur a le droit sur ce devoir (soit créateur, soit enseignant de la classe)
-    const { data: classTeacher, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', homework.class_id)
-      .eq('teacher_id', teacherId)
-      .single();
+    // Vérifier le droit sur ce devoir (créateur, enseignant de la classe ou
+    // direction pédagogique dans son périmètre)
+    const hasClassAccess = await canAccessClassAsTeacher(req, homework.class_id);
 
-    if (ctError && homework.created_by !== teacherId) {
-      console.log('Erreur: Professeur non autorisé sur ce devoir', ctError);
+    if (!hasClassAccess && homework.created_by !== teacherId) {
+      console.log('Erreur: Utilisateur non autorisé sur ce devoir');
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -952,12 +1002,21 @@ router.get('/lesson-plan/:classId', async (req, res) => {
     const { week_start } = req.query;
     const teacherId = req.user.id;
 
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('lesson_plan')
       .select('*')
       .eq('class_id', classId)
-      .eq('teacher_id', teacherId)
       .eq('week_start', week_start);
+
+    // La direction pédagogique voit le planning de tous les profs de la classe
+    if (isPedagogicalStaff(req.user)) {
+      const allowed = await canAccessClassAsTeacher(req, classId);
+      if (!allowed) return res.status(403).json({ error: 'Accès refusé' });
+    } else {
+      query = query.eq('teacher_id', teacherId);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
     res.json(data);
@@ -1352,12 +1411,21 @@ router.get('/classes/:classId/students-metrics', async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const { data: tracking, error: trackingError } = await supabaseAdmin
+    let trackingQuery = supabaseAdmin
       .from('session_tracking')
       .select('student_id, presence, cahier_present, sleeping, homework, participation, work_status, discipline, phone_use, cahier_lesson, cahier_documents, cahier_readability, attitude, comment, session_id, sessions!inner(id, class_id, teacher_id, tracking_options)')
       .eq('sessions.class_id', classId)
-      .eq('sessions.teacher_id', teacherId)
       .gte('created_at', thirtyDaysAgo.toISOString());
+
+    // La direction pédagogique voit le suivi de tous les profs de la classe
+    if (isPedagogicalStaff(req.user)) {
+      const allowed = await canAccessClassAsTeacher(req, classId);
+      if (!allowed) return res.status(403).json({ error: 'Accès refusé' });
+    } else {
+      trackingQuery = trackingQuery.eq('sessions.teacher_id', teacherId);
+    }
+
+    const { data: tracking, error: trackingError } = await trackingQuery;
 
     if (trackingError) {
       console.error('Erreur récupération suivi:', trackingError);
@@ -1606,9 +1674,10 @@ router.post('/control-tracking', async (req, res) => {
     const teacherId = req.user.id;
 
     // Vérifier que la session existe et appartient au professeur
+    // (ou est dans le périmètre de la direction pédagogique)
     const { data: session, error: sessionError } = await supabaseAdmin
       .from('sessions')
-      .select('id, type, teacher_id')
+      .select('id, type, teacher_id, class_id')
       .eq('id', session_id)
       .single();
 
@@ -1617,7 +1686,8 @@ router.post('/control-tracking', async (req, res) => {
     }
 
     if (session.teacher_id !== teacherId) {
-      return res.status(403).json({ error: 'Non autorisé' });
+      const allowed = isPedagogicalStaff(req.user) && await canAccessClassAsTeacher(req, session.class_id);
+      if (!allowed) return res.status(403).json({ error: 'Non autorisé' });
     }
 
     if (session.type !== 'control') {
@@ -1695,9 +1765,10 @@ router.get('/sessions/:sessionId/control-tracking', async (req, res) => {
     const teacherId = req.user.id;
 
     // Vérifier que la session appartient au professeur
+    // (ou est dans le périmètre de la direction pédagogique)
     const { data: session, error: sessionError } = await supabaseAdmin
       .from('sessions')
-      .select('id, type, teacher_id')
+      .select('id, type, teacher_id, class_id')
       .eq('id', sessionId)
       .single();
 
@@ -1706,7 +1777,8 @@ router.get('/sessions/:sessionId/control-tracking', async (req, res) => {
     }
 
     if (session.teacher_id !== teacherId) {
-      return res.status(403).json({ error: 'Non autorisé' });
+      const allowed = isPedagogicalStaff(req.user) && await canAccessClassAsTeacher(req, session.class_id);
+      if (!allowed) return res.status(403).json({ error: 'Non autorisé' });
     }
 
     const { data, error } = await supabaseAdmin
@@ -1748,7 +1820,8 @@ router.post('/sessions/:sessionId/control-tracking/batch', async (req, res) => {
     }
 
     if (session.teacher_id !== teacherId) {
-      return res.status(403).json({ error: 'Non autorisé' });
+      const allowed = isPedagogicalStaff(req.user) && await canAccessClassAsTeacher(req, session.class_id);
+      if (!allowed) return res.status(403).json({ error: 'Non autorisé' });
     }
 
     if (session.type !== 'control') {
@@ -1893,15 +1966,9 @@ router.post('/controls/parse-excel', upload.single('file'), async (req, res) => 
       return res.status(400).json({ error: 'classId requis' });
     }
 
-    // Vérifier que le professeur est assigné à cette classe
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('class_id')
-      .eq('teacher_id', teacherId)
-      .eq('class_id', classId)
-      .maybeSingle();
-
-    if (!classTeacher) {
+    // Vérifier l'accès à cette classe (prof assigné ou direction pédagogique)
+    const excelClassAllowed = await canAccessClassAsTeacher(req, classId);
+    if (!excelClassAllowed) {
       return res.status(403).json({ error: 'Accès non autorisé à cette classe' });
     }
 
@@ -2151,15 +2218,9 @@ router.post('/controls/import-excel-notes', async (req, res) => {
       return res.status(400).json({ error: 'Données manquantes' });
     }
 
-    // Vérifier que le professeur est assigné à cette classe
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('class_id')
-      .eq('teacher_id', teacherId)
-      .eq('class_id', classId)
-      .maybeSingle();
-
-    if (!classTeacher) {
+    // Vérifier l'accès à cette classe (prof assigné ou direction pédagogique)
+    const importClassAllowed = await canAccessClassAsTeacher(req, classId);
+    if (!importClassAllowed) {
       return res.status(403).json({ error: 'Accès non autorisé à cette classe' });
     }
 
@@ -2169,12 +2230,19 @@ router.post('/controls/import-excel-notes', async (req, res) => {
       return res.status(400).json({ error: 'Aucun mapping de contrôle fourni' });
     }
 
-    const { data: validControls, error: vcError } = await supabaseAdmin
+    let validControlsQuery = supabaseAdmin
       .from('controls_plan')
       .select('id, name')
-      .eq('teacher_id', teacherId)
       .eq('class_id', classId)
       .in('id', controlIds);
+
+    // La direction pédagogique peut importer les notes des contrôles de
+    // n'importe quel prof de la classe
+    if (!isPedagogicalStaff(req.user)) {
+      validControlsQuery = validControlsQuery.eq('teacher_id', teacherId);
+    }
+
+    const { data: validControls, error: vcError } = await validControlsQuery;
 
     if (vcError) {
       console.error('Erreur vérification contrôles:', vcError);
@@ -2307,15 +2375,9 @@ router.get('/classes/:classId/analytics', async (req, res) => {
     const { days = 30 } = req.query;
     const teacherId = req.user.id;
 
-    // Vérifier que le professeur est assigné à cette classe
-    const { data: classTeacher, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', classId)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (ctError || !classTeacher) {
+    // Vérifier l'accès à cette classe (prof assigné ou direction pédagogique)
+    const allowed = await canAccessClassAsTeacher(req, classId);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -2343,15 +2405,21 @@ router.get('/classes/:classId/analytics', async (req, res) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
-    const { data: tracking, error: trackingError } = await supabaseAdmin
+    let trackingQuery = supabaseAdmin
       .from('session_tracking')
       .select(`
         *,
         sessions!inner(id, date, start_time, class_id, teacher_id, topic, tracking_options)
       `)
       .eq('sessions.class_id', classId)
-      .eq('sessions.teacher_id', teacherId)
       .gte('created_at', startDate.toISOString());
+
+    // La direction pédagogique voit le suivi de tous les profs de la classe
+    if (!isPedagogicalStaff(req.user)) {
+      trackingQuery = trackingQuery.eq('sessions.teacher_id', teacherId);
+    }
+
+    const { data: tracking, error: trackingError } = await trackingQuery;
 
     if (trackingError) throw trackingError;
 
@@ -2547,35 +2615,55 @@ router.get('/dashboard/summary', async (req, res) => {
     const teacherId = req.user.id;
     const { days = 7 } = req.query;
 
-    // Récupérer les classes du professeur
-    const { data: classTeachers, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('class_id, classes(id, name, level)')
-      .eq('teacher_id', teacherId);
+    // Récupérer les classes accessibles (prof : classes assignées ;
+    // direction pédagogique : classes du périmètre)
+    let classes;
+    if (isPedagogicalStaff(req.user)) {
+      const accessibleIds = await getTeachingClassIds(req);
+      if (accessibleIds.length === 0) {
+        return res.json({ classes: [], summary: null, todaysSessions: [], alerts: [] });
+      }
+      const { data: cls, error: clsError } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, level')
+        .in('id', accessibleIds);
+      if (clsError) throw clsError;
+      classes = cls || [];
+    } else {
+      const { data: classTeachers, error: ctError } = await supabaseAdmin
+        .from('class_teachers')
+        .select('class_id, classes(id, name, level)')
+        .eq('teacher_id', teacherId);
 
-    if (ctError) throw ctError;
+      if (ctError) throw ctError;
 
-    const classes = classTeachers.map(ct => ct.classes).filter(Boolean);
+      classes = classTeachers.map(ct => ct.classes).filter(Boolean);
+    }
 
     if (classes.length === 0) {
       return res.json({ classes: [], summary: null, todaysSessions: [], alerts: [] });
     }
 
     const classIds = classes.map(c => c.id);
-    
+
     // Récupérer le suivi sur la période
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - parseInt(days));
 
-    const { data: tracking, error: trackingError } = await supabaseAdmin
+    let trackingQuery = supabaseAdmin
       .from('session_tracking')
       .select(`
         *,
         sessions!inner(id, date, start_time, class_id, teacher_id, tracking_options)
       `)
-      .eq('sessions.teacher_id', teacherId)
       .in('sessions.class_id', classIds)
       .gte('created_at', startDate.toISOString());
+
+    if (!isPedagogicalStaff(req.user)) {
+      trackingQuery = trackingQuery.eq('sessions.teacher_id', teacherId);
+    }
+
+    const { data: tracking, error: trackingError } = await trackingQuery;
 
     if (trackingError) throw trackingError;
 
@@ -2638,12 +2726,19 @@ router.get('/dashboard/summary', async (req, res) => {
 
     // Récupérer les sessions d'aujourd'hui
     const today = new Date().toISOString().split('T')[0];
-    const { data: todaysSessions, error: todayError } = await supabaseAdmin
+    let todayQuery = supabaseAdmin
       .from('sessions')
       .select('id, class_id, date, start_time, end_time, topic, type, classes(name)')
-      .eq('teacher_id', teacherId)
       .eq('date', today)
       .order('start_time', { ascending: true });
+
+    if (isPedagogicalStaff(req.user)) {
+      todayQuery = todayQuery.in('class_id', classIds);
+    } else {
+      todayQuery = todayQuery.eq('teacher_id', teacherId);
+    }
+
+    const { data: todaysSessions, error: todayError } = await todayQuery;
 
     if (todayError) throw todayError;
 
@@ -2680,14 +2775,28 @@ router.get('/dashboard/class-ranking', async (req, res) => {
   try {
     const teacherId = req.user.id;
 
-    // Récupérer les classes du professeur
-    const { data: classTeachers, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('class_id, classes(id, name, level, academic_year)')
-      .eq('teacher_id', teacherId);
-    if (ctError) throw ctError;
+    // Récupérer les classes accessibles (prof ou direction pédagogique)
+    let classes;
+    if (isPedagogicalStaff(req.user)) {
+      const accessibleIds = await getTeachingClassIds(req);
+      if (accessibleIds.length === 0) {
+        return res.json({ ranking: [], period: {}, totalClasses: 0, rankedClasses: 0 });
+      }
+      const { data: cls, error: clsError } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, level, academic_year')
+        .in('id', accessibleIds);
+      if (clsError) throw clsError;
+      classes = cls || [];
+    } else {
+      const { data: classTeachers, error: ctError } = await supabaseAdmin
+        .from('class_teachers')
+        .select('class_id, classes(id, name, level, academic_year)')
+        .eq('teacher_id', teacherId);
+      if (ctError) throw ctError;
 
-    const classes = classTeachers.map(ct => ct.classes).filter(Boolean);
+      classes = classTeachers.map(ct => ct.classes).filter(Boolean);
+    }
     if (classes.length === 0) {
       return res.json({ ranking: [], period: {}, totalClasses: 0, rankedClasses: 0 });
     }
@@ -2706,12 +2815,17 @@ router.get('/dashboard/class-ranking', async (req, res) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const sinceDate = thirtyDaysAgo.toISOString().split('T')[0];
 
-    const { data: trackingData, error: trackingError } = await supabaseAdmin
+    let rankingTrackingQuery = supabaseAdmin
       .from('session_tracking')
       .select('student_id, presence, phone_use, sleeping, discipline, attitude, homework, cahier_present, participation, writing, sessions!inner(id, date, class_id, teacher_id, tracking_options)')
-      .eq('sessions.teacher_id', teacherId)
       .in('sessions.class_id', classIds)
       .gte('sessions.date', sinceDate);
+
+    if (!isPedagogicalStaff(req.user)) {
+      rankingTrackingQuery = rankingTrackingQuery.eq('sessions.teacher_id', teacherId);
+    }
+
+    const { data: trackingData, error: trackingError } = await rankingTrackingQuery;
     if (trackingError) throw trackingError;
 
     const isPresentStatus = (status) => ['present', 'excused', 'late'].includes(status);
@@ -2863,11 +2977,22 @@ router.get('/cahier-de-texte', async (req, res) => {
     let query = supabaseAdmin
       .from('sessions')
       .select('id, date, start_time, end_time, topic, notes, type, class_id, subject_id, subject:subjects(id, name), class:classes!inner(id, name, level, school_type, filiere)')
-      .eq('teacher_id', teacherId)
       .gte('date', startDate)
       .lte('date', endDate)
       .order('date', { ascending: true })
       .order('start_time', { ascending: true });
+
+    // La direction pédagogique voit le cahier de texte de toutes les classes
+    // de son périmètre (tous profs confondus)
+    if (isPedagogicalStaff(req.user)) {
+      const accessibleIds = await getTeachingClassIds(req);
+      if (accessibleIds.length === 0) {
+        return res.json({ teacherName: '', classes: [], period: { startDate, endDate } });
+      }
+      query = query.in('class_id', accessibleIds);
+    } else {
+      query = query.eq('teacher_id', teacherId);
+    }
 
     // Filter by class_id(s) if provided (comma-separated)
     if (class_id) {

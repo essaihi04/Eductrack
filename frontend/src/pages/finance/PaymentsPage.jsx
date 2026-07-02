@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CreditCard, Search, Ban, Printer, LayoutGrid, List } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
+import { printHtmlDocument } from '../../lib/download';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
@@ -37,7 +38,6 @@ export default function PaymentsPage() {
   };
 
   const printReceipt = (payment) => {
-    const w = window.open('', '_blank');
     const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
     const school = payment.school || {};
     const logoSrc = school.logo_url
@@ -92,9 +92,7 @@ export default function PaymentsPage() {
         <p>Ce reçu atteste le paiement effectué. Veuillez le conserver précieusement.</p>
       </div>
       </body></html>`;
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 500);
+    printHtmlDocument(html, { title: `Reçu ${payment?.receipt_number || ''}`.trim() });
   };
 
   const filteredBySearch = filters.search

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../lib/supabase';
+import { cacheSplashSchool } from '../components/SchoolSplash';
 
 const AuthContext = createContext({});
 
@@ -102,8 +103,12 @@ export const AuthProvider = ({ children }) => {
 
       const data = await response.json();
       setProfile(data.profile);
-      setSchool(data.profile?.school || data.school || null);
+      const activeSchool = data.profile?.school || data.school || null;
+      setSchool(activeSchool);
       setAvailableSchools(data.available_schools || []);
+      // Mémorise le logo de l'école pour le splash de bienvenue : au prochain
+      // chargement, l'animation démarre avant même que le profil ne soit chargé.
+      cacheSplashSchool(data.profile?.email, activeSchool);
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {

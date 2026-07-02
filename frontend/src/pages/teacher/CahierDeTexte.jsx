@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { saveBlob } from '../../lib/download';
 import { FileText, Download, Calendar, BookOpen, Pencil, Check, ChevronDown } from 'lucide-react';
 import { loadLogoForPdf, addLogoToPdf } from '../../lib/schoolLogo';
 
@@ -379,7 +380,7 @@ const CahierDeTexte = () => {
       const fileName = classGroups.length === 1
         ? `Cahier_de_Texte_${classGroups[0].classInfo?.name || 'classe'}.pdf`
         : `Cahier_de_Texte_${startDate}_${endDate}.pdf`;
-      doc.save(fileName.replace(/\s+/g, '_'));
+      await saveBlob(doc.output('blob'), fileName.replace(/\s+/g, '_'));
     } catch (error) {
       console.error('Erreur génération PDF:', error);
       alert('Erreur lors de la génération du PDF.');

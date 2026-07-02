@@ -154,6 +154,58 @@ export const applyScopeFilter = async (query, req, columnName = 'class_id') => {
   return query.in(columnName, scopedIds);
 };
 
+// --- Accès "enseignant" étendu à la direction pédagogique -------------------
+// Le directeur/responsable pédagogique peut faire le travail d'un prof
+// (enregistrer les séances, suivre les élèves, signaler) sur ses classes.
+export const PEDAGOGICAL_STAFF_ROLES = ['pedagogical_director', 'pedagogical_manager'];
+export const isPedagogicalStaff = (user) => PEDAGOGICAL_STAFF_ROLES.includes(user?.role);
+
+/**
+ * Ids des classes accessibles "comme un prof" :
+ *  - teacher → classes assignées (class_teachers)
+ *  - pedagogical_director → toutes les classes de son école
+ *  - pedagogical_manager → classes/niveaux assignés (pedagogical_manager_scopes)
+ */
+export const getTeachingClassIds = async (req) => {
+  if (!req.user) return [];
+  if (isPedagogicalStaff(req.user)) {
+    const scoped = await getScopedClassIds(req);
+    if (scoped !== null) return scoped;
+    let q = supabaseAdmin.from('classes').select('id');
+    if (req.user.school_id) q = q.eq('school_id', req.user.school_id);
+    const { data } = await q;
+    return (data || []).map((c) => c.id);
+  }
+  const { data } = await supabaseAdmin
+    .from('class_teachers')
+    .select('class_id')
+    .eq('teacher_id', req.user.id);
+  return (data || []).map((ct) => ct.class_id);
+};
+
+/** Vérifie l'accès "enseignant" à une classe donnée (prof assigné ou direction pédagogique dans son périmètre). */
+export const canAccessClassAsTeacher = async (req, classId) => {
+  if (!req.user || !classId) return false;
+  if (isPedagogicalStaff(req.user)) {
+    const scoped = await getScopedClassIds(req);
+    if (scoped !== null) return scoped.includes(classId);
+    if (!req.user.school_id) return true;
+    const { data: cls } = await supabaseAdmin
+      .from('classes')
+      .select('school_id')
+      .eq('id', classId)
+      .maybeSingle();
+    return !!cls && cls.school_id === req.user.school_id;
+  }
+  const { data } = await supabaseAdmin
+    .from('class_teachers')
+    .select('id')
+    .eq('class_id', classId)
+    .eq('teacher_id', req.user.id)
+    .maybeSingle();
+  return !!data;
+};
+
 // Réservé aux admins "complets" — exclut le directeur pédagogique
 // Utilisé pour les actions sensibles (créer un autre admin, gérer les responsables financiers, etc.)
 export const requireFullAdmin = (req, res, next) => {

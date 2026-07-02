@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { printHtmlDocument } from '../../lib/download';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
@@ -660,8 +661,6 @@ const StudentsPage = () => {
   };
 
   const printInscriptionFiche = (student) => {
-    const w = window.open('', '_blank');
-    if (!w) { alert('Veuillez autoriser les pop-ups pour télécharger la fiche.'); return; }
     const apiBase = apiUrl;
     const school = profile?.school || {};
     const resolveAsset = (u) => !u ? null : (u.startsWith('http') ? u : `${apiBase}${u.startsWith('/') ? '' : '/'}${u}`);
@@ -834,9 +833,7 @@ const StudentsPage = () => {
       </div>
 
     </body></html>`;
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 600);
+    printHtmlDocument(html, { title: `Fiche inscription ${student?.first_name || ''} ${student?.last_name || ''}`.trim() });
   };
 
   const deleteStudent = async (id) => {

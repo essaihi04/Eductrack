@@ -6,24 +6,31 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
+import SchoolSplash, { readSplashCache } from '../components/SchoolSplash';
+
+/** Page d'accueil selon le rôle : admins et finance passent par le choix d'année. */
+const homeFor = (role) => {
+  const yearSelectRoles = ['admin', 'school_admin', 'pedagogical_director', 'finance_manager'];
+  return yearSelectRoles.includes(role) ? '/select-year' : '/dashboard';
+};
 
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, user, profile } = useAuth();
+  // Splash « logo de l'école » : affiché dès la connexion réussie, pendant le
+  // chargement du profil ; la navigation part à la fin de l'animation.
+  const [splash, setSplash] = useState(false);
+  const { signIn, user, profile, school } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user && profile) {
-      // Les administrateurs ET le responsable financier passent par l'écran de
-      // choix d'année (façon Koolskools) ; les autres rôles vont directement à
-      // leur tableau de bord.
-      const yearSelectRoles = ['admin', 'school_admin', 'pedagogical_director', 'finance_manager'];
-      navigate(yearSelectRoles.includes(profile.role) ? '/select-year' : '/dashboard', { replace: true });
+    // Déjà connecté (retour sur /login) : redirection directe, sans splash.
+    if (user && profile && !splash) {
+      navigate(homeFor(profile.role), { replace: true });
     }
-  }, [user, profile, navigate]);
+  }, [user, profile, splash, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,12 +39,25 @@ const Login = () => {
 
     try {
       await signIn(email, password);
+      setSplash(true);
     } catch (err) {
       setError('Email ou mot de passe incorrect');
       console.error('Login error:', err);
       setLoading(false);
     }
   };
+
+  if (splash) {
+    const cached = readSplashCache(email);
+    return (
+      <SchoolSplash
+        logoUrl={school?.logo_url || cached?.logo_url || null}
+        schoolName={school?.name || cached?.name || ''}
+        ready={!!(user && profile)}
+        onDone={() => navigate(homeFor(profile.role), { replace: true })}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">

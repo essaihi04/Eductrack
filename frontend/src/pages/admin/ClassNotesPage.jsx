@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
+import { saveBlob } from '../../lib/download';
 import { ClipboardList, RefreshCw, FileDown, Save, X, Users, AlertTriangle, Pencil, Upload, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 
@@ -258,11 +259,7 @@ const ClassNotesPage = () => {
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Erreur ${res.status}`);
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `rapport_controle.pdf`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      await saveBlob(blob, 'rapport_controle.pdf');
     } catch (e) { setMsg(`❌ ${e.message}`); }
     finally { setExporting(false); }
   };

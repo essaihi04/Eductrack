@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, FileText, BookOpen, Edit3, Home, RotateCcw, Star, Trash2, Download, Eye, Users, Calendar, Clock } from 'lucide-react';
+import { saveBlob } from '../../lib/download';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -331,16 +332,7 @@ const DocumentsPage = () => {
       }
 
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = doc?.file_name || `document-${id}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
+      await saveBlob(blob, doc?.file_name || `document-${id}`);
     } catch (error) {
       console.error('Erreur:', error);
       alert('❌ Erreur lors du téléchargement');

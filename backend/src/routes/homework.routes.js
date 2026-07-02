@@ -1,30 +1,22 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, authorize, isPedagogicalStaff, getTeachingClassIds, canAccessClassAsTeacher } from '../middleware/auth.js';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
 
 const router = express.Router();
 
-// Middleware pour vérifier que c'est un professeur
+// Professeurs + direction pédagogique (directeur / responsable pédagogique)
 router.use(authenticate);
-router.use(authorize('teacher'));
+router.use(authorize('teacher', 'pedagogical_director', 'pedagogical_manager'));
 
 // ==================== DEVOIRS ====================
 
 // Récupérer tous les devoirs du professeur
 router.get('/homework', async (req, res) => {
   try {
-    const teacherId = req.user.id;
-
-    // Récupérer d'abord les classes du professeur
-    const { data: classTeachers, error: ctError } = await supabaseAdmin
-      .from('class_teachers')
-      .select('class_id')
-      .eq('teacher_id', teacherId);
-
-    if (ctError) throw ctError;
-
-    const classIds = classTeachers.map(ct => ct.class_id);
+    // Classes accessibles (prof : classes assignées ; direction pédagogique :
+    // classes du périmètre)
+    const classIds = await getTeachingClassIds(req);
 
     if (classIds.length === 0) {
       return res.json([]);
@@ -112,15 +104,9 @@ router.get('/homework/:id', async (req, res) => {
 
     if (error) throw error;
 
-    // Vérifier que le professeur a accès à ce devoir
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', data.class_id)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (!classTeacher) {
+    // Vérifier l'accès à ce devoir (prof de la classe ou direction pédagogique)
+    const allowed = await canAccessClassAsTeacher(req, data.class_id);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -137,15 +123,9 @@ router.post('/homework', async (req, res) => {
     const { title, description, type, classId, targetType, studentIds, dueDate } = req.body;
     const teacherId = req.user.id;
 
-    // Vérifier que le professeur a accès à cette classe
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', classId)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (!classTeacher) {
+    // Vérifier l'accès à cette classe (prof assigné ou direction pédagogique)
+    const allowed = await canAccessClassAsTeacher(req, classId);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé à cette classe' });
     }
 
@@ -345,15 +325,9 @@ router.put('/homework/:id', async (req, res) => {
 
     const targetClassId = classId || homework.class_id;
 
-    // Vérifier que le professeur a accès à la classe cible
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', targetClassId)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (!classTeacher) {
+    // Vérifier l'accès à la classe cible (prof assigné ou direction pédagogique)
+    const allowed = await canAccessClassAsTeacher(req, targetClassId);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -443,14 +417,8 @@ router.delete('/homework/:id', async (req, res) => {
       return res.status(404).json({ error: 'Devoir non trouvé' });
     }
 
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', homework.class_id)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (!classTeacher) {
+    const allowed = await canAccessClassAsTeacher(req, homework.class_id);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 
@@ -487,14 +455,8 @@ router.put('/homework/:homeworkId/submissions/:studentId', async (req, res) => {
       return res.status(404).json({ error: 'Devoir non trouvé' });
     }
 
-    const { data: classTeacher } = await supabaseAdmin
-      .from('class_teachers')
-      .select('id')
-      .eq('class_id', homework.class_id)
-      .eq('teacher_id', teacherId)
-      .single();
-
-    if (!classTeacher) {
+    const allowed = await canAccessClassAsTeacher(req, homework.class_id);
+    if (!allowed) {
       return res.status(403).json({ error: 'Accès refusé' });
     }
 

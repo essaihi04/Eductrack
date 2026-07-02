@@ -70,10 +70,15 @@ const MobileNav = () => {
     }
 
     if (profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager') {
+      const isPedagogical = profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
       return [
         { icon: LayoutDashboard, label: 'Accueil', path: '/dashboard' },
         { icon: Users, label: 'Élèves', path: '/students' },
         { icon: GraduationCap, label: 'Classes', path: '/classes' },
+        // La direction pédagogique peut faire le suivi de séance comme un prof
+        ...(isPedagogical
+          ? [{ icon: Calendar, label: 'Séance', path: '/teacher/rapide' }]
+          : []),
         { icon: TrendingUp, label: 'Suivi profs', path: '/teacher-tracking' },
         { icon: BarChart3, label: 'Stats', path: '/behavior' },
         { icon: BookOpen, label: 'Matières', path: '/subjects' },
