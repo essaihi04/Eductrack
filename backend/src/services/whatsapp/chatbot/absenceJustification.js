@@ -18,8 +18,8 @@ const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY || '',
 });
 
-/** Absences récentes (par défaut 3 jours) non encore justifiées des enfants du parent. */
-export async function getRecentAbsences(parentId, days = 3) {
+/** Absences des enfants du parent sur une fenêtre (par défaut 60 jours). */
+export async function getRecentAbsences(parentId, days = 60) {
   const { data: links } = await supabaseAdmin
     .from('parent_students')
     .select('student_id')
@@ -32,7 +32,6 @@ export async function getRecentAbsences(parentId, days = 3) {
     .from('session_tracking')
     .select('id, student_id, justified, seen_by_parent, sessions!inner(date)')
     .eq('presence', 'absent')
-    .eq('absence_notified', true)
     .in('student_id', studentIds)
     .gte('sessions.date', since);
   return { absences: rows || [], studentIds };
@@ -51,13 +50,13 @@ async function markSeen(ids) {
 /** Analyse DeepSeek : le message est-il une justification ? Motif ? Enfant ? */
 async function analyzeJustification({ text, childNames }) {
   if (!process.env.DEEPSEEK_API_KEY) return null;
-  const sys = `Tu analyses le message d'un parent qui répond à une notification d'absence de son enfant à l'école.
+  const sys = `Tu analyses le message d'un parent qui répond à une notification d'absence de son enfant à l'école. Le message peut être en français, en arabe standard ou en darija marocaine (éventuellement en lettres latines/arabizi).
 Réponds STRICTEMENT en JSON, sans texte autour :
-{"is_justification": boolean, "justified": boolean, "reason": "motif résumé en français (max 10 mots), vide sinon", "child": "prénom mentionné ou vide"}
+{"is_justification": boolean, "justified": boolean, "reason": "motif NORMALISÉ EN FRANÇAIS (max 10 mots)", "child": "prénom mentionné ou vide"}
 Règles :
 - is_justification = true si le parent explique/justifie l'absence, envoie un motif, ou répond au sujet de cette absence (maladie, rendez-vous médical, voyage, raison familiale, décès, urgence, certificat…). false s'il pose une question sans rapport ou demande le menu.
 - justified = true si le motif est une justification recevable ; false si le parent dit que l'enfant était présent / que c'est une erreur / refuse de justifier.
-- reason = motif court (ex : "Maladie", "Rendez-vous médical", "Raison familiale", "Voyage").`;
+- reason = motif TOUJOURS traduit et résumé EN FRANÇAIS, jamais le texte brut du parent, jamais en arabe/darija. Exemples : "Maladie", "Rendez-vous médical", "Raison familiale", "Voyage", "Décès dans la famille", "Fièvre". Si is_justification est false, reason doit être "".`;
   try {
     const c = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
@@ -87,11 +86,13 @@ Règles :
  *    quand même pu être marqué s'il y avait des absences récentes).
  */
 export async function handleAbsenceReply({ parentInfo, text }) {
-  const { absences } = await getRecentAbsences(parentInfo.parent_id, 3);
+  const { absences } = await getRecentAbsences(parentInfo.parent_id, 60);
   if (absences.length === 0) return { handled: false };
 
-  // Le parent répond → il a vu l'absence.
-  await markSeen(absences.map((a) => a.id));
+  // « Vue » : le parent répond → il a vu la/les notification(s) récente(s)
+  // (absences des 3 derniers jours).
+  const recentCutoff = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0];
+  await markSeen(absences.filter((a) => (a.sessions?.date || '') >= recentCutoff).map((a) => a.id));
 
   // N'analyse que s'il reste des absences non traitées (justified NULL).
   const pending = absences.filter((a) => a.justified === null || a.justified === undefined);
@@ -116,11 +117,15 @@ export async function handleAbsenceReply({ parentInfo, text }) {
     }
   }
 
+  // On stocke UNIQUEMENT le motif normalisé en français par l'IA — jamais le
+  // texte brut du parent (qui peut être en arabe/darija).
+  const reasonFr = (analysis.reason && analysis.reason.trim())
+    || (analysis.justified === true ? 'Justification reçue (motif non précisé)' : 'Réponse du parent enregistrée');
   await supabaseAdmin
     .from('session_tracking')
     .update({
       justified: analysis.justified === true,
-      justification_comment: (analysis.reason && analysis.reason.trim()) || String(text || '').slice(0, 200),
+      justification_comment: reasonFr,
       justification_source: 'ai',
       seen_by_parent: true,
       seen_at: new Date().toISOString(),

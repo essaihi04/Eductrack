@@ -204,6 +204,43 @@ export async function getWeeklyAttendance(student, parentInfo) {
   return `${header(`Présence — ${student.first_name}`, '📅')}\n\n${body}${footer(parentInfo.school_name)}`;
 }
 
+/**
+ * Absences en attente de justification (justified NULL) — pousse le parent à
+ * justifier en répondant. La justification est ensuite traitée par l'IA
+ * (voir absenceJustification.js) et la liste se met à jour automatiquement.
+ */
+export async function getUnjustifiedAbsences(student, parentInfo) {
+  const since = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  const { data: tracking } = await supabaseAdmin
+    .from('session_tracking')
+    .select('id, presence, justified, session:sessions!inner(date, subjects(name))')
+    .eq('student_id', student.id)
+    .eq('presence', 'absent')
+    .is('justified', null)
+    .gte('session.date', since)
+    .order('created_at', { ascending: false })
+    .limit(60);
+
+  const valid = (tracking || []).filter((t) => t.session?.date);
+  if (valid.length === 0) {
+    return `${header('Absences à justifier', '📝')}\n\n✅ Aucune absence en attente de justification pour *${student.first_name}*. Merci !${footer(parentInfo.school_name)}`;
+  }
+
+  // Regroupement par jour
+  const byDate = {};
+  valid.forEach((t) => { (byDate[t.session.date] ||= []).push(t.session.subjects?.name || 'Séance'); });
+  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+
+  let body = `Voici les absences de *${student.first_name}* en attente de justification :\n\n`;
+  dates.forEach((d) => {
+    const subjects = [...new Set(byDate[d])];
+    body += `📅 *${fmtDate(d)}*\n   ${subjects.map((s) => `• ${s}`).join('\n   ')}\n`;
+  });
+  body += `\n📝 *Pour justifier*, répondez simplement à ce message en indiquant le motif (maladie, rendez-vous médical, raison familiale…). Votre justification sera enregistrée automatiquement.`;
+
+  return `${header('Absences à justifier', '📝')}\n\n${body}${footer(parentInfo.school_name)}`;
+}
+
 /** P4 — Devoirs à faire (homework non rendus) */
 export async function getPendingHomework(student, parentInfo) {
   const today = new Date().toISOString().slice(0, 10);
