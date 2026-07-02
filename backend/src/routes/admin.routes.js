@@ -7242,6 +7242,85 @@ router.get('/dashboard', async (req, res) => {
       trendsAverages.push(avgEval);
     }
 
+    // ===== Présence des profs + heures enseignées AUJOURD'HUI =====
+    // Un prof est « présent » s'il a tenu (enregistré une séance sur) au moins
+    // un de ses créneaux d'emploi du temps prévus aujourd'hui. Le taux =
+    // créneaux tenus / créneaux prévus. Respecte le périmètre (responsable péd.).
+    let teacherPresence = {
+      value: null, total: teachers.length, scheduledCount: 0, presentCount: 0,
+      absentCount: 0, absentTeachers: [], hoursTaught: 0, expectedSlots: 0, realizedSlots: 0,
+    };
+    try {
+      const DOW_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const todayDow = DOW_NAMES[new Date(today + 'T00:00:00').getDay()];
+      const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
+      const durH = (s, e) => {
+        const a = hhmm(s), b = hhmm(e);
+        if (!a || !b) return 0;
+        const [ah, am] = a.split(':').map(Number);
+        const [bh, bm] = b.split(':').map(Number);
+        const m = (bh * 60 + bm) - (ah * 60 + am);
+        return m > 0 ? m / 60 : 0;
+      };
+      const teacherIds = teachers.map((t) => t.id);
+      const scopedClassIds = await getScopedClassIds(req); // null = pas de restriction
+      const scopedSet = scopedClassIds ? new Set(scopedClassIds) : null;
+
+      if (teacherIds.length > 0) {
+        const { data: slotsRaw } = await supabaseAdmin
+          .from('class_timetable')
+          .select('teacher_id, class_id, start_time, end_time, day_of_week')
+          .in('teacher_id', teacherIds)
+          .eq('day_of_week', todayDow);
+        const slots = (slotsRaw || []).filter((s) => !scopedSet || scopedSet.has(s.class_id));
+
+        const { data: sessRaw } = await supabaseAdmin
+          .from('sessions')
+          .select('teacher_id, class_id, start_time, end_time')
+          .eq('date', today)
+          .in('teacher_id', teacherIds);
+        const sessionsToday = (sessRaw || []).filter((s) => !scopedSet || scopedSet.has(s.class_id));
+        const sessionKey = new Set(sessionsToday.map((s) => `${s.teacher_id}|${hhmm(s.start_time)}`));
+
+        const nameById = {};
+        teachers.forEach((t) => { nameById[t.id] = `${t.first_name} ${t.last_name}`.trim(); });
+
+        let expected = 0, realized = 0;
+        const perTeacher = {};
+        slots.forEach((s) => {
+          const rec = perTeacher[s.teacher_id] || (perTeacher[s.teacher_id] = { expected: 0, realized: 0, missed: [] });
+          expected += 1; rec.expected += 1;
+          const done = sessionKey.has(`${s.teacher_id}|${hhmm(s.start_time)}`);
+          if (done) { realized += 1; rec.realized += 1; }
+          else rec.missed.push({
+            start_time: hhmm(s.start_time), end_time: hhmm(s.end_time),
+            class_name: classes.find((c) => c.id === s.class_id)?.name || '—',
+          });
+        });
+
+        const hoursTaught = sessionsToday.reduce((sum, s) => sum + durH(s.start_time, s.end_time), 0);
+        const scheduledTeachers = Object.keys(perTeacher);
+        const presentTeachers = scheduledTeachers.filter((id) => perTeacher[id].realized > 0);
+        const absentTeachers = scheduledTeachers
+          .filter((id) => perTeacher[id].realized === 0)
+          .map((id) => ({ id, name: nameById[id] || id, missedSlots: perTeacher[id].missed }));
+
+        teacherPresence = {
+          value: expected > 0 ? Math.round((realized / expected) * 100) : null,
+          total: teachers.length,
+          scheduledCount: scheduledTeachers.length,
+          presentCount: presentTeachers.length,
+          absentCount: absentTeachers.length,
+          absentTeachers,
+          hoursTaught: Math.round(hoursTaught * 10) / 10,
+          expectedSlots: expected,
+          realizedSlots: realized,
+        };
+      }
+    } catch (e) {
+      console.error('Erreur calcul présence profs:', e);
+    }
+
     res.json({
       kpis: {
         studentAttendance: {
@@ -7254,11 +7333,7 @@ router.get('/dashboard', async (req, res) => {
             className: classes.find(c => c.id === s.class_id)?.name || ''
           }))
         },
-        teacherAttendance: {
-          value: teachers.length > 0 && hasTrackingData ? 100 : null,
-          total: teachers.length,
-          absentCount: 0
-        },
+        teacherAttendance: teacherPresence,
         uncorrectedHomework: {
           value: uncorrectedHomework.length,
           teacherCount: teachersWithUncorrected.length,

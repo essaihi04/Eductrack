@@ -185,7 +185,7 @@ const AdminDashboard = () => {
   const [dashboardData, setDashboardData] = useState({
     kpis: {
       studentAttendance: { value: 0, total: 0, absentCount: 0, absentStudents: [], absent: [] },
-      teacherAttendance: { value: 0, total: 0, absent: [] },
+      teacherAttendance: { value: null, total: 0, scheduledCount: 0, presentCount: 0, absentCount: 0, hoursTaught: 0, expectedSlots: 0, realizedSlots: 0, absentTeachers: [], absent: [] },
       uncorrectedHomework: { value: 0, teacherCount: 0, teachers: [] },
       behaviorAlerts: { value: 0, studentCount: 0, details: {}, students: [] },
       classesWithoutCourse: { value: 0, classes: [] },
@@ -278,10 +278,17 @@ const AdminDashboard = () => {
               absentStudents: data.kpis?.studentAttendance?.absentStudents || [],
               absent: [] 
             },
-            teacherAttendance: { 
-              value: data.kpis?.teacherAttendance?.value ?? null, 
-              total: data.kpis?.teacherAttendance?.total || 0, 
-              absent: [] 
+            teacherAttendance: {
+              value: data.kpis?.teacherAttendance?.value ?? null,
+              total: data.kpis?.teacherAttendance?.total || 0,
+              scheduledCount: data.kpis?.teacherAttendance?.scheduledCount || 0,
+              presentCount: data.kpis?.teacherAttendance?.presentCount || 0,
+              absentCount: data.kpis?.teacherAttendance?.absentCount || 0,
+              hoursTaught: data.kpis?.teacherAttendance?.hoursTaught || 0,
+              expectedSlots: data.kpis?.teacherAttendance?.expectedSlots || 0,
+              realizedSlots: data.kpis?.teacherAttendance?.realizedSlots || 0,
+              absentTeachers: data.kpis?.teacherAttendance?.absentTeachers || [],
+              absent: []
             },
             uncorrectedHomework: { 
               value: data.kpis?.uncorrectedHomework?.value || 0, 
@@ -368,7 +375,7 @@ const AdminDashboard = () => {
         setDashboardData({
           kpis: {
             studentAttendance: { value: studentAttendanceRate, total: stats.totalStudents || 0, absentCount: 0, absentStudents: [], absent: [] },
-            teacherAttendance: { value: hasStudents ? null : null, total: stats.totalTeachers || 0, absent: [] },
+            teacherAttendance: { value: null, total: stats.totalTeachers || 0, scheduledCount: 0, presentCount: 0, absentCount: 0, hoursTaught: 0, expectedSlots: 0, realizedSlots: 0, absentTeachers: [], absent: [] },
             uncorrectedHomework: { value: 0, teacherCount: 0, teachers: [] },
             behaviorAlerts: { value: 0, studentCount: 0, details: {}, students: [] },
             classesWithoutCourse: { value: 0, classes: [] },
@@ -860,7 +867,11 @@ const AdminDashboard = () => {
           icon={GraduationCap}
           title="Présence Profs"
           value={kpis.teacherAttendance.value !== null ? `${kpis.teacherAttendance.value}%` : '—'}
-          subtitle={kpis.teacherAttendance.total > 0 ? `${kpis.teacherAttendance.total} professeurs` : 'Aucun professeur'}
+          subtitle={
+            kpis.teacherAttendance.value !== null
+              ? `${kpis.teacherAttendance.presentCount}/${kpis.teacherAttendance.scheduledCount} profs • ${kpis.teacherAttendance.hoursTaught}h enseignées`
+              : (kpis.teacherAttendance.total > 0 ? 'Aucun cours prévu aujourd\'hui' : 'Aucun professeur')
+          }
           status={kpis.teacherAttendance.value !== null ? getStatusColor(kpis.teacherAttendance.value, { good: 95, warning: 85 }) : 'gray'}
           onClick={() => openPanel('teacher-attendance', kpis.teacherAttendance)}
         />
@@ -1067,16 +1078,48 @@ const AdminDashboard = () => {
         title="Présence des Professeurs"
       >
         {panelData && <div className="space-y-4">
-          <div className="p-4 bg-muted rounded-lg">
-            <p className="text-2xl font-bold">{panelData.value ?? '—'}%</p>
-            <p className="text-sm text-muted-foreground">{panelData.total} professeurs au total</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-4 bg-muted rounded-lg">
+              <p className="text-2xl font-bold">{panelData.value ?? '—'}{panelData.value !== null && panelData.value !== undefined ? '%' : ''}</p>
+              <p className="text-xs text-muted-foreground">Créneaux tenus aujourd'hui{typeof panelData.realizedSlots === 'number' ? ` (${panelData.realizedSlots}/${panelData.expectedSlots})` : ''}</p>
+            </div>
+            <div className="p-4 bg-blue-50 rounded-lg">
+              <p className="text-2xl font-bold text-blue-700">{panelData.hoursTaught ?? 0}h</p>
+              <p className="text-xs text-blue-600">Heures enseignées aujourd'hui</p>
+            </div>
           </div>
-          
+
+          <div className="p-3 bg-muted/50 rounded-lg text-sm flex items-center justify-between">
+            <span className="text-muted-foreground">Profs ayant assuré leur cours</span>
+            <span className="font-semibold">{panelData.presentCount ?? 0}/{panelData.scheduledCount ?? 0}</span>
+          </div>
+
+          {panelData.absentTeachers && panelData.absentTeachers.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="font-medium text-red-700">Profs n'ayant pas assuré leur créneau</h3>
+              <div className="space-y-1 max-h-72 overflow-y-auto">
+                {panelData.absentTeachers.map((t) => (
+                  <div key={t.id} className="p-2 bg-red-50 rounded border border-red-200">
+                    <p className="text-sm font-medium">{t.name}</p>
+                    {t.missedSlots?.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {t.missedSlots.map((s, i) => (
+                          <span key={i} className="text-[11px] px-1.5 py-0.5 rounded bg-red-100 text-red-700">
+                            {s.start_time}–{s.end_time} · {s.class_name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <h3 className="font-medium">Actions rapides</h3>
             <div className="grid grid-cols-1 gap-2">
-              <ActionButton icon={Eye} label="Voir profs absents" variant="info" size="md" onClick={() => { closePanel(); navigate('/teachers'); }} />
-              <ActionButton icon={UserPlus} label="Assigner remplaçant" variant="success" size="md" onClick={() => alert('Fonctionnalité à venir: Assigner un remplaçant')} />
+              <ActionButton icon={Eye} label="Voir le suivi des profs" variant="info" size="md" onClick={() => { closePanel(); navigate('/teacher-tracking'); }} />
             </div>
           </div>
         </div>}
