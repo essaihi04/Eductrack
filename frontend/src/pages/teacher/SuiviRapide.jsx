@@ -16,6 +16,35 @@ const DEFAULT_TRACKING_OPTIONS = {
   writing: true
 };
 
+// Résout l'URL de la photo (absolue telle quelle, sinon préfixée par l'API).
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${API_URL}${u.startsWith('/') ? '' : '/'}${u}`);
+
+// Pastille photo de l'élève : photo réelle si disponible, sinon initiales.
+const StudentAvatar = ({ student, size = 32 }) => {
+  const url = resolveAvatar(student?.avatar_url);
+  const initials = `${student?.first_name?.[0] || ''}${student?.last_name?.[0] || ''}`.toUpperCase();
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="rounded-full object-cover shrink-0 border border-gray-200"
+        style={{ width: size, height: size }}
+        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+      />
+    );
+  }
+  return (
+    <span
+      className="rounded-full shrink-0 flex items-center justify-center bg-blue-100 text-blue-700 font-semibold border border-blue-200"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }}
+    >
+      {initials || '👤'}
+    </span>
+  );
+};
+
 const SuiviRapide = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -1427,7 +1456,10 @@ const SuiviRapide = () => {
                   <div key={student.id} className={`rounded-xl border p-3 space-y-2 ${isAbsent ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
                     {/* Nom + Présence */}
                     <div className="flex items-center justify-between">
-                      <p className="font-semibold text-sm text-gray-900">{student.first_name} {student.last_name}</p>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <StudentAvatar student={student} size={32} />
+                        <p className="font-semibold text-sm text-gray-900 truncate">{student.first_name} {student.last_name}</p>
+                      </div>
                       <div className="flex gap-1">
                         {[{value:'present',icon:'✔️'},{value:'absent',icon:'✖️'},{value:'late',icon:'⏱️'}].map(opt => (
                           <button key={opt.value} disabled={presenceSaved} onClick={() => updateTracking(student.id, 'presence', opt.value)}
@@ -1589,6 +1621,7 @@ const SuiviRapide = () => {
                       }`}>
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${hasPresence ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                          <StudentAvatar student={student} size={24} />
                           {student.first_name} {student.last_name}
                         </div>
                       </td>
