@@ -5229,7 +5229,7 @@ router.get('/absences', async (req, res) => {
     // 1. Enregistrements « absent » sur la période
     let q = supabaseAdmin
       .from('session_tracking')
-      .select('id, student_id, presence, absence_notified, seen_by_parent, seen_at, justified, justification_comment, justification_source, sessions!inner(id, date, class_id, start_time, school_id, subjects(name))')
+      .select('id, student_id, presence, absence_notified, seen_by_parent, seen_at, justified, justification_comment, justification_source, sessions!inner(id, date, class_id, start_time, end_time, school_id, subjects(name))')
       .eq('presence', 'absent')
       .gte('sessions.date', start)
       .lte('sessions.date', end);
@@ -5240,14 +5240,26 @@ router.get('/absences', async (req, res) => {
     const absent = rows || [];
     if (absent.length === 0) return res.json({ period: { start, end }, absences: [] });
 
-    // 2. Élèves concernés (photo + classe)
+    // 2. Élèves concernés (photo + classe) — requêtes séparées pour éviter toute
+    //    ambiguïté de relation FK sur l'embed classes.
     const studentIds = [...new Set(absent.map(r => r.student_id).filter(Boolean))];
     const { data: studentsRaw } = await supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, avatar_url, class_id, classes(id, name, level)')
+      .select('id, first_name, last_name, avatar_url, class_id')
       .in('id', studentIds);
     const studentById = {};
     (studentsRaw || []).forEach(s => { studentById[s.id] = s; });
+
+    // Classes (nom + niveau) résolues séparément.
+    const classIds = [...new Set((studentsRaw || []).map(s => s.class_id).filter(Boolean))];
+    const classById = {};
+    if (classIds.length > 0) {
+      const { data: classesRaw } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, level')
+        .in('id', classIds);
+      (classesRaw || []).forEach(c => { classById[c.id] = c; });
+    }
 
     // 3. Parents + numéros
     const { data: links } = await supabaseAdmin
@@ -5271,14 +5283,15 @@ router.get('/absences', async (req, res) => {
       const key = `${r.student_id}_${date}`;
       if (!map.has(key)) {
         const stu = studentById[r.student_id] || {};
+        const cls = classById[stu.class_id] || {};
         map.set(key, {
           key,
           date,
           student_id: r.student_id,
-          student_name: `${stu.first_name || ''} ${stu.last_name || ''}`.trim(),
+          student_name: `${stu.first_name || ''} ${stu.last_name || ''}`.trim() || '(élève inconnu)',
           avatar_url: stu.avatar_url || null,
-          class_name: stu.classes?.name || '—',
-          class_level: stu.classes?.level || '',
+          class_name: cls.name || '—',
+          class_level: cls.level || '',
           parents: parentsByStudent[r.student_id] || [],
           sessions: [],
           tracking_ids: [],
@@ -5291,7 +5304,11 @@ router.get('/absences', async (req, res) => {
       }
       const agg = map.get(key);
       agg.tracking_ids.push(r.id);
-      agg.sessions.push({ subject: r.sessions?.subjects?.name || '—', start_time: (r.sessions?.start_time || '').slice(0, 5) });
+      agg.sessions.push({
+        subject: r.sessions?.subjects?.name || '—',
+        start_time: (r.sessions?.start_time || '').slice(0, 5),
+        end_time: (r.sessions?.end_time || '').slice(0, 5),
+      });
       if (r.absence_notified) agg.absence_notified = true;
       if (r.seen_by_parent) agg.seen_by_parent = true;
       // justifié : on prend le premier statut non nul rencontré

@@ -130,6 +130,8 @@ export default function AbsencesPage() {
         r.student_name,
         `${r.class_name}${r.class_level ? ` (${r.class_level})` : ''}`,
         r.date,
+        [...new Set(r.sessions.map(s => s.end_time ? `${s.start_time}-${s.end_time}` : s.start_time).filter(Boolean))].join(', ') || '—',
+        [...new Set(r.sessions.map(s => s.subject).filter(v => v && v !== '—'))].join(', ') || '—',
         r.parents.map(p => p.name).join(', ') || '—',
         r.parents.map(p => p.phone).filter(Boolean).join(', ') || '—',
         r.absence_notified ? 'Oui' : 'Non',
@@ -140,11 +142,11 @@ export default function AbsencesPage() {
 
       autoTable(doc, {
         startY: 24,
-        head: [['Photo', 'Élève', 'Classe', 'Date', 'Parent(s)', 'Téléphone', 'Abs. envoyée', 'Vue', 'Justifié', 'Commentaire']],
+        head: [['Photo', 'Élève', 'Classe', 'Date', 'Créneau', 'Matière', 'Parent(s)', 'Téléphone', 'Abs. envoyée', 'Vue', 'Justifié', 'Commentaire']],
         body,
-        styles: { fontSize: 8, cellPadding: 1.5, valign: 'middle' },
-        headStyles: { fillColor: [37, 99, 235], fontSize: 8 },
-        columnStyles: { 0: { cellWidth: 12, minCellHeight: 12 }, 9: { cellWidth: 45 } },
+        styles: { fontSize: 7.5, cellPadding: 1.3, valign: 'middle' },
+        headStyles: { fillColor: [37, 99, 235], fontSize: 7.5 },
+        columnStyles: { 0: { cellWidth: 11, minCellHeight: 12 }, 11: { cellWidth: 32 } },
         didDrawCell: (data) => {
           if (data.section === 'body' && data.column.index === 0) {
             const r = filtered[data.row.index];
@@ -220,6 +222,8 @@ export default function AbsencesPage() {
                 <th className="px-3 py-2 font-semibold">Élève</th>
                 <th className="px-3 py-2 font-semibold">Classe</th>
                 <th className="px-3 py-2 font-semibold">Date</th>
+                <th className="px-3 py-2 font-semibold">Créneau</th>
+                <th className="px-3 py-2 font-semibold">Matière</th>
                 <th className="px-3 py-2 font-semibold">Parent(s)</th>
                 <th className="px-3 py-2 font-semibold">Absence envoyée</th>
                 <th className="px-3 py-2 font-semibold">Vue</th>
@@ -236,14 +240,17 @@ export default function AbsencesPage() {
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
                         <StudentAvatar row={r} />
-                        <div>
-                          <p className="font-medium text-gray-900">{r.student_name}</p>
-                          <p className="text-[11px] text-gray-400">{r.sessions.map(s => s.subject).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</p>
-                        </div>
+                        <p className="font-medium text-gray-900">{r.student_name}</p>
                       </div>
                     </td>
                     <td className="px-3 py-2">{r.class_name}{r.class_level ? <span className="text-gray-400 text-xs"> ({r.class_level})</span> : ''}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{r.date}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-600">
+                      {[...new Set(r.sessions.map(s => s.end_time ? `${s.start_time}–${s.end_time}` : s.start_time).filter(Boolean))].join(', ') || '—'}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-600">
+                      {[...new Set(r.sessions.map(s => s.subject).filter(v => v && v !== '—'))].join(', ') || '—'}
+                    </td>
                     <td className="px-3 py-2">
                       {r.parents.length === 0 ? <span className="text-gray-400">—</span> : r.parents.map((p, i) => (
                         <div key={i} className="text-xs">
