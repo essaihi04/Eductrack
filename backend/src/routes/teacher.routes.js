@@ -69,7 +69,7 @@ async function handlePresenceNotification({ presence, existing, rowId, sessionId
     if (subjectName) msg += `\n📚 Matière: ${subjectName}`;
     if (lessonTopic) msg += `\n📖 Leçon: ${lessonTopic}`;
     if (timeSlot) msg += `\n🕐 Horaire: ${timeSlot}`;
-    msg += `\n\nPour toute question, n'hésitez pas à contacter l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+    msg += `\n\n📝 *Pour justifier cette absence*, répondez simplement à ce message en indiquant le motif (maladie, rendez-vous médical, raison familiale…). Votre réponse sera transmise automatiquement à l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
     await sendToParents(msg, 'absence_notification');
     if (rowId) await supabaseAdmin.from('session_tracking').update({ absence_notified: true }).eq('id', rowId);
     return;

@@ -35,6 +35,7 @@ import { MENUS, sendMenu, matchMenuOption } from './menus.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery } from './ai.js';
 import { getReceptionistByPhone, answerSchoolAI, receptionistWelcome, receptionistFooter } from './adminAi.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
+import { handleAbsenceReply } from './absenceJustification.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
 import { sendMediaBuffer, sendImage } from '../index.js';
@@ -1162,6 +1163,36 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     await sendText(parentInfo.school_id, phone, `✅ Vos notifications WhatsApp sont réactivées. Tapez *menu* pour commencer.`, { urgent: true });
     await markProcessed(incomingMsg?.id);
     return;
+  }
+
+  // 3.ter Réponse à une notification d'absence → « vue » + justification IA.
+  // On ne détourne le message QUE si le parent n'est pas dans une saisie
+  // guidée (photo / rapports / sélection enfant) et que ce n'est pas un simple
+  // numéro de menu. Sinon le flux chatbot normal continue.
+  {
+    const st = State.getState(phone);
+    const inDataFlow = st && ['PHOTO', 'REPORT', 'CHILD'].includes(st.state);
+    const trimmed = String(text || '').trim();
+    const isMenuNumber = /^\d{1,2}$/.test(normalizeDigits(trimmed));
+    if (!inDataFlow && !isMenuNumber && trimmed.length >= 3) {
+      try {
+        const r = await handleAbsenceReply({ parentInfo, text: trimmed });
+        if (r.handled) {
+          await sendText(parentInfo.school_id, phone, r.reply, { urgent: true });
+          await supabaseAdmin
+            .from('whatsapp_incoming_messages')
+            .update({ category: 'absence_justification', ai_response_sent: true, ai_response_text: r.reply })
+            .eq('id', incomingMsg?.id);
+          setTimeout(() => {
+            sendText(parentInfo.school_id, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+          }, 1200);
+          await markProcessed(incomingMsg?.id);
+          return;
+        }
+      } catch (e) {
+        console.error('[chatbot] Erreur justification absence:', e.message);
+      }
+    }
   }
 
   // 4. State machine
