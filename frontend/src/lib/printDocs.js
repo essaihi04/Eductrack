@@ -5,6 +5,7 @@
 //     avec blocs de signature (employé + responsable financier).
 // Chaque document porte le logo et le nom de l'école.
 import { formatMAD, formatDate } from './financeApi';
+import { printHtmlDocument } from './download';
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
@@ -89,11 +90,7 @@ function printTwoCopies({ title, accent, copyHtml, labels }) {
       <hr class="cut"/><div style="text-align:center"><span style="font-size:0.7em;color:#9ca3af">✂ — — — — — — — — — — — — — — — — — — — — — — — — — — — —</span></div>
       <div class="sheet">${copyHtml(labels[1])}</div>
     </body></html>`;
-  const w = window.open('', '_blank');
-  if (!w) { alert("Veuillez autoriser les fenêtres pop-up pour imprimer."); return; }
-  w.document.write(html);
-  w.document.close();
-  setTimeout(() => w.print(), 400);
+  printHtmlDocument(html, { title });
 }
 
 // ── Facture élève (double exemplaire : École / Parent) ─────────────────────

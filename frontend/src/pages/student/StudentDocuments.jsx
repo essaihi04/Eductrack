@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { saveBlob } from '../../lib/download';
 import { FileText, Download, Eye, Search, Filter, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
@@ -111,16 +112,7 @@ const StudentDocuments = () => {
     }
 
     const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = doc.file_name || `document-${doc.id}`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    window.URL.revokeObjectURL(url);
+    await saveBlob(blob, doc.file_name || `document-${doc.id}`);
   };
 
   const handleDocumentClick = (doc) => {

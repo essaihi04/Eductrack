@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { saveBlob, openBlob } from '../../lib/download';
 import {
   ArrowLeft, BookOpen, FileText, Activity, Bus, GraduationCap,
   CheckCircle2, XCircle, Clock, AlertCircle, Calendar, Award,
@@ -678,19 +679,11 @@ const DocumentCard = ({ doc, childId }) => {
       setBusy(mode);
       const inline = mode === 'view' ? '?inline=1' : '';
       const blob = await fetchBlob(`/api/parent/children/${childId}/documents/${doc.id}/download${inline}`);
-      const url = window.URL.createObjectURL(blob);
+      const fileName = doc.file_name || `document-${doc.id}`;
       if (mode === 'view') {
-        window.open(url, '_blank', 'noopener,noreferrer');
-        // Révocation différée pour laisser le temps au navigateur d'ouvrir le blob
-        setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+        await openBlob(blob, fileName);
       } else {
-        const a = window.document.createElement('a');
-        a.href = url;
-        a.download = doc.file_name || `document-${doc.id}`;
-        window.document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
+        await saveBlob(blob, fileName);
       }
     } catch (e) {
       alert(`❌ ${e.message}`);

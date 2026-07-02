@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Wallet, TrendingUp, TrendingDown, Banknote, CreditCard, Building2, FileCheck, MoreHorizontal, FileSpreadsheet, Ban, Printer, X } from 'lucide-react';
+import { saveBlob } from '../../lib/download';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
 import { PageHeader, KpiGrid, KpiCard, Card, Money, Badge, Button, Drawer } from '../../components/finance/ui';
 
@@ -144,12 +145,8 @@ const CashRegisterPage = () => {
     ws.addRow({});
     ws.addRow({ student: 'TOTAL', amount: data.income?.total || 0 }).font = { bold: true };
     const buf = await wb.xlsx.writeBuffer();
-    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `coffre_${range.from}_${range.to}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    await saveBlob(blob, `coffre_${range.from}_${range.to}.xlsx`);
   };
 
   return (

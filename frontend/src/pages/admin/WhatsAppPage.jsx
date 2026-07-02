@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { saveBlob } from '../../lib/download';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
@@ -1128,14 +1129,7 @@ const WhatsAppPage = () => {
         : `rapport_${startDate}_${endDate}.pdf`;
 
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      await saveBlob(blob, fileName);
     } catch (error) {
       console.error('Erreur PDF:', error);
       alert('Erreur lors du téléchargement: ' + error.message);

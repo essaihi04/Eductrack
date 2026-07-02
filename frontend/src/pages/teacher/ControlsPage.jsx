@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Calendar, Clock, FileText, Plus, Edit2, Trash2, Save, X, CheckCircle, Users, TrendingUp, UserX, Package, Shield, Phone, AlertTriangle, Eye, FileCheck, Upload, BarChart3, Edit3, Activity, TrendingDown } from 'lucide-react';
+import { saveBlob } from '../../lib/download';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
@@ -737,14 +738,7 @@ const ControlsPage = () => {
         throw new Error(err.error || `Erreur ${res.status}`);
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `rapport_controle_${(control.name || 'controle').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await saveBlob(blob, `rapport_controle_${(control.name || 'controle').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`);
     } catch (error) {
       console.error('Erreur lors de l\'exportation PDF:', error);
       alert('Erreur lors de la generation du PDF. Veuillez reessayer.');

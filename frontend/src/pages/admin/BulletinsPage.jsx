@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FileText, RefreshCw, Send, Eye, CheckCircle, Download, Printer, MessageCircle } from 'lucide-react';
+import { openPdfUrl } from '../../lib/download';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 
 const BulletinsPage = () => {
@@ -163,7 +164,7 @@ const BulletinsPage = () => {
 
   const openPdf = async (bulletinId) => {
     const token = await getToken();
-    window.open(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}&mode=${mode}`, '_blank');
+    await openPdfUrl(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}&mode=${mode}`, `bulletin_${bulletinId}.pdf`);
   };
 
   // La classe sélectionnée est-elle une année de certification ?

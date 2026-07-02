@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { FileText, Download, Eye, RefreshCw } from 'lucide-react';
+import { openPdfUrl } from '../../lib/download';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -58,7 +59,7 @@ const ParentBulletinsPage = () => {
 
   const openPdf = async (bulletinId) => {
     const token = await getToken();
-    window.open(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}`, '_blank');
+    await openPdfUrl(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}`, `bulletin_${bulletinId}.pdf`);
   };
 
   const mentionColor = (avg) => {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, session } = require('electron');
+const { app, BrowserWindow, Menu, session, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -151,6 +151,60 @@ function buildErrorHTML(logoSrc) {
 </html>`;
 }
 
+// Autorise l'ouverture de fenêtres secondaires (impression PDF côté navigateur).
+// window.open(...) est utilisé de deux façons :
+//   - window.open('', '_blank') puis document.write + print() → factures,
+//     reçus de salaire, fiches élève/inscription. On AUTORISE une vraie fenêtre
+//     enfant pour que l'impression (et le « Enregistrer en PDF ») fonctionne.
+//   - window.open(urlPdfServeur, '_blank') → bulletins, exports finance. On
+//     laisse Chromium l'ouvrir (visionneuse PDF intégrée + impression).
+function setupDownloadsAndPopups(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (!url || url === 'about:blank') {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 900,
+          height: 1000,
+          autoHideMenuBar: true,
+          webPreferences: { contextIsolation: false, nodeIntegration: false },
+        },
+      };
+    }
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: { width: 1000, height: 900, autoHideMenuBar: true },
+    };
+  });
+}
+
+// Téléchargements réels (blobs jsPDF, fichiers Supabase, exports Excel, PDF
+// servis par le backend). Sans handler, rien ne s'enregistre dans Electron.
+// On propose une boîte « Enregistrer sous » puis on ouvre le fichier. Enregistré
+// UNE seule fois sur la session (sinon écouteurs dupliqués à chaque fenêtre).
+function setupSessionDownloads() {
+  session.defaultSession.on('will-download', (event, item) => {
+    const suggested = item.getFilename() || 'document';
+    const parent = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const savePath = dialog.showSaveDialogSync(parent, {
+      title: 'Enregistrer le fichier',
+      defaultPath: path.join(app.getPath('downloads'), suggested),
+    });
+
+    if (!savePath) {
+      item.cancel();
+      return;
+    }
+    item.setSavePath(savePath);
+
+    item.once('done', (e, state) => {
+      if (state === 'completed') {
+        shell.openPath(savePath).catch(() => {});
+      }
+    });
+  });
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null);
 
@@ -174,6 +228,11 @@ function createWindow() {
     show: false,
     backgroundColor: '#1e3a5f'
   });
+
+  // ── Téléchargement & impression des PDF ────────────────────────────────
+  // Sans ce câblage, Electron bloque window.open (factures/reçus/bulletins) et
+  // n'ouvre aucune boîte d'enregistrement pour les blobs jsPDF / fichiers.
+  setupDownloadsAndPopups(win);
 
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(LOADING_HTML)}`);
   win.show();
@@ -214,6 +273,9 @@ app.whenReady().then(() => {
 
   // Permet l'accès aux périphériques (capteurs)
   session.defaultSession.setDevicePermissionHandler(() => true);
+
+  // Route les téléchargements de fichiers vers une boîte « Enregistrer sous ».
+  setupSessionDownloads();
 
   createWindow();
 });
