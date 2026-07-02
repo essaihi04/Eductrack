@@ -8,14 +8,40 @@ import NotificationsBell from '../NotificationsBell';
 import YearSelector from '../YearSelector';
 import SchoolSwitcher from '../SchoolSwitcher';
 
+/** Âge en années à partir d'une date de naissance (null si invalide). */
+const ageFromDob = (dob) => {
+  if (!dob) return null;
+  const d = new Date(dob);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age >= 0 && age < 120 ? age : null;
+};
+
+/**
+ * Variante de thème selon le public :
+ *  - personnel        → .theme-school  (encre indigo)
+ *  - parent           → .theme-parent  (menthe, contrastes renforcés)
+ *  - élève ≤ 11 ans   → .theme-junior  (vif, arrondi, ludique — primaire)
+ *  - élève ≥ 12 ans   → .theme-teen    (violet moderne — collège/lycée)
+ * Sans date de naissance, un élève reçoit le thème teen (neutre).
+ */
+const themeClassFor = (profile) => {
+  if (!profile) return '';
+  if (!['student', 'parent'].includes(profile.role)) return 'theme-school';
+  if (profile.role === 'parent') return 'theme-parent';
+  const age = ageFromDob(profile.date_of_birth);
+  return age !== null && age <= 11 ? 'theme-junior' : 'theme-teen';
+};
+
 const DashboardLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLandscape, setIsLandscape] = useState(false);
   const location = useLocation();
   const { profile } = useAuth();
-  // Thème « Campus » réservé au personnel (admin, profs, direction…).
-  // Les élèves et parents conservent le thème par défaut.
-  const isStaff = profile && !['student', 'parent'].includes(profile.role);
+  const themeClass = themeClassFor(profile);
 
   // Détecter l'orientation du téléphone
   useEffect(() => {
@@ -55,7 +81,7 @@ const DashboardLayout = () => {
                          location.pathname.includes('/teacher/rapide');
 
   return (
-    <div className={`min-h-screen bg-background ${isStaff ? 'theme-school' : ''}`}>
+    <div className={`min-h-screen bg-background ${themeClass}`}>
       {/* Sidebar desktop - Masquée en mode paysage sur les pages de suivi */}
       {!(isLandscape && isTrackingPage) && (
         <div className="hidden md:block">

@@ -109,6 +109,64 @@
     --ring: 243 80% 70%;
   }
 
+  /* ─────────────────────────────────────────────────────────────
+     Variantes par âge — expérience adaptée à chaque public.
+     Appliquées via DashboardLayout selon le rôle et la date de naissance :
+     - .theme-junior : élève ≤ 11 ans (primaire) — vif, chaud, très arrondi
+     - .theme-teen   : élève ≥ 12 ans (collège/lycée) — violet moderne
+     - .theme-parent : parent — contrastes et confort de lecture renforcés
+     ───────────────────────────────────────────────────────────── */
+  .theme-junior {
+    --background: 40 55% 96.5%;
+    --foreground: 248 22% 18%;
+    --primary: 160 84% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 160 55% 93%;
+    --secondary-foreground: 168 70% 15%;
+    --accent: 41 95% 88%;
+    --accent-foreground: 32 85% 24%;
+    --border: 42 35% 85%;
+    --input: 42 35% 85%;
+    --ring: 160 84% 36%;
+    --radius: 1.1rem;
+  }
+  .dark .theme-junior {
+    --primary: 160 70% 55%;
+    --primary-foreground: 225 30% 8%;
+    --accent: 38 50% 20%;
+    --accent-foreground: 42 95% 72%;
+    --ring: 160 70% 55%;
+    --radius: 1.1rem;
+  }
+
+  .theme-teen {
+    --primary: 258 70% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 258 55% 95%;
+    --secondary-foreground: 259 50% 28%;
+    --accent: 41 85% 92%;
+    --accent-foreground: 35 80% 26%;
+    --ring: 258 70% 56%;
+    --radius: 0.85rem;
+  }
+  .dark .theme-teen {
+    --primary: 258 85% 74%;
+    --primary-foreground: 228 35% 10%;
+    --ring: 258 85% 74%;
+  }
+
+  .theme-parent {
+    /* Lisibilité d'abord : texte principal et secondaire plus contrastés. */
+    --foreground: 248 24% 15%;
+    --card-foreground: 248 24% 15%;
+    --muted-foreground: 250 12% 38%;
+  }
+  .dark .theme-parent {
+    --foreground: 220 45% 96%;
+    --card-foreground: 220 45% 96%;
+    --muted-foreground: 222 18% 72%;
+  }
+
   /* Fond papier doux : halo encre indigo + touche safran (ambiance étude). */
   .theme-school {
     background-image:
@@ -223,6 +281,55 @@
   .animate-rise,
   .shimmer {
     animation: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Ergonomie par public (règles non-layered, prioritaires sur les utilitaires).
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Junior : fond gai (halos menthe + safran + corail), animations rebondissantes. */
+.theme-junior {
+  background-image:
+    radial-gradient(900px 480px at 100% -10%, hsl(160 84% 40% / 0.09), transparent 55%),
+    radial-gradient(760px 440px at -10% 105%, hsl(41 95% 55% / 0.09), transparent 55%),
+    radial-gradient(620px 380px at 55% 120%, hsl(14 85% 60% / 0.05), transparent 50%);
+  background-attachment: fixed;
+}
+.theme-junior .card-lift:hover {
+  transform: translateY(-4px) rotate(-0.4deg) scale(1.01);
+}
+.theme-junior .card-lift {
+  transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Teen : halo violet discret, ambiance moderne. */
+.theme-teen {
+  background-image:
+    radial-gradient(1000px 520px at 100% -10%, hsl(258 70% 58% / 0.07), transparent 60%),
+    radial-gradient(820px 480px at -10% 110%, hsl(41 92% 55% / 0.05), transparent 55%);
+  background-attachment: fixed;
+}
+
+/* Parent : confort de lecture (texte de base légèrement plus grand). */
+.theme-parent {
+  font-size: 1.0325rem;
+  line-height: 1.55;
+}
+
+/* Cibles tactiles ≥ 44 px sur mobile pour parents et jeunes élèves
+   (recommandation accessibilité — doigts d'enfants et parents pressés). */
+@media (max-width: 768px) {
+  .theme-parent button,
+  .theme-junior button,
+  .theme-parent select,
+  .theme-junior select,
+  .theme-parent input:not([type='checkbox']):not([type='radio']),
+  .theme-junior input:not([type='checkbox']):not([type='radio']) {
+    min-height: 2.75rem;
+  }
+  .theme-junior {
+    font-size: 1.0625rem;
   }
 }
 
