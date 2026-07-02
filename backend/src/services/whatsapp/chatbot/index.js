@@ -508,28 +508,12 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
   const fromCaption = caption ? matchChildFromInput(caption, children) : null;
   const target = fromCaption || selected || (children.length === 1 ? children[0] : null);
 
-  // Import direct si le parent a explicitement demandé l'envoi via le menu
-  if (state?.awaitingPhoto && target) {
-    State.setState(phone, { awaitingPhoto: false });
-    await applyProfilePhoto(schoolId, phone, target, photoUrl);
-    await markProcessed(incomingMsgId);
-    return;
-  }
-
+  // Cible claire (enfant sélectionné, unique, ou nommé dans la légende) →
+  // enregistrement direct, comme pour la localisation. On n'exige plus de « oui »
+  // qui restait souvent sans réponse (le parent croyait la photo déjà enregistrée).
   if (target) {
-    // Photo spontanée → confirmation avant d'écraser la photo existante
-    State.setState(phone, {
-      state: 'PHOTO',
-      pendingPhotoUrl: photoUrl,
-      pendingPhotoTargetId: target.id,
-      childrenList: children.map((c) => c.id),
-    });
-    await sendText(
-      schoolId,
-      phone,
-      `📷 *Photo reçue*\n\nDéfinir cette photo comme photo de profil de *${target.first_name} ${target.last_name}* ?\n\n• Répondez *oui* pour confirmer\n• *non* pour annuler${children.length > 1 ? `\n• ou le *prénom / numéro* d'un autre enfant` : ''}`,
-      { urgent: true }
-    );
+    if (state?.awaitingPhoto) State.setState(phone, { awaitingPhoto: false });
+    await applyProfilePhoto(schoolId, phone, target, photoUrl);
     await markProcessed(incomingMsgId);
     return;
   }

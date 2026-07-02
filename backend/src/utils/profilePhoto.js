@@ -46,13 +46,20 @@ export async function deleteProfilePhotoByUrl(url) {
 
 /** Met à jour profiles.avatar_url d'un élève. */
 export async function setStudentAvatarUrl(studentId, avatarUrl) {
-  const { error } = await supabaseAdmin
+  // .select() pour vérifier qu'une ligne a bien été modifiée : un .update()
+  // sans correspondance renvoie { error: null } et masquerait un ID erroné.
+  const { data, error } = await supabaseAdmin
     .from('profiles')
     .update({ avatar_url: avatarUrl })
     .eq('id', studentId)
-    .eq('role', 'student');
+    .eq('role', 'student')
+    .select('id');
   if (error) {
     console.error('[profilePhoto] setStudentAvatarUrl error:', error.message);
+    return false;
+  }
+  if (!data || data.length === 0) {
+    console.error(`[profilePhoto] setStudentAvatarUrl: aucun élève id=${studentId} (role=student) mis à jour`);
     return false;
   }
   return true;
