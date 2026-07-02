@@ -2,111 +2,124 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Thème « Encre & Safran » — identité EduTrack.
+   Encre indigo (savoir) + safran (craie, énergie) + menthe (succès) sur un
+   fond papier crème ; mode sombre « tableau d'ardoise ».
+   - :root         → parents / élèves (dominante menthe, chaleureuse)
+   - .theme-school → personnel (dominante encre indigo)
+   ───────────────────────────────────────────────────────────────────────── */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 42 40% 97%;
+    --foreground: 248 19% 20%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 248 19% 20%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 142 70% 42%;
+    --popover-foreground: 248 19% 20%;
+    --primary: 165 80% 35%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 142 30% 95%;
-    --secondary-foreground: 142 50% 15%;
-    --muted: 142 20% 96%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 142 76% 36%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 142 20% 88%;
-    --input: 142 20% 88%;
-    --ring: 142 70% 42%;
-    --radius: 0.5rem;
+    --secondary: 162 45% 94%;
+    --secondary-foreground: 168 65% 16%;
+    --muted: 45 25% 94%;
+    --muted-foreground: 250 10% 45%;
+    --accent: 41 85% 92%;
+    --accent-foreground: 35 80% 26%;
+    --destructive: 4 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 44 24% 87%;
+    --input: 44 24% 87%;
+    --ring: 165 80% 35%;
+    --radius: 0.75rem;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 142 70% 45%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 142 20% 18%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 142 20% 18%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 142 76% 36%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 142 20% 20%;
-    --input: 142 20% 20%;
-    --ring: 142 70% 45%;
+    --background: 225 28% 11%;
+    --foreground: 220 40% 94%;
+    --card: 223 27% 16%;
+    --card-foreground: 220 40% 94%;
+    --popover: 223 27% 16%;
+    --popover-foreground: 220 40% 94%;
+    --primary: 163 62% 53%;
+    --primary-foreground: 225 30% 8%;
+    --secondary: 223 20% 21%;
+    --secondary-foreground: 220 40% 94%;
+    --muted: 223 20% 21%;
+    --muted-foreground: 222 14% 66%;
+    --accent: 38 42% 18%;
+    --accent-foreground: 42 90% 70%;
+    --destructive: 4 60% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 223 20% 24%;
+    --input: 223 20% 24%;
+    --ring: 163 62% 53%;
   }
 }
 
 @layer base {
   /* ─────────────────────────────────────────────────────────────
-     Thème « Campus » — interface du personnel (admin, professeurs,
-     direction…). Ambiance teal + pastels douce et amicale, pensée pour un
+     Variante « Encre » — interface du personnel (admin, professeurs,
+     direction…). Encre indigo + safran sur papier crème, pensée pour un
      usage prolongé. Appliquée via la classe .theme-school posée sur le
-     layout selon le rôle (les élèves/parents gardent le thème vert).
+     layout selon le rôle (les élèves/parents gardent la variante menthe).
      ───────────────────────────────────────────────────────────── */
   .theme-school {
-    --background: 180 30% 98%;
-    --foreground: 196 32% 15%;
+    --background: 42 40% 97%;
+    --foreground: 247 26% 21%;
     --card: 0 0% 100%;
-    --card-foreground: 196 32% 15%;
+    --card-foreground: 247 26% 21%;
     --popover: 0 0% 100%;
-    --popover-foreground: 196 32% 15%;
-    --primary: 174 64% 39%;
+    --popover-foreground: 247 26% 21%;
+    --primary: 243 53% 52%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 174 44% 95%;
-    --secondary-foreground: 178 52% 22%;
-    --muted: 180 22% 95%;
-    --muted-foreground: 196 12% 44%;
-    --accent: 174 48% 93%;
-    --accent-foreground: 178 52% 22%;
-    --destructive: 0 84% 60%;
+    --secondary: 243 45% 95%;
+    --secondary-foreground: 244 42% 30%;
+    --muted: 45 25% 94%;
+    --muted-foreground: 248 12% 46%;
+    --accent: 41 85% 92%;
+    --accent-foreground: 35 80% 26%;
+    --destructive: 4 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 180 24% 89%;
-    --input: 180 24% 89%;
-    --ring: 174 64% 39%;
+    --border: 240 14% 89%;
+    --input: 240 14% 89%;
+    --ring: 243 53% 52%;
     --radius: 0.75rem;
   }
 
   .dark .theme-school {
-    --background: 196 32% 9%;
-    --foreground: 174 30% 95%;
-    --card: 196 28% 12%;
-    --card-foreground: 174 30% 95%;
-    --popover: 196 28% 12%;
-    --popover-foreground: 174 30% 95%;
-    --primary: 174 58% 50%;
-    --primary-foreground: 196 40% 8%;
-    --secondary: 190 20% 18%;
-    --secondary-foreground: 174 30% 95%;
-    --muted: 190 18% 18%;
-    --muted-foreground: 180 12% 66%;
-    --accent: 188 24% 22%;
-    --accent-foreground: 174 30% 95%;
-    --destructive: 0 62% 45%;
+    --background: 225 28% 11%;
+    --foreground: 220 40% 94%;
+    --card: 223 27% 16%;
+    --card-foreground: 220 40% 94%;
+    --popover: 223 27% 16%;
+    --popover-foreground: 220 40% 94%;
+    --primary: 243 80% 70%;
+    --primary-foreground: 228 35% 10%;
+    --secondary: 223 20% 21%;
+    --secondary-foreground: 220 40% 94%;
+    --muted: 223 20% 21%;
+    --muted-foreground: 222 14% 66%;
+    --accent: 38 42% 18%;
+    --accent-foreground: 42 90% 70%;
+    --destructive: 4 60% 48%;
     --destructive-foreground: 0 0% 100%;
-    --border: 190 18% 22%;
-    --input: 190 18% 22%;
-    --ring: 174 58% 50%;
+    --border: 223 20% 24%;
+    --input: 223 20% 24%;
+    --ring: 243 80% 70%;
   }
 
-  /* Fond pastel doux (teal + touche crème) pour une ambiance « école » agréable. */
+  /* Fond papier doux : halo encre indigo + touche safran (ambiance étude). */
   .theme-school {
     background-image:
-      radial-gradient(1100px 560px at 100% -10%, hsl(174 64% 45% / 0.08), transparent 60%),
-      radial-gradient(900px 520px at -10% 110%, hsl(44 90% 62% / 0.06), transparent 55%);
+      radial-gradient(1100px 560px at 100% -10%, hsl(243 53% 55% / 0.07), transparent 60%),
+      radial-gradient(900px 520px at -10% 110%, hsl(38 92% 55% / 0.06), transparent 55%);
     background-attachment: fixed;
+  }
+  .dark .theme-school {
+    background-image:
+      radial-gradient(1100px 560px at 100% -10%, hsl(243 80% 70% / 0.06), transparent 60%),
+      radial-gradient(900px 520px at -10% 110%, hsl(38 92% 60% / 0.04), transparent 55%);
   }
 }
 
@@ -116,7 +129,100 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Noto Sans Arabic', 'Arial Unicode MS', sans-serif;
+    font-family: 'Inter', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont,
+      'Segoe UI', Roboto, 'Noto Sans Arabic', 'Arial Unicode MS', sans-serif;
+    /* Chiffres tabulaires : colonnes de montants et de notes alignées. */
+    font-variant-numeric: tabular-nums;
+  }
+  /* Titres en Sora : géométrique et amical, signature du thème. */
+  h1, h2, h3, .font-display {
+    font-family: 'Sora', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Micro-animations « Encre & Safran ».
+   Utilisées par les kits UI (cartes, navigation, squelettes de chargement).
+   Toutes désactivées si l'utilisateur préfère réduire les animations.
+   ───────────────────────────────────────────────────────────────────────── */
+@layer utilities {
+  /* Élévation douce des cartes au survol. */
+  .card-lift {
+    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1.1),
+      box-shadow 0.22s ease, border-color 0.15s ease;
+  }
+  .card-lift:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px hsl(var(--primary) / 0.12);
+  }
+
+  /* Entrée en fondu + montée (cascade via animation-delay inline). */
+  .animate-rise {
+    animation: et-rise 0.45s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+  }
+
+  /* Squelette de chargement à reflet (remplace les spinners). */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--card)) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 200% 100%;
+    animation: et-shimmer 1.6s linear infinite;
+  }
+
+  /* Soulignement « coup de surligneur » safran (nav horizontale, onglets). */
+  .nav-underline {
+    position: relative;
+  }
+  .nav-underline::after {
+    content: '';
+    position: absolute;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0.15rem;
+    height: 3px;
+    border-radius: 2px;
+    background: hsl(38 92% 53%);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .nav-underline:hover::after,
+  .nav-underline[data-active='true']::after {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes et-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes et-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-lift,
+  .nav-underline::after {
+    transition: none;
+  }
+  .card-lift:hover {
+    transform: none;
+  }
+  .animate-rise,
+  .shimmer {
+    animation: none;
   }
 }
 
@@ -126,5 +232,5 @@
   background-color: hsl(45 52% 97.5%);
 }
 .dark .theme-school aside {
-  background-color: hsl(196 28% 12%);
+  background-color: hsl(223 27% 16%);
 }

@@ -266,7 +266,7 @@ export function EntityCard({
   return (
     <div
       onClick={onClick}
-      className={`relative bg-card border rounded-xl p-3 transition-colors ${
+      className={`relative bg-card border rounded-xl p-3 card-lift ${
         selected ? 'border-blue-400 ring-1 ring-blue-200' : 'border-border hover:border-gray-300'
       } ${onClick ? 'cursor-pointer' : ''} ${className}`}
       style={t ? { borderTop: `3px solid currentColor` } : undefined}

@@ -7,6 +7,10 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
+        display: ['Sora', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
@@ -56,10 +60,20 @@ export default {
           from: { height: 'var(--radix-accordion-content-height)' },
           to: { height: 0 },
         },
+        rise: {
+          from: { opacity: 0, transform: 'translateY(10px)' },
+          to: { opacity: 1, transform: 'none' },
+        },
+        'draw-check': {
+          from: { 'stroke-dashoffset': 24 },
+          to: { 'stroke-dashoffset': 0 },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
+        rise: 'rise 0.45s cubic-bezier(0.2, 0.8, 0.3, 1) both',
+        'draw-check': 'draw-check 0.5s ease-out forwards',
       },
     },
   },

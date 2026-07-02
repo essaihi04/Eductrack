@@ -40,7 +40,7 @@ const KPI_TONES = {
 };
 export function KpiCard({ icon: Icon, label, value, tone = 'gray', sub, href }) {
   const inner = (
-    <div className="bg-card border border-border rounded-xl p-4 hover:border-gray-300 transition-colors h-full">
+    <div className="bg-card border border-border rounded-xl p-4 hover:border-gray-300 card-lift animate-rise h-full">
       <div className="flex items-center justify-between">
         <span className="text-sm text-muted-foreground">{label}</span>
         {Icon && <Icon className="w-4 h-4 text-muted-foreground/60" />}
