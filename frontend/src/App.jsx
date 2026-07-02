@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { YearProvider } from './contexts/YearContext';
+import SchoolSplash, { readSplashCache } from './components/SchoolSplash';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -100,19 +102,34 @@ import SondagesPage from './pages/school-life/SondagesPage';
 import SignalementsPage from './pages/school-life/SignalementsPage';
 
 const ProtectedRoute = ({ children }) => {
-  const { user, profile, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const { user, profile, school, loading } = useAuth();
+  // Splash « logo de l'école » uniquement au chargement initial de la page
+  // (rechargement / accès direct) : jamais lors des navigations internes.
+  const [splashDone, setSplashDone] = useState(() => !loading);
 
   // Rediriger vers login si pas d'utilisateur OU pas de profil
-  if (!user || !profile) {
+  if (!loading && (!user || !profile)) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (!splashDone) {
+    // Avant le chargement du profil, on affiche le logo mémorisé lors de la
+    // dernière session ; le vrai logo prend le relais dès qu'il arrive.
+    const cached = readSplashCache(user?.email);
+    const logoUrl = school?.logo_url || cached?.logo_url || null;
+    const schoolName = school?.name || cached?.name || '';
+    return (
+      <>
+        {/* L'accueil se charge déjà sous le splash : aucune seconde perdue. */}
+        {!loading && user && profile ? children : null}
+        <SchoolSplash
+          logoUrl={logoUrl}
+          schoolName={schoolName}
+          ready={!loading}
+          onDone={() => setSplashDone(true)}
+        />
+      </>
+    );
   }
 
   return children;
