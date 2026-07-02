@@ -261,9 +261,15 @@ const SuiviRapide = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
-      // Filtrer pour n'afficher que les créneaux du professeur connecté
-      const mySlots = (Array.isArray(data) ? data : []).filter(slot => (slot.teacher_id || slot.teacher?.id) === profile?.id);
-      setTimetableSlots(mySlots);
+      const allSlots = Array.isArray(data) ? data : [];
+      // Le prof ne voit que ses propres créneaux ; la direction pédagogique
+      // (directeur/responsable) voit TOUS les créneaux de la classe pour
+      // pouvoir enregistrer la séance à la place de n'importe quel prof.
+      const isPedagogicalStaff = ['pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
+      const slots = isPedagogicalStaff
+        ? allSlots
+        : allSlots.filter(slot => (slot.teacher_id || slot.teacher?.id) === profile?.id);
+      setTimetableSlots(slots);
     } catch (error) {
       console.error('Erreur chargement emploi du temps:', error);
       setTimetableSlots([]);
@@ -1046,7 +1052,7 @@ const SuiviRapide = () => {
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  Mes créneaux — {{ monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' }[timetableSlots[0]?.day_of_week] || ''}
+                  {(['pedagogical_director', 'pedagogical_manager'].includes(profile?.role) ? 'Créneaux de la classe' : 'Mes créneaux')} — {{ monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' }[timetableSlots[0]?.day_of_week] || ''}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {timetableSlots.map((slot) => {
@@ -1072,6 +1078,9 @@ const SuiviRapide = () => {
                         )}
                         <p className="text-xs font-bold text-gray-900">{slotStart} — {slotEnd}</p>
                         <p className="text-[10px] text-gray-500 truncate">{slot.subject?.name || '—'}</p>
+                        {['pedagogical_director', 'pedagogical_manager'].includes(profile?.role) && slot.teacher && (
+                          <p className="text-[10px] text-blue-600 truncate">{slot.teacher.first_name} {slot.teacher.last_name}</p>
+                        )}
                       </button>
                     );
                   })}
@@ -1080,7 +1089,7 @@ const SuiviRapide = () => {
             ) : selectedClass && (
               <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
                 <p className="text-xs text-amber-700">
-                  <span className="font-semibold">Aucun créneau programmé</span> pour vous dans cette classe à cette date. Veuillez définir manuellement l'horaire ou contacter l'administration.
+                  <span className="font-semibold">Aucun créneau programmé</span> dans cette classe à cette date. Veuillez définir manuellement l'horaire ci-dessous ou contacter l'administration.
                 </p>
               </div>
             )}
