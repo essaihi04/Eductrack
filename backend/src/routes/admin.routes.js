@@ -5209,6 +5209,157 @@ router.get('/teachers/tracking-dashboard', async (req, res) => {
   }
 });
 
+// ==================== ÉLÈVES ABSENTS ====================
+
+// Liste des absences sur une période, agrégées par élève + jour.
+// Query: ?start=YYYY-MM-DD&end=YYYY-MM-DD
+router.get('/absences', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const today = new Date().toISOString().split('T')[0];
+    const start = req.query.start || today;
+    const end = req.query.end || today;
+
+    // Scope pédagogique (responsable = ses classes ; autres = toute l'école)
+    const scopedIds = await getScopedClassIds(req); // null = pas de restriction
+    if (scopedIds !== null && scopedIds.length === 0) {
+      return res.json({ period: { start, end }, absences: [] });
+    }
+
+    // 1. Enregistrements « absent » sur la période
+    let q = supabaseAdmin
+      .from('session_tracking')
+      .select('id, student_id, presence, absence_notified, seen_by_parent, seen_at, justified, justification_comment, justification_source, sessions!inner(id, date, class_id, start_time, school_id, subjects(name))')
+      .eq('presence', 'absent')
+      .gte('sessions.date', start)
+      .lte('sessions.date', end);
+    if (schoolId) q = q.eq('sessions.school_id', schoolId);
+    if (scopedIds !== null) q = q.in('sessions.class_id', scopedIds);
+    const { data: rows, error } = await q;
+    if (error) throw error;
+    const absent = rows || [];
+    if (absent.length === 0) return res.json({ period: { start, end }, absences: [] });
+
+    // 2. Élèves concernés (photo + classe)
+    const studentIds = [...new Set(absent.map(r => r.student_id).filter(Boolean))];
+    const { data: studentsRaw } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, avatar_url, class_id, classes(id, name, level)')
+      .in('id', studentIds);
+    const studentById = {};
+    (studentsRaw || []).forEach(s => { studentById[s.id] = s; });
+
+    // 3. Parents + numéros
+    const { data: links } = await supabaseAdmin
+      .from('parent_students')
+      .select('student_id, profiles!parent_id(first_name, last_name, phone)')
+      .in('student_id', studentIds);
+    const parentsByStudent = {};
+    (links || []).forEach(l => {
+      const p = l.profiles;
+      if (!p) return;
+      (parentsByStudent[l.student_id] ||= []).push({
+        name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+        phone: p.phone || null,
+      });
+    });
+
+    // 4. Agrégation par élève + jour
+    const map = new Map();
+    absent.forEach(r => {
+      const date = r.sessions?.date;
+      const key = `${r.student_id}_${date}`;
+      if (!map.has(key)) {
+        const stu = studentById[r.student_id] || {};
+        map.set(key, {
+          key,
+          date,
+          student_id: r.student_id,
+          student_name: `${stu.first_name || ''} ${stu.last_name || ''}`.trim(),
+          avatar_url: stu.avatar_url || null,
+          class_name: stu.classes?.name || '—',
+          class_level: stu.classes?.level || '',
+          parents: parentsByStudent[r.student_id] || [],
+          sessions: [],
+          tracking_ids: [],
+          absence_notified: false,
+          seen_by_parent: false,
+          justified: null,
+          justification_comment: '',
+          justification_source: null,
+        });
+      }
+      const agg = map.get(key);
+      agg.tracking_ids.push(r.id);
+      agg.sessions.push({ subject: r.sessions?.subjects?.name || '—', start_time: (r.sessions?.start_time || '').slice(0, 5) });
+      if (r.absence_notified) agg.absence_notified = true;
+      if (r.seen_by_parent) agg.seen_by_parent = true;
+      // justifié : on prend le premier statut non nul rencontré
+      if (r.justified !== null && agg.justified === null) {
+        agg.justified = r.justified;
+        agg.justification_comment = r.justification_comment || '';
+        agg.justification_source = r.justification_source || null;
+      }
+    });
+
+    const absences = Array.from(map.values()).sort((a, b) =>
+      (b.date || '').localeCompare(a.date || '') || a.student_name.localeCompare(b.student_name)
+    );
+    res.json({ period: { start, end }, absences });
+  } catch (e) {
+    console.error('Erreur liste absences:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Mise à jour manuelle : justification / vue d'une absence (agrégée par jour).
+// Body: { tracking_ids: [...], justified, justification_comment, seen_by_parent }
+router.patch('/absences', async (req, res) => {
+  try {
+    const { tracking_ids, justified, justification_comment, seen_by_parent } = req.body || {};
+    if (!Array.isArray(tracking_ids) || tracking_ids.length === 0) {
+      return res.status(400).json({ error: 'tracking_ids requis' });
+    }
+
+    // Sécurité : ne modifier que des absences du périmètre de l'utilisateur.
+    const schoolId = getSchoolId(req);
+    const scopedIds = await getScopedClassIds(req);
+    let checkQ = supabaseAdmin
+      .from('session_tracking')
+      .select('id, sessions!inner(class_id, school_id)')
+      .in('id', tracking_ids);
+    if (schoolId) checkQ = checkQ.eq('sessions.school_id', schoolId);
+    if (scopedIds !== null) {
+      if (scopedIds.length === 0) return res.status(403).json({ error: 'Accès refusé' });
+      checkQ = checkQ.in('sessions.class_id', scopedIds);
+    }
+    const { data: allowed } = await checkQ;
+    const allowedIds = (allowed || []).map(r => r.id);
+    if (allowedIds.length === 0) return res.status(403).json({ error: 'Accès refusé' });
+
+    const patch = { updated_at: new Date().toISOString() };
+    if (justified !== undefined) {
+      patch.justified = justified;
+      patch.justification_source = 'manual';
+    }
+    if (justification_comment !== undefined) patch.justification_comment = justification_comment;
+    if (seen_by_parent !== undefined) {
+      patch.seen_by_parent = !!seen_by_parent;
+      patch.seen_at = seen_by_parent ? new Date().toISOString() : null;
+    }
+
+    const { error } = await supabaseAdmin
+      .from('session_tracking')
+      .update(patch)
+      .in('id', allowedIds);
+    if (error) throw error;
+    res.json({ success: true, updated: allowedIds.length });
+  } catch (e) {
+    console.error('Erreur maj absence:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ==================== TABLEAU DE BORD COMPORTEMENT ====================
 
 // Récupérer les métriques comportementales du jour

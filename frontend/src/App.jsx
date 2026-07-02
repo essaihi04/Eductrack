@@ -85,6 +85,7 @@ import ActiveTripPage from './pages/driver/ActiveTripPage';
 import SchoolYearConfigPage from './pages/admin/SchoolYearConfigPage';
 import ReinscriptionPage from './pages/admin/ReinscriptionPage';
 import TeacherTrackingDashboard from './pages/admin/TeacherTrackingDashboard';
+import AbsencesPage from './pages/admin/AbsencesPage';
 import CoefficientsPage from './pages/admin/CoefficientsPage';
 import BulletinsPage from './pages/admin/BulletinsPage';
 import ExamNotesPage from './pages/admin/ExamNotesPage';
@@ -167,6 +168,7 @@ function App() {
             <Route path="parents" element={<ParentsPage />} />
             <Route path="stats" element={<StatsPage />} />
             <Route path="teacher-tracking" element={<TeacherTrackingDashboard />} />
+            <Route path="absences" element={<AbsencesPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
