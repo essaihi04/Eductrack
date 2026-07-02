@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, Trash2, BookOpen, CheckSquare, Clock, RefreshCw, Plus, ChevronDown, Users, CalendarDays, Zap, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
+import { Save, Trash2, BookOpen, CheckSquare, Clock, RefreshCw, Plus, ChevronDown, Users, CalendarDays, Zap, AlertCircle, CheckCircle2, Loader2, X, Search } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -54,6 +54,7 @@ const SuiviRapide = () => {
   const [subjects, setSubjects] = useState([]);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [students, setStudents] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
   const [tracking, setTracking] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -954,6 +955,16 @@ const SuiviRapide = () => {
 
   const selectedClassData = classes.find(c => c.id === selectedClass);
 
+  // Filtre de la liste des élèves par nom / prénom (ordre indifférent).
+  const normalizedSearch = studentSearch.trim().toLowerCase();
+  const filteredStudents = normalizedSearch
+    ? students.filter((s) => {
+        const nom = `${s.first_name || ''} ${s.last_name || ''}`.toLowerCase();
+        const nomInverse = `${s.last_name || ''} ${s.first_name || ''}`.toLowerCase();
+        return nom.includes(normalizedSearch) || nomInverse.includes(normalizedSearch);
+      })
+    : students;
+
   return (
     <div className="space-y-4 pb-24">
       {/* ── Header ── */}
@@ -1447,9 +1458,38 @@ const SuiviRapide = () => {
               </div>
             </div>
 
+            {/* ── Barre de recherche élève (nom / prénom) ── */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                placeholder="Rechercher un élève par nom ou prénom…"
+                className="w-full pl-9 pr-9 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+              />
+              {studentSearch && (
+                <button
+                  type="button"
+                  onClick={() => setStudentSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 text-gray-400"
+                  aria-label="Effacer la recherche"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            {normalizedSearch && (
+              <p className="text-[11px] text-gray-500">
+                {filteredStudents.length} élève(s) trouvé(s) sur {students.length}
+              </p>
+            )}
+
             {/* ── Vue CARTE mobile (visible uniquement sur mobile) ── */}
             <div className="md:hidden space-y-3">
-              {students.map((student) => {
+              {filteredStudents.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">Aucun élève ne correspond à « {studentSearch} ».</p>
+              ) : filteredStudents.map((student) => {
                 const t = tracking[student.id] || {};
                 const isAbsent = t.presence === 'absent';
                 return (
@@ -1612,7 +1652,7 @@ const SuiviRapide = () => {
                   </tr>
                 </thead>
               <tbody>
-                {students.map((student, idx) => {
+                {filteredStudents.map((student, idx) => {
                   const hasPresence = !!tracking[student.id]?.presence;
                   return (
                     <tr key={student.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
