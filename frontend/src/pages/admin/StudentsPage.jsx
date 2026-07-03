@@ -962,18 +962,15 @@ L'administration de ${schoolName}`;
 
   // --- Réinscription (propre école + écoles associées) ----------------------
 
-  // Statut d'un élève vis-à-vis de l'année active : 'active' (réinscrit / classe
-  // de l'année), 'candidate' (était dans une autre année, pas réinscrit) ou
-  // 'neutral' (sans classe, non concerné).
+  // Statut d'un élève vis-à-vis de l'année active — MÊME source de vérité que
+  // la page finance (roster = student_enrollments) : un élève ne s'affiche que
+  // s'il a une inscription active (RI/NI) pour l'année. Tous les autres (année
+  // précédente, sans classe, jamais inscrits) sont des candidats proposés dans
+  // la fenêtre « Réinscription ». Les professeurs (pas de roster chargé) voient
+  // leurs élèves normalement.
   const studentYearStatus = (student) => {
-    if (activeIds.has(student.id)) return 'active';
-    if (student.class_id) {
-      const cls = classes.find((c) => c.id === student.class_id);
-      const cy = cls?.academic_year;
-      if (cy && cy === year) return 'active';
-      if (cy && cy !== year) return 'candidate';
-    }
-    return 'neutral';
+    if (!isAdmin) return 'active';
+    return activeIds.has(student.id) ? 'active' : 'candidate';
   };
 
   // Élèves de la propre école inscrits une autre année, pas encore réinscrits
