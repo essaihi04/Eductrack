@@ -16,6 +16,36 @@ export const generateEmail = (studentIdOrName, schoolNameOrId, schoolDomain) => 
   return `${first}.${last}${randomNum}@student.edu`;
 };
 
+// Domaine email de l'école — même convention que l'import Excel (ClassesPage) :
+// nom de l'école en minuscules, sans accents ni caractères spéciaux, + ".ma".
+// Ex : « Groupe Scolaire Al Baida » → "groupescolairealbaida.ma".
+export const schoolEmailDomain = (schoolName) => {
+  const base = String(schoolName || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+  return `${base || 'ecole'}.ma`;
+};
+
+// Email d'un élève créé à la main — même convention que les élèves importés :
+//   codemassar@nomecole.ma
+// et si l'élève n'a pas encore de code Massar :
+//   nom.prenom@nomecole.ma
+export const generateStudentEmail = ({ massarCode, firstName, lastName, schoolName }) => {
+  const domain = schoolEmailDomain(schoolName);
+  const massar = String(massarCode || '').trim().replace(/\s+/g, '');
+  if (massar) return `${massar}@${domain}`;
+  const sanitize = (s) => String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+  const local = [sanitize(lastName), sanitize(firstName)].filter(Boolean).join('.');
+  // Noms entièrement en arabe → local vide après nettoyage : repli horodaté.
+  return `${local || `eleve${Date.now().toString().slice(-6)}`}@${domain}`;
+};
+
 // Générer un mot de passe simple pour les élèves
 // Format: PrénomAnnée (ex: Ahmed2025)
 export const generatePassword = (firstName = '') => {

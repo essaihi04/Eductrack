@@ -9,7 +9,7 @@ import {
 } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
-import { generateEmail, generatePassword } from '../../utils/studentUtils';
+import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { LEVEL_ORDER, nextLevel } from '../../lib/levelProgression';
 
@@ -587,8 +587,14 @@ const StudentsPage = () => {
         setStudents(prev => prev.map(s => s.id === savedStudent.id ? { ...s, ...savedStudent } : s));
       } else {
         // ── MODE CRÉATION : POST + photo + parents ──
-        const email = (formData.email || '').trim() ||
-          `${(formData.registrationNumber || formData.massarCode || `el${Date.now()}`).toString().trim().replace(/\s+/g, '')}@student.edu`;
+        // Même convention que les élèves importés : codemassar@nomecole.ma,
+        // ou nom.prenom@nomecole.ma tant que l'élève n'a pas de code Massar.
+        const email = (formData.email || '').trim() || generateStudentEmail({
+          massarCode: formData.massarCode,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          schoolName: profile?.school?.name,
+        });
         const password = (formData.password || '').trim() || generatePassword(formData.firstName);
 
         const res = await fetch(`${apiUrl}/api/admin/students`, {
@@ -1726,7 +1732,7 @@ L'administration de ${schoolName}`;
                   <section className="space-y-2">
                     <h4 className="text-sm font-bold text-blue-700">🔑 Identifiants d'accès (auto-générés si vides)</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div><Label>Email</Label><input type="email" className={inputCls} value={formData.email} onChange={setF('email')} placeholder="auto" /></div>
+                      <div><Label>Email</Label><input type="email" className={inputCls} value={formData.email} onChange={setF('email')} placeholder="auto : codemassar@ecole.ma ou nom.prenom@ecole.ma" /></div>
                       <div><Label>Mot de passe</Label><input className={inputCls} value={formData.password} onChange={setF('password')} placeholder="auto (Prénom+année)" /></div>
                     </div>
                   </section>
