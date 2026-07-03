@@ -976,6 +976,9 @@ L'administration de ${schoolName}`;
   // Élèves de la propre école inscrits une autre année, pas encore réinscrits
   // dans l'année active → proposés dans la fenêtre « Réinscription ».
   const reinscriptionCandidates = students.filter((s) => studentYearStatus(s) === 'candidate');
+  // Élèves actifs de l'année (même total que la finance et l'entonnoir) — sert
+  // de dénominateur aux compteurs de l'en-tête (X/Y élèves, « sans parent »).
+  const activeStudentsList = students.filter((s) => studentYearStatus(s) === 'active');
 
   // Ouvre la modale et liste d'emblée les élèves des établissements associés.
   const openCrossModal = async () => {
@@ -1384,9 +1387,9 @@ L'administration de ${schoolName}`;
             )}
 
             <span className="text-xs text-gray-600 whitespace-nowrap">
-              {getFilteredStudents().length}/{students.length} élève(s)
+              {getFilteredStudents().length}/{activeStudentsList.length} élève(s)
               {(() => {
-                const without = students.filter(s => !(s.parents?.length > 0)).length;
+                const without = activeStudentsList.filter(s => !(s.parents?.length > 0)).length;
                 return without > 0 ? <span className="ml-1 text-amber-600 font-medium">• {without} sans parent</span> : null;
               })()}
             </span>

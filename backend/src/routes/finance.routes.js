@@ -2439,9 +2439,14 @@ router.get('/students', async (req, res) => {
     if (range) invQ = invQ.gte('issue_date', range.start).lte('issue_date', range.end);
     const { data: invs } = await invQ;
 
-    // Plans
+    // Plans — student_fee_plans stocke l'année au format tiret "YYYY-YYYY" alors
+    // que le front envoie le format slash "YYYY/YYYY" : on accepte les deux,
+    // sinon has_plan serait toujours faux.
     let plansQ = supabaseAdmin.from('student_fee_plans').select('student_id, academic_year, status').in('student_id', studentIds);
-    if (academic_year) plansQ = plansQ.eq('academic_year', academic_year);
+    if (academic_year) {
+      const y = String(academic_year);
+      plansQ = plansQ.in('academic_year', [...new Set([y, y.replace('/', '-'), y.replace('-', '/')])]);
+    }
     const { data: plans } = await plansQ;
 
     const totalsByStudent = {};

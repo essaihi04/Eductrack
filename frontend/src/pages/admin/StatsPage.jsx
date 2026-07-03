@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Users, GraduationCap, BookOpen, TrendingUp } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { useYear } from '../../contexts/YearContext';
 
 const StatCard = ({ icon: Icon, title, value, description, color }) => (
   <motion.div
@@ -28,6 +29,7 @@ const StatCard = ({ icon: Icon, title, value, description, color }) => (
 );
 
 const StatsPage = () => {
+  const { year } = useYear();
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalTeachers: 0,
@@ -40,14 +42,17 @@ const StatsPage = () => {
 
   useEffect(() => {
     fetchStats();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
 
   const fetchStats = async () => {
     try {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
 
-      const res = await fetch(`${apiUrl}/api/admin/stats`, {
+      // academic_year : les compteurs (élèves = inscriptions actives, classes)
+      // sont scopés à l'année active — mêmes totaux que l'entonnoir et la finance.
+      const res = await fetch(`${apiUrl}/api/admin/stats?academic_year=${encodeURIComponent(year)}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -68,7 +73,7 @@ const StatsPage = () => {
     <div className="p-8 space-y-8">
       <div>
         <h1 className="text-3xl font-bold">Statistiques</h1>
-        <p className="text-muted-foreground mt-2">Vue d'ensemble de l'établissement</p>
+        <p className="text-muted-foreground mt-2">Vue d'ensemble de l'établissement · Année scolaire {year}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
