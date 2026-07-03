@@ -1,12 +1,33 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 
 const router = express.Router();
 
-// Inscription
-router.post('/register', async (req, res) => {
+// Anti brute-force : 10 tentatives / 15 min / IP sur les routes sensibles
+// (login, register, change-password). Les tentatives réussies ne comptent pas.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives, réessayez dans 15 minutes' },
+});
+
+// Inscription publique — SÉCURITÉ : le rôle est TOUJOURS forcé à 'student'.
+// Le champ `role` envoyé par le client est ignoré ; les comptes staff (admin,
+// prof, finance…) ne se créent que via les routes admin authentifiées.
+router.post('/register', authLimiter, async (req, res) => {
   try {
-    const { email, password, firstName, lastName, role } = req.body;
+    const { email, password, firstName, lastName } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email et mot de passe requis' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
+    }
 
     // Créer l'utilisateur
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -16,7 +37,7 @@ router.post('/register', async (req, res) => {
       user_metadata: {
         first_name: firstName,
         last_name: lastName,
-        role: role || 'student'
+        role: 'student'
       }
     });
 
@@ -25,14 +46,14 @@ router.post('/register', async (req, res) => {
     }
 
     // Créer le profil
-    const { data: profile, error: profileError } = await supabase
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .insert({
         id: authData.user.id,
         email,
         first_name: firstName,
         last_name: lastName,
-        role: role || 'student'
+        role: 'student'
       })
       .select()
       .single();
@@ -49,7 +70,7 @@ router.post('/register', async (req, res) => {
 });
 
 // Connexion
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -125,7 +146,9 @@ router.get('/me', async (req, res) => {
       const metadata = user.user_metadata || {};
       const firstName = metadata.first_name || user.email?.split('@')[0] || 'Utilisateur';
       const lastName = metadata.last_name || '';
-      const role = metadata.role || 'student';
+      // SÉCURITÉ : user_metadata est modifiable par l'utilisateur lui-même
+      // (supabase.auth.updateUser) → ne JAMAIS en déduire un rôle privilégié.
+      const role = 'student';
       
       // Créer le profil
       const { data: newProfile, error: createError } = await supabaseAdmin
@@ -263,7 +286,7 @@ router.put('/profile', async (req, res) => {
 });
 
 // Changer le mot de passe (tous les utilisateurs)
-router.post('/change-password', async (req, res) => {
+router.post('/change-password', authLimiter, async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (!token) {

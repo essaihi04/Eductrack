@@ -156,18 +156,23 @@ router.post('/me/documents/:id/download', authorize('student'), async (req, res)
 // Lister tous les élèves (Admin, Prof)
 router.get('/', authorize('admin', 'school_admin', 'teacher'), async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // SÉCURITÉ : chaque école ne voit que ses propres élèves
+    let query = supabase
       .from('profiles')
       .select('*, classes(*)')
-      .eq('role', 'student')
-      .order('last_name');
+      .eq('role', 'student');
+    if (req.user.role !== 'super_admin') {
+      if (!req.user.school_id) return res.json([]);
+      query = query.eq('school_id', req.user.school_id);
+    }
+    const { data, error } = await query.order('last_name');
 
     if (error) throw error;
 
     res.json(data);
   } catch (error) {
     console.error('Erreur:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
@@ -189,10 +194,16 @@ router.get('/:id', authorize('admin', 'school_admin', 'teacher', 'student'), asy
 
     if (error) throw error;
 
+    // SÉCURITÉ : le staff ne voit que les élèves de sa propre école
+    if (req.user.role !== 'super_admin' && req.user.role !== 'student'
+        && data.school_id !== req.user.school_id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
     res.json(data);
   } catch (error) {
     console.error('Erreur:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
@@ -209,7 +220,9 @@ router.post('/', authorize('admin', 'school_admin'), async (req, res) => {
         last_name: lastName,
         role: 'student',
         class_id: classId,
-        date_of_birth: dateOfBirth
+        date_of_birth: dateOfBirth,
+        // SÉCURITÉ : l'élève est rattaché à l'école de l'admin qui le crée
+        school_id: req.user.school_id || null
       })
       .select()
       .single();
@@ -229,7 +242,8 @@ router.put('/:id', authorize('admin', 'school_admin'), async (req, res) => {
     const { id } = req.params;
     const { firstName, lastName, classId, dateOfBirth } = req.body;
 
-    const { data, error } = await supabase
+    // SÉCURITÉ : un admin ne modifie que les élèves de sa propre école
+    let query = supabase
       .from('profiles')
       .update({
         first_name: firstName,
@@ -238,15 +252,18 @@ router.put('/:id', authorize('admin', 'school_admin'), async (req, res) => {
         date_of_birth: dateOfBirth
       })
       .eq('id', id)
-      .select()
-      .single();
+      .eq('role', 'student');
+    if (req.user.role !== 'super_admin') {
+      query = query.eq('school_id', req.user.school_id);
+    }
+    const { data, error } = await query.select().single();
 
     if (error) throw error;
 
     res.json(data);
   } catch (error) {
     console.error('Erreur:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
@@ -255,17 +272,23 @@ router.delete('/:id', authorize('admin', 'school_admin'), async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    // SÉCURITÉ : un admin ne supprime que les élèves de sa propre école
+    let query = supabase
       .from('profiles')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('role', 'student');
+    if (req.user.role !== 'super_admin') {
+      query = query.eq('school_id', req.user.school_id);
+    }
+    const { error } = await query;
 
     if (error) throw error;
 
     res.json({ message: 'Élève supprimé avec succès' });
   } catch (error) {
     console.error('Erreur:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

@@ -45,3 +45,7 @@ backend/test-*.mjs
 ~$*
 check-parent.mjs
 scripts/gen-proposal.cjs
+
+# Secrets de signature Android (ne jamais committer)
+*.keystore
+keystore.properties

@@ -58,6 +58,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.set('etag', false);
+// Derrière nginx : nécessaire pour que le rate limiting voie l'IP réelle
+// du client (X-Forwarded-For) et non celle du proxy.
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet({
