@@ -8,21 +8,6 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-const roleOptions = [
-  {
-    value: 'student',
-    label: 'Élève',
-    description: 'Accès au tableau de bord personnel, devoirs et remarques.',
-    accent: 'from-blue-500/20 to-indigo-500/20 border-blue-400/40',
-  },
-  {
-    value: 'teacher',
-    label: 'Professeur',
-    description: 'Gestion des classes, devoirs et suivi du comportement.',
-    accent: 'from-emerald-500/20 to-teal-500/20 border-emerald-400/40',
-  },
-];
-
 const Register = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -64,7 +49,6 @@ const Register = () => {
           lastName: formData.lastName,
           email: formData.email,
           password: formData.password,
-          role: formData.role,
         }),
       });
 
@@ -248,28 +232,16 @@ const Register = () => {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <span className="text-sm font-medium text-gray-700">Rôle</span>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {roleOptions.map((role) => (
-                      <button
-                        type="button"
-                        key={role.value}
-                        onClick={() => setFormData((prev) => ({ ...prev, role: role.value }))}
-                        className={`text-left rounded-2xl border bg-gradient-to-br px-4 py-4 transition-all ${
-                          formData.role === role.value
-                            ? `${role.accent} ring-2 ring-offset-2 ring-primary/60`
-                            : 'border-white/60 from-white to-white/80'
-                        }`}
-                      >
-                        <p className="font-semibold text-gray-900 flex items-center gap-2">
-                          <ShieldCheck className="w-4 h-4 text-primary" />
-                          {role.label}
-                        </p>
-                        <p className="text-sm text-gray-600 mt-1">{role.description}</p>
-                      </button>
-                    ))}
-                  </div>
+                <div className="rounded-2xl border border-white/60 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 px-4 py-4">
+                  <p className="font-semibold text-gray-900 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-primary" />
+                    Compte élève
+                  </p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    L'inscription en ligne crée un compte élève. Les comptes
+                    professeurs et personnels sont créés par l'administration
+                    de l'établissement.
+                  </p>
                 </div>
 
                 <ul className="text-xs text-gray-500 space-y-1">
