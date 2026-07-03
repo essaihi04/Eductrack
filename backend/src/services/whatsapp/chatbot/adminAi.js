@@ -17,6 +17,10 @@ import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/sc
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
   apiKey: process.env.DEEPSEEK_API_KEY || '',
+  // Conversation temps réel : mieux vaut basculer vite sur le message de
+  // repli que laisser l'admin attendre (défaut SDK : 10 min).
+  timeout: 45_000,
+  maxRetries: 1,
 });
 
 const SYSTEM_PROMPT = `Tu es l'assistant de direction d'une école marocaine, accessible via WhatsApp à l'accueil/la réception et à la direction.

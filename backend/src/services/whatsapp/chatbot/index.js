@@ -372,7 +372,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
     return;
   }
 
-  const state = State.getState(phone);
+  const state = State.getState(schoolId, phone);
   const selected = state?.studentId
     ? children.find((c) => c.id === state.studentId)
     : null;
@@ -390,7 +390,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
     let msg = await locationSavedMessage(target, location);
     if (children.length > 1) {
       // Propose d'appliquer la même adresse aux frères et sœurs
-      State.setState(phone, { lastLocation: location });
+      State.setState(schoolId, phone, { lastLocation: location });
       msg += `\n\n_Répondez *tous* pour appliquer cette adresse à tous vos enfants (${children.length})._`;
     }
     await sendText(schoolId, phone, msg, { urgent: true });
@@ -412,7 +412,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
   lines.push('');
   lines.push(`_Répondez avec le numéro de votre choix._`);
 
-  State.setState(phone, {
+  State.setState(schoolId, phone, {
     state: 'CHILD',
     pendingLocation: location,
     childrenList: children.map((c) => c.id),
@@ -503,7 +503,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
   }
   const photoUrl = await saveProfilePhotoBuffer(buffer, image.mimetype);
 
-  const state = State.getState(phone);
+  const state = State.getState(schoolId, phone);
   const selected = state?.studentId ? children.find((c) => c.id === state.studentId) : null;
   // Cible : enfant nommé dans la légende > enfant sélectionné > enfant unique
   const fromCaption = caption ? matchChildFromInput(caption, children) : null;
@@ -513,7 +513,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
   // enregistrement direct, comme pour la localisation. On n'exige plus de « oui »
   // qui restait souvent sans réponse (le parent croyait la photo déjà enregistrée).
   if (target) {
-    if (state?.awaitingPhoto) State.setState(phone, { awaitingPhoto: false });
+    if (state?.awaitingPhoto) State.setState(schoolId, phone, { awaitingPhoto: false });
     await applyProfilePhoto(schoolId, phone, target, photoUrl);
     await markProcessed(incomingMsgId);
     return;
@@ -532,7 +532,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
   lines.push('');
   lines.push(`_Répondez avec le numéro de l'enfant, ou *non* pour annuler._`);
 
-  State.setState(phone, {
+  State.setState(schoolId, phone, {
     state: 'PHOTO',
     pendingPhotoUrl: photoUrl,
     pendingPhotoTargetId: null,
@@ -706,7 +706,7 @@ async function sendChildSelectionMenu(schoolId, phone, children, parentInfo) {
 
   if (children.length === 1) {
     // Un seul enfant → sélection auto
-    State.selectStudent(phone, children[0].id);
+    State.selectStudent(schoolId, phone, children[0].id);
     await sendMainMenu(schoolId, phone, children[0], parentInfo);
     return;
   }
@@ -725,9 +725,9 @@ async function sendChildSelectionMenu(schoolId, phone, children, parentInfo) {
   lines.push('');
   lines.push(`_Répondez avec le numéro de l'enfant._`);
 
-  State.setChildSelection(phone);
+  State.setChildSelection(schoolId, phone);
   // Stocke la liste pour résoudre la sélection
-  State.setState(phone, { childrenList: children.map((c) => c.id) });
+  State.setState(schoolId, phone, { childrenList: children.map((c) => c.id) });
 
   await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
 }
@@ -737,7 +737,7 @@ async function sendChildSelectionMenu(schoolId, phone, children, parentInfo) {
 // ─────────────────────────────────────────────────────────────────────────
 
 async function sendMainMenu(schoolId, phone, student, parentInfo) {
-  State.setMenu(phone, 'main');
+  State.setMenu(schoolId, phone, 'main');
   await sendMenu(schoolId, phone, MENUS.main, {
     studentName: `${student.first_name} ${student.last_name}`,
     schoolName: parentInfo.school_name,
@@ -745,7 +745,7 @@ async function sendMainMenu(schoolId, phone, student, parentInfo) {
 }
 
 async function sendSubMenu(schoolId, phone, menuId, student, parentInfo) {
-  State.setMenu(phone, menuId);
+  State.setMenu(schoolId, phone, menuId);
   await sendMenu(schoolId, phone, MENUS[menuId], {
     studentName: `${student.first_name} ${student.last_name}`,
     schoolName: parentInfo.school_name,
@@ -772,7 +772,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       return sendSubMenu(schoolId, phone, target, student, parentInfo);
     }
     if (target === 'ai') {
-      State.setAIMode(phone);
+      State.setAIMode(schoolId, phone);
       const msg = `*💬 Question libre*\n━━━━━━━━━━━━━━━━━━━\n\nPosez votre question sur ${student.first_name} en tant que parent.\n\nExemples :\n• "Comment se débrouille-t-il en maths ?"\n• "Que dois-je payer ce mois-ci ?"\n\n_L'IA répond en se basant uniquement sur les données de votre enfant._\n\nTapez *menu* à tout moment pour revenir au menu principal.`;
       return sendText(schoolId, phone, msg, { urgent: true });
     }
@@ -796,13 +796,13 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     if (target === 'photo') {
       // Active le mode "photo attendue" : la prochaine image reçue sera
       // importée directement comme photo de profil de l'enfant sélectionné.
-      State.setState(phone, { awaitingPhoto: true });
+      State.setState(schoolId, phone, { awaitingPhoto: true });
       return sendText(schoolId, phone, photoInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
     }
     if (target === 'reports') {
       // Démarre l'assistant de configuration des rapports IA WhatsApp.
       const { prefs, defaultTime } = await getReportPreferences(parentInfo);
-      State.setState(phone, {
+      State.setState(schoolId, phone, {
         state: 'REPORT',
         reportStep: 'enabled',
         reportDefaultTime: defaultTime,
@@ -848,7 +848,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
         if (polls.length === 0) {
           await sendText(schoolId, phone, await A.getActivePolls(student, parentInfo), { urgent: true });
         } else {
-          State.setPollVoting(phone, polls);
+          State.setPollVoting(schoolId, phone, polls);
           await sendText(schoolId, phone, A.formatPollPrompt(polls[0], 1, polls.length), { urgent: true });
         }
         return;
@@ -1091,7 +1091,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   if (credReq.wants) {
     let credStudent = null;
     if (credReq.target !== 'parent') {
-      const st = State.getState(phone);
+      const st = State.getState(schoolId, phone);
       if (st?.studentId) credStudent = await getStudentById(st.studentId);
       if (!credStudent) {
         const children = await getParentChildren(parentInfo.parent_id);
@@ -1116,7 +1116,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   // 3.bis Commandes spéciales (toujours prioritaires)
   const cmd = detectSpecialCommand(text);
   if (cmd === 'menu' || cmd === 'help') {
-    const state = State.getState(phone);
+    const state = State.getState(schoolId, phone);
     let student = state?.studentId ? await getStudentById(state.studentId) : null;
     if (!student) {
       const children = await getParentChildren(parentInfo.parent_id);
@@ -1128,7 +1128,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     return;
   }
   if (cmd === 'stop') {
-    State.resetState(phone);
+    State.resetState(schoolId, phone);
     // Persiste l'opt-out WhatsApp → le routeur ne lui enverra plus de WhatsApp.
     await setWhatsappOptOut(parentInfo.parent_id, true);
     await sendText(
@@ -1170,7 +1170,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   // guidée (photo / rapports / sélection enfant) et que ce n'est pas un simple
   // numéro de menu. Sinon le flux chatbot normal continue.
   {
-    const st = State.getState(phone);
+    const st = State.getState(schoolId, phone);
     const inDataFlow = st && ['PHOTO', 'REPORT', 'CHILD'].includes(st.state);
     const trimmed = String(text || '').trim();
     const isMenuNumber = /^\d{1,2}$/.test(normalizeDigits(trimmed));
@@ -1196,7 +1196,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   }
 
   // 4. State machine
-  let state = State.getState(phone);
+  let state = State.getState(schoolId, phone);
 
   // Mode PHOTO : une photo est en attente de confirmation / de cible.
   // (Traité avant le bloc "pas d'enfant sélectionné" car ce mode peut
@@ -1208,9 +1208,9 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
 
     if (PHOTO_NO_RE.test(input)) {
       await deleteProfilePhotoByUrl(photoUrl);
-      State.setState(phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
-      if (state.studentId) State.setMenu(phone, 'main');
-      else State.resetState(phone);
+      State.setState(schoolId, phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
+      if (state.studentId) State.setMenu(schoolId, phone, 'main');
+      else State.resetState(schoolId, phone);
       await sendText(parentInfo.school_id, phone, `❌ Photo annulée. Tapez *menu* pour d'autres options.`, { urgent: true });
       await markProcessed(incomingMsg?.id);
       return;
@@ -1228,8 +1228,8 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     }
 
     if (photoChild) {
-      State.setState(phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
-      State.selectStudent(phone, photoChild.id);
+      State.setState(schoolId, phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
+      State.selectStudent(schoolId, phone, photoChild.id);
       await applyProfilePhoto(parentInfo.school_id, phone, photoChild, photoUrl);
       await markProcessed(incomingMsg?.id);
       return;
@@ -1256,12 +1256,12 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     if (state.reportStep === 'enabled') {
       if (YES_RE.test(input)) {
         draft.enabled = true;
-        State.setState(phone, { reportDraft: draft, reportStep: 'frequency' });
+        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'frequency' });
         await sendText(parentInfo.school_id, phone, REPORT_FREQUENCY_PROMPT, { urgent: true });
       } else if (NO_RE.test(input)) {
         draft.enabled = false;
         const ok = await saveReportPreferences(parentInfo.parent_id, draft);
-        State.setMenu(phone, 'account');
+        State.setMenu(schoolId, phone, 'account');
         await sendText(
           parentInfo.school_id,
           phone,
@@ -1280,11 +1280,11 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     if (state.reportStep === 'frequency') {
       if (/^(1|quotidien|jour|daily|يومي)/i.test(input)) {
         draft.frequency = 'daily';
-        State.setState(phone, { reportDraft: draft, reportStep: 'time' });
+        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'time' });
         await sendText(parentInfo.school_id, phone, reportTimePrompt(draft.preferred_time || defaultTime), { urgent: true });
       } else if (/^(2|hebdo|semaine|weekly|أسبوعي)/i.test(input)) {
         draft.frequency = 'weekly';
-        State.setState(phone, { reportDraft: draft, reportStep: 'weekday' });
+        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'weekday' });
         await sendText(parentInfo.school_id, phone, REPORT_WEEKDAY_PROMPT, { urgent: true });
       } else {
         await sendText(parentInfo.school_id, phone, `🤔 Répondez *1* (Quotidien) ou *2* (Hebdomadaire).`, { urgent: true });
@@ -1298,7 +1298,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
       const n = parseInt(input, 10);
       if (Number.isFinite(n) && REPORT_DAY_INPUT[n] !== undefined) {
         draft.weekly_day = REPORT_DAY_INPUT[n];
-        State.setState(phone, { reportDraft: draft, reportStep: 'time' });
+        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'time' });
         await sendText(parentInfo.school_id, phone, reportTimePrompt(draft.preferred_time || defaultTime), { urgent: true });
       } else {
         await sendText(parentInfo.school_id, phone, `🤔 Indiquez le numéro du jour, de *1* (Lundi) à *7* (Dimanche).`, { urgent: true });
@@ -1321,7 +1321,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
       }
       draft.preferred_time = time;
       const ok = await saveReportPreferences(parentInfo.parent_id, draft);
-      State.setMenu(phone, 'account');
+      State.setMenu(schoolId, phone, 'account');
       if (!ok) {
         await sendText(parentInfo.school_id, phone, `⚠️ Erreur lors de l'enregistrement. Réessayez plus tard.`, { urgent: true });
       } else {
@@ -1340,7 +1340,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     }
 
     // Étape inconnue → réinitialise proprement
-    State.setMenu(phone, 'account');
+    State.setMenu(schoolId, phone, 'account');
     await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`, { urgent: true });
     await markProcessed(incomingMsg?.id);
     return;
@@ -1352,8 +1352,8 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   if (!state || !state.studentId) {
     const children = await getParentChildren(parentInfo.parent_id);
     if (children.length === 1) {
-      State.selectStudent(phone, children[0].id);
-      state = State.getState(phone);
+      State.selectStudent(schoolId, phone, children[0].id);
+      state = State.getState(schoolId, phone);
 
       // Détecte si la 1re saisie est une vraie question (et non une simple
       // salutation type "bonjour", "salam", "hi"…). Si oui, on répond
@@ -1403,7 +1403,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     // parent vient de recevoir le menu de sélection).
     const matched = matchChildFromInput(text, children);
     if (matched) {
-      State.selectStudent(phone, matched.id);
+      State.selectStudent(schoolId, phone, matched.id);
       await sendText(
         parentInfo.school_id,
         phone,
@@ -1422,7 +1422,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
 
   const student = await getStudentById(state.studentId);
   if (!student) {
-    State.resetState(phone);
+    State.resetState(schoolId, phone);
     await sendText(parentInfo.school_id, phone, `Erreur : élève introuvable. Tapez *menu* pour recommencer.`, { urgent: true });
     await markProcessed(incomingMsg?.id);
     return;
@@ -1443,15 +1443,15 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     if (state.pendingLocation) {
       const loc = state.pendingLocation;
       if (APPLY_ALL_RE.test(normalizeDigits(String(text || '').trim()))) {
-        State.setState(phone, { pendingLocation: null, state: 'MENU', currentMenu: 'main' });
+        State.setState(schoolId, phone, { pendingLocation: null, state: 'MENU', currentMenu: 'main' });
         await applyLocationToAllChildren({ location: loc, phone, parentInfo });
         await markProcessed(incomingMsg?.id);
         return;
       }
       const locChild = matchChildFromInput(text, orderedChildren);
       if (locChild) {
-        State.setState(phone, { pendingLocation: null });
-        State.selectStudent(phone, locChild.id);
+        State.setState(schoolId, phone, { pendingLocation: null });
+        State.selectStudent(schoolId, phone, locChild.id);
         const ok = await saveStudentHomeLocation(locChild.id, loc);
         const msg = ok
           ? await locationSavedMessage(locChild, loc)
@@ -1472,7 +1472,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
 
     const matched = matchChildFromInput(text, orderedChildren);
     if (matched) {
-      State.selectStudent(phone, matched.id);
+      State.selectStudent(schoolId, phone, matched.id);
       await sendText(
         parentInfo.school_id,
         phone,
@@ -1526,7 +1526,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     const idx = state.pollIndex || 0;
     const poll = queue[idx];
     if (!poll) {
-      State.setMenu(phone, 'schoollife');
+      State.setMenu(schoolId, phone, 'schoollife');
       await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`, { urgent: true });
       await markProcessed(incomingMsg?.id);
       return;
@@ -1543,10 +1543,10 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
 
     // Passe au sondage suivant s'il en reste, sinon retour au menu Vie scolaire
     if (idx + 1 < queue.length) {
-      State.setState(phone, { pollIndex: idx + 1 });
+      State.setState(schoolId, phone, { pollIndex: idx + 1 });
       await sendText(parentInfo.school_id, phone, A.formatPollPrompt(queue[idx + 1], idx + 2, queue.length), { urgent: true });
     } else {
-      State.setMenu(phone, 'schoollife');
+      State.setMenu(schoolId, phone, 'schoollife');
       await sendText(parentInfo.school_id, phone, `Merci ! 🙏 Tapez *menu* pour d'autres options.`, { urgent: true });
     }
     await markProcessed(incomingMsg?.id);
@@ -1560,7 +1560,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     // signifie "Retour" dans les sous-menus.)
     if (state.lastLocation && /^(tous|toutes|all|الكل|كلهم|للجميع)[\s!.]*$/i.test(String(text || '').trim())) {
       const loc = state.lastLocation;
-      State.setState(phone, { lastLocation: null });
+      State.setState(schoolId, phone, { lastLocation: null });
       await applyLocationToAllChildren({ location: loc, phone, parentInfo });
       await markProcessed(incomingMsg?.id);
       return;
@@ -1630,7 +1630,7 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   }
 
   // Sécurité : état inconnu
-  State.resetState(phone);
+  State.resetState(schoolId, phone);
   await sendMainMenu(parentInfo.school_id, phone, student, parentInfo);
   await markProcessed(incomingMsg?.id);
 }

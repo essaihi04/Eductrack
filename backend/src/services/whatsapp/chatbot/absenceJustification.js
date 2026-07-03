@@ -16,6 +16,10 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
   apiKey: process.env.DEEPSEEK_API_KEY || '',
+  // Conversation temps réel : mieux vaut basculer vite sur le repli que
+  // laisser le parent attendre (défaut SDK : 10 min).
+  timeout: 45_000,
+  maxRetries: 1,
 });
 
 /** Absences des enfants du parent sur une fenêtre (par défaut 60 jours). */

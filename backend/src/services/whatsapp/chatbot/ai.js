@@ -14,6 +14,10 @@ import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/sc
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
   apiKey: process.env.DEEPSEEK_API_KEY || '',
+  // Conversation temps réel : mieux vaut basculer vite sur le message de
+  // repli que laisser le parent attendre (défaut SDK : 10 min).
+  timeout: 45_000,
+  maxRetries: 1,
 });
 
 const SYSTEM_PROMPT = `Tu es l'assistant pédagogique officiel d'une école marocaine, accessible via WhatsApp aux parents.
