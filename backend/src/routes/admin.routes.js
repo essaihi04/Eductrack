@@ -2325,6 +2325,27 @@ router.post('/students', async (req, res) => {
 
     if (profileError) throw profileError;
 
+    // Inscription de l'année active — INDISPENSABLE : le roster finance
+    // (/api/enrollments) lit uniquement student_enrollments. Sans cette ligne,
+    // un élève créé par l'admin n'apparaîtrait jamais côté finance. Statut NI =
+    // nouvel inscrit. Même logique que POST /api/inscriptions/students (finance).
+    const academicYear = req.body.academicYear || (() => {
+      const now = new Date();
+      const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+      return `${y}/${y + 1}`;
+    })();
+    const { error: enrollError } = await supabaseAdmin
+      .from('student_enrollments')
+      .upsert({
+        school_id: getSchoolId(req),
+        student_id: profile.id,
+        class_id: classId || null,
+        academic_year: academicYear,
+        status: 'NI',
+        created_by: req.user.id,
+      }, { onConflict: 'student_id,academic_year' });
+    if (enrollError) console.error('Inscription (student_enrollments) échouée:', enrollError);
+
     res.status(201).json({ ...profile, password });
   } catch (error) {
     console.error('Erreur:', error);

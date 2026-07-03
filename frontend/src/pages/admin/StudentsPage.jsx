@@ -594,7 +594,9 @@ const StudentsPage = () => {
         const res = await fetch(`${apiUrl}/api/admin/students`, {
           method: 'POST',
           headers: { ...authHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...studentFields, email, password }),
+          // academicYear : l'élève est inscrit (student_enrollments) pour l'année
+          // active → il apparaît aussitôt côté finance (roster = student_enrollments).
+          body: JSON.stringify({ ...studentFields, email, password, academicYear: year }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -643,8 +645,11 @@ const StudentsPage = () => {
       setShowForm(false);
 
       if (thenPrint) printInscriptionFiche(savedStudent);
-      // Rafraîchir pour récupérer parents/champs normalisés côté serveur
+      // Rafraîchir pour récupérer parents/champs normalisés côté serveur.
+      // refreshActiveIds : la création a inscrit l'élève (student_enrollments) pour
+      // l'année active → il doit s'afficher aussitôt dans la liste (statut « actif »).
       fetchData();
+      if (isAdmin) refreshActiveIds();
     } catch (error) {
       console.error('Error saving student:', error);
       alert('Erreur : ' + (error.message || 'enregistrement impossible'));
