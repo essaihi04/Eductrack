@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronUp, Link2, Unlink, Star, FileSpreadsheet, Download, Edit2, Key, Send, Copy, CheckCheck } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Avatar, ChannelBadge, ParentCard, DetailDrawer } from '../../components/directory/ui';
+import { useYear } from '../../contexts/YearContext';
 import * as XLSX from 'xlsx';
 
 // Libellés lisibles des filières (lycée). Sert au filtre « Filière » de la page Parents.
@@ -295,6 +296,7 @@ const StudentPicker = ({ students, value, onChange }) => {
 };
 
 const ParentsPage = () => {
+  const { year } = useYear(); // année active : seuls les parents d'élèves inscrits
   const [parents, setParents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
@@ -354,7 +356,9 @@ const ParentsPage = () => {
     try {
       const token = await getToken();
       const [parentsRes, classesRes, studentsRes] = await Promise.all([
-        fetch(`${apiUrl}/api/admin/parents`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        // academic_year : seuls les parents ayant au moins un enfant inscrit
+        // (RI/NI) dans l'année active — les familles des non-réinscrits sortent.
+        fetch(`${apiUrl}/api/admin/parents${year ? `?academic_year=${encodeURIComponent(year)}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/classes`, { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch(`${apiUrl}/api/admin/students`, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
@@ -371,7 +375,7 @@ const ParentsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, [apiUrl, year]);
 
   useEffect(() => {
     fetchData();

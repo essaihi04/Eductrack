@@ -11,6 +11,14 @@
 import cron from 'node-cron';
 import { supabaseAdmin } from '../config/supabase.js';
 import { routeNotification } from './notificationRouter.js';
+import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+
+// Année scolaire courante au format slash "YYYY/YYYY" (rentrée en septembre).
+const currentSchoolYear = () => {
+  const now = new Date();
+  const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${y}/${y + 1}`;
+};
 
 const TYPE_PREFIX = {
   urgent: '🔴 *URGENT* — ',
@@ -51,7 +59,12 @@ async function resolveTargetParents(schoolId, target) {
   const classIds = Array.isArray(target?.class_ids) ? target.class_ids : null;
   if (classIds && classIds.length) q = q.in('class_id', classIds);
   const { data: students } = await q;
-  const studentIds = (students || []).map((s) => s.id);
+
+  // Seuls les élèves inscrits (RI/NI) dans l'année scolaire courante : les
+  // familles des élèves non réinscrits ne reçoivent plus les communications.
+  const activeIds = await activeStudentIdSet(schoolId, currentSchoolYear());
+  const scoped = activeIds ? (students || []).filter((s) => activeIds.has(s.id)) : (students || []);
+  const studentIds = scoped.map((s) => s.id);
   if (!studentIds.length) return [];
 
   // 2. parent_students → parent_ids (par lots pour éviter les URLs trop longues)

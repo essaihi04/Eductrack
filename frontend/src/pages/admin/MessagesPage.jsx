@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye
@@ -7,6 +8,7 @@ import {
 
 const MessagesPage = () => {
   const { profile } = useAuth();
+  const { year } = useYear(); // année active : scope les classes/destinataires
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   // Filter state
@@ -69,7 +71,9 @@ const MessagesPage = () => {
           headers: { Authorization: `Bearer ${token}` }
         });
         const data = await res.json();
-        const cls = Array.isArray(data) ? data : [];
+        // Seules les classes de l'année active (pas celles des années passées).
+        const allCls = Array.isArray(data) ? data : [];
+        const cls = year ? allCls.filter(c => !c.academic_year || c.academic_year === year) : allCls;
         setClasses(cls);
         setSelectedClasses(cls.map(c => c.id));
 
@@ -80,7 +84,7 @@ const MessagesPage = () => {
       }
     };
     loadClasses();
-  }, [apiUrl]);
+  }, [apiUrl, year]);
 
   // Fetch recipient count when filters change
   const fetchRecipientCount = useCallback(async () => {
@@ -93,6 +97,7 @@ const MessagesPage = () => {
       }
       if (schoolTypeFilter) params.append('school_type', schoolTypeFilter);
       if (levelFilter) params.append('level', levelFilter);
+      if (year) params.append('academic_year', year);
 
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -104,7 +109,7 @@ const MessagesPage = () => {
     } finally {
       setLoadingRecipients(false);
     }
-  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter]);
+  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year]);
 
   useEffect(() => {
     if (classes.length > 0) {
@@ -272,6 +277,7 @@ const MessagesPage = () => {
       }
       if (schoolTypeFilter) filter.school_type = schoolTypeFilter;
       if (levelFilter) filter.level = levelFilter;
+      if (year) filter.academic_year = year; // seuls les élèves inscrits dans l'année active
 
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',

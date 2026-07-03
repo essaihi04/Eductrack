@@ -1193,7 +1193,9 @@ L'administration de ${schoolName}`;
         body: JSON.stringify({
           filter: sendCredentialsFilter,
           filiere: sendCredentialsFiliere,
-          classId: sendCredentialsClass
+          classId: sendCredentialsClass,
+          // Seuls les élèves inscrits dans l'année active reçoivent leurs identifiants.
+          academicYear: year
         })
       });
 

@@ -7,6 +7,7 @@ import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
+import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 
@@ -591,7 +592,15 @@ router.get('/parents', async (req, res) => {
       };
     });
 
-    res.json(response);
+    // Année active fournie → seuls les parents ayant au moins un enfant inscrit
+    // (RI/NI) cette année-là (même règle que les listes élèves / la finance).
+    step = 'yearScope';
+    const activeIds = await activeStudentIdSet(getSchoolId(req), req.query.academic_year);
+    const scoped = activeIds
+      ? response.filter(p => p.children.some(c => activeIds.has(c.id)))
+      : response;
+
+    res.json(scoped);
   } catch (error) {
     // Diagnostic : on remonte l'étape en échec + tout le détail de l'erreur
     // (supabase-js efface error.cause, mais garde message/details/hint/code).
@@ -2718,7 +2727,7 @@ router.delete('/teachers/:id', async (req, res) => {
 // Envoyer les identifiants des élèves via WhatsApp en masse
 router.post('/students/send-credentials-whatsapp', async (req, res) => {
   try {
-    const { filter, filiere, classId } = req.body;
+    const { filter, filiere, classId, academicYear } = req.body;
     const schoolId = getSchoolId(req);
 
     // Récupérer les élèves selon le filtre
@@ -2744,6 +2753,11 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
     if (filter === 'filiere' && filiere) {
       filteredStudents = filteredStudents.filter(s => s.classes?.filiere === filiere);
     }
+
+    // Année active fournie → seuls les élèves inscrits (RI/NI) cette année-là
+    // reçoivent leurs identifiants (pas les familles des non-réinscrits).
+    const activeIdsYear = await activeStudentIdSet(schoolId, academicYear);
+    if (activeIdsYear) filteredStudents = filteredStudents.filter(s => activeIdsYear.has(s.id));
 
     if (filteredStudents.length === 0) {
       return res.status(400).json({ error: 'Aucun élève trouvé avec ces critères' });

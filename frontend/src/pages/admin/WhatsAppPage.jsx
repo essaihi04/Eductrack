@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { saveBlob } from '../../lib/download';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
@@ -14,6 +15,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 
 const WhatsAppPage = () => {
   const { profile } = useAuth();
+  const { year } = useYear(); // année active : scope les classes/destinataires
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const [activeTab, setActiveTab] = useState('send');
 
@@ -235,6 +237,7 @@ const WhatsAppPage = () => {
       const token = await getAuthToken();
       const params = new URLSearchParams();
       params.append('class_ids', selectedClasses.join(','));
+      if (year) params.append('academic_year', year);
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients-list?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -247,7 +250,7 @@ const WhatsAppPage = () => {
     } finally {
       setLoadingParents(false);
     }
-  }, [apiUrl, selectedClasses, parentSelectionMode]);
+  }, [apiUrl, selectedClasses, parentSelectionMode, year]);
 
   useEffect(() => {
     fetchParentsList();
@@ -270,7 +273,10 @@ const WhatsAppPage = () => {
         const teachersData = await teachersRes.json();
         const subjectsData = await subjectsRes.json();
         
-        const cls = Array.isArray(classesData) ? classesData : [];
+        // Seules les classes de l'année active (les classes des années passées
+        // ne doivent plus servir de cible d'envoi).
+        const allCls = Array.isArray(classesData) ? classesData : [];
+        const cls = year ? allCls.filter(c => !c.academic_year || c.academic_year === year) : allCls;
         setClasses(cls);
         setSelectedClasses(cls.map(c => c.id));
         const levels = [...new Set(cls.map(c => c.level).filter(Boolean))].sort();
@@ -303,7 +309,7 @@ const WhatsAppPage = () => {
       }
     };
     loadData();
-  }, [apiUrl]);
+  }, [apiUrl, year]);
 
   // ===================== SEND LOGIC =====================
   const fetchRecipientCount = useCallback(async () => {
@@ -316,6 +322,7 @@ const WhatsAppPage = () => {
       }
       if (schoolTypeFilter) params.append('school_type', schoolTypeFilter);
       if (levelFilter) params.append('level', levelFilter);
+      if (year) params.append('academic_year', year);
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients?${params}`, {
         headers: { Authorization: `Bearer ${await getAuthToken()}` }
       });
@@ -326,7 +333,7 @@ const WhatsAppPage = () => {
     } finally {
       setLoadingRecipients(false);
     }
-  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter]);
+  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year]);
 
   useEffect(() => {
     if (classes.length > 0) fetchRecipientCount();
@@ -448,6 +455,7 @@ const WhatsAppPage = () => {
       if (selectedClasses.length > 0 && selectedClasses.length < classes.length) filter.class_ids = selectedClasses;
       if (schoolTypeFilter) filter.school_type = schoolTypeFilter;
       if (levelFilter) filter.level = levelFilter;
+      if (year) filter.academic_year = year; // seuls les élèves inscrits dans l'année active
       // If specific parents selected, pass their phones
       if (parentSelectionMode === 'select' && selectedParents.length > 0) {
         filter.parent_phones = selectedParents;

@@ -12,6 +12,7 @@ import {
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
+import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 
@@ -47,6 +48,9 @@ router.get('/classes', async (req, res) => {
     const schoolId = getSchoolId(req);
     let query = supabaseAdmin.from('classes').select('*').order('name');
     if (schoolId) query = query.eq('school_id', schoolId);
+    // Année active fournie → seules les classes de cette année (sinon le
+    // sélecteur de classes proposerait aussi celles des années passées).
+    if (req.query.academic_year) query = query.eq('academic_year', req.query.academic_year);
     const { data, error } = await query;
     if (error) throw error;
     res.json(data || []);
@@ -169,6 +173,12 @@ router.get('/recipients', async (req, res) => {
       filteredStudents = filteredStudents.filter(s => s.classes?.level === level);
     }
 
+    // Année active fournie → seuls les élèves inscrits (RI/NI) cette année-là.
+    // Sans ce filtre, les parents des élèves non réinscrits recevaient encore
+    // les messages WhatsApp après le passage à la nouvelle année.
+    const activeIds = await activeStudentIdSet(schoolId, req.query.academic_year);
+    if (activeIds) filteredStudents = filteredStudents.filter(s => activeIds.has(s.id));
+
     const studentIds = filteredStudents.map(s => s.id);
 
     if (studentIds.length === 0) {
@@ -256,9 +266,13 @@ router.get('/recipients-list', async (req, res) => {
 
     if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId);
 
-    const { data: students, error: studentsError } = await studentQuery;
+    const { data: allStudents, error: studentsError } = await studentQuery;
     if (studentsError) throw studentsError;
-    if (!students || students.length === 0) return res.json({ parents: [] });
+
+    // Année active fournie → seuls les élèves inscrits (RI/NI) cette année-là.
+    const activeIds = await activeStudentIdSet(schoolId, req.query.academic_year);
+    const students = activeIds ? (allStudents || []).filter(s => activeIds.has(s.id)) : (allStudents || []);
+    if (students.length === 0) return res.json({ parents: [] });
 
     const studentIds = students.map(s => s.id);
 
@@ -377,6 +391,11 @@ router.post('/send', async (req, res) => {
     if (filter?.level) {
       filteredStudents = filteredStudents.filter(s => s.classes?.level === filter.level);
     }
+
+    // Année active fournie → seuls les élèves inscrits (RI/NI) cette année-là.
+    // Les parents des élèves non réinscrits ne reçoivent plus les envois.
+    const activeIds = await activeStudentIdSet(schoolId, filter?.academic_year || req.body.academic_year);
+    if (activeIds) filteredStudents = filteredStudents.filter(s => activeIds.has(s.id));
 
     const studentIds = filteredStudents.map(s => s.id);
 
