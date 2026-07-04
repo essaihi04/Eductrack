@@ -259,7 +259,12 @@ const WhatsAppPage = () => {
     try {
       const token = await getAuthToken();
       const params = new URLSearchParams();
-      params.append('class_ids', selectedClasses.join(','));
+      // On ne transmet class_ids que si c'est un sous-ensemble : quand toutes
+      // les classes sont sélectionnées, on laisse le backend se baser sur les
+      // inscriptions actives (profiles.class_id peut être périmé après promotion).
+      if (selectedClasses.length > 0 && selectedClasses.length < classes.length) {
+        params.append('class_ids', selectedClasses.join(','));
+      }
       if (year) params.append('academic_year', year);
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients-list?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -274,7 +279,7 @@ const WhatsAppPage = () => {
     } finally {
       setLoadingParents(false);
     }
-  }, [apiUrl, selectedClasses, parentSelectionMode, year]);
+  }, [apiUrl, selectedClasses, classes.length, parentSelectionMode, year]);
 
   useEffect(() => {
     fetchParentsList();

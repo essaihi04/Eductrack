@@ -240,33 +240,32 @@ router.get('/recipients', async (req, res) => {
 
 // ==================== RECIPIENTS LIST (detailed) ====================
 
-// GET /recipients-list — get detailed parent list with names and children for a given class
+// GET /recipients-list — get detailed parent list with names and children.
+// Sans class_ids → tous les parents de l'école (même logique que /recipients :
+// on ne filtre pas sur profiles.class_id, qui peut être périmé après une
+// promotion d'année ; on se fie aux inscriptions actives student_enrollments).
 router.get('/recipients-list', async (req, res) => {
   try {
     const { class_ids } = req.query;
     const schoolId = getSchoolId(req);
 
-    if (!class_ids) {
-      return res.json({ parents: [] });
-    }
-
-    let ids = class_ids.split(',').map(id => id.trim()).filter(Boolean);
-    if (ids.length === 0) return res.json({ parents: [] });
+    // Liste de classes demandée (vide = toutes les classes de l'école)
+    let ids = class_ids ? class_ids.split(',').map(id => id.trim()).filter(Boolean) : [];
 
     // Filtre de scope pour pedagogical_manager : restreindre aux classes assignées
     const scopedIds = await getScopedClassIds(req);
     if (scopedIds !== null) {
-      ids = ids.filter(id => scopedIds.includes(id));
+      // Sans sélection explicite → on se limite aux classes du périmètre.
+      ids = ids.length ? ids.filter(id => scopedIds.includes(id)) : scopedIds;
       if (ids.length === 0) return res.json({ parents: [] });
     }
 
-    // Get students in selected classes
+    // Get students (dans les classes demandées, ou toute l'école si aucune)
     let studentQuery = supabaseAdmin
       .from('profiles')
       .select('id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)')
-      .eq('role', 'student')
-      .in('class_id', ids);
-
+      .eq('role', 'student');
+    if (ids.length) studentQuery = studentQuery.in('class_id', ids);
     if (schoolId) studentQuery = studentQuery.eq('school_id', schoolId);
 
     const { data: allStudents, error: studentsError } = await studentQuery;
@@ -279,29 +278,28 @@ router.get('/recipients-list', async (req, res) => {
 
     const studentIds = students.map(s => s.id);
 
-    // Get parent-student links
-    const { data: parentLinks } = await supabaseAdmin
-      .from('parent_students')
-      .select('parent_id, student_id')
-      .in('student_id', studentIds);
+    // Get parent-student links (par lots : évite le « Bad Request » PostgREST
+    // quand la liste d'UUID est trop longue — écoles à plusieurs centaines d'élèves).
+    const parentLinks = await selectInChunks(
+      studentIds,
+      (chunk) => supabaseAdmin.from('parent_students').select('parent_id, student_id').in('student_id', chunk)
+    );
 
     if (!parentLinks || parentLinks.length === 0) return res.json({ parents: [] });
 
     const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
 
     // Get parent profiles
-    const { data: parentProfiles } = await supabaseAdmin
-      .from('profiles')
-      .select('id, first_name, last_name, phone')
-      .in('id', parentIds);
+    const parentProfiles = await selectInChunks(
+      parentIds,
+      (chunk) => supabaseAdmin.from('profiles').select('id, first_name, last_name, phone').in('id', chunk)
+    );
 
     // Get parent WhatsApp contacts
-    const { data: contacts } = await supabaseAdmin
-      .from('parent_contacts')
-      .select('parent_id, phone_e164, is_primary')
-      .in('parent_id', parentIds)
-      .eq('channel', 'whatsapp')
-      .order('is_primary', { ascending: false });
+    const contacts = await selectInChunks(
+      parentIds,
+      (chunk) => supabaseAdmin.from('parent_contacts').select('parent_id, phone_e164, is_primary').in('parent_id', chunk).eq('channel', 'whatsapp').order('is_primary', { ascending: false })
+    );
 
     // Build parent map with children and phone
     const parentMap = {};
