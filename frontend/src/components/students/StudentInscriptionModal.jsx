@@ -51,7 +51,7 @@ const buildParentContacts = (p) => {
   };
 };
 
-export default function StudentInscriptionModal({ open, onClose, classes = [], academicYear, onCreated }) {
+export default function StudentInscriptionModal({ open, onClose, classes = [], levels = [], academicYear, onCreated }) {
   const { profile } = useAuth();
   const school = profile?.school || {};
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -238,7 +238,17 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], a
                 <div><Label>Code Massar</Label><input className={inputCls} value={formData.massarCode} onChange={setF('massarCode')} /></div>
                 <div><Label>N° matricule</Label><input className={inputCls} value={formData.registrationNumber} onChange={setF('registrationNumber')} placeholder="2025_000091" /></div>
                 <div><Label>Date d'entrée</Label><input type="date" className={inputCls} value={formData.entryDate} onChange={setF('entryDate')} /></div>
-                <div><Label>Niveau</Label><input className={inputCls} value={formData.level} onChange={setF('level')} placeholder="1APIC" /></div>
+                <div>
+                  <Label>Niveau</Label>
+                  {levels.length ? (
+                    <select className={inputCls} value={formData.level} onChange={setF('level')}>
+                      <option value="">Sélectionner un niveau</option>
+                      {levels.map((lv) => <option key={lv} value={lv}>{lv}</option>)}
+                    </select>
+                  ) : (
+                    <input className={inputCls} value={formData.level} onChange={setF('level')} placeholder="1APIC" />
+                  )}
+                </div>
                 <div>
                   <Label>Classe</Label>
                   <select className={inputCls} value={formData.classId} onChange={setF('classId')}>

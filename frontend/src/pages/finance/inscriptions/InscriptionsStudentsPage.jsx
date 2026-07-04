@@ -9,7 +9,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useYear } from '../../../contexts/YearContext';
 import { enrollmentsApi } from '../../../lib/enrollmentsApi';
 import { inscriptionsApi } from '../../../lib/inscriptionsApi';
-import { LEVEL_ORDER, nextLevel } from '../../../lib/levelProgression';
+import { LEVEL_ORDER, nextLevel, distinctLevels } from '../../../lib/levelProgression';
 import { prevYearStr, toDashYear } from '../../../lib/schoolYear';
 import { printInscriptionFiche } from '../../../utils/inscriptionFiche';
 
@@ -84,6 +84,20 @@ export default function InscriptionsStudentsPage() {
     inscriptionsApi.listClasses(year).then((data) => setClasses(Array.isArray(data) ? data : []))
       .catch((e) => console.error(e));
   }, [year]);
+  // Classes de l'année précédente : alimente la liste des niveaux du
+  // formulaire d'inscription (une nouvelle année n'a souvent pas encore de classes).
+  const [prevClasses, setPrevClasses] = useState([]);
+  useEffect(() => {
+    if (!prevYear) { setPrevClasses([]); return; }
+    inscriptionsApi.listClasses(prevYear).then((data) => setPrevClasses(Array.isArray(data) ? data : []))
+      .catch(() => setPrevClasses([]));
+  }, [prevYear]);
+  // Niveaux proposés dans la fiche d'inscription : ceux de l'année précédente
+  // + ceux de l'année active, triés selon la progression scolaire.
+  const levelOptions = useMemo(
+    () => distinctLevels([...prevClasses, ...classes]),
+    [prevClasses, classes],
+  );
 
   // Identifiants des élèves déjà présents dans l'année active (réinscrits/nouveaux).
   const activeStudentIds = useMemo(
@@ -419,6 +433,7 @@ export default function InscriptionsStudentsPage() {
         open={showForm}
         onClose={() => setShowForm(false)}
         classes={classes}
+        levels={levelOptions}
         academicYear={year}
         onCreated={load}
       />

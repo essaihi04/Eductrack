@@ -17,3 +17,19 @@ export const nextLevel = (level) => {
 // True si l'élève est en fin de cursus (quitte l'établissement).
 export const isTerminalLevel = (level) =>
   LEVEL_ORDER.indexOf(String(level || '').toUpperCase()) === LEVEL_ORDER.length - 1;
+
+// Niveaux distincts (non vides) d'une liste de classes, triés selon
+// LEVEL_ORDER puis alphabétiquement pour les niveaux hors référentiel.
+export const distinctLevels = (classes = []) => {
+  const set = new Set(
+    classes.map((c) => String(c?.level || '').trim()).filter(Boolean),
+  );
+  return [...set].sort((a, b) => {
+    const ia = LEVEL_ORDER.indexOf(a.toUpperCase());
+    const ib = LEVEL_ORDER.indexOf(b.toUpperCase());
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b, 'fr');
+  });
+};

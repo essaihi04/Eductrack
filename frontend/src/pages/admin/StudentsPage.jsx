@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { printHtmlDocument } from '../../lib/download';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw } from 'lucide-react';
@@ -11,7 +11,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
-import { LEVEL_ORDER, nextLevel } from '../../lib/levelProgression';
+import { LEVEL_ORDER, nextLevel, distinctLevels } from '../../lib/levelProgression';
+import { prevYearStr, toSlashYear } from '../../lib/schoolYear';
 
 const StudentsPage = () => {
   const { profile, availableSchools } = useAuth();
@@ -20,6 +21,19 @@ const StudentsPage = () => {
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
+  // Niveaux proposés dans la fiche d'inscription : ceux des classes de
+  // l'année précédente + de l'année active (repli : toutes les années si
+  // aucune classe sur ces deux années).
+  const levelOptions = useMemo(() => {
+    const activeSlash = toSlashYear(year);
+    const prevSlash = prevYearStr(activeSlash);
+    const recent = classes.filter((c) => {
+      const y = toSlashYear(c.academic_year);
+      return y === activeSlash || y === prevSlash;
+    });
+    const lvls = distinctLevels(recent);
+    return lvls.length ? lvls : distinctLevels(classes);
+  }, [classes, year]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState({});
@@ -1559,7 +1573,21 @@ L'administration de ${schoolName}`;
                     <div><Label>Code Massar</Label><input className={inputCls} value={formData.massarCode} onChange={setF('massarCode')} /></div>
                     <div><Label>N° matricule</Label><input className={inputCls} value={formData.registrationNumber} onChange={setF('registrationNumber')} placeholder="2025_000091" /></div>
                     <div><Label>Date d'entrée</Label><input type="date" className={inputCls} value={formData.entryDate} onChange={setF('entryDate')} /></div>
-                    <div><Label>Niveau</Label><input className={inputCls} value={formData.level} onChange={setF('level')} placeholder="1APIC" /></div>
+                    <div>
+                      <Label>Niveau</Label>
+                      {levelOptions.length ? (
+                        <select className={inputCls} value={formData.level} onChange={setF('level')}>
+                          <option value="">Sélectionner un niveau</option>
+                          {/* Un niveau déjà saisi hors liste (édition) reste sélectionnable */}
+                          {formData.level && !levelOptions.includes(formData.level) && (
+                            <option value={formData.level}>{formData.level}</option>
+                          )}
+                          {levelOptions.map((lv) => <option key={lv} value={lv}>{lv}</option>)}
+                        </select>
+                      ) : (
+                        <input className={inputCls} value={formData.level} onChange={setF('level')} placeholder="1APIC" />
+                      )}
+                    </div>
                     <div>
                       <Label>Classe</Label>
                       <select className={inputCls} value={formData.classId} onChange={setF('classId')}>
