@@ -3785,6 +3785,48 @@ router.post('/classes/import', async (req, res) => {
               )
             );
           }
+
+          // Inscriptions de l'année (student_enrollments) — INDISPENSABLE :
+          // les pages Élèves/Finance filtrent sur ces lignes, pas sur
+          // profiles.class_id. Sans ce bloc, une classe importée est visible
+          // dans « Classes » mais ses élèves invisibles partout ailleurs.
+          // On n'insère que les manquantes pour ne pas écraser un statut
+          // existant (ex. RI posé par la réinscription).
+          try {
+            const enrollYear = academic_year || (() => {
+              const now = new Date();
+              const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+              return `${y}/${y + 1}`;
+            })();
+            const studentIds = classStudents.map(s => s.id).filter(Boolean);
+            if (studentIds.length) {
+              const { data: existingEnrolls } = await supabaseAdmin
+                .from('student_enrollments')
+                .select('student_id')
+                .eq('academic_year', enrollYear)
+                .in('student_id', studentIds);
+              const alreadyEnrolled = new Set((existingEnrolls || []).map(e => e.student_id));
+              const toEnroll = studentIds
+                .filter(id => !alreadyEnrolled.has(id))
+                .map(id => ({
+                  school_id: schoolId,
+                  student_id: id,
+                  class_id: newClass.id,
+                  academic_year: enrollYear,
+                  status: 'NI',
+                  created_by: req.user?.id || null,
+                }));
+              if (toEnroll.length) {
+                const { error: enrollError } = await supabaseAdmin
+                  .from('student_enrollments')
+                  .upsert(toEnroll, { onConflict: 'student_id,academic_year' });
+                if (enrollError) console.error(`[Import Class] Inscriptions ${name} échouées:`, enrollError.message);
+                else console.log(`[Import Class] ${toEnroll.length} inscription(s) ${enrollYear} créée(s) pour ${name}`);
+              }
+            }
+          } catch (enrollErr) {
+            console.error(`[Import Class] Erreur inscriptions ${name}:`, enrollErr?.message);
+          }
         }
 
         createdClasses.push({
