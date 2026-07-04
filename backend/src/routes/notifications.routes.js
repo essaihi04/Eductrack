@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate } from '../middleware/auth.js';
+import { markNotificationsRead } from '../services/communicationTracking.js';
 
 const router = express.Router();
 
@@ -41,6 +42,8 @@ router.put('/:id/read', async (req, res) => {
       .single();
 
     if (error) throw error;
+    // Tracking communications : propage la lecture au hub (canal app)
+    markNotificationsRead([id]).catch(() => {});
     res.json(data);
   } catch (error) {
     console.error('Erreur:', error);
@@ -60,6 +63,8 @@ router.put('/read-all', async (req, res) => {
       .select();
 
     if (error) throw error;
+    // Tracking communications : propage la lecture au hub (canal app)
+    markNotificationsRead((data || []).map((n) => n.id)).catch(() => {});
     res.json({ message: 'Notifications marquées comme lues' });
   } catch (error) {
     console.error('Erreur:', error);

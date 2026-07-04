@@ -26,6 +26,7 @@ import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { markWaAck } from '../communicationTracking.js';
 
 const AUTH_ROOT = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), 'data', 'whatsapp_auth');
 
@@ -335,6 +336,23 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         await onIncoming({ schoolId, msg, sock });
       } catch (e) {
         console.error(`[baileys][${schoolId}] ❌ Erreur handler entrant:`, e.message);
+      }
+    }
+  });
+
+  // Accusés de remise/lecture de NOS messages (✓✓ / ✓✓ bleu) → tracking
+  // des communications (delivered_at / read_at). Statuts Baileys :
+  // 3 = DELIVERY_ACK (remis), 4 = READ (lu), 5 = PLAYED (audio écouté).
+  sock.ev.on('messages.update', async (updates) => {
+    if (entry.sock !== sock) return;
+    for (const u of updates || []) {
+      try {
+        const status = u.update?.status;
+        if (!u.key?.fromMe || !u.key?.id || typeof status !== 'number') continue;
+        if (status >= 4) await markWaAck(u.key.id, 'read');
+        else if (status === 3) await markWaAck(u.key.id, 'delivered');
+      } catch (e) {
+        console.error(`[baileys][${schoolId}] ack update:`, e.message);
       }
     }
   });

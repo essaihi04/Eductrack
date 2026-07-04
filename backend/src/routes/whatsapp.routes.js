@@ -13,6 +13,7 @@ import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+import { sendPushToUser } from '../services/webPush.js';
 
 const router = express.Router();
 
@@ -228,7 +229,9 @@ router.get('/recipients', async (req, res) => {
 
     const uniqueRecipients = Object.values(uniquePhones);
 
-    res.json({ count: uniqueRecipients.length, recipients: uniqueRecipients });
+    // count = numéros WhatsApp uniques ; parentCount = parents ciblés (canal app,
+    // joignables même sans numéro WhatsApp via la notification in-app).
+    res.json({ count: uniqueRecipients.length, parentCount: parentIds.length, recipients: uniqueRecipients });
   } catch (error) {
     console.error('Erreur récupération destinataires:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -342,9 +345,18 @@ router.get('/recipients-list', async (req, res) => {
       }
     });
 
-    // Filter only parents that have a WhatsApp phone
+    // App installée ? (au moins un abonnement push) — affiché dans le sélecteur
+    // et utile pour choisir le canal.
+    const subs = await selectInChunks(
+      parentIds,
+      (chunk) => supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk)
+    );
+    const appParentIds = new Set((subs || []).map(s => s.user_id));
+    Object.values(parentMap).forEach(p => { p.has_app = appParentIds.has(p.parent_id); });
+
+    // On garde aussi les parents SANS numéro WhatsApp : ils restent joignables
+    // par le canal app (notification in-app / push).
     const parents = Object.values(parentMap)
-      .filter(p => p.phone_whatsapp)
       .sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({ parents, total: parents.length });
@@ -362,6 +374,10 @@ router.post('/send', async (req, res) => {
     const { message, type, mediaUrl, fileName, filter, category: requestedCategory } = req.body;
     const schoolId = getSchoolId(req);
     const category = resolveCategoryForSending(requestedCategory, req.user?.role);
+    // Canal(aux) d'envoi : 'whatsapp' (défaut, historique), 'push' (app), 'both'
+    const channels = ['whatsapp', 'push', 'both'].includes(req.body.channels) ? req.body.channels : 'whatsapp';
+    const wantWa = channels !== 'push';
+    const wantPush = channels !== 'whatsapp';
 
     if (!message && !mediaUrl) {
       return res.status(400).json({ error: 'Message ou média requis' });
@@ -414,36 +430,46 @@ router.post('/send', async (req, res) => {
       return res.status(400).json({ error: 'Aucun parent trouvé pour ces élèves' });
     }
 
-    const { data: contacts } = await supabaseAdmin
-      .from('parent_contacts')
-      .select('parent_id, phone_e164, is_primary')
-      .in('parent_id', parentIds)
-      .eq('channel', 'whatsapp')
-      .order('is_primary', { ascending: false });
+    const contacts = await selectInChunks(
+      parentIds,
+      (chunk) => supabaseAdmin.from('parent_contacts').select('parent_id, phone_e164, is_primary').in('parent_id', chunk).eq('channel', 'whatsapp').order('is_primary', { ascending: false })
+    );
 
-    // Deduplicate
+    // Un numéro par parent (préférence au principal)
     const parentPhoneMap = {};
     (contacts || []).forEach(c => {
       if (!parentPhoneMap[c.parent_id]) {
-        parentPhoneMap[c.parent_id] = c;
+        parentPhoneMap[c.parent_id] = c.phone_e164;
       }
     });
-    const uniquePhones = {};
-    Object.values(parentPhoneMap).forEach(c => {
-      if (!uniquePhones[c.phone_e164]) {
-        uniquePhones[c.phone_e164] = c;
-      }
-    });
-    let recipients = Object.values(uniquePhones);
 
-    // If specific parent phones are provided, filter to only those
-    if (filter?.parent_phones?.length > 0) {
+    // Base destinataires = 1 ligne par parent (téléphone nullable : un parent
+    // sans WhatsApp reste joignable via le canal app/push).
+    let recipients = parentIds.map(pid => ({ parent_id: pid, phone_e164: parentPhoneMap[pid] || null }));
+
+    // Sélection explicite de parents (mode « choisir les parents »)
+    if (filter?.parent_ids?.length > 0) {
+      const targetIds = new Set(filter.parent_ids);
+      recipients = recipients.filter(r => targetIds.has(r.parent_id));
+    } else if (filter?.parent_phones?.length > 0) {
+      // Rétro-compatibilité : sélection par numéro
       const targetPhones = new Set(filter.parent_phones);
-      recipients = recipients.filter(r => targetPhones.has(r.phone_e164));
+      recipients = recipients.filter(r => r.phone_e164 && targetPhones.has(r.phone_e164));
+    }
+
+    if (!wantPush) {
+      // WhatsApp uniquement : il faut un numéro, dédupliqué (un même numéro
+      // peut être partagé par plusieurs parents).
+      const seenPhones = new Set();
+      recipients = recipients.filter(r => {
+        if (!r.phone_e164 || seenPhones.has(r.phone_e164)) return false;
+        seenPhones.add(r.phone_e164);
+        return true;
+      });
     }
 
     if (recipients.length === 0) {
-      return res.status(400).json({ error: 'Aucun numéro WhatsApp trouvé' });
+      return res.status(400).json({ error: wantPush ? 'Aucun destinataire trouvé' : 'Aucun numéro WhatsApp trouvé' });
     }
 
     // Create message log
@@ -460,27 +486,39 @@ router.post('/send', async (req, res) => {
         recipient_filter: filter || {},
         total_recipients: recipients.length,
         status: 'sending',
-        category
+        category,
+        channels
       })
       .select()
       .single();
 
     if (logError) throw logError;
 
-    // Insert recipient records
+    // Insert recipient records (phone_e164 peut être null en mode push)
     const recipientRecords = recipients.map(r => ({
       message_id: msgLog.id,
       parent_id: r.parent_id,
-      phone_e164: r.phone_e164,
+      phone_e164: r.phone_e164 || '',
       status: 'pending'
     }));
 
-    await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRecords);
+    const { data: insertedRecipients } = await supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .insert(recipientRecords)
+      .select('id, parent_id, phone_e164');
+    const recipientRowId = new Map((insertedRecipients || []).map(r => [`${r.parent_id || ''}|${r.phone_e164 || ''}`, r.id]));
 
-    // Vérifie session Baileys
-    if (!(await isSessionReady(schoolId))) {
+    // Vérifie session Baileys/Cloud (seulement si le canal WhatsApp est demandé)
+    if (wantWa && !(await isSessionReady(schoolId))) {
       await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
-      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Connectez le numéro de votre école depuis cette page.' });
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Connectez le numéro de votre école depuis l\'onglet Connexion, ou choisissez le canal Application.' });
+    }
+
+    // Nom de l'école pour le titre des notifications in-app
+    let schoolName = 'votre école';
+    if (wantPush && schoolId) {
+      const { data: school } = await supabaseAdmin.from('schools').select('name').eq('id', schoolId).maybeSingle();
+      if (school?.name) schoolName = school.name;
     }
 
     // Répond immédiatement, envoi en arrière-plan
@@ -491,45 +529,85 @@ router.post('/send', async (req, res) => {
       status: 'sending'
     });
 
-    // Background: envoi séquentiel via Baileys (anti-ban intégré)
+    // Background: envoi séquentiel — canal app (notification + push) puis
+    // WhatsApp via Baileys/Cloud (anti-ban intégré).
     let sentCount = 0;
     let failedCount = 0;
 
+    // Corps de la notification in-app (le média est joint en lien cliquable)
+    const notifTitle = `📣 ${schoolName}`;
+    let notifBody = message || (messageType === 'image' ? '📷 Image' : '📎 Document');
+    if (mediaUrl) notifBody += `\n📎 ${fileName || 'Pièce jointe'} : ${mediaUrl}`;
+
+    // Un même numéro partagé par 2 parents ne reçoit qu'UN WhatsApp,
+    // mais chaque parent garde sa notification in-app.
+    const waSentPhones = new Set();
+
     for (const recipient of recipients) {
-      try {
-        const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message, mediaUrl, fileName });
-        if (result.success) {
-          sentCount++;
-          await supabaseAdmin
-            .from('whatsapp_message_recipients')
-            .update({
-              status: 'sent',
-              provider_msg_id: String(result.data?.msgId || ''),
-              sent_at: new Date().toISOString()
+      const rowId = recipientRowId.get(`${recipient.parent_id || ''}|${recipient.phone_e164 || ''}`);
+      const patch = {};
+      let waOk = false;
+      let appOk = false;
+      let errorMsg = null;
+
+      // 1. Canal app : notification in-app (lisible même sans push) + push
+      if (wantPush && recipient.parent_id) {
+        try {
+          const { data: notif, error: notifErr } = await supabaseAdmin
+            .from('notifications')
+            .insert({
+              user_id: recipient.parent_id,
+              type: 'message',
+              title: notifTitle,
+              message: notifBody,
+              data: { hub_message_id: msgLog.id, media_url: mediaUrl || null, file_name: fileName || null, message_type: messageType }
             })
-            .eq('message_id', msgLog.id)
-            .eq('phone_e164', recipient.phone_e164);
-        } else {
-          failedCount++;
-          await supabaseAdmin
-            .from('whatsapp_message_recipients')
-            .update({
-              status: 'failed',
-              error_message: result.message || 'Erreur inconnue'
-            })
-            .eq('message_id', msgLog.id)
-            .eq('phone_e164', recipient.phone_e164);
+            .select('id')
+            .single();
+          if (notifErr) throw notifErr;
+          patch.notification_id = notif.id;
+          appOk = true;
+          const pushRes = await sendPushToUser(recipient.parent_id, {
+            title: notifTitle,
+            body: (message || notifBody).slice(0, 140),
+            url: '/parent/notifications',
+            tag: `comm-msg-${msgLog.id}`
+          });
+          patch.push_status = pushRes.sent > 0 ? 'sent' : 'no_subscription';
+        } catch (pushErr) {
+          patch.push_status = 'failed';
+          errorMsg = `App: ${pushErr.message || 'erreur'}`;
         }
-      } catch (sendErr) {
-        failedCount++;
-        await supabaseAdmin
-          .from('whatsapp_message_recipients')
-          .update({
-            status: 'failed',
-            error_message: sendErr.message || 'Erreur réseau'
-          })
-          .eq('message_id', msgLog.id)
-          .eq('phone_e164', recipient.phone_e164);
+      }
+
+      // 2. Canal WhatsApp
+      if (wantWa && recipient.phone_e164) {
+        if (waSentPhones.has(recipient.phone_e164)) {
+          waOk = true; // déjà envoyé à ce numéro (parents partageant un téléphone)
+        } else {
+          try {
+            const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message, mediaUrl, fileName });
+            if (result.success) {
+              waOk = true;
+              waSentPhones.add(recipient.phone_e164);
+              patch.provider_msg_id = String(result.data?.msgId || '');
+            } else {
+              errorMsg = [errorMsg, result.message || 'Erreur WhatsApp'].filter(Boolean).join(' | ');
+            }
+          } catch (sendErr) {
+            errorMsg = [errorMsg, sendErr.message || 'Erreur réseau'].filter(Boolean).join(' | ');
+          }
+        }
+      }
+
+      const reached = waOk || appOk;
+      if (reached) sentCount++; else failedCount++;
+      patch.status = reached ? 'sent' : 'failed';
+      if (reached) patch.sent_at = new Date().toISOString();
+      if (errorMsg) patch.error_message = errorMsg;
+
+      if (rowId) {
+        await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', rowId);
       }
 
       // Update progress
@@ -859,6 +937,10 @@ router.get('/conversations', async (req, res) => {
       allRecipients = allRecipients.filter(r => r.parent_id && allowedParentIds.has(r.parent_id));
     }
 
+    // Les envois « app uniquement » (sans numéro WhatsApp) n'apparaissent pas
+    // dans les conversations WhatsApp.
+    allRecipients = allRecipients.filter(r => r.phone_e164);
+
     // Get parent names
     const parentIds = [...new Set(allRecipients.map(r => r.parent_id).filter(Boolean))];
     let parentMap = {};
@@ -1028,6 +1110,206 @@ router.get('/conversations', async (req, res) => {
 });
 
 // ==================== MEDIA UPLOAD ====================
+
+// ==================== ENGAGEMENT (dashboard parents) ====================
+
+// Récupère messages + destinataires du hub sur une fenêtre glissante,
+// avec le filtre de catégories du rôle (même logique que /history).
+async function fetchEngagementRows(req, days) {
+  const schoolId = getSchoolId(req);
+  const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+
+  let msgQuery = supabaseAdmin
+    .from('whatsapp_messages')
+    .select('id, channels, category, message_type, created_at, total_recipients')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (schoolId) msgQuery = msgQuery.eq('school_id', schoolId);
+  const allowedCats = allowedCategoriesForRole(req.user?.role);
+  if (allowedCats) msgQuery = msgQuery.in('category', allowedCats);
+  const { data: messages, error } = await msgQuery;
+  if (error) throw error;
+
+  const msgIds = (messages || []).map(m => m.id);
+  let recipients = [];
+  if (msgIds.length) {
+    recipients = await selectInChunks(
+      msgIds,
+      (chunk) => supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .select('message_id, parent_id, phone_e164, status, push_status, notification_id, provider_msg_id, delivered_at, read_at, read_channel, responded_at, sent_at, created_at')
+        .in('message_id', chunk)
+    );
+  }
+  return { schoolId, messages: messages || [], recipients };
+}
+
+// GET /engagement/summary?days=30 — métriques globales du hub communication
+router.get('/engagement/summary', async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+    const { schoolId, messages, recipients } = await fetchEngagementRows(req, days);
+
+    // Totaux par canal
+    let reached = 0, failed = 0, waSent = 0, waDelivered = 0, pushSent = 0, appInbox = 0;
+    let readTotal = 0, readApp = 0, readWa = 0, responded = 0;
+    const byDayMap = new Map(); // 'YYYY-MM-DD' -> { sent, read, responded }
+    const dayKey = (iso) => String(iso).slice(0, 10);
+    const bump = (iso, field) => {
+      if (!iso) return;
+      const k = dayKey(iso);
+      if (!byDayMap.has(k)) byDayMap.set(k, { date: k, sent: 0, read: 0, responded: 0 });
+      byDayMap.get(k)[field]++;
+    };
+
+    for (const r of recipients) {
+      if (r.status === 'sent') { reached++; bump(r.sent_at || r.created_at, 'sent'); }
+      else if (r.status === 'failed') failed++;
+      if (r.provider_msg_id) waSent++;
+      if (r.delivered_at) waDelivered++;
+      if (r.push_status === 'sent') pushSent++;
+      if (r.notification_id) appInbox++;
+      if (r.read_at) {
+        readTotal++;
+        bump(r.read_at, 'read');
+        if (r.read_channel === 'app') readApp++; else readWa++;
+      }
+      if (r.responded_at) { responded++; bump(r.responded_at, 'responded'); }
+    }
+
+    // Couverture école : parents, app installée, opt-out, numéro WhatsApp
+    let parentsTotal = 0, parentsWithApp = 0, parentsOptedOut = 0, parentsWithWhatsapp = 0;
+    if (schoolId) {
+      const { data: parentProfiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('role', 'parent')
+        .eq('school_id', schoolId);
+      const pIds = (parentProfiles || []).map(p => p.id);
+      parentsTotal = pIds.length;
+      if (pIds.length) {
+        const subs = await selectInChunks(pIds, (chunk) =>
+          supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk));
+        parentsWithApp = new Set((subs || []).map(s => s.user_id)).size;
+        const waContacts = await selectInChunks(pIds, (chunk) =>
+          supabaseAdmin.from('parent_contacts').select('parent_id, consent_status').eq('channel', 'whatsapp').in('parent_id', chunk));
+        const withWa = new Set(); const opted = new Set();
+        (waContacts || []).forEach(c => {
+          withWa.add(c.parent_id);
+          if (c.consent_status === 'opted_out') opted.add(c.parent_id);
+        });
+        parentsWithWhatsapp = withWa.size;
+        parentsOptedOut = opted.size;
+      }
+    }
+
+    // Timeline complète (jours sans activité inclus) — bornée à 90 points
+    const byDay = [];
+    const nDays = Math.min(days, 90);
+    for (let i = nDays - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 3600 * 1000);
+      const k = d.toISOString().slice(0, 10);
+      byDay.push(byDayMap.get(k) || { date: k, sent: 0, read: 0, responded: 0 });
+    }
+
+    res.json({
+      days,
+      totals: {
+        messages: messages.length,
+        recipients: recipients.length,
+        reached, failed,
+        readTotal, readApp, readWa, responded,
+        readRate: reached ? Math.round((readTotal / reached) * 100) : 0,
+        responseRate: reached ? Math.round((responded / reached) * 100) : 0,
+      },
+      channels: { waSent, waDelivered, pushSent, appInbox },
+      coverage: { parentsTotal, parentsWithApp, parentsOptedOut, parentsWithWhatsapp },
+      byDay,
+    });
+  } catch (error) {
+    console.error('Erreur engagement summary:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// GET /engagement/parents?days=90 — engagement par parent (qui lit, qui répond, par quel canal)
+router.get('/engagement/parents', async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 90));
+    const { recipients } = await fetchEngagementRows(req, days);
+
+    // Agrégation par parent
+    const byParent = new Map();
+    for (const r of recipients) {
+      if (!r.parent_id) continue;
+      if (!byParent.has(r.parent_id)) {
+        byParent.set(r.parent_id, {
+          parent_id: r.parent_id,
+          phone: r.phone_e164 || null,
+          sent: 0, reached: 0, failed: 0,
+          waSent: 0, pushSent: 0,
+          read: 0, readApp: 0, readWa: 0,
+          responded: 0,
+          lastReadAt: null, lastRespondedAt: null, lastSentAt: null,
+        });
+      }
+      const p = byParent.get(r.parent_id);
+      p.sent++;
+      if (r.status === 'sent') p.reached++;
+      if (r.status === 'failed') p.failed++;
+      if (r.provider_msg_id) p.waSent++;
+      if (r.push_status === 'sent') p.pushSent++;
+      if (r.read_at) {
+        p.read++;
+        if (r.read_channel === 'app') p.readApp++; else p.readWa++;
+        if (!p.lastReadAt || r.read_at > p.lastReadAt) p.lastReadAt = r.read_at;
+      }
+      if (r.responded_at) {
+        p.responded++;
+        if (!p.lastRespondedAt || r.responded_at > p.lastRespondedAt) p.lastRespondedAt = r.responded_at;
+      }
+      if (r.sent_at && (!p.lastSentAt || r.sent_at > p.lastSentAt)) p.lastSentAt = r.sent_at;
+    }
+
+    const parentIds = [...byParent.keys()];
+    if (parentIds.length) {
+      // Noms
+      const profiles = await selectInChunks(parentIds, (chunk) =>
+        supabaseAdmin.from('profiles').select('id, first_name, last_name').in('id', chunk));
+      (profiles || []).forEach(pr => {
+        const p = byParent.get(pr.id);
+        if (p) p.name = `${pr.first_name || ''} ${pr.last_name || ''}`.trim() || 'Parent';
+      });
+      // App installée
+      const subs = await selectInChunks(parentIds, (chunk) =>
+        supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk));
+      const appIds = new Set((subs || []).map(s => s.user_id));
+      // Opt-out WhatsApp
+      const optContacts = await selectInChunks(parentIds, (chunk) =>
+        supabaseAdmin.from('parent_contacts').select('parent_id, consent_status').eq('channel', 'whatsapp').in('parent_id', chunk));
+      const optedIds = new Set((optContacts || []).filter(c => c.consent_status === 'opted_out').map(c => c.parent_id));
+
+      for (const p of byParent.values()) {
+        p.hasApp = appIds.has(p.parent_id);
+        p.optedOut = optedIds.has(p.parent_id);
+        // Canal dominant de lecture
+        p.preferredChannel = p.readApp > p.readWa ? 'app' : (p.readWa > 0 ? 'whatsapp' : (p.hasApp ? 'app' : 'whatsapp'));
+        // Segment d'engagement
+        if (p.reached === 0) p.segment = 'injoignable';
+        else if (p.responded > 0) p.segment = 'reactif';
+        else if (p.read > 0) p.segment = 'lecteur';
+        else p.segment = 'silencieux';
+      }
+    }
+
+    const parents = [...byParent.values()].sort((a, b) => (b.responded - a.responded) || (b.read - a.read) || (b.sent - a.sent));
+    res.json({ days, parents, total: parents.length });
+  } catch (error) {
+    console.error('Erreur engagement parents:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 
 // POST /upload — upload vers Supabase Storage (bucket whatsapp-media)
 // Avec Baileys, on n'a plus besoin du proxy Wasender. Le base64 est uploadé

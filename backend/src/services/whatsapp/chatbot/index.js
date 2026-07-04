@@ -21,6 +21,7 @@ import { downloadMediaMessage } from 'baileys';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
+import { markResponded } from '../../communicationTracking.js';
 import {
   saveProfilePhotoBuffer,
   deleteProfilePhotoByUrl,
@@ -1070,6 +1071,10 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
     })
     .select()
     .single();
+
+  // Tracking communications : ce message entrant vaut « réponse » (et lecture)
+  // pour les envois récents adressés à ce parent.
+  markResponded({ parentId: parentInfo.parent_id, phone }).catch(() => {});
 
   // 2.bis Localisation partagée → enregistrement dans le profil transport
   // de l'élève (home_lat/home_lng), même sans affectation bus.

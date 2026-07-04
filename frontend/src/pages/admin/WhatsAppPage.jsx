@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { saveBlob } from '../../lib/download';
+import EngagementDashboard from './communication/EngagementDashboard';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
@@ -13,11 +15,29 @@ import {
 import QRCode from 'qrcode';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
+// Rôles qui utilisent le hub /communication (onglets pilotés par l'URL +
+// DomainTabs). Les autres rôles (finance, transport) restent sur /whatsapp
+// avec la barre d'onglets interne.
+const ADMIN_HUB_ROLES = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'];
+
 const WhatsAppPage = () => {
   const { profile } = useAuth();
   const { year } = useYear(); // année active : scope les classes/destinataires
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-  const [activeTab, setActiveTab] = useState('send');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { tab: routeTab } = useParams();
+  const isHub = location.pathname.startsWith('/communication');
+  const [localTab, setLocalTab] = useState('send');
+  const activeTab = isHub ? (routeTab || 'send') : localTab;
+  const setActiveTab = (key) => { if (isHub) navigate(`/communication/${key}`); else setLocalTab(key); };
+
+  // Ancienne URL /whatsapp → hub pour les rôles admin (liens/favoris existants)
+  useEffect(() => {
+    if (!isHub && ADMIN_HUB_ROLES.includes(profile?.role)) {
+      navigate('/communication/send', { replace: true });
+    }
+  }, [isHub, profile?.role, navigate]);
 
   const getAuthToken = async () => {
     const { supabase } = await import('../../lib/supabase');
@@ -36,6 +56,9 @@ const WhatsAppPage = () => {
   const [loadingRecipients, setLoadingRecipients] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [messageType, setMessageType] = useState('text');
+  // Canal d'envoi : 'push' (app), 'whatsapp', 'both' (portée maximale)
+  const [sendChannels, setSendChannels] = useState('both');
+  const [parentCount, setParentCount] = useState(0); // parents ciblés (canal app, même sans n° WhatsApp)
   // Catégorie du message (boîte cible)
   const [messageCategory, setMessageCategory] = useState(() => {
     const r = profile?.role;
@@ -243,8 +266,9 @@ const WhatsAppPage = () => {
       });
       const data = await res.json();
       setParentsList(data.parents || []);
-      // By default select all parents
-      setSelectedParents((data.parents || []).map(p => p.phone_whatsapp));
+      // By default select all parents (sélection par parent_id : inclut les
+      // parents sans WhatsApp, joignables par le canal app)
+      setSelectedParents((data.parents || []).map(p => p.parent_id));
     } catch (error) {
       console.error('Erreur chargement parents:', error);
     } finally {
@@ -328,6 +352,7 @@ const WhatsAppPage = () => {
       });
       const data = await res.json();
       setRecipientCount(data.count || 0);
+      setParentCount(data.parentCount ?? data.count ?? 0);
     } catch (error) {
       console.error('Erreur comptage:', error);
     } finally {
@@ -440,7 +465,11 @@ const WhatsAppPage = () => {
     } catch (error) { setUploading(false); throw error; }
   };
 
-  const effectiveRecipientCount = parentSelectionMode === 'select' ? selectedParents.length : recipientCount;
+  // Nombre affiché : en mode sélection = parents cochés ; sinon selon canal
+  // (WhatsApp seul → numéros uniques ; app/both → tous les parents ciblés).
+  const effectiveRecipientCount = parentSelectionMode === 'select'
+    ? selectedParents.length
+    : (sendChannels === 'whatsapp' ? recipientCount : Math.max(parentCount, recipientCount));
 
   const handleSend = async () => {
     if (!messageText && !mediaFile) return;
@@ -456,14 +485,14 @@ const WhatsAppPage = () => {
       if (schoolTypeFilter) filter.school_type = schoolTypeFilter;
       if (levelFilter) filter.level = levelFilter;
       if (year) filter.academic_year = year; // seuls les élèves inscrits dans l'année active
-      // If specific parents selected, pass their phones
+      // Sélection explicite de parents (par id : inclut ceux sans WhatsApp)
       if (parentSelectionMode === 'select' && selectedParents.length > 0) {
-        filter.parent_phones = selectedParents;
+        filter.parent_ids = selectedParents;
       }
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory })
+        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory, channels: sendChannels })
       });
       const data = await res.json();
       if (data.success && data.messageId) {
@@ -694,6 +723,10 @@ const WhatsAppPage = () => {
   useEffect(() => {
     if (activeTab === 'connection') fetchStatus();
   }, [activeTab, fetchStatus]);
+
+  // Statut de session dès l'arrivée (pill d'en-tête + avertissement du
+  // sélecteur de canal), sans spinner.
+  useEffect(() => { fetchStatus(true); }, [fetchStatus]);
 
   // Onboarding Cloud API : ajoute le numéro + envoie le code de vérification
   const handleCloudAddNumber = async () => {
@@ -1244,24 +1277,25 @@ const WhatsAppPage = () => {
     { key: 'send', label: 'Parents', icon: Send, desc: 'Envoyer aux parents' },
     { key: 'teachers', label: 'Professeurs', icon: Users, desc: 'Envoyer aux profs' },
     { key: 'inbox', label: 'Messages', icon: Inbox, desc: 'Boîte de réception' },
+    { key: 'dashboard', label: 'Dashboard parents', icon: BarChart3, desc: 'Qui lit, qui répond' },
     { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
     { key: 'planning', label: 'Planifier', icon: Calendar, desc: 'Communications planifiées' },
     { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
   ];
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden bg-gray-50">
+    <div className={`${isHub ? 'h-[calc(100vh-8rem)]' : 'h-[calc(100vh-4rem)]'} flex flex-col overflow-hidden bg-gray-50`}>
       {/* ===== HEADER WITH TABS ===== */}
       <div className="bg-white border-b border-gray-200 flex-shrink-0">
         {/* Top bar */}
         <div className="px-5 py-3 flex items-center justify-between border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-sm">
+            <div className={`w-9 h-9 bg-gradient-to-br ${isHub ? 'from-indigo-500 to-violet-600' : 'from-green-500 to-green-600'} rounded-xl flex items-center justify-center shadow-sm`}>
               <MessageSquare className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-gray-900">WhatsApp</h1>
-              <p className="text-xs text-gray-500">Messagerie instantanée</p>
+              <h1 className="text-lg font-bold text-gray-900">{isHub ? 'Communication' : 'WhatsApp'}</h1>
+              <p className="text-xs text-gray-500">{isHub ? 'App (push) + WhatsApp — envoi, suivi de lecture et réponses' : 'Messagerie instantanée'}</p>
             </div>
           </div>
           {sessionStatus && (
@@ -1271,12 +1305,15 @@ const WhatsAppPage = () => {
                 : 'bg-red-50 text-red-600 border-red-200'
             }`}>
               <div className={`w-2 h-2 rounded-full ${sessionStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`}></div>
-              {sessionStatus.connected ? 'Connecté' : 'Déconnecté'}
+              {sessionStatus.connected ? 'WhatsApp connecté' : 'WhatsApp déconnecté'}
             </div>
           )}
         </div>
 
-        {/* Horizontal tabs */}
+        {/* Horizontal tabs — sur le hub /communication, la navigation passe par
+            les onglets du domaine (DomainTabs) ; la barre interne reste pour
+            les rôles finance/transport sur /whatsapp. */}
+        {!isHub && (
         <div className="px-4 flex gap-1 overflow-x-auto">
           {tabs.map(tab => {
             const Icon = tab.icon;
@@ -1297,6 +1334,7 @@ const WhatsAppPage = () => {
             );
           })}
         </div>
+        )}
       </div>
 
       {/* ===== MAIN CONTENT ===== */}
@@ -1376,7 +1414,11 @@ const WhatsAppPage = () => {
                     <div className="flex items-center gap-2">
                       <CheckSquare className="w-4 h-4 text-green-600" />
                       <span className="text-sm font-medium text-gray-700">
-                        {loadingRecipients ? 'Calcul...' : `${recipientCount} parent(s) avec numéro WhatsApp`}
+                        {loadingRecipients
+                          ? 'Calcul...'
+                          : sendChannels === 'whatsapp'
+                            ? `${recipientCount} parent(s) avec numéro WhatsApp`
+                            : `${Math.max(parentCount, recipientCount)} parent(s) ciblé(s) — dont ${recipientCount} avec WhatsApp`}
                       </span>
                     </div>
                   ) : (
@@ -1393,7 +1435,7 @@ const WhatsAppPage = () => {
                             <input type="text" placeholder="Rechercher un parent..."
                               value={parentSearch} onChange={(e) => setParentSearch(e.target.value)}
                               className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500" />
-                            <button onClick={() => setSelectedParents(parentsList.map(p => p.phone_whatsapp))}
+                            <button onClick={() => setSelectedParents(parentsList.map(p => p.parent_id))}
                               className="px-3 py-1.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100">
                               Tout
                             </button>
@@ -1412,24 +1454,32 @@ const WhatsAppPage = () => {
                                   || p.children?.some(c => c.name.toLowerCase().includes(q) || c.class_name?.toLowerCase().includes(q));
                               })
                               .map(parent => (
-                                <label key={parent.phone_whatsapp}
+                                <label key={parent.parent_id}
                                   className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-green-50/50 transition-colors ${
-                                    selectedParents.includes(parent.phone_whatsapp) ? 'bg-green-50/30' : ''
+                                    selectedParents.includes(parent.parent_id) ? 'bg-green-50/30' : ''
                                   }`}>
                                   <input type="checkbox"
-                                    checked={selectedParents.includes(parent.phone_whatsapp)}
+                                    checked={selectedParents.includes(parent.parent_id)}
                                     onChange={() => {
                                       setSelectedParents(prev =>
-                                        prev.includes(parent.phone_whatsapp)
-                                          ? prev.filter(p => p !== parent.phone_whatsapp)
-                                          : [...prev, parent.phone_whatsapp]
+                                        prev.includes(parent.parent_id)
+                                          ? prev.filter(p => p !== parent.parent_id)
+                                          : [...prev, parent.parent_id]
                                       );
                                     }}
                                     className="w-4 h-4 rounded text-green-600 flex-shrink-0" />
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-gray-800 truncate">{parent.name}</p>
+                                    <p className="text-sm font-medium text-gray-800 truncate flex items-center gap-1.5">
+                                      {parent.name}
+                                      {parent.has_app && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium" title="A installé l'application">📲 App</span>
+                                      )}
+                                      {!parent.phone_whatsapp && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium" title="Pas de numéro WhatsApp — joignable via l'app uniquement">Sans WhatsApp</span>
+                                      )}
+                                    </p>
                                     <p className="text-xs text-gray-500">
-                                      {parent.phone_whatsapp}
+                                      {parent.phone_whatsapp || 'App uniquement'}
                                       {parent.children?.length > 0 && (
                                         <span className="ml-2 text-gray-400">
                                           — {parent.children.map(c => `${c.name} (${c.class_name})`).join(', ')}
@@ -1458,6 +1508,37 @@ const WhatsAppPage = () => {
                 <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
                   <Send className="w-4 h-4" /> Composer le message
                 </h2>
+
+                {/* Choix du canal d'envoi */}
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 block mb-1.5">Canal d'envoi</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {[
+                      { k: 'push', icon: Smartphone, title: 'Application', desc: 'Notification push + boîte in-app — gratuit', ring: 'border-indigo-500 bg-indigo-50', dot: 'text-indigo-600' },
+                      { k: 'whatsapp', icon: MessageSquare, title: 'WhatsApp', desc: 'Message WhatsApp (session requise)', ring: 'border-green-500 bg-green-50', dot: 'text-green-600' },
+                      { k: 'both', icon: Sparkles, title: 'Les deux', desc: 'App + WhatsApp — portée maximale', ring: 'border-violet-500 bg-violet-50', dot: 'text-violet-600' },
+                    ].map(c => {
+                      const CIcon = c.icon;
+                      const active = sendChannels === c.k;
+                      return (
+                        <button key={c.k} type="button" onClick={() => setSendChannels(c.k)}
+                          className={`text-left rounded-lg border-2 p-2.5 transition-all ${active ? c.ring : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                          <div className={`flex items-center gap-1.5 text-sm font-semibold ${active ? c.dot : 'text-gray-700'}`}>
+                            <CIcon className="w-4 h-4" /> {c.title}
+                            {active && <CheckCircle className="w-3.5 h-3.5 ml-auto" />}
+                          </div>
+                          <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{c.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {sendChannels !== 'push' && sessionStatus && !sessionStatus.connected && (
+                    <p className="text-[11px] text-amber-600 mt-1.5 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> Session WhatsApp non connectée — connectez-la dans l'onglet Connexion, ou choisissez le canal Application.
+                    </p>
+                  )}
+                </div>
+
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)}
                   placeholder="Tapez votre message ici..." rows="5"
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
@@ -1593,6 +1674,13 @@ const WhatsAppPage = () => {
                           <p className="text-xs text-gray-500 mt-0.5">{formatFullDate(msg.created_at)}</p>
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             {statusBadge(msg.status)}
+                            {msg.channels && msg.channels !== 'whatsapp' && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                msg.channels === 'push' ? 'bg-indigo-100 text-indigo-700' : 'bg-violet-100 text-violet-700'
+                              }`}>
+                                {msg.channels === 'push' ? '📲 App' : '📲💬 App + WhatsApp'}
+                              </span>
+                            )}
                             {msg.category && msg.category !== 'general' && (
                               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                                 msg.category === 'pedagogical' ? 'bg-blue-100 text-blue-700' :
@@ -1921,6 +2009,11 @@ const WhatsAppPage = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ===================== TAB: DASHBOARD PARENTS ===================== */}
+      {activeTab === 'dashboard' && (
+        <EngagementDashboard apiUrl={apiUrl} getAuthToken={getAuthToken} />
       )}
 
       {/* ===================== TAB: INBOX ===================== */}
@@ -3339,17 +3432,48 @@ const WhatsAppPage = () => {
                 </div>
               )}
               <div>
-                <p className="text-xs font-semibold text-gray-500 mb-2">Destinataires ({detailMessage.recipients?.length || 0})</p>
+                {/* Compteurs de suivi (vu / répondu) */}
+                {(() => {
+                  const recs = detailMessage.recipients || [];
+                  const readCount = recs.filter(r => r.read_at).length;
+                  const respCount = recs.filter(r => r.responded_at).length;
+                  return (
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <p className="text-xs font-semibold text-gray-500">Destinataires ({recs.length})</p>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">👁 {readCount} vu(s)</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">💬 {respCount} réponse(s)</span>
+                    </div>
+                  );
+                })()}
                 <div className="space-y-1 max-h-60 overflow-y-auto">
                   {(detailMessage.recipients || []).map(r => (
-                    <div key={r.id} className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded text-sm">
-                      <div>
-                        <span className="text-gray-700">{r.phone_e164}</span>
-                        {r.parent && <span className="text-gray-500 ml-2 text-xs">({r.parent.first_name} {r.parent.last_name})</span>}
+                    <div key={r.id} className="py-1.5 px-2 bg-gray-50 rounded text-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <span className="text-gray-700">{r.phone_e164 || '📲 App uniquement'}</span>
+                          {r.parent && <span className="text-gray-500 ml-2 text-xs">({r.parent.first_name} {r.parent.last_name})</span>}
+                        </div>
+                        <span className={`text-xs font-medium flex-shrink-0 ${r.status === 'sent' ? 'text-green-600' : r.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>
+                          {r.status === 'sent' ? '✓ Envoyé' : r.status === 'failed' ? '✗ Échec' : '...'}
+                        </span>
                       </div>
-                      <span className={`text-xs font-medium ${r.status === 'sent' ? 'text-green-600' : r.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>
-                        {r.status === 'sent' ? '✓' : r.status === 'failed' ? '✗' : '...'}
-                      </span>
+                      {(r.read_at || r.responded_at || r.delivered_at || r.push_status) && (
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {r.push_status === 'sent' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">📲 Push envoyé</span>}
+                          {r.push_status === 'no_subscription' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500" title="Notification visible à l'ouverture de l'app">📥 Boîte in-app</span>}
+                          {r.delivered_at && !r.read_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">✓✓ Remis</span>}
+                          {r.read_at && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">
+                              👁 Vu {r.read_channel === 'app' ? '(app)' : '(WhatsApp)'} · {formatFullDate(r.read_at)}
+                            </span>
+                          )}
+                          {r.responded_at && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
+                              💬 A répondu · {formatFullDate(r.responded_at)}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

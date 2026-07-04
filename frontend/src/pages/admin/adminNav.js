@@ -3,6 +3,7 @@ import {
   Users2, FileText, ClipboardList, Calendar, ShieldCheck, BarChart3,
   Wallet, Bus, MapPin, Sparkles, Image as ImageIcon, Search, BarChart2,
   AlertTriangle, Settings, UserCog, MessageSquare, UserCheck, Bot, UserX,
+  Send, Inbox, Smartphone,
 } from 'lucide-react';
 
 // Source de navigation admin unique — utilisée par la Sidebar (domaines de
@@ -80,6 +81,41 @@ export const ADMIN_DOMAINS = [
     ],
   },
   {
+    // Hub communication unifié : envoi aux parents par app (push) et/ou
+    // WhatsApp, suivi de lecture/réponse et dashboard d'engagement.
+    key: 'communication',
+    label: 'Communication',
+    icon: MessageSquare,
+    roles: ALL_ADMIN,
+    groups: [
+      {
+        key: 'envoyer',
+        label: 'Envoyer',
+        items: [
+          { label: 'Parents', path: '/communication/send', icon: Send, roles: ALL_ADMIN },
+          { label: 'Professeurs', path: '/communication/teachers', icon: UserCircle, roles: ALL_ADMIN },
+          { label: 'Planifier', path: '/communication/planning', icon: Calendar, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'suivi',
+        label: 'Suivi & engagement',
+        items: [
+          { label: 'Dashboard parents', path: '/communication/dashboard', icon: BarChart3, roles: ALL_ADMIN },
+          { label: 'Boîte de réception', path: '/communication/inbox', icon: Inbox, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'canaux',
+        label: 'Automatisation & canaux',
+        items: [
+          { label: 'Rapports IA', path: '/communication/reports', icon: Bot, roles: ALL_ADMIN },
+          { label: 'Connexion WhatsApp', path: '/communication/connection', icon: Smartphone, roles: ALL_ADMIN },
+        ],
+      },
+    ],
+  },
+  {
     key: 'transport',
     label: 'Transport',
     icon: Bus,
@@ -131,7 +167,6 @@ export const ADMIN_DOMAINS = [
           { label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers', icon: UserCog, roles: NON_MANAGER },
           { label: 'Resp. transport', path: '/transport/managers', icon: UserCog, roles: FULL },
           { label: 'Réceptionniste (chatbot)', path: '/admin/receptionists', icon: Bot, roles: FULL },
-          { label: 'WhatsApp', path: '/whatsapp', icon: MessageSquare, roles: ALL_ADMIN },
         ],
       },
     ],

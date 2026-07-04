@@ -629,12 +629,24 @@ router.get('/notifications', async (req, res) => {
     // 1) Récupérer les destinataires (recipients) liés à ce parent
     const { data: recipients, error: rErr } = await supabaseAdmin
       .from('whatsapp_message_recipients')
-      .select('id, message_id, phone_e164, status, sent_at, error_message, created_at')
+      .select('id, message_id, phone_e164, status, sent_at, error_message, created_at, read_at')
       .eq('parent_id', parentId)
       .order('created_at', { ascending: false })
       .limit(limit);
     if (rErr) throw rErr;
     if (!recipients || recipients.length === 0) return res.json([]);
+
+    // Tracking « vu » : le parent consulte sa liste de notifications dans
+    // l'app → les messages affichés sont considérés comme lus (canal app).
+    const unreadIds = recipients.filter(r => !r.read_at && r.status === 'sent').map(r => r.id);
+    if (unreadIds.length) {
+      supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .update({ read_at: new Date().toISOString(), read_channel: 'app' })
+        .in('id', unreadIds)
+        .is('read_at', null)
+        .then(({ error }) => { if (error) console.error('[parent] read tracking:', error.message); });
+    }
 
     // 2) Récupérer les messages associés
     const messageIds = [...new Set(recipients.map(r => r.message_id))];

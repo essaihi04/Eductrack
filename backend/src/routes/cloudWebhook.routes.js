@@ -13,6 +13,24 @@
 import express from 'express';
 import { verifySignature, parseIncoming } from '../services/whatsapp/cloudApi.js';
 import { handleIncomingWhatsAppMessage } from '../services/whatsapp/chatbot/index.js';
+import { markWaAck } from '../services/communicationTracking.js';
+
+/**
+ * Statuts d'acheminement des messages SORTANTS (sent/delivered/read) envoyés
+ * par Meta dans le même webhook que les messages entrants → tracking des
+ * communications (delivered_at / read_at).
+ */
+async function processStatuses(body) {
+  for (const entry of body?.entry || []) {
+    for (const change of entry?.changes || []) {
+      for (const st of change?.value?.statuses || []) {
+        if (!st?.id) continue;
+        if (st.status === 'read') await markWaAck(st.id, 'read');
+        else if (st.status === 'delivered') await markWaAck(st.id, 'delivered');
+      }
+    }
+  }
+}
 
 const router = express.Router();
 
@@ -41,6 +59,7 @@ router.post('/webhook', async (req, res) => {
 
   // Traitement en arrière-plan
   try {
+    await processStatuses(req.body);
     const parsed = await parseIncoming(req.body);
     if (parsed) {
       await handleIncomingWhatsAppMessage(parsed);

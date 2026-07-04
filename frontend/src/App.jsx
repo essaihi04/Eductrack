@@ -171,6 +171,10 @@ function App() {
             <Route path="absences" element={<AbsencesPage />} />
             <Route path="approvals" element={<ApprovalsPage />} />
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
+            {/* Hub Communication (admin/directeur/resp. pédago) — onglet piloté par l'URL.
+                /whatsapp reste pour les rôles finance/transport (barre d'onglets interne). */}
+            <Route path="communication" element={<WhatsAppPage />} />
+            <Route path="communication/:tab" element={<WhatsAppPage />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
             <Route path="finance" element={<FinanceShell />}>
               <Route index element={<FinanceDashboard />} />
