@@ -44,6 +44,12 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation project(':capacitor-cordova-android-plugins')
+    // Firebase Cloud Messaging (notifications push natives)
+    implementation platform('com.google.firebase:firebase-bom:33.7.0')
+    implementation 'com.google.firebase:firebase-messaging'
 }
 
 apply from: 'capacitor.build.gradle'
+
+// Doit rester en bas : lit google-services.json et configure FCM.
+apply plugin: 'com.google.gms.google-services'

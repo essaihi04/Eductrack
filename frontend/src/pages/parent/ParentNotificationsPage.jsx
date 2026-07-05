@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, Settings, ChevronDown, ChevronUp, Save, Sparkles, ThumbsUp, Reply, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
+import { isNativePush, enableNativePush, nativePushState } from '../../lib/nativePush';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -56,6 +57,12 @@ const PushEnableBanner = () => {
   const [hidden, setHidden] = useState(false);
 
   const refresh = async () => {
+    // App installée (Capacitor) : on passe par le push natif (FCM), pas le web push.
+    if (isNativePush()) {
+      const s = await nativePushState();
+      setState(s === 'granted' ? 'enabled' : s === 'denied' ? 'denied' : 'prompt');
+      return;
+    }
     if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
       setState('unsupported');
       return;
@@ -75,6 +82,14 @@ const PushEnableBanner = () => {
   const enable = async () => {
     setBusy(true);
     try {
+      if (isNativePush()) {
+        const ok = await enableNativePush();
+        await refresh();
+        if (!ok) {
+          alert("Notifications non activées. Autorisez-les dans les réglages du téléphone (Applications → Eductrack → Notifications), puis réessayez.");
+        }
+        return;
+      }
       const ok = await enablePushNotifications();
       await refresh();
       if (!ok && Notification.permission !== 'granted') {

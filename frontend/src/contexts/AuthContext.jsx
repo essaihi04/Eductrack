@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../lib/supabase';
 import { cacheSplashSchool } from '../components/SchoolSplash';
+import { ensureNativePushRegistered, disableNativePush } from '../lib/nativePush';
 
 const AuthContext = createContext({});
 
@@ -109,6 +110,8 @@ export const AuthProvider = ({ children }) => {
       // Mémorise le logo de l'école pour le splash de bienvenue : au prochain
       // chargement, l'animation démarre avant même que le profil ne soit chargé.
       cacheSplashSchool(data.profile?.email, activeSchool);
+      // App installée : rafraîchit le jeton push natif (sans pop-up) si déjà autorisé.
+      ensureNativePushRegistered();
     } catch (error) {
       console.error('Error fetching profile:', error);
     } finally {
@@ -162,6 +165,9 @@ export const AuthProvider = ({ children }) => {
   };
 
   const signOut = async () => {
+    // App installée : retire le jeton push de cet appareil pour ne plus recevoir
+    // les notifications de ce compte après déconnexion.
+    try { await disableNativePush(); } catch (_) { /* ignore */ }
     // Tente d'abord un logout serveur (révoque le refresh token côté Supabase).
     // Si la session est déjà invalide (ex: mot de passe changé juste avant),
     // l'appel échoue avec AuthSessionMissingError / 403 — on l'ignore et on

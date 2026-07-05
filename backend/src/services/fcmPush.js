@@ -1,0 +1,108 @@
+// Push NATIF via Firebase Cloud Messaging (app Capacitor Android/iOS).
+// Complémentaire de webPush.js (navigateur/PWA). Le backend envoie à FCM avec
+// le compte de service Firebase (clé privée fournie via variable d'environnement).
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
+import { supabaseAdmin } from '../config/supabase.js';
+
+let messaging = null;
+let configured = false;
+
+// Lit le compte de service depuis FCM_SERVICE_ACCOUNT_JSON (JSON brut OU base64).
+function loadServiceAccount() {
+  const raw = process.env.FCM_SERVICE_ACCOUNT_JSON || process.env.FCM_SERVICE_ACCOUNT;
+  if (!raw) return null;
+  let text = String(raw).trim();
+  if (!text.startsWith('{')) {
+    // Base64 (pratique pour une variable d'env sur une seule ligne).
+    try { text = Buffer.from(text, 'base64').toString('utf8'); } catch { /* ignore */ }
+  }
+  try { return JSON.parse(text); } catch (e) {
+    console.error('[FCM] FCM_SERVICE_ACCOUNT_JSON invalide:', e.message);
+    return null;
+  }
+}
+
+(function init() {
+  try {
+    const svc = loadServiceAccount();
+    if (!svc) {
+      console.warn('[FCM] non configuré (FCM_SERVICE_ACCOUNT_JSON absent). Push natif désactivé.');
+      return;
+    }
+    const app = getApps().length ? getApps()[0] : initializeApp({ credential: cert(svc) });
+    messaging = getMessaging(app);
+    configured = true;
+    console.log('[FCM] initialisé pour le projet', svc.project_id);
+  } catch (e) {
+    console.error('[FCM] initialisation échouée:', e.message);
+  }
+})();
+
+export const isFcmConfigured = () => configured;
+
+/**
+ * Envoie une notification native à tous les appareils d'un utilisateur.
+ * @param {string} userId
+ * @param {{ title: string, body: string, url?: string, tag?: string }} payload
+ */
+export async function sendFcmToUser(userId, payload) {
+  if (!configured || !userId) return { sent: 0 };
+
+  const { data: rows } = await supabaseAdmin
+    .from('device_tokens')
+    .select('id, token')
+    .eq('user_id', userId);
+  if (!rows?.length) return { sent: 0 };
+
+  const tokens = rows.map((r) => r.token);
+  const message = {
+    tokens,
+    notification: { title: payload.title, body: payload.body },
+    data: {
+      url: String(payload.url || '/'),
+      ...(payload.tag ? { tag: String(payload.tag) } : {}),
+    },
+    android: { priority: 'high', notification: { sound: 'default' } },
+    apns: { payload: { aps: { sound: 'default' } } },
+  };
+
+  let sent = 0;
+  const stale = [];
+  try {
+    const resp = await messaging.sendEachForMulticast(message);
+    resp.responses.forEach((r, i) => {
+      if (r.success) { sent++; return; }
+      const code = r.error?.code || '';
+      // Jeton périmé/invalide → suppression pour ne pas réessayer indéfiniment.
+      if (
+        code.includes('registration-token-not-registered') ||
+        code.includes('invalid-registration-token') ||
+        code.includes('invalid-argument')
+      ) {
+        stale.push(tokens[i]);
+      } else {
+        console.error('[FCM] envoi échoué:', code, r.error?.message);
+      }
+    });
+  } catch (e) {
+    console.error('[FCM] sendEachForMulticast:', e.message);
+    return { sent: 0 };
+  }
+
+  if (stale.length) {
+    await supabaseAdmin.from('device_tokens').delete().in('token', stale);
+  }
+  return { sent };
+}
+
+/** Un utilisateur a-t-il au moins un appareil natif enregistré ? */
+export async function userHasDeviceToken(userId) {
+  if (!configured || !userId) return false;
+  const { data } = await supabaseAdmin
+    .from('device_tokens')
+    .select('id')
+    .eq('user_id', userId)
+    .limit(1);
+  return !!(data && data.length);
+}

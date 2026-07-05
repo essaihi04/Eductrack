@@ -85,4 +85,10 @@ export const pushApi = {
   }),
   unsubscribe: (endpoint) => request('/api/push/unsubscribe', { method: 'POST', body: { endpoint } }),
   test: () => request('/api/push/test', { method: 'POST' }),
+  // Push natif (Capacitor/FCM) — jeton d'appareil au lieu d'un abonnement web.
+  registerDeviceToken: (token, platform) => request('/api/push/device-token', {
+    method: 'POST',
+    body: { token, platform, userAgent: navigator.userAgent },
+  }),
+  removeDeviceToken: (token) => request('/api/push/device-token/delete', { method: 'POST', body: { token } }),
 };

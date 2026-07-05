@@ -53,14 +53,49 @@ router.post('/unsubscribe', async (req, res) => {
   }
 });
 
-// POST /test — envoyer une notif test à l'utilisateur courant
+// POST /device-token — enregistrer un jeton d'appareil natif (FCM)
+router.post('/device-token', async (req, res) => {
+  try {
+    const { token, platform, userAgent } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'token requis' });
+    const { error } = await supabaseAdmin
+      .from('device_tokens')
+      .upsert({
+        user_id: req.user.id,
+        token,
+        platform: platform || null,
+        user_agent: userAgent || req.headers['user-agent'] || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'token' });
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Erreur device-token:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /device-token/delete — retirer un jeton (déconnexion)
+router.post('/device-token/delete', async (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (token) await supabaseAdmin.from('device_tokens').delete().eq('token', token);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Erreur device-token delete:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /test — envoyer une notif test à l'utilisateur courant (web + natif)
 router.post('/test', async (req, res) => {
   try {
-    const result = await sendPushToUser(req.user.id, {
+    const payload = {
       title: '🔔 Notification test',
       body: 'Les notifications Eductrack fonctionnent !',
       url: '/'
-    });
+    };
+    const result = await sendPushToUser(req.user.id, payload);
     res.json(result);
   } catch (e) {
     console.error('Erreur push test:', e);

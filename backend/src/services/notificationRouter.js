@@ -12,17 +12,24 @@
 
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUser, isPushConfigured } from './webPush.js';
+import { userHasDeviceToken } from './fcmPush.js';
 import { sendText } from './whatsapp/index.js';
 
-/** Le parent a-t-il installé l'app (abonnement push actif) ? */
+/** Le parent a-t-il installé l'app ? (abonnement Web Push OU jeton d'appareil natif) */
 export async function parentHasApp(parentId) {
-  if (!isPushConfigured() || !parentId) return false;
-  const { data } = await supabaseAdmin
-    .from('push_subscriptions')
-    .select('id')
-    .eq('user_id', parentId)
-    .limit(1);
-  return !!(data && data.length);
+  if (!parentId) return false;
+  // Web Push (navigateur / PWA)
+  if (isPushConfigured()) {
+    const { data } = await supabaseAdmin
+      .from('push_subscriptions')
+      .select('id')
+      .eq('user_id', parentId)
+      .limit(1);
+    if (data && data.length) return true;
+  }
+  // Push natif (app Capacitor installée)
+  if (await userHasDeviceToken(parentId)) return true;
+  return false;
 }
 
 /**
@@ -113,7 +120,7 @@ export async function setWhatsappOptOut(parentId, optedOut) {
 export async function routeNotification({ parentId, schoolId, phone, push, whatsappText, nudge = true }) {
   const hasApp = await parentHasApp(parentId);
 
-  // 1. App installée → push gratuit
+  // 1. App installée → push gratuit (web + natif, via sendPushToUser)
   if (push && hasApp) {
     try {
       const r = await sendPushToUser(parentId, push);
