@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
+import { resolveLogoUrl } from '../../lib/schoolLogo';
 import { FINANCE_SIDEBAR_POLES, poleForPath } from '../../pages/finance/financeNav';
 import { adminSidebarDomains, domainForPath } from '../../pages/admin/adminNav';
 
@@ -171,7 +172,7 @@ const Sidebar = () => {
         {profile?.school?.logo_url && profile?.role !== 'super_admin' ? (
           <div className="flex flex-col items-center gap-2">
             <img
-              src={`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${profile.school.logo_url}`}
+              src={resolveLogoUrl(profile.school)}
               alt={profile.school.name}
               className="w-full max-h-14 object-contain"
               onError={(e) => { e.target.style.display = 'none'; }}

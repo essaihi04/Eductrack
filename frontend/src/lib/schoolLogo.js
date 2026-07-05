@@ -7,11 +7,16 @@
 
 const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-/** Résout l'URL absolue du logo à partir de l'objet école. */
-export function resolveLogoUrl(school) {
-  const url = school?.logo_url;
+/** Résout l'URL absolue du logo à partir de l'objet école (ou d'une URL brute). */
+export function resolveLogoUrl(schoolOrUrl) {
+  let url = typeof schoolOrUrl === 'string' ? schoolOrUrl : schoolOrUrl?.logo_url;
   if (!url) return null;
-  return url.startsWith('http') ? url : `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+  // Répare un schéma corrompu « https//… » (deux-points manquant) : sans lui, le
+  // navigateur traite l'URL comme relative et la préfixe par l'origine du site.
+  url = url.replace(/^(https?)\/\//i, '$1://');
+  if (/^https?:\/\//i.test(url)) return url; // déjà absolue (Supabase Storage…)
+  if (url.startsWith('//')) return `https:${url}`; // protocole-relative
+  return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`; // chemin local hérité
 }
 
 const _cache = new Map(); // src -> { dataUrl, width, height } | null
