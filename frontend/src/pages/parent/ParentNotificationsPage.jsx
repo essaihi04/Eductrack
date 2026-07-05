@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, Settings, ChevronDown, ChevronUp, Save, Sparkles, ThumbsUp, Reply, Send } from 'lucide-react';
+import { Bell, BellRing, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, Settings, ChevronDown, ChevronUp, Save, Sparkles, ThumbsUp, Reply, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { enablePushNotifications } from '../../lib/pushClient';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -41,6 +42,93 @@ const fmtRelative = (iso) => {
   if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
   if (diff < 7 * 86400) return `il y a ${Math.floor(diff / 86400)} j`;
   return fmtDateTime(iso);
+};
+
+// Bandeau « Activer la cloche sur ce téléphone ». Sans abonnement push actif,
+// l'école dépose bien le message dans la boîte in-app, mais le téléphone ne
+// SONNE pas (pas de notification système). Ce bandeau invite le parent à
+// autoriser les notifications → crée l'abonnement (push_subscriptions) qui
+// permet à l'école de faire sonner la cloche, même app fermée.
+const PushEnableBanner = () => {
+  // 'unsupported' | 'enabled' | 'denied' | 'prompt' | 'loading'
+  const [state, setState] = useState('loading');
+  const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
+
+  const refresh = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setState('unsupported');
+      return;
+    }
+    if (Notification.permission === 'denied') { setState('denied'); return; }
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      setState(Notification.permission === 'granted' && sub ? 'enabled' : 'prompt');
+    } catch {
+      setState('prompt');
+    }
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      const ok = await enablePushNotifications();
+      await refresh();
+      if (!ok && Notification.permission !== 'granted') {
+        alert("Notifications non activées. Autorisez-les dans les réglages du navigateur, puis réessayez.");
+      }
+    } catch (e) {
+      alert('Erreur : ' + (e.message || 'activation impossible'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (state === 'loading' || state === 'enabled' || hidden) return null;
+
+  // iOS n'autorise le push que pour une app « installée » (ajoutée à l'écran d'accueil).
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+  if (state === 'unsupported') {
+    return (
+      <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        🔔 Pour recevoir les notifications de l'école directement sur ce téléphone,
+        {isIOS ? " ajoutez l'application à votre écran d'accueil (Partager → « Sur l'écran d'accueil »), puis rouvrez-la." : ' utilisez un navigateur récent (Chrome, Edge, Firefox) ou installez l\'application.'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-5 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 p-4 flex items-start gap-3">
+      <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
+        <BellRing className="w-5 h-5 text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-semibold text-gray-900">Activez la cloche sur ce téléphone</p>
+        <p className="text-sm text-gray-600 mt-0.5">
+          {state === 'denied'
+            ? "Les notifications sont bloquées. Autorisez-les dans les réglages de votre navigateur pour ce site, puis réessayez."
+            : "Recevez une notification sonore dès que l'école vous envoie un message — même quand l'application est fermée."}
+        </p>
+        {state === 'prompt' && (
+          <button
+            onClick={enable}
+            disabled={busy}
+            className="mt-3 inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            <BellRing className="w-4 h-4" />
+            {busy ? 'Activation…' : 'Activer les notifications'}
+          </button>
+        )}
+      </div>
+      <button onClick={() => setHidden(true)} className="p-1 text-gray-400 hover:text-gray-600" aria-label="Masquer">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
 };
 
 const ParentNotificationsPage = () => {
@@ -97,6 +185,8 @@ const ParentNotificationsPage = () => {
           <p className="text-gray-600 text-sm">Historique des messages WhatsApp reçus de l'école</p>
         </div>
       </header>
+
+      <PushEnableBanner />
 
       <PreferencesPanel />
 
