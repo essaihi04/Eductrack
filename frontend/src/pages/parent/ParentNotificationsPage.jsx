@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, Settings, ChevronDown, ChevronUp, Save, Sparkles } from 'lucide-react';
+import { Bell, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, Settings, ChevronDown, ChevronUp, Save, Sparkles, ThumbsUp, Reply, Send } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -142,6 +142,25 @@ const ParentNotificationsPage = () => {
   );
 };
 
+// Une pièce jointe est une image si le type l'indique, ou d'après l'extension.
+const isImageMedia = (n) => {
+  if (!n?.media_url) return false;
+  if (n.message_type === 'image') return true;
+  if (n.message_type === 'document') return false;
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(n.file_name || n.media_url);
+};
+
+// Retire les lignes contenant un lien brut (le document est affiché comme PJ).
+const stripLinks = (text) => {
+  if (!text || typeof text !== 'string') return text;
+  return text
+    .split('\n')
+    .filter((line) => !/https?:\/\/\S+/i.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
 const NotificationCard = ({ n }) => {
   const cat = CATEGORY_BADGE[n.category] || CATEGORY_BADGE.general;
   const Icon = cat.icon;
@@ -151,9 +170,54 @@ const NotificationCard = ({ n }) => {
   const isFailed = n.status === 'failed';
   const isPending = n.status === 'pending' || n.status === 'sending';
 
+  // Interaction (canal app) : j'aime + réponse
+  const [reaction, setReaction] = useState(n.reaction || null);
+  const [respondedAt, setRespondedAt] = useState(n.responded_at || null);
+  const [responseText, setResponseText] = useState(n.response_text || null);
+  const [showReply, setShowReply] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const authFetch = async (path, body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const res = await fetch(`${apiUrl}/api/parent/notifications/${n.id}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Erreur');
+    return res.json();
+  };
+
+  const toggleLike = async () => {
+    if (busy) return;
+    setBusy(true);
+    const next = reaction ? null : '👍';
+    setReaction(next); // optimiste
+    try { await authFetch('/react', { like: !!next }); }
+    catch { setReaction(reaction); } // rollback
+    finally { setBusy(false); }
+  };
+
+  const sendReply = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try {
+      const r = await authFetch('/respond', { text });
+      setRespondedAt(r.responded_at);
+      setResponseText(r.response_text);
+      setShowReply(false);
+      setDraft('');
+    } catch (e) { alert(e.message); }
+    finally { setBusy(false); }
+  };
+
   // Première ligne du message comme "titre"
   const firstLine = (n.content || '').split('\n').find(l => l.trim()) || '';
   const title = firstLine.replace(/[*_~`]/g, '').slice(0, 80);
+  const body = stripLinks(n.content);
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition">
@@ -189,19 +253,19 @@ const NotificationCard = ({ n }) => {
 
           {title && <p className="font-semibold text-gray-900 text-sm">{title}</p>}
 
-          {n.content && (
+          {body && (
             <p className="text-sm text-gray-700 whitespace-pre-line mt-1">
-              {n.content}
+              {body}
             </p>
           )}
 
-          {n.media_url && n.message_type === 'image' && (
+          {n.media_url && isImageMedia(n) && (
             <a href={n.media_url} target="_blank" rel="noreferrer" className="mt-2 inline-block">
-              <img src={n.media_url} alt="" className="max-h-48 rounded-lg border border-gray-200" />
+              <img src={n.media_url} alt={n.file_name || ''} className="max-h-48 rounded-lg border border-gray-200" />
             </a>
           )}
 
-          {n.media_url && n.message_type === 'document' && (
+          {n.media_url && !isImageMedia(n) && (
             <a
               href={n.media_url}
               target="_blank"
@@ -211,6 +275,60 @@ const NotificationCard = ({ n }) => {
               <FileText className="w-4 h-4" />
               {n.file_name || 'Document joint'}
             </a>
+          )}
+
+          {/* Interaction parent : J'aime + Répondre (canal app) */}
+          <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+            <button
+              onClick={toggleLike}
+              disabled={busy}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition disabled:opacity-50 ${
+                reaction
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'
+              }`}
+            >
+              <ThumbsUp className={`w-3.5 h-3.5 ${reaction ? 'fill-blue-600 text-blue-600' : ''}`} />
+              {reaction ? 'Aimé' : "J'aime"}
+            </button>
+            <button
+              onClick={() => setShowReply((v) => !v)}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:border-emerald-300 transition disabled:opacity-50"
+            >
+              <Reply className="w-3.5 h-3.5" /> Répondre
+            </button>
+            {respondedAt && !showReply && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Répondu
+              </span>
+            )}
+          </div>
+
+          {responseText && !showReply && (
+            <div className="mt-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+              <p className="text-[11px] font-semibold text-emerald-700 mb-0.5">Votre réponse</p>
+              <p className="text-sm text-gray-700 whitespace-pre-line">{responseText}</p>
+            </div>
+          )}
+
+          {showReply && (
+            <div className="mt-2 flex items-end gap-2">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={2}
+                placeholder="Écrire une réponse à l'école…"
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none"
+              />
+              <button
+                onClick={sendReply}
+                disabled={busy || !draft.trim()}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" /> Envoyer
+              </button>
+            </div>
           )}
         </div>
       </div>

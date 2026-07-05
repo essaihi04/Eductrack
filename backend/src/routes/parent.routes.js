@@ -627,12 +627,25 @@ router.get('/notifications', async (req, res) => {
     const category = req.query.category; // optionnel : transport | pedagogical | financial | general
 
     // 1) Récupérer les destinataires (recipients) liés à ce parent
-    const { data: recipients, error: rErr } = await supabaseAdmin
+    // Colonnes d'interaction (reaction / response_text) ajoutées par
+    // ADD_PARENT_COMM_INTERACTION.sql. Repli sur le select de base si la
+    // migration n'est pas encore appliquée (ne casse pas la page notifications).
+    const baseCols = 'id, message_id, phone_e164, status, sent_at, error_message, created_at, read_at, responded_at';
+    let recipients, rErr;
+    ({ data: recipients, error: rErr } = await supabaseAdmin
       .from('whatsapp_message_recipients')
-      .select('id, message_id, phone_e164, status, sent_at, error_message, created_at, read_at')
+      .select(`${baseCols}, reaction, response_text`)
       .eq('parent_id', parentId)
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .limit(limit));
+    if (rErr) {
+      ({ data: recipients, error: rErr } = await supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .select(baseCols)
+        .eq('parent_id', parentId)
+        .order('created_at', { ascending: false })
+        .limit(limit));
+    }
     if (rErr) throw rErr;
     if (!recipients || recipients.length === 0) return res.json([]);
 
@@ -676,6 +689,9 @@ router.get('/notifications', async (req, res) => {
           file_name: m.file_name,
           category: m.category || 'general',
           created_at: m.created_at,
+          reaction: r.reaction || null,
+          responded_at: r.responded_at || null,
+          response_text: r.response_text || null,
         };
       })
       .filter(Boolean);
@@ -683,6 +699,78 @@ router.get('/notifications', async (req, res) => {
     res.json(result);
   } catch (e) {
     console.error('[parent] notifications error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// POST /api/parent/notifications/:id/react
+// Le parent aime / retire son « J'aime » sur un message reçu (canal app).
+// :id = whatsapp_message_recipients.id (doit appartenir au parent connecté).
+// Body: { like: boolean }
+// ============================================================
+router.post('/notifications/:id/react', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    const { id } = req.params;
+    const like = req.body?.like !== false; // défaut : aimer
+    const reaction = like ? '👍' : null;
+    // Aimer implique avoir vu le message → on marque « lu » (canal app) si besoin.
+    const patch = { reaction };
+    const { data, error } = await supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .update(patch)
+      .eq('id', id)
+      .eq('parent_id', parentId)
+      .select('id, reaction, read_at')
+      .single();
+    if (error) throw error;
+    if (like && !data.read_at) {
+      await supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .update({ read_at: new Date().toISOString(), read_channel: 'app' })
+        .eq('id', id)
+        .is('read_at', null);
+    }
+    res.json({ success: true, reaction: data.reaction || null });
+  } catch (e) {
+    console.error('[parent] react error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// POST /api/parent/notifications/:id/respond
+// Le parent répond par un texte depuis l'app (canal app).
+// :id = whatsapp_message_recipients.id (doit appartenir au parent connecté).
+// Body: { text: string }
+// ============================================================
+router.post('/notifications/:id/respond', async (req, res) => {
+  try {
+    const parentId = req.user.id;
+    const { id } = req.params;
+    const text = (req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Réponse vide' });
+    if (text.length > 2000) return res.status(400).json({ error: 'Réponse trop longue' });
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .update({
+        response_text: text,
+        responded_at: now,
+        response_channel: 'app',
+        // Répondre implique avoir vu le message
+        read_at: now,
+        read_channel: 'app',
+      })
+      .eq('id', id)
+      .eq('parent_id', parentId)
+      .select('id, responded_at, response_text')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, responded_at: data.responded_at, response_text: data.response_text });
+  } catch (e) {
+    console.error('[parent] respond error', e);
     res.status(500).json({ error: e.message });
   }
 });

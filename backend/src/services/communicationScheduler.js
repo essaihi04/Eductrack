@@ -199,8 +199,10 @@ export async function sendCommunication(comm) {
   const pushBody = comm.body
     ? comm.body.slice(0, 120)
     : (comm.type === 'deadline' && comm.deadline_date ? `Date limite : ${formatDateFr(comm.deadline_date)}` : 'Nouvelle communication');
+  // Corps de la notification in-app : SANS le lien brut du document (il est déjà
+  // porté par data.media_url / file_name → affiché comme pièce jointe cliquable).
   const pushNotifBody = comm.attachment_url
-    ? `${pushBody}\n📎 ${comm.attachment_name || 'Pièce jointe'} : ${comm.attachment_url}`
+    ? `${pushBody}\n📎 ${comm.attachment_name || 'Pièce jointe'}`
     : pushBody;
 
   // Tracking unifié : mêmes tables que les envois directs. On journalise le
@@ -231,6 +233,7 @@ export async function sendCommunication(comm) {
               communication_id: comm.id,
               media_url: comm.attachment_url || null,
               file_name: comm.attachment_name || null,
+              message_type: isImage ? 'image' : (isDoc ? 'document' : null),
             },
           })
           .select('id')

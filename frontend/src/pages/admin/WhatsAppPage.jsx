@@ -3895,7 +3895,7 @@ const WhatsAppPage = () => {
                           {r.status === 'sent' ? '✓ Envoyé' : r.status === 'failed' ? '✗ Échec' : '...'}
                         </span>
                       </div>
-                      {(r.read_at || r.responded_at || r.delivered_at || r.push_status) && (
+                      {(r.read_at || r.responded_at || r.delivered_at || r.push_status || r.reaction) && (
                         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                           {r.push_status === 'sent' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">📲 Push envoyé</span>}
                           {r.push_status === 'no_subscription' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500" title="Notification visible à l'ouverture de l'app">📥 Boîte in-app</span>}
@@ -3905,11 +3905,21 @@ const WhatsAppPage = () => {
                               👁 Vu {r.read_channel === 'app' ? '(app)' : '(WhatsApp)'} · {formatFullDate(r.read_at)}
                             </span>
                           )}
-                          {r.responded_at && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
-                              💬 A répondu · {formatFullDate(r.responded_at)}
+                          {r.reaction && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium" title="A aimé le message">
+                              👍 Aimé
                             </span>
                           )}
+                          {r.responded_at && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
+                              💬 A répondu {r.response_channel === 'app' ? '(app)' : '(WhatsApp)'} · {formatFullDate(r.responded_at)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {r.response_text && (
+                        <div className="mt-1 rounded bg-emerald-50 border border-emerald-100 px-2 py-1 text-xs text-gray-700 whitespace-pre-line">
+                          {r.response_text}
                         </div>
                       )}
                     </div>

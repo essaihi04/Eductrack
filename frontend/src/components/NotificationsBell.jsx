@@ -25,8 +25,31 @@ const NotificationsBell = () => {
   useEffect(() => {
     if (isOpen) {
       fetchNotifications();
+      // Ouvrir la cloche = consulter ses notifications → tout est considéré « vu »
+      // (propage la lecture au suivi des communications, canal app).
+      if (unreadCount > 0) markAllAsRead();
     }
   }, [isOpen]);
+
+  // Retire un lien brut du corps (ex. « 📎 doc.pdf : https://…supabase.co/… ») :
+  // la pièce jointe est présentée à part via notification.data.media_url.
+  // Une pièce jointe est une image si le type l'indique, ou d'après l'extension.
+  const isImageMedia = (d) => {
+    if (!d?.media_url) return false;
+    if (d.message_type === 'image') return true;
+    if (d.message_type === 'document') return false;
+    return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(d.file_name || d.media_url);
+  };
+
+  const cleanMessage = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    return text
+      .split('\n')
+      .filter((line) => !/https?:\/\/\S+/i.test(line))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
 
   const fetchNotifications = async () => {
     try {
@@ -218,9 +241,38 @@ const NotificationsBell = () => {
                         <p className="text-sm font-medium text-gray-900">
                           {notification.title}
                         </p>
-                        <p className="text-sm text-gray-600 mt-1">
-                          {notification.message}
+                        <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">
+                          {cleanMessage(notification.message)}
                         </p>
+                        {notification.data?.media_url && (
+                          isImageMedia(notification.data) ? (
+                            <a
+                              href={notification.data.media_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-2 block"
+                            >
+                              <img
+                                src={notification.data.media_url}
+                                alt={notification.data.file_name || 'Image'}
+                                className="max-h-40 w-auto rounded-lg border border-gray-200 object-contain"
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
+                            </a>
+                          ) : (
+                            <a
+                              href={notification.data.media_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100 max-w-full"
+                            >
+                              <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate">{notification.data.file_name || 'Pièce jointe'}</span>
+                            </a>
+                          )
+                        )}
                         <p className="text-xs text-gray-400 mt-2">
                           {formatTime(notification.created_at)}
                         </p>
