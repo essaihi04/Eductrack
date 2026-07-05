@@ -76,6 +76,9 @@ const StudentsPage = () => {
   const [parentModalIndex, setParentModalIndex] = useState(0);
   const [parentForm, setParentForm] = useState({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
   const [parentSaving, setParentSaving] = useState(false);
+  // Édition inline des parents DÉJÀ associés dans la modale (nom/prénom/téléphone).
+  const [existingEdits, setExistingEdits] = useState({}); // { [parentId]: { last_name, first_name, phone } }
+  const [savingExistingId, setSavingExistingId] = useState(null);
   const DOC_KEYS = [
     ['livret_famille', 'Livret de famille'],
     ['carnet_vaccination', 'Carnet de vaccination'],
@@ -297,6 +300,33 @@ const StudentsPage = () => {
     setParentModalQueue([]);
     setParentModalIndex(0);
     setParentForm({ pereName: '', perePhone: '', mereName: '', merePhone: '', tuteurName: '', tuteurPhone: '' });
+  };
+
+  // Enregistre les modifications d'un parent DÉJÀ associé (depuis la modale).
+  const saveExistingParent = async (parent) => {
+    if (String(parent.id).startsWith('tmp_')) return; // pas encore synchronisé côté serveur
+    const edit = existingEdits[parent.id] || {};
+    const first_name = edit.first_name ?? parent.first_name ?? '';
+    const last_name = edit.last_name ?? parent.last_name ?? '';
+    const phone = edit.phone ?? parent.phone ?? '';
+    if (!last_name.trim() && !first_name.trim()) { alert('Nom requis.'); return; }
+    setSavingExistingId(parent.id);
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const res = await fetch(`${apiUrl}/api/admin/parents/${parent.id}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ first_name, last_name, phone }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Échec de la modification'); }
+      setExistingEdits(s => { const n = { ...s }; delete n[parent.id]; return n; });
+      await fetchData();
+      alert('Parent mis à jour.');
+    } catch (e) {
+      alert('Erreur : ' + e.message);
+    } finally {
+      setSavingExistingId(null);
+    }
   };
 
   const saveParentsForCurrent = async () => {
@@ -2050,15 +2080,39 @@ L'administration de ${schoolName}`;
                   )}
                 </div>
 
-                {/* Détection parent existant */}
+                {/* Parents déjà associés — éditables directement (nom / prénom / téléphone) */}
                 {existing.length > 0 && (
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-800 flex gap-2">
-                    <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <div>
-                      Cet élève a déjà <strong>{existing.length} parent(s)</strong> associé(s) :
-                      <span className="block mt-0.5">{existing.map(p => `${p.first_name} ${p.last_name}${p.relationship ? ` (${p.relationship})` : ''}`).join(', ')}</span>
-                      <span className="block mt-1 text-orange-600">Vous ajoutez un parent supplémentaire (les numéros déjà connus seront réutilisés).</span>
-                    </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-gray-700">👪 Parent(s) déjà associé(s)</p>
+                    {existing.map(p => {
+                      const edit = existingEdits[p.id] || {};
+                      const ln = edit.last_name ?? p.last_name ?? '';
+                      const fn = edit.first_name ?? p.first_name ?? '';
+                      const ph = edit.phone ?? p.phone ?? '';
+                      const isTmp = String(p.id).startsWith('tmp_');
+                      const setField = (field) => (e) =>
+                        setExistingEdits(s => ({ ...s, [p.id]: { ...s[p.id], [field]: e.target.value } }));
+                      return (
+                        <div key={p.id} className="border border-blue-200 rounded-lg p-2.5 bg-blue-50/40 space-y-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <input className="px-3 py-2 border rounded text-sm" placeholder="Nom" value={ln} onChange={setField('last_name')} />
+                            <input className="px-3 py-2 border rounded text-sm" placeholder="Prénom" value={fn} onChange={setField('first_name')} />
+                            <input type="tel" className="px-3 py-2 border rounded text-sm" placeholder="Téléphone (06/07…)" value={ph} onChange={setField('phone')} />
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-gray-500">{p.relationship || 'parent'}</span>
+                            <button type="button" disabled={isTmp || savingExistingId === p.id}
+                              onClick={() => saveExistingParent(p)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                              title={isTmp ? 'Rechargez la page pour modifier ce parent' : 'Enregistrer les modifications'}>
+                              <Edit2 className="w-3.5 h-3.5" />
+                              {savingExistingId === p.id ? 'Enregistrement…' : 'Modifier'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <p className="text-xs text-orange-600">Ou ajoutez un <b>parent supplémentaire</b> ci-dessous (les numéros déjà connus seront réutilisés).</p>
                   </div>
                 )}
 
