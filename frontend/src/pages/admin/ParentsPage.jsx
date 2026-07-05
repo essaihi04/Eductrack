@@ -3,6 +3,7 @@ import { Plus, Trash2, Upload, Phone, UserPlus, X, Search, ChevronDown, ChevronU
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Avatar, ChannelBadge, ParentCard, DetailDrawer } from '../../components/directory/ui';
 import { useYear } from '../../contexts/YearContext';
+import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import * as XLSX from 'xlsx';
 
 // Libellés lisibles des filières (lycée). Sert au filtre « Filière » de la page Parents.
@@ -300,6 +301,9 @@ const ParentsPage = () => {
   const [parents, setParents] = useState([]);
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
+  // Ids des élèves inscrits (RI/NI) pour l'année active — même source de vérité
+  // que la page Élèves/finance. null = pas de scope (année absente) → tous les élèves.
+  const [activeIds, setActiveIds] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedParent, setExpandedParent] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -370,6 +374,25 @@ const ParentsPage = () => {
       setParents(Array.isArray(parentsData) ? parentsData : []);
       setClasses(Array.isArray(classesData) ? classesData : []);
       setStudents(Array.isArray(studentsData) ? studentsData : []);
+
+      // Élèves inscrits pour l'année active : sert à scoper les compteurs
+      // (Élèves / Avec parent / Sans parent) sur la même base que la liste des
+      // parents. Sans ça, une année neuve (aucune réinscription) afficherait
+      // quand même tous les profils élèves au lieu de 0.
+      if (year) {
+        try {
+          const rows = await enrollmentsApi.list(year);
+          const ids = (rows || [])
+            .filter((r) => r.status !== 'NR')
+            .map((r) => r.student_id || r.student?.id)
+            .filter(Boolean);
+          setActiveIds(new Set(ids));
+        } catch {
+          setActiveIds(new Set());
+        }
+      } else {
+        setActiveIds(null);
+      }
     } catch (error) {
       console.error('Error fetching parents data:', error);
     } finally {
@@ -960,7 +983,11 @@ const ParentsPage = () => {
   const filterClassIds = filterClass
     ? new Set(classes.filter(c => c.name === filterClass).map(c => c.id))
     : null;
-  const scopedStudents = students.filter(s => !filterClassIds || filterClassIds.has(s.class_id));
+  const scopedStudents = students
+    // Année active : ne compter que les élèves inscrits (RI/NI) cette année-là,
+    // comme la liste des parents et la page Élèves. Une année neuve → 0 élève.
+    .filter(s => activeIds === null || activeIds.has(s.id))
+    .filter(s => !filterClassIds || filterClassIds.has(s.class_id));
 
   // Statistiques de couverture parents/numéros
   const stats = scopedStudents.reduce((acc, s) => {
