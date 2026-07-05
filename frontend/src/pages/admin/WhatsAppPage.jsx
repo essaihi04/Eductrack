@@ -807,6 +807,42 @@ const WhatsAppPage = () => {
 
   useEffect(() => { if (activeTab === 'planning') fetchComms(); }, [activeTab, fetchComms]);
 
+  // Agrégats « vue d'ensemble » des communications (bandeau KPI du planificateur).
+  const commStats = useMemo(() => {
+    const now = Date.now();
+    const d = new Date();
+    const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    let targeted = 0, delivered = 0, read = 0, readApp = 0, readWa = 0, responded = 0, failed = 0;
+    let upcoming = 0, sending = 0, sentThisMonth = 0, sentTotal = 0;
+    comms.forEach((c) => {
+      const at = new Date(c.scheduled_at).getTime();
+      if (c.status === 'scheduled' && at > now) upcoming++;
+      if (c.status === 'sending') sending++;
+      if (c.status === 'sent') { sentTotal++; if (at >= monthStart) sentThisMonth++; }
+      failed += c.failed_count || 0;
+      if (c.metrics) {
+        targeted += c.metrics.targeted || 0;
+        delivered += c.metrics.sent || 0;
+        read += c.metrics.read || 0;
+        readApp += c.metrics.readApp || 0;
+        readWa += c.metrics.readWa || 0;
+        responded += c.metrics.responded || 0;
+      } else if (c.status === 'sent') {
+        // Repli sur les compteurs bruts si le tracking détaillé est absent
+        targeted += c.total_recipients || c.sent_count || 0;
+        delivered += c.sent_count || 0;
+      }
+    });
+    const pct = (n, den) => (den > 0 ? Math.round((n / den) * 100) : 0);
+    return {
+      targeted, delivered, read, readApp, readWa, responded, failed,
+      upcoming, sending, sentThisMonth, sentTotal,
+      deliveryRate: pct(delivered, targeted),
+      readRate: pct(read, delivered),
+      responseRate: pct(responded, delivered),
+    };
+  }, [comms]);
+
   // Sélection d'un fichier à joindre (image ou document) pour le planificateur
   const handleCommFileSelect = (e) => {
     const file = e.target.files[0];
@@ -1089,6 +1125,17 @@ const WhatsAppPage = () => {
   const formatFullDate = (dateStr) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+  // Retire les lignes contenant un lien brut (ex. « 📎 doc.pdf : https://…supabase.co/… »)
+  // du corps affiché : la pièce jointe est déjà présentée à part (media_url / file_name).
+  const stripMediaLinks = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    return text
+      .split('\n')
+      .filter((line) => !/https?:\/\/\S+/i.test(line))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   };
   const statusBadge = (status) => {
     const map = {
@@ -3339,6 +3386,52 @@ const WhatsAppPage = () => {
               </button>
             </div>
 
+            {/* Bandeau KPI — vue d'ensemble des communications */}
+            {comms.length > 0 && (
+              <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-3">
+                  <BarChart3 className="w-4 h-4 text-indigo-600" />
+                  <h3 className="text-sm font-semibold text-gray-800">Vue d'ensemble</h3>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {/* Portée & remise */}
+                  <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500"><Users className="w-3.5 h-3.5" /> Portée</div>
+                    <p className="text-xl font-bold text-gray-800 mt-1">{commStats.targeted}</p>
+                    <p className="text-[11px] text-gray-500">{commStats.delivered} atteint(s)</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700"><Send className="w-3.5 h-3.5" /> Remise</div>
+                    <p className="text-xl font-bold text-emerald-700 mt-1">{commStats.deliveryRate}%</p>
+                    <p className="text-[11px] text-emerald-600/80">{commStats.delivered}/{commStats.targeted}</p>
+                  </div>
+                  {/* Lecture & réponse */}
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-blue-700"><Eye className="w-3.5 h-3.5" /> Lecture</div>
+                    <p className="text-xl font-bold text-blue-700 mt-1">{commStats.readRate}%</p>
+                    <p className="text-[11px] text-blue-600/80">{commStats.read} vu(s)</p>
+                  </div>
+                  <div className="rounded-lg border border-violet-100 bg-violet-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-violet-700"><MessageSquare className="w-3.5 h-3.5" /> Réponse</div>
+                    <p className="text-xl font-bold text-violet-700 mt-1">{commStats.responseRate}%</p>
+                    <p className="text-[11px] text-violet-600/80">{commStats.responded} réponse(s)</p>
+                  </div>
+                  {/* Canal & échecs */}
+                  <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500"><Smartphone className="w-3.5 h-3.5" /> Canal (vus)</div>
+                    <p className="text-base font-bold text-gray-800 mt-1">📲 {commStats.readApp} · 💬 {commStats.readWa}</p>
+                    <p className="text-[11px] text-gray-500">{commStats.failed > 0 ? `${commStats.failed} échec(s)` : 'aucun échec'}</p>
+                  </div>
+                  {/* Planning */}
+                  <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-700"><Calendar className="w-3.5 h-3.5" /> Planning</div>
+                    <p className="text-xl font-bold text-amber-700 mt-1">{commStats.upcoming}</p>
+                    <p className="text-[11px] text-amber-600/80">à venir · {commStats.sentThisMonth} ce mois{commStats.sending ? ` · ${commStats.sending} en cours` : ''}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Liste des communications */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between mb-4">
@@ -3722,9 +3815,13 @@ const WhatsAppPage = () => {
               {detailMessage.message && (
                 <div>
                   <p className="text-xs font-semibold text-gray-500 mb-1">Message</p>
-                  <p className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">{detailMessage.message.content}</p>
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded">{stripMediaLinks(detailMessage.message.content)}</p>
                   {detailMessage.message.media_url && (
-                    <p className="text-xs text-blue-600 mt-1">Média : {detailMessage.message.file_name || detailMessage.message.message_type}</p>
+                    <a href={detailMessage.message.media_url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100 max-w-full">
+                      <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">{detailMessage.message.file_name || 'Pièce jointe'}</span>
+                    </a>
                   )}
                   <div className="flex gap-3 mt-2 text-xs text-gray-500">
                     <span>{formatFullDate(detailMessage.message.created_at)}</span>

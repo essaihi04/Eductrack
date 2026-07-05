@@ -203,8 +203,10 @@ export async function sendCommunication(comm) {
     ? `${pushBody}\n📎 ${comm.attachment_name || 'Pièce jointe'} : ${comm.attachment_url}`
     : pushBody;
 
-  // Tracking unifié : mêmes tables que les envois directs
-  const tracking = await createTrackingLog(comm, parents, buildMessage(comm, true));
+  // Tracking unifié : mêmes tables que les envois directs. On journalise le
+  // texte SANS le lien brut du document (il ferait doublon dans le détail admin
+  // avec la pièce jointe déjà tracée via media_url / file_name).
+  const tracking = await createTrackingLog(comm, parents, buildMessage(comm, false));
 
   const notifTitle = `${TYPE_PREFIX[comm.type] ? '⚠️ ' : '📣 '}${comm.title}`;
 
