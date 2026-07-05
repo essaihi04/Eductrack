@@ -1672,7 +1672,8 @@ const WhatsAppPage = () => {
                   {sendHistory.length === 0 ? (
                     <div className="px-4 py-8 text-center text-gray-400 text-sm">Aucun message envoyé</div>
                   ) : sendHistory.map(msg => (
-                    <div key={msg.id} className="px-4 py-3 hover:bg-gray-50">
+                    <div key={msg.id} onClick={() => viewDetails(msg.id)}
+                      className="px-4 py-3 hover:bg-gray-50 cursor-pointer" title="Voir qui a vu / répondu">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-gray-800 truncate">{msg.content || `[${typeLabel(msg.message_type)}]`}</p>
@@ -1698,10 +1699,22 @@ const WhatsAppPage = () => {
                                 {msg.category === 'transport' && '🚌 Transport'}
                               </span>
                             )}
-                            <span className="text-xs text-gray-500">{msg.sent_count}/{msg.total_recipients}</span>
+                            <span className="text-xs text-gray-500" title="Envoyés / ciblés">{msg.sent_count}/{msg.total_recipients}</span>
+                            {msg.metrics && (
+                              <>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${msg.metrics.read > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}
+                                  title={`Vus : ${msg.metrics.readApp} via l'app, ${msg.metrics.readWa} via WhatsApp`}>
+                                  👁 {msg.metrics.read} vu(s)
+                                  {msg.metrics.read > 0 && ` · 📲${msg.metrics.readApp} 💬${msg.metrics.readWa}`}
+                                </span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${msg.metrics.responded > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                                  💬 {msg.metrics.responded} rép.
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
-                        <button onClick={() => viewDetails(msg.id)} className="p-1 hover:bg-gray-200 rounded" title="Détails">
+                        <button onClick={(e) => { e.stopPropagation(); viewDetails(msg.id); }} className="p-1 hover:bg-gray-200 rounded" title="Détails">
                           <Eye className="w-4 h-4 text-gray-400" />
                         </button>
                       </div>
@@ -3082,22 +3095,46 @@ const WhatsAppPage = () => {
                   {comms.map((c) => {
                     const badge = c.type === 'urgent' ? '🔴' : c.type === 'deadline' ? '🟠' : '🟢';
                     const statusColor = c.status === 'sent' ? 'text-green-600' : c.status === 'failed' ? 'text-red-600' : c.status === 'sending' ? 'text-amber-600' : 'text-gray-500';
+                    const clickable = !!c.message_id; // envoi tracké → détail « qui a vu / répondu »
                     return (
-                      <div key={c.id} className="flex items-center justify-between gap-3 p-3 border border-gray-100 rounded-lg">
+                      <div key={c.id}
+                        onClick={clickable ? () => viewDetails(c.message_id) : undefined}
+                        title={clickable ? 'Voir qui a vu / répondu' : undefined}
+                        className={`flex items-center justify-between gap-3 p-3 border border-gray-100 rounded-lg ${clickable ? 'cursor-pointer hover:bg-gray-50' : ''}`}>
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-800 truncate">{badge} {c.title}</p>
                           <p className="text-xs text-gray-500">
                             {new Date(c.scheduled_at).toLocaleString('fr-FR')} ·
                             <span className={`ml-1 font-medium ${statusColor}`}>{c.status}</span>
-                            {c.status === 'sent' && ` · ${c.sent_count} envoyé(s)${c.failed_count ? `, ${c.failed_count} échec(s)` : ''}`}
+                            {c.status === 'sent' && !c.metrics && ` · ${c.sent_count} envoyé(s)${c.failed_count ? `, ${c.failed_count} échec(s)` : ''}`}
                           </p>
+                          {c.metrics && (
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium" title="Parents ciblés / atteints">
+                                🎯 {c.metrics.targeted} ciblé(s) · ✓ {c.metrics.sent} atteint(s)
+                              </span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${c.metrics.read > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}
+                                title={`${c.metrics.readApp} via l'app · ${c.metrics.readWa} via WhatsApp`}>
+                                👁 {c.metrics.read} vu(s){c.metrics.read > 0 && ` — 📲${c.metrics.readApp} 💬${c.metrics.readWa}`}
+                              </span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${c.metrics.responded > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                                💬 {c.metrics.responded} réponse(s)
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
+                          {clickable && (
+                            <button onClick={(e) => { e.stopPropagation(); viewDetails(c.message_id); }}
+                              className="p-1.5 text-gray-400 hover:bg-gray-100 rounded" title="Détails par parent">
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )}
                           {c.status === 'scheduled' && (
-                            <button onClick={() => sendCommNow(c.id)} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">Envoyer</button>
+                            <button onClick={(e) => { e.stopPropagation(); sendCommNow(c.id); }} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">Envoyer</button>
                           )}
                           {c.status !== 'sending' && (
-                            <button onClick={() => deleteComm(c.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); deleteComm(c.id); }} className="p-1.5 text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
                           )}
                         </div>
                       </div>
@@ -3440,13 +3477,22 @@ const WhatsAppPage = () => {
                 {/* Compteurs de suivi (vu / répondu) */}
                 {(() => {
                   const recs = detailMessage.recipients || [];
-                  const readCount = recs.filter(r => r.read_at).length;
+                  const sentCount = recs.filter(r => r.status === 'sent').length;
+                  const readApp = recs.filter(r => r.read_at && r.read_channel === 'app').length;
+                  const readWa = recs.filter(r => r.read_at && r.read_channel !== 'app').length;
+                  const readCount = readApp + readWa;
                   const respCount = recs.filter(r => r.responded_at).length;
+                  const pct = (n) => sentCount ? ` (${Math.round((n / sentCount) * 100)}%)` : '';
                   return (
                     <div className="flex items-center gap-2 mb-2 flex-wrap">
-                      <p className="text-xs font-semibold text-gray-500">Destinataires ({recs.length})</p>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium">👁 {readCount} vu(s)</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">💬 {respCount} réponse(s)</span>
+                      <p className="text-xs font-semibold text-gray-500">Destinataires ({recs.length} ciblés · {sentCount} atteints)</p>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-medium"
+                        title={`${readApp} via l'app · ${readWa} via WhatsApp`}>
+                        👁 {readCount} vu(s){pct(readCount)}{readCount > 0 && ` — 📲 ${readApp} · 💬 ${readWa}`}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">
+                        💬 {respCount} réponse(s){pct(respCount)}
+                      </span>
                     </div>
                   );
                 })()}

@@ -771,8 +771,33 @@ router.get('/history', async (req, res) => {
 
     const { data, error, count } = await query;
     if (error) throw error;
+    const messages = data || [];
 
-    res.json({ messages: data || [], total: count || 0, page: parseInt(page), limit: parseInt(limit) });
+    // Métriques de suivi par message : vus (par canal) et réponses
+    const msgIds = messages.map(m => m.id);
+    if (msgIds.length) {
+      const metricsByMsg = new Map();
+      const recs = await selectInChunks(
+        msgIds,
+        (chunk) => supabaseAdmin
+          .from('whatsapp_message_recipients')
+          .select('message_id, status, read_at, read_channel, responded_at')
+          .in('message_id', chunk)
+      );
+      recs.forEach(r => {
+        if (!metricsByMsg.has(r.message_id)) {
+          metricsByMsg.set(r.message_id, { targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0 });
+        }
+        const m = metricsByMsg.get(r.message_id);
+        m.targeted++;
+        if (r.status === 'sent') m.sent++;
+        if (r.read_at) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
+        if (r.responded_at) m.responded++;
+      });
+      messages.forEach(m => { m.metrics = metricsByMsg.get(m.id) || null; });
+    }
+
+    res.json({ messages, total: count || 0, page: parseInt(page), limit: parseInt(limit) });
   } catch (error) {
     console.error('Erreur historique:', error);
     res.status(500).json({ error: 'Erreur serveur' });

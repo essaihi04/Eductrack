@@ -7,6 +7,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { sendCommunication } from '../services/communicationScheduler.js';
+import { resolveCategoryForSending } from '../utils/whatsappCategory.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -14,7 +15,8 @@ router.use(authorize('admin', 'school_admin', 'pedagogical_manager', 'pedagogica
 
 const getSchoolId = (req) => (req.user.role === 'super_admin' ? null : req.user.school_id || null);
 
-// GET / — liste des communications de l'école
+// GET / — liste des communications de l'école, avec métriques de lecture
+// (ciblés / vus par canal / réponses) pour les envois trackés (message_id).
 router.get('/', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -26,7 +28,33 @@ router.get('/', async (req, res) => {
     if (schoolId) q = q.eq('school_id', schoolId);
     const { data, error } = await q;
     if (error) throw error;
-    res.json({ communications: data || [] });
+    const comms = data || [];
+
+    // Agrégats de tracking par message lié
+    const msgIds = comms.map((c) => c.message_id).filter(Boolean);
+    if (msgIds.length) {
+      const metricsByMsg = new Map();
+      for (let i = 0; i < msgIds.length; i += 100) {
+        const chunk = msgIds.slice(i, i + 100);
+        const { data: recs } = await supabaseAdmin
+          .from('whatsapp_message_recipients')
+          .select('message_id, status, read_at, read_channel, responded_at')
+          .in('message_id', chunk);
+        (recs || []).forEach((r) => {
+          if (!metricsByMsg.has(r.message_id)) {
+            metricsByMsg.set(r.message_id, { targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0 });
+          }
+          const m = metricsByMsg.get(r.message_id);
+          m.targeted++;
+          if (r.status === 'sent') m.sent++;
+          if (r.read_at) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
+          if (r.responded_at) m.responded++;
+        });
+      }
+      comms.forEach((c) => { if (c.message_id) c.metrics = metricsByMsg.get(c.message_id) || null; });
+    }
+
+    res.json({ communications: comms });
   } catch (e) {
     console.error('Erreur liste communications:', e);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -58,6 +86,8 @@ router.post('/', async (req, res) => {
       title,
       body: body || null,
       type,
+      // Boîte cible figée selon le rôle (le tracking whatsapp_messages en hérite)
+      category: resolveCategoryForSending(req.body?.category, req.user?.role),
       deadline_date: type === 'deadline' ? (deadline_date || null) : null,
       attachment_url: attachment_url || null,
       attachment_name: attachment_name || null,
@@ -66,11 +96,21 @@ router.post('/', async (req, res) => {
       status: 'scheduled',
     };
 
-    const { data, error } = await supabaseAdmin
+    let { data, error } = await supabaseAdmin
       .from('scheduled_communications')
       .insert(payload)
       .select()
       .single();
+    // Migration ADD_SCHEDULED_COMM_TRACKING pas encore appliquée → retente
+    // sans la colonne category (la création ne doit pas être bloquée).
+    if (error && /category/i.test(error.message || '')) {
+      delete payload.category;
+      ({ data, error } = await supabaseAdmin
+        .from('scheduled_communications')
+        .insert(payload)
+        .select()
+        .single());
+    }
     if (error) throw error;
 
     // Envoi immédiat si urgent / send_now (en arrière-plan)
