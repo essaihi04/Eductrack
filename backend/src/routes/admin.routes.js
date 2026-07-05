@@ -7,7 +7,7 @@ import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
-import { activeStudentIdSet, ensureEnrollment } from '../utils/enrollmentScope.js';
+import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 
@@ -989,13 +989,6 @@ router.post('/parents/:parentId/link', async (req, res) => {
       .single();
 
     if (error) throw error;
-
-    // Aligner la page Parents (scopée par année) : garantir l'inscription de l'année
-    // active pour que l'enfant lié compte dans le périmètre. N'écrase aucun statut.
-    const { data: stu } = await supabaseAdmin
-      .from('profiles').select('school_id, class_id').eq('id', student_id).eq('role', 'student').maybeSingle();
-    if (stu) await ensureEnrollment(stu.school_id || getSchoolId(req), student_id, stu.class_id, req.body.academic_year, req.user?.id);
-
     res.status(201).json(data);
   } catch (error) {
     console.error('Erreur link parent-student:', error);
@@ -1151,17 +1144,6 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
         { onConflict: 'parent_id,student_id' }
       );
     if (linkError) throw linkError;
-
-    // Aligner la page Parents (scopée par année) avec la page Élèves : garantir une
-    // inscription pour l'année active afin que le parent rattaché apparaisse aussitôt
-    // côté Parents. N'écrase aucun statut existant (RI/NR conservé).
-    await ensureEnrollment(
-      student.school_id || getSchoolId(req),
-      studentId,
-      student.class_id,
-      req.body.academic_year,
-      req.user?.id
-    );
 
     res.status(201).json({
       success: true,
@@ -1526,10 +1508,6 @@ router.post('/parents/import', async (req, res) => {
           { onConflict: 'parent_id,student_id' }
         );
       if (upsertLinkError) throw upsertLinkError;
-
-      // Aligner la page Parents (scopée par année) : garantir l'inscription de
-      // l'année active pour l'élève rattaché. N'écrase aucun statut existant.
-      await ensureEnrollment(getSchoolId(req), r.student.id, r.student.class_id, req.body.academic_year, req.user?.id);
 
       commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }

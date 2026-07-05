@@ -16,7 +16,6 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
-import { ensureEnrollment } from '../utils/enrollmentScope.js';
 
 const router = Router();
 
@@ -315,11 +314,6 @@ router.post('/students/:id/add-parents', async (req, res) => {
       { onConflict: 'parent_id,student_id' },
     );
     if (linkErr) throw linkErr;
-
-    // Aligner la page Parents (scopée par année) : garantir une inscription pour
-    // l'année active afin que le parent rattaché depuis la fiche d'inscription
-    // apparaisse aussitôt côté Parents. N'écrase aucun statut existant.
-    await ensureEnrollment(schoolId, id, student.class_id, req.body.academic_year, req.user?.id);
 
     res.status(201).json({ success: true, parent_id: parentId, createdParent, contactsCount: contacts.length });
   } catch (error) {
