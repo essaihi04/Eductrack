@@ -2392,10 +2392,13 @@ router.get('/students', async (req, res) => {
     // avec la classe de CETTE année ; sinon (ou si table absente) → profils courants.
     let students = null;
     if (academic_year) {
+      // Tolérant au format d'année (slash « 2026/2027 » ou tiret « 2026-2027 ») :
+      // student_enrollments est normalisé en slash mais la finance peut envoyer du tiret.
+      const yearVariants = [...new Set([academic_year, academic_year.replace('/', '-'), academic_year.replace('-', '/')])];
       let enrQ = supabaseAdmin
         .from('student_enrollments')
         .select('student_id, class_id, class:classes!student_enrollments_class_id_fkey(id, name)')
-        .eq('academic_year', academic_year)
+        .in('academic_year', yearVariants)
         .neq('status', 'NR');
       if (schoolId) enrQ = enrQ.eq('school_id', schoolId);
       if (class_id) enrQ = enrQ.eq('class_id', class_id);

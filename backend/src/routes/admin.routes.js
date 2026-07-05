@@ -7,7 +7,7 @@ import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
-import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+import { activeStudentIdSet, yearVariants } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 
@@ -5076,7 +5076,7 @@ router.get('/stats', async (req, res) => {
         let q = supabaseAdmin
           .from('student_enrollments')
           .select('student_id', { count: 'exact', head: true })
-          .eq('academic_year', academicYear)
+          .in('academic_year', yearVariants(academicYear))
           .neq('status', 'NR');
         if (schoolId) q = q.eq('school_id', schoolId);
         const { count, error } = await q;
@@ -7144,7 +7144,7 @@ router.get('/dashboard', async (req, res) => {
       let enrQ = supabaseAdmin
         .from('student_enrollments')
         .select('student_id')
-        .eq('academic_year', academicYear)
+        .in('academic_year', yearVariants(academicYear))
         .neq('status', 'NR');
       if (schoolId) enrQ = enrQ.eq('school_id', schoolId);
       const { data: enr, error: enrErr } = await enrQ;
