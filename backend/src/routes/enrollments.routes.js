@@ -2,6 +2,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireSchoolAdmin, requireSchoolAdminOrFinance } from '../middleware/auth.js';
 import { nextLevel, isTerminalLevel } from '../utils/levelProgression.js';
+import { yearVariants } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -127,9 +128,13 @@ router.get('/school-years', async (req, res) => {
         : { data: [] },
     ]);
 
-    (classesRes.data || []).forEach((r) => r.academic_year && years.add(r.academic_year));
-    (enrollRes.data || []).forEach((r) => r.academic_year && years.add(r.academic_year));
-    (configRes.data || []).forEach((r) => r.academic_year && years.add(r.academic_year));
+    // Normalise chaque année au format d'affichage slash "YYYY/YYYY" AVANT de
+    // dédupliquer : sinon "2026/2027" (inscriptions) et "2026-2027" (finance)
+    // apparaîtraient comme DEUX entrées distinctes dans le sélecteur.
+    const toSlash = (y) => String(y || '').replace('-', '/');
+    (classesRes.data || []).forEach((r) => r.academic_year && years.add(toSlash(r.academic_year)));
+    (enrollRes.data || []).forEach((r) => r.academic_year && years.add(toSlash(r.academic_year)));
+    (configRes.data || []).forEach((r) => r.academic_year && years.add(toSlash(r.academic_year)));
 
     const cur = currentYear();
     years.add(cur);
@@ -156,9 +161,9 @@ router.get('/funnel', async (req, res) => {
 
     const [{ data: cur }, { data: prevRows }] = await Promise.all([
       supabaseAdmin.from('student_enrollments').select('student_id, status')
-        .eq('school_id', schoolId).eq('academic_year', year),
+        .eq('school_id', schoolId).in('academic_year', yearVariants(year)),
       supabaseAdmin.from('student_enrollments').select('student_id, status')
-        .eq('school_id', schoolId).eq('academic_year', prev),
+        .eq('school_id', schoolId).in('academic_year', yearVariants(prev)),
     ]);
 
     const active = (cur || []).filter((e) => e.status !== 'NR');
@@ -193,7 +198,7 @@ router.get('/', async (req, res) => {
         class:classes!student_enrollments_class_id_fkey(id, name, level, filiere)
       `)
       .eq('school_id', schoolId)
-      .eq('academic_year', year);
+      .in('academic_year', yearVariants(year));
 
     if (req.query.class_id) q = q.eq('class_id', req.query.class_id);
 
@@ -225,7 +230,7 @@ router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
       .from('student_enrollments')
       .select('student_id, class_id')
       .eq('school_id', schoolId)
-      .eq('academic_year', from_year);
+      .in('academic_year', yearVariants(from_year));
     const fromClassByStudent = new Map((fromEnrollments || []).map((e) => [e.student_id, e.class_id]));
 
     let reinscrits = 0;
@@ -316,14 +321,14 @@ router.post('/auto-reinscription', requireSchoolAdmin, async (req, res) => {
       .from('classes')
       .select('id, name, level, school_type, filiere, academic_year')
       .eq('school_id', schoolId)
-      .eq('academic_year', from_year);
+      .in('academic_year', yearVariants(from_year));
 
     // 2) Classes déjà existantes pour l'année cible (idempotence).
     const { data: dstExisting } = await supabaseAdmin
       .from('classes')
       .select('id, name, level, filiere')
       .eq('school_id', schoolId)
-      .eq('academic_year', to_year);
+      .in('academic_year', yearVariants(to_year));
     const findDst = (name, level, filiere) =>
       (dstExisting || []).find((c) => c.level === level && (c.filiere || '') === (filiere || '') && c.name === name)
       || (dstExisting || []).find((c) => c.level === level && (c.filiere || '') === (filiere || ''));
@@ -363,7 +368,7 @@ router.post('/auto-reinscription', requireSchoolAdmin, async (req, res) => {
       .from('student_enrollments')
       .select('student_id, class_id, status')
       .eq('school_id', schoolId)
-      .eq('academic_year', from_year);
+      .in('academic_year', yearVariants(from_year));
     const srcLevelByClass = new Map((srcClasses || []).map((c) => [c.id, c.level]));
 
     let reinscrits = 0;
@@ -418,7 +423,7 @@ router.post('/reset', requireSchoolAdmin, async (req, res) => {
       .from('student_enrollments')
       .select('student_id, class_id, previous_class_id')
       .eq('school_id', schoolId)
-      .eq('academic_year', year);
+      .in('academic_year', yearVariants(year));
 
     // Remettre la classe courante du profil à la classe précédente (si elle pointe
     // encore vers la classe de l'année réinitialisée).
@@ -435,7 +440,7 @@ router.post('/reset', requireSchoolAdmin, async (req, res) => {
     // Supprimer les plans de frais et les inscriptions de l'année.
     await supabaseAdmin.from('student_fee_plans').delete().eq('school_id', schoolId).eq('academic_year', toDash(year));
     const { error: delErr } = await supabaseAdmin
-      .from('student_enrollments').delete().eq('school_id', schoolId).eq('academic_year', year);
+      .from('student_enrollments').delete().eq('school_id', schoolId).in('academic_year', yearVariants(year));
     if (delErr) throw delErr;
 
     res.json({ success: true, year, reverted, deleted: (enrollments || []).length });
@@ -613,7 +618,7 @@ router.post('/reinscribe/undo', requireSchoolAdminOrFinance, async (req, res) =>
       .from('student_enrollments')
       .select('id, class_id, previous_class_id')
       .eq('school_id', schoolId)
-      .eq('academic_year', year)
+      .in('academic_year', yearVariants(year))
       .eq('student_id', student_id)
       .maybeSingle();
     if (!enr) return res.status(404).json({ error: 'Aucune réinscription à annuler pour cet élève et cette année' });
