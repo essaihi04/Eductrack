@@ -835,6 +835,164 @@ router.get('/messages/:messageId/details', async (req, res) => {
   }
 });
 
+// POST /messages/:messageId/resend — renvoyer le même message à un sous-ensemble
+// des destinataires d'origine (non vus / non répondus / non distribués) via le
+// canal choisi (app | whatsapp | both). Crée une NOUVELLE entrée « relance »
+// pour ne pas écraser le suivi de l'envoi initial.
+router.post('/messages/:messageId/resend', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { messageId } = req.params;
+    const allowed = ['unread', 'unresponded', 'undelivered'];
+    const criteria = (Array.isArray(req.body?.criteria) ? req.body.criteria : [])
+      .filter((c) => allowed.includes(c));
+    if (!criteria.length) criteria.push('unread');
+    const channel = ['whatsapp', 'app', 'both'].includes(req.body?.channel) ? req.body.channel : 'app';
+    const wantWa = channel !== 'app';
+    const wantPush = channel !== 'whatsapp';
+
+    // 1. Message original (scoping école)
+    let mq = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id, school_id, content, media_url, file_name, message_type, category')
+      .eq('id', messageId);
+    if (schoolId) mq = mq.eq('school_id', schoolId);
+    const { data: orig, error: oErr } = await mq.single();
+    if (oErr || !orig) return res.status(404).json({ error: 'Message introuvable' });
+
+    // 2. Destinataires d'origine + filtrage (union des critères cochés)
+    const { data: recs, error: rErr } = await supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .select('parent_id, phone_e164, status, read_at, responded_at')
+      .eq('message_id', messageId);
+    if (rErr) throw rErr;
+    const match = (r) => criteria.some((c) =>
+      c === 'unread' ? !r.read_at
+        : c === 'unresponded' ? !r.responded_at
+        : c === 'undelivered' ? r.status !== 'sent' : false);
+    let targets = (recs || []).filter(match);
+    if (!wantWa) targets = targets.filter((r) => r.parent_id);        // app seul → besoin d'un parent
+    if (!wantPush) {                                                   // WhatsApp seul → numéro unique
+      const seen = new Set();
+      targets = targets.filter((r) => {
+        if (!r.phone_e164 || seen.has(r.phone_e164)) return false;
+        seen.add(r.phone_e164);
+        return true;
+      });
+    }
+    if (!targets.length) return res.status(400).json({ error: 'Aucun destinataire ne correspond aux critères pour ce canal.' });
+
+    // 3. Session WhatsApp requise si canal WA
+    if (wantWa && !(await isSessionReady(schoolId))) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Choisissez le canal Application ou connectez WhatsApp.' });
+    }
+
+    // 4. Nouvelle entrée « relance » + destinataires
+    const channelsCol = channel === 'app' ? 'push' : channel === 'whatsapp' ? 'whatsapp' : 'both';
+    const messageType = orig.message_type || 'text';
+    const { data: msgLog, error: logErr } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .insert({
+        school_id: orig.school_id,
+        sent_by: req.user.id,
+        message_type: messageType,
+        content: orig.content,
+        media_url: orig.media_url,
+        file_name: orig.file_name,
+        recipient_filter: { resend_of: messageId, criteria },
+        total_recipients: targets.length,
+        status: 'sending',
+        category: orig.category || 'general',
+        channels: channelsCol,
+      })
+      .select('id')
+      .single();
+    if (logErr) throw logErr;
+
+    const { data: inserted } = await supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .insert(targets.map((t) => ({ message_id: msgLog.id, parent_id: t.parent_id, phone_e164: t.phone_e164 || '', status: 'pending' })))
+      .select('id, parent_id, phone_e164');
+    const rowIdBy = new Map((inserted || []).map((r) => [`${r.parent_id || ''}|${r.phone_e164 || ''}`, r.id]));
+
+    let schoolName = 'votre école';
+    if (wantPush && orig.school_id) {
+      const { data: sc } = await supabaseAdmin.from('schools').select('name').eq('id', orig.school_id).maybeSingle();
+      if (sc?.name) schoolName = sc.name;
+    }
+
+    // Répond tout de suite, envoi en arrière-plan
+    res.json({ success: true, messageId: msgLog.id, totalRecipients: targets.length });
+
+    let sent = 0, failed = 0;
+    const notifTitle = `📣 ${schoolName}`;
+    const notifBody = orig.content || (messageType === 'image' ? '📷 Image' : (orig.media_url ? '📎 Document' : 'Nouvelle communication'));
+    const waSent = new Set();
+    for (const t of targets) {
+      const rowId = rowIdBy.get(`${t.parent_id || ''}|${t.phone_e164 || ''}`);
+      const patch = {};
+      let waOk = false, appOk = false, errorMsg = null;
+
+      if (wantPush && t.parent_id) {
+        try {
+          const { data: notif, error: nErr } = await supabaseAdmin
+            .from('notifications')
+            .insert({
+              user_id: t.parent_id,
+              type: 'message',
+              title: notifTitle,
+              message: notifBody,
+              data: { hub_message_id: msgLog.id, media_url: orig.media_url || null, file_name: orig.file_name || null, message_type: messageType },
+            })
+            .select('id')
+            .single();
+          if (nErr) throw nErr;
+          patch.notification_id = notif.id;
+          appOk = true;
+          const pr = await sendPushToUser(t.parent_id, {
+            title: notifTitle,
+            body: (orig.content || notifBody).slice(0, 140),
+            url: '/parent/notifications',
+            tag: `comm-msg-${msgLog.id}`,
+          });
+          patch.push_status = pr.sent > 0 ? 'sent' : 'no_subscription';
+        } catch (e) {
+          patch.push_status = 'failed';
+          errorMsg = `App: ${e.message || 'erreur'}`;
+        }
+      }
+
+      if (wantWa && t.phone_e164) {
+        if (waSent.has(t.phone_e164)) waOk = true;
+        else {
+          try {
+            const r = await sendUnified(orig.school_id, t.phone_e164, { messageType, message: orig.content, mediaUrl: orig.media_url, fileName: orig.file_name });
+            if (r.success) { waOk = true; waSent.add(t.phone_e164); patch.provider_msg_id = String(r.data?.msgId || ''); }
+            else errorMsg = [errorMsg, r.message || 'Erreur WhatsApp'].filter(Boolean).join(' | ');
+          } catch (e) {
+            errorMsg = [errorMsg, e.message || 'Erreur réseau'].filter(Boolean).join(' | ');
+          }
+        }
+      }
+
+      const reached = waOk || appOk;
+      if (reached) sent++; else failed++;
+      patch.status = reached ? 'sent' : 'failed';
+      if (reached) patch.sent_at = new Date().toISOString();
+      if (errorMsg) patch.error_message = errorMsg;
+      if (rowId) await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', rowId);
+      await supabaseAdmin.from('whatsapp_messages').update({ sent_count: sent, failed_count: failed, updated_at: new Date().toISOString() }).eq('id', msgLog.id);
+    }
+    await supabaseAdmin
+      .from('whatsapp_messages')
+      .update({ status: failed === targets.length ? 'failed' : 'completed', sent_count: sent, failed_count: failed, updated_at: new Date().toISOString() })
+      .eq('id', msgLog.id);
+  } catch (error) {
+    console.error('Erreur renvoi message:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ==================== INBOX / MESSAGE LOGS ====================
 
 // GET /message-logs — journaux des messages envoyés, depuis la base locale

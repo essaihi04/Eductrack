@@ -82,6 +82,11 @@ const WhatsAppPage = () => {
   const [historyPage, setHistoryPage] = useState(1);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [detailMessage, setDetailMessage] = useState(null);
+  const [showResend, setShowResend] = useState(false); // panneau « Renvoyer »
+  const [resendCriteria, setResendCriteria] = useState({ unread: true, unresponded: false, undelivered: false });
+  const [resendChannel, setResendChannel] = useState('app'); // app | whatsapp | both
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
   const [availableLevels, setAvailableLevels] = useState([]);
 
   // Parent selection
@@ -552,7 +557,50 @@ const WhatsAppPage = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDetailMessage(await res.json());
+      // Réinitialise le panneau « Renvoyer » à l'ouverture d'un détail
+      setShowResend(false); setResendMsg('');
+      setResendCriteria({ unread: true, unresponded: false, undelivered: false });
+      setResendChannel('app');
     } catch (error) { console.error('Erreur détails:', error); }
+  };
+
+  // Nombre de destinataires correspondant aux critères de renvoi (aperçu).
+  const resendMatchCount = (recs) => {
+    const crit = resendCriteria;
+    if (!crit.unread && !crit.unresponded && !crit.undelivered) return 0;
+    let matched = (recs || []).filter(r =>
+      (crit.unread && !r.read_at) ||
+      (crit.unresponded && !r.responded_at) ||
+      (crit.undelivered && r.status !== 'sent'));
+    if (resendChannel === 'app') matched = matched.filter(r => r.parent_id);
+    if (resendChannel === 'whatsapp') {
+      const seen = new Set();
+      matched = matched.filter(r => r.phone_e164 && !seen.has(r.phone_e164) && seen.add(r.phone_e164));
+    }
+    return matched.length;
+  };
+
+  const submitResend = async () => {
+    if (!detailMessage?.message?.id) return;
+    const criteria = Object.entries(resendCriteria).filter(([, v]) => v).map(([k]) => k);
+    if (!criteria.length) { setResendMsg('Choisissez au moins un critère.'); return; }
+    setResendBusy(true); setResendMsg('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/messages/${detailMessage.message.id}/resend`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ criteria, channel: resendChannel }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResendMsg(`✓ Renvoi lancé à ${data.totalRecipients} destinataire(s).`);
+        setShowResend(false);
+        if (activeTab === 'planning') fetchComms();
+      } else setResendMsg(data.error || 'Erreur lors du renvoi.');
+    } catch (e) {
+      setResendMsg('Erreur de connexion au serveur.');
+    } finally { setResendBusy(false); }
   };
 
   // ===================== INBOX LOGIC =====================
@@ -3860,6 +3908,68 @@ const WhatsAppPage = () => {
                   </div>
                 </div>
               )}
+
+              {/* Renvoyer à un sous-ensemble (non vus / non répondus / non distribués) */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50">
+                <button
+                  onClick={() => { setShowResend(v => !v); setResendMsg(''); }}
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg">
+                  <span className="flex items-center gap-2"><RefreshCw className="w-4 h-4 text-indigo-600" /> Renvoyer ce message</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showResend ? 'rotate-180' : ''}`} />
+                </button>
+                {showResend && (
+                  <div className="px-3 pb-3 pt-1 space-y-3 border-t border-gray-200">
+                    <div>
+                      <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Renvoyer aux parents…</p>
+                      <div className="flex flex-col gap-1.5">
+                        {[
+                          { k: 'unread', label: 'Non vus' },
+                          { k: 'unresponded', label: 'Non répondus' },
+                          { k: 'undelivered', label: 'Non distribués (échec)' },
+                        ].map(o => (
+                          <label key={o.k} className="flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" checked={resendCriteria[o.k]}
+                              onChange={(e) => setResendCriteria(c => ({ ...c, [o.k]: e.target.checked }))} />
+                            {o.label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Canal</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { k: 'app', icon: Smartphone, label: 'Application' },
+                          { k: 'whatsapp', icon: MessageSquare, label: 'WhatsApp' },
+                          { k: 'both', icon: Sparkles, label: 'Les deux' },
+                        ].map(c => {
+                          const CIcon = c.icon; const active = resendChannel === c.k;
+                          return (
+                            <button key={c.k} type="button" onClick={() => setResendChannel(c.k)}
+                              className={`flex items-center gap-1.5 justify-center rounded-lg border-2 px-2 py-1.5 text-xs font-medium transition ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}`}>
+                              <CIcon className="w-3.5 h-3.5" /> {c.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {(() => {
+                      const n = resendMatchCount(detailMessage.recipients);
+                      return (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-gray-500">{n} destinataire(s) ciblé(s)</span>
+                          <button onClick={submitResend} disabled={resendBusy || n === 0}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
+                            {resendBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Renvoyer
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+                {resendMsg && <p className="px-3 pb-2 text-xs text-gray-600">{resendMsg}</p>}
+              </div>
+
               <div>
                 {/* Compteurs de suivi (vu / répondu) */}
                 {(() => {
