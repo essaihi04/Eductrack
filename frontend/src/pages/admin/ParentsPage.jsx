@@ -494,7 +494,7 @@ const ParentsPage = () => {
       const res = await fetch(`${apiUrl}/api/admin/parents/${parentId}/link`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: linkStudentId, relationship: linkRelationship || null })
+        body: JSON.stringify({ student_id: linkStudentId, relationship: linkRelationship || null, academic_year: year })
       });
       if (res.ok) {
         setLinkingParentId(null);
@@ -692,7 +692,7 @@ const ParentsPage = () => {
       const postChunk = (f, rows, isDry) => fetch(`${apiUrl}/api/admin/parents/import`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(f.global ? { global: true, rows, dryRun: isDry } : { class_id: f.classId, rows, dryRun: isDry })
+        body: JSON.stringify(f.global ? { global: true, rows, dryRun: isDry, academic_year: year } : { class_id: f.classId, rows, dryRun: isDry, academic_year: year })
       });
 
       // Envoi d'un lot avec relance automatique (réseau / 5xx / timeout) → fiabilité.

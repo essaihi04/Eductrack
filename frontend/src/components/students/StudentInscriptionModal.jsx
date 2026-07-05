@@ -120,7 +120,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
       const savedParents = [];
       for (const c of contacts) {
         try {
-          await inscriptionsApi.addParents(saved.id, [c]);
+          await inscriptionsApi.addParents(saved.id, [c], academicYear);
           savedParents.push({
             first_name: c.name.split(' ').slice(1).join(' '), last_name: c.name.split(' ')[0],
             relationship: c.relationship, email: c.email, phone: c.phone,

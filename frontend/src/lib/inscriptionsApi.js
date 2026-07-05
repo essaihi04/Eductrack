@@ -49,7 +49,8 @@ export const inscriptionsApi = {
     if (!res.ok) throw new Error(d.error || 'Upload de la photo échoué');
     return d;
   },
-  // Rattache un ou plusieurs parents à un élève.
-  addParents: (studentId, contacts) =>
-    request(`/api/inscriptions/students/${studentId}/add-parents`, { method: 'POST', body: { contacts } }),
+  // Rattache un ou plusieurs parents à un élève (academicYear → garantit l'inscription
+  // de l'année active pour que le parent apparaisse aussitôt sur la page Parents).
+  addParents: (studentId, contacts, academicYear) =>
+    request(`/api/inscriptions/students/${studentId}/add-parents`, { method: 'POST', body: { contacts, academic_year: academicYear } }),
 };

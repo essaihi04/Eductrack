@@ -317,7 +317,7 @@ const StudentsPage = () => {
       const res = await fetch(`${apiUrl}/api/admin/students/${student.id}/add-parents`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contacts }),
+        body: JSON.stringify({ contacts, academic_year: toSlashYear(year) }),
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error || 'Erreur lors de l\'enregistrement'); return; }
@@ -535,7 +535,7 @@ const StudentsPage = () => {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const res = await fetch(`${apiUrl}/api/admin/students/${editingStudent.id}/add-parents`, {
         method: 'POST', headers: { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contacts: [{ name: fullName, phone: p.phone.trim(), relationship: p.relationship, cin: p.cin, profession: p.profession, maritalStatus: p.maritalStatus, email: p.email }] }),
+        body: JSON.stringify({ contacts: [{ name: fullName, phone: p.phone.trim(), relationship: p.relationship, cin: p.cin, profession: p.profession, maritalStatus: p.maritalStatus, email: p.email }], academic_year: toSlashYear(year) }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Échec du rattachement'); }
       const newParent = { id: `tmp_${Date.now()}`, first_name: p.firstName, last_name: p.lastName, relationship: p.relationship, phone: p.phone, email: p.email, cin: p.cin, profession: p.profession };
@@ -645,7 +645,7 @@ const StudentsPage = () => {
           try {
             const ar = await fetch(`${apiUrl}/api/admin/students/${savedStudent.id}/add-parents`, {
               method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contacts: [c] }),
+              body: JSON.stringify({ contacts: [c], academic_year: toSlashYear(year) }),
             });
             if (ar.ok) {
               savedParents.push({
