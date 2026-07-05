@@ -183,6 +183,20 @@ const WhatsAppPage = () => {
   const [commError, setCommError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Canal + pièce jointe importée + ciblage parents du planificateur
+  const [commChannels, setCommChannels] = useState('both');
+  const [commMediaFile, setCommMediaFile] = useState(null);
+  const [commMediaPreview, setCommMediaPreview] = useState(null);
+  const [commUploading, setCommUploading] = useState(false);
+  const commFileInputRef = useRef(null);
+  const [commClassDropdownOpen, setCommClassDropdownOpen] = useState(false);
+  const commClassDropdownRef = useRef(null);
+  const [commParentMode, setCommParentMode] = useState('all'); // 'all' | 'select'
+  const [commParentsList, setCommParentsList] = useState([]);
+  const [commSelectedParents, setCommSelectedParents] = useState([]);
+  const [commLoadingParents, setCommLoadingParents] = useState(false);
+  const [commParentSearch, setCommParentSearch] = useState('');
+  const [commRecipientCount, setCommRecipientCount] = useState(null);
 
   // ===================== TAB: REPORTS IA =====================
   const [reportSettings, setReportSettings] = useState(null);
@@ -243,6 +257,9 @@ const WhatsAppPage = () => {
       }
       if (parentDropdownRef.current && !parentDropdownRef.current.contains(e.target)) {
         setParentDropdownOpen(false);
+      }
+      if (commClassDropdownRef.current && !commClassDropdownRef.current.contains(e.target)) {
+        setCommClassDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClick);
@@ -790,33 +807,140 @@ const WhatsAppPage = () => {
 
   useEffect(() => { if (activeTab === 'planning') fetchComms(); }, [activeTab, fetchComms]);
 
+  // Sélection d'un fichier à joindre (image ou document) pour le planificateur
+  const handleCommFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCommMediaFile(file);
+    setCommForm((f) => ({ ...f, attachment_name: file.name }));
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (ev) => setCommMediaPreview(ev.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setCommMediaPreview(null);
+    }
+  };
+  const removeCommMedia = () => {
+    setCommMediaFile(null); setCommMediaPreview(null);
+    setCommForm((f) => ({ ...f, attachment_url: '', attachment_name: '' }));
+    if (commFileInputRef.current) commFileInputRef.current.value = '';
+  };
+  // Upload du fichier joint → renvoie { url, type }
+  const uploadCommMedia = async () => {
+    if (!commMediaFile) return { url: commForm.attachment_url || null, type: null };
+    const token = await getAuthToken();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        try {
+          const res = await fetch(`${apiUrl}/api/admin/whatsapp/upload`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64: ev.target.result, mimetype: commMediaFile.type }),
+          });
+          const data = await res.json();
+          if (data.success && data.publicUrl) {
+            resolve({ url: data.publicUrl, type: commMediaFile.type.startsWith('image/') ? 'image' : 'document' });
+          } else reject(new Error(data.error || 'Erreur upload'));
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = () => reject(new Error('Erreur lecture'));
+      reader.readAsDataURL(commMediaFile);
+    });
+  };
+
+  // Liste des parents pour le ciblage (mode « sélectionner »)
+  const fetchCommParents = useCallback(async () => {
+    if (commParentMode !== 'select') { setCommParentsList([]); return; }
+    setCommLoadingParents(true);
+    try {
+      const token = await getAuthToken();
+      const params = new URLSearchParams();
+      if (commClassIds.length > 0 && commClassIds.length < classes.length) {
+        params.append('class_ids', commClassIds.join(','));
+      }
+      if (year) params.append('academic_year', year);
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients-list?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setCommParentsList(data.parents || []);
+      setCommSelectedParents((data.parents || []).map((p) => p.parent_id));
+    } catch (e) { console.error('Erreur parents comm:', e); }
+    finally { setCommLoadingParents(false); }
+  }, [apiUrl, commParentMode, commClassIds, classes.length, year]);
+
+  useEffect(() => { fetchCommParents(); }, [fetchCommParents]);
+
+  // Compteur de destinataires (mode « tous ») selon les classes choisies
+  const fetchCommCount = useCallback(async () => {
+    if (commParentMode === 'select') { setCommRecipientCount(commSelectedParents.length); return; }
+    try {
+      const token = await getAuthToken();
+      const params = new URLSearchParams();
+      if (commClassIds.length > 0 && commClassIds.length < classes.length) {
+        params.append('class_ids', commClassIds.join(','));
+      }
+      if (year) params.append('academic_year', year);
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setCommRecipientCount(Math.max(data.parentCount ?? 0, data.count ?? 0));
+    } catch { setCommRecipientCount(null); }
+  }, [apiUrl, commParentMode, commSelectedParents.length, commClassIds, classes.length, year]);
+
+  useEffect(() => { if (activeTab === 'planning') fetchCommCount(); }, [activeTab, fetchCommCount]);
+
   const submitComm = async () => {
     if (!commForm.title) { setCommError('Titre requis'); return; }
     if (!commForm.send_now && commForm.type !== 'urgent' && !commForm.scheduled_at) {
       setCommError('Choisissez une date d\'envoi ou cochez « Envoyer maintenant »'); return;
     }
+    if (commParentMode === 'select' && commSelectedParents.length === 0) {
+      setCommError('Sélectionnez au moins un parent'); return;
+    }
     setCommSaving(true); setCommError('');
     try {
+      // Upload de la pièce jointe importée (le cas échéant)
+      let attachment_url = commForm.attachment_url || null;
+      let attachment_type = null;
+      if (commMediaFile) {
+        setCommUploading(true);
+        const up = await uploadCommMedia();
+        attachment_url = up.url; attachment_type = up.type;
+        setCommUploading(false);
+      }
+      // Cible : parents sélectionnés > classes > toute l'école
+      const target = commParentMode === 'select'
+        ? { parent_ids: commSelectedParents }
+        : (commClassIds.length ? { class_ids: commClassIds } : { all: true });
+
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/communications`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...commForm,
+          attachment_url,
+          attachment_type,
+          channels: commChannels,
           scheduled_at: commForm.scheduled_at ? new Date(commForm.scheduled_at).toISOString() : null,
-          target: commClassIds.length ? { class_ids: commClassIds } : { all: true },
+          target,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setCommForm({ title: '', body: '', type: 'normal', deadline_date: '', attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false });
-        setCommClassIds([]);
+        setCommClassIds([]); removeCommMedia();
+        setCommParentMode('all'); setCommSelectedParents([]); setCommParentsList([]);
         fetchComms();
       } else setCommError(data.error || 'Erreur lors de la création');
     } catch (e) {
       console.error('Erreur création comm:', e);
       setCommError('Erreur de connexion au serveur');
-    } finally { setCommSaving(false); }
+    } finally { setCommSaving(false); setCommUploading(false); }
   };
 
   const deleteComm = async (id) => {
@@ -2981,8 +3105,9 @@ const WhatsAppPage = () => {
                 <Calendar className="w-5 h-5 text-indigo-600" /> Planifier une communication
               </h2>
               <p className="text-xs text-gray-500">
-                Envoyée automatiquement par <strong>push (gratuit)</strong> aux parents qui ont l'app,
-                sinon par <strong>WhatsApp</strong>. Un rappel d'installation de l'app est ajouté pour les autres.
+                Préparez un message à envoyer plus tard (ou tout de suite). Choisissez le canal,
+                importez une image ou un document, ciblez des classes ou des parents précis.
+                Le suivi <strong>vu / répondu</strong> apparaît ensuite comme pour les envois directs.
               </p>
 
               <div>
@@ -3022,31 +3147,165 @@ const WhatsAppPage = () => {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-gray-700 block mb-1">Lien du document (optionnel)</label>
-                  <input type="text" value={commForm.attachment_url}
-                    onChange={(e) => setCommForm({ ...commForm, attachment_url: e.target.value })}
-                    placeholder="https://…"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-gray-700 block mb-1">Nom du document</label>
-                  <input type="text" value={commForm.attachment_name}
-                    onChange={(e) => setCommForm({ ...commForm, attachment_name: e.target.value })}
-                    placeholder="Ex: Convocation.pdf"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+              {/* Canal d'envoi */}
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1.5">Canal d'envoi</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[
+                    { k: 'push', icon: Smartphone, title: 'Application', desc: 'Push + boîte in-app — gratuit', ring: 'border-indigo-500 bg-indigo-50', dot: 'text-indigo-600' },
+                    { k: 'whatsapp', icon: MessageSquare, title: 'WhatsApp', desc: 'Message WhatsApp', ring: 'border-green-500 bg-green-50', dot: 'text-green-600' },
+                    { k: 'both', icon: Sparkles, title: 'Les deux', desc: 'Portée maximale', ring: 'border-violet-500 bg-violet-50', dot: 'text-violet-600' },
+                  ].map((c) => {
+                    const CIcon = c.icon; const active = commChannels === c.k;
+                    return (
+                      <button key={c.k} type="button" onClick={() => setCommChannels(c.k)}
+                        className={`text-left rounded-lg border-2 p-2.5 transition-all ${active ? c.ring : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                        <div className={`flex items-center gap-1.5 text-sm font-semibold ${active ? c.dot : 'text-gray-700'}`}>
+                          <CIcon className="w-4 h-4" /> {c.title}
+                          {active && <CheckCircle className="w-3.5 h-3.5 ml-auto" />}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">{c.desc}</p>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
+              {/* Pièce jointe importée (image ou document → vraie PJ WhatsApp) */}
+              <div>
+                <label className="text-xs font-semibold text-gray-700 block mb-1">Pièce jointe (image ou document)</label>
+                {commMediaFile ? (
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    {commMediaPreview ? (
+                      <img src={commMediaPreview} alt="preview" className="w-14 h-14 object-cover rounded" />
+                    ) : (
+                      <div className="w-14 h-14 bg-indigo-100 rounded flex items-center justify-center">
+                        <FileText className="w-6 h-6 text-indigo-600" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{commForm.attachment_name}</p>
+                      <p className="text-xs text-gray-500">{commMediaFile.type.startsWith('image/') ? 'Image' : 'Document'} — envoyé en pièce jointe</p>
+                    </div>
+                    <button onClick={removeCommMedia} className="p-1 hover:bg-gray-200 rounded"><X className="w-4 h-4 text-gray-500" /></button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input ref={commFileInputRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                      onChange={handleCommFileSelect} className="hidden" />
+                    <button type="button" onClick={() => commFileInputRef.current?.click()}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
+                      <Paperclip className="w-4 h-4" /> Importer un fichier
+                    </button>
+                    <span className="text-[11px] text-gray-400">Image, PDF, Word, Excel… (pas un lien)</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Destinataires : classes (cases) + option parents précis + compteur */}
               <div>
                 <label className="text-xs font-semibold text-gray-700 block mb-1">Destinataires</label>
-                <select multiple value={commClassIds}
-                  onChange={(e) => setCommClassIds(Array.from(e.target.selectedOptions, (o) => o.value))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 h-24">
-                  {(classes || []).map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-                </select>
-                <p className="text-[11px] text-gray-400 mt-1">Aucune sélection = toute l'école. (Ctrl/Cmd pour multi-sélection)</p>
+                <div className="relative" ref={commClassDropdownRef}>
+                  <button type="button" onClick={() => setCommClassDropdownOpen(!commClassDropdownOpen)}
+                    className="w-full flex items-center justify-between rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white hover:bg-gray-50">
+                    <span className="truncate">
+                      {commClassIds.length === 0 ? 'Toute l\'école'
+                        : commClassIds.length === 1 ? (classes.find((c) => c.id === commClassIds[0])?.name || '1 classe')
+                        : `${commClassIds.length} classes`}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${commClassDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {commClassDropdownOpen && (
+                    <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                      <label className="flex items-center gap-2 px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100">
+                        <input type="checkbox" checked={commClassIds.length === 0}
+                          onChange={() => setCommClassIds([])} className="w-4 h-4 rounded text-indigo-600" />
+                        <span className="text-sm font-semibold text-indigo-700">Toute l'école</span>
+                      </label>
+                      {(classes || []).map((c) => (
+                        <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer">
+                          <input type="checkbox" checked={commClassIds.includes(c.id)}
+                            onChange={() => setCommClassIds((prev) => prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id])}
+                            className="w-4 h-4 rounded text-indigo-600" />
+                          <span className="text-sm text-gray-700">{c.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Mode de ciblage : tous les parents des classes, ou une sélection */}
+                <div className="flex items-center gap-4 mt-2">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" name="commParentMode" checked={commParentMode === 'all'}
+                      onChange={() => { setCommParentMode('all'); setCommParentsList([]); }} className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="text-sm text-gray-700">Tous les parents</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" name="commParentMode" checked={commParentMode === 'select'}
+                      onChange={() => setCommParentMode('select')} className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="text-sm text-gray-700">Sélectionner des parents</span>
+                  </label>
+                  {commRecipientCount != null && (
+                    <span className="ml-auto text-xs font-medium text-gray-600 flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5 text-indigo-600" /> {commRecipientCount} destinataire(s)
+                    </span>
+                  )}
+                </div>
+
+                {commParentMode === 'select' && (
+                  <div className="mt-2 space-y-2">
+                    {commLoadingParents ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-500"><RefreshCw className="w-4 h-4 animate-spin" /> Chargement…</div>
+                    ) : commParentsList.length === 0 ? (
+                      <p className="text-sm text-gray-500">Aucun parent pour cette sélection.</p>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <input type="text" placeholder="Rechercher un parent…" value={commParentSearch}
+                            onChange={(e) => setCommParentSearch(e.target.value)}
+                            className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500" />
+                          <button type="button" onClick={() => setCommSelectedParents(commParentsList.map((p) => p.parent_id))}
+                            className="px-3 py-1.5 text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100">Tout</button>
+                          <button type="button" onClick={() => setCommSelectedParents([])}
+                            className="px-3 py-1.5 text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-100">Aucun</button>
+                        </div>
+                        <div className="max-h-52 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                          {commParentsList
+                            .filter((p) => {
+                              if (!commParentSearch) return true;
+                              const q = commParentSearch.toLowerCase();
+                              return p.name.toLowerCase().includes(q) || p.phone_whatsapp?.includes(q)
+                                || p.children?.some((c) => c.name.toLowerCase().includes(q) || c.class_name?.toLowerCase().includes(q));
+                            })
+                            .map((parent) => (
+                              <label key={parent.parent_id}
+                                className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-indigo-50/50 ${commSelectedParents.includes(parent.parent_id) ? 'bg-indigo-50/30' : ''}`}>
+                                <input type="checkbox" checked={commSelectedParents.includes(parent.parent_id)}
+                                  onChange={() => setCommSelectedParents((prev) => prev.includes(parent.parent_id) ? prev.filter((x) => x !== parent.parent_id) : [...prev, parent.parent_id])}
+                                  className="w-4 h-4 rounded text-indigo-600 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-800 truncate flex items-center gap-1.5">
+                                    {parent.name}
+                                    {parent.has_app && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium">📲 App</span>}
+                                    {!parent.phone_whatsapp && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Sans WhatsApp</span>}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {parent.phone_whatsapp || 'App uniquement'}
+                                    {parent.children?.length > 0 && (
+                                      <span className="ml-2 text-gray-400">— {parent.children.map((c) => `${c.name} (${c.class_name})`).join(', ')}</span>
+                                    )}
+                                  </p>
+                                </div>
+                              </label>
+                            ))}
+                        </div>
+                        <p className="text-xs text-gray-500">{commSelectedParents.length} / {commParentsList.length} sélectionné(s)</p>
+                      </>
+                    )}
+                  </div>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1">Le canal est choisi automatiquement par parent : push si l'app est installée, sinon WhatsApp (selon le canal ci-dessus).</p>
               </div>
 
               {commForm.type !== 'urgent' && (
@@ -3073,10 +3332,10 @@ const WhatsAppPage = () => {
                 </div>
               )}
 
-              <button onClick={submitComm} disabled={commSaving}
+              <button onClick={submitComm} disabled={commSaving || commUploading}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
-                {commSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {commForm.type === 'urgent' || commForm.send_now ? 'Envoyer' : 'Planifier'}
+                {commSaving || commUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {commUploading ? 'Upload…' : commForm.type === 'urgent' || commForm.send_now ? 'Envoyer' : 'Planifier'}
               </button>
             </div>
 

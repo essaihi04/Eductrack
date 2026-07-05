@@ -2,16 +2,20 @@
  * Planificateur de communications admin (docs, événements, annonces).
  *
  * Cron chaque minute → envoie les communications dont scheduled_at est échu.
- * Chaque parent ciblé est routé par notificationRouter :
- *   app → push gratuit ; sinon WhatsApp (gratuit si fenêtre 24h, sinon payant).
- * Le nudge « installez l'app / répondez » est ajouté automatiquement par le
- * routeur pour les parents sans app.
+ * Canal choisi par l'admin (comm.channels) : 'push' (app), 'whatsapp' ou 'both'.
+ *   - app      : notification in-app + push web
+ *   - whatsapp : texte, ou VRAIE pièce jointe (image/PDF) si un fichier a été
+ *                importé (comm.attachment_type), sauf opt-out
+ * Écrit dans whatsapp_messages / whatsapp_message_recipients → suivi unifié
+ * (historique, « qui a vu / répondu », dashboard).
  */
 
 import cron from 'node-cron';
 import { supabaseAdmin } from '../config/supabase.js';
-import { routeNotification } from './notificationRouter.js';
+import { whatsappOptedOut } from './notificationRouter.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+import { sendText, sendImage, sendDocument } from './whatsapp/index.js';
+import { sendPushToUser } from './webPush.js';
 
 // Année scolaire courante au format slash "YYYY/YYYY" (rentrée en septembre).
 const currentSchoolYear = () => {
@@ -32,8 +36,15 @@ function formatDateFr(iso) {
   return `${d}/${m}/${y}`;
 }
 
-/** Construit le texte WhatsApp/push d'une communication. */
-function buildMessage(comm) {
+/**
+ * Construit le texte d'une communication.
+ * @param {object} comm
+ * @param {boolean} withLink  inclure le lien du document en texte
+ *   (true pour push/app et pour les pièces jointes « lien seul » ;
+ *    false quand le fichier part en VRAIE pièce jointe WhatsApp → le lien
+ *    ferait doublon avec l'image/PDF joint).
+ */
+function buildMessage(comm, withLink = true) {
   const lines = [];
   lines.push(`${TYPE_PREFIX[comm.type] || ''}*${comm.title}*`);
   if (comm.body) { lines.push(''); lines.push(comm.body); }
@@ -41,15 +52,40 @@ function buildMessage(comm) {
     lines.push('');
     lines.push(`📅 *Date limite : ${formatDateFr(comm.deadline_date)}*`);
   }
-  if (comm.attachment_url) {
+  if (comm.attachment_url && withLink) {
     lines.push('');
     lines.push(`📎 ${comm.attachment_name || 'Document'} : ${comm.attachment_url}`);
   }
   return lines.join('\n');
 }
 
+/** Numéro WhatsApp principal pour une liste de parents (Map parent_id → phone). */
+async function phonesForParents(ids) {
+  const phoneByParent = new Map();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { data: contacts } = await supabaseAdmin
+      .from('parent_contacts')
+      .select('parent_id, phone_e164, is_primary')
+      .in('parent_id', chunk)
+      .eq('channel', 'whatsapp')
+      .order('is_primary', { ascending: false });
+    (contacts || []).forEach((c) => {
+      if (!phoneByParent.has(c.parent_id)) phoneByParent.set(c.parent_id, c.phone_e164);
+    });
+  }
+  return phoneByParent;
+}
+
 /** Résout la liste des parents ciblés { parent_id, phone } pour une école. */
 async function resolveTargetParents(schoolId, target) {
+  // 0. Ciblage direct de parents (sélection manuelle dans l'UI)
+  if (Array.isArray(target?.parent_ids) && target.parent_ids.length) {
+    const ids = [...new Set(target.parent_ids)];
+    const phoneByParent = await phonesForParents(ids);
+    return ids.map((pid) => ({ parent_id: pid, phone: phoneByParent.get(pid) || null }));
+  }
+
   // 1. Élèves de l'école (filtrés par classes si fourni)
   let q = supabaseAdmin
     .from('profiles')
@@ -81,20 +117,7 @@ async function resolveTargetParents(schoolId, target) {
 
   // 3. Numéro WhatsApp principal par parent
   const ids = [...parentIds];
-  const phoneByParent = new Map();
-  for (let i = 0; i < ids.length; i += 200) {
-    const chunk = ids.slice(i, i + 200);
-    const { data: contacts } = await supabaseAdmin
-      .from('parent_contacts')
-      .select('parent_id, phone_e164, is_primary')
-      .in('parent_id', chunk)
-      .eq('channel', 'whatsapp')
-      .order('is_primary', { ascending: false });
-    (contacts || []).forEach((c) => {
-      if (!phoneByParent.has(c.parent_id)) phoneByParent.set(c.parent_id, c.phone_e164);
-    });
-  }
-
+  const phoneByParent = await phonesForParents(ids);
   return ids.map((pid) => ({ parent_id: pid, phone: phoneByParent.get(pid) || null }));
 }
 
@@ -119,7 +142,7 @@ async function createTrackingLog(comm, parents, text) {
         total_recipients: parents.length,
         status: 'sending',
         category: comm.category || 'general',
-        channels: 'both', // routage auto : push si app, sinon WhatsApp
+        channels: ['whatsapp', 'push', 'both'].includes(comm.channels) ? comm.channels : 'both',
       })
       .select('id')
       .single();
@@ -161,60 +184,101 @@ export async function sendCommunication(comm) {
     .eq('id', comm.id);
 
   const parents = await resolveTargetParents(comm.school_id, comm.target || {});
-  const text = buildMessage(comm);
+
+  // Canaux demandés (défaut : les deux, pour la portée maximale)
+  const channels = ['whatsapp', 'push', 'both'].includes(comm.channels) ? comm.channels : 'both';
+  const wantWa = channels !== 'push';
+  const wantPush = channels !== 'whatsapp';
+  const isImage = comm.attachment_type === 'image' && comm.attachment_url;
+  const isDoc = comm.attachment_type === 'document' && comm.attachment_url;
+  const hasRealAttachment = isImage || isDoc;
+
+  // Texte WhatsApp : sans le lien si le fichier part en vraie pièce jointe
+  // (sinon doublon image/PDF + lien) ; push : toujours avec le lien.
+  const waText = buildMessage(comm, !hasRealAttachment);
   const pushBody = comm.body
     ? comm.body.slice(0, 120)
     : (comm.type === 'deadline' && comm.deadline_date ? `Date limite : ${formatDateFr(comm.deadline_date)}` : 'Nouvelle communication');
+  const pushNotifBody = comm.attachment_url
+    ? `${pushBody}\n📎 ${comm.attachment_name || 'Pièce jointe'} : ${comm.attachment_url}`
+    : pushBody;
 
   // Tracking unifié : mêmes tables que les envois directs
-  const tracking = await createTrackingLog(comm, parents, text);
+  const tracking = await createTrackingLog(comm, parents, buildMessage(comm, true));
+
+  const notifTitle = `${TYPE_PREFIX[comm.type] ? '⚠️ ' : '📣 '}${comm.title}`;
 
   let sent = 0, failed = 0;
   for (const p of parents) {
     const rowId = tracking?.rowIdByParent?.get(p.parent_id);
-    try {
-      const routed = await routeNotification({
-        parentId: p.parent_id,
-        schoolId: comm.school_id,
-        phone: p.phone,
-        push: {
-          title: `${TYPE_PREFIX[comm.type] ? '⚠️ ' : ''}${comm.title}`,
+    const patch = {};
+    let waOk = false, appOk = false, errorMsg = null;
+
+    // 1. Canal app : notification in-app (lisible même sans push) + push
+    if (wantPush && p.parent_id) {
+      try {
+        const { data: notif, error: notifErr } = await supabaseAdmin
+          .from('notifications')
+          .insert({
+            user_id: p.parent_id,
+            type: 'message',
+            title: notifTitle,
+            message: pushNotifBody,
+            data: {
+              hub_message_id: tracking?.messageId || null,
+              communication_id: comm.id,
+              media_url: comm.attachment_url || null,
+              file_name: comm.attachment_name || null,
+            },
+          })
+          .select('id')
+          .single();
+        if (notifErr) throw notifErr;
+        patch.notification_id = notif.id;
+        appOk = true;
+        const pr = await sendPushToUser(p.parent_id, {
+          title: notifTitle,
           body: pushBody,
           url: '/parent/notifications',
           tag: `comm-${comm.id}`,
-        },
-        whatsappText: text,
-      });
-      if (routed.success) sent++;
-      else if (routed.channel !== 'optout') failed++;
+        });
+        patch.push_status = pr.sent > 0 ? 'sent' : 'no_subscription';
+      } catch (e) {
+        patch.push_status = 'failed';
+        errorMsg = `App: ${e.message || 'erreur'}`;
+      }
+    }
 
-      if (rowId) {
-        const patch = routed.success
-          ? {
-              status: 'sent',
-              sent_at: new Date().toISOString(),
-              // Canal réellement utilisé → accusés WhatsApp / lecture app
-              ...(routed.channel === 'push'
-                ? { push_status: 'sent' }
-                : { provider_msg_id: routed.raw?.data?.msgId ? String(routed.raw.data.msgId) : null }),
-            }
-          : {
-              status: 'failed',
-              error_message: routed.channel === 'optout'
-                ? 'Opt-out WhatsApp (STOP) et pas d\'app installée'
-                : (routed.raw?.message || 'Échec envoi'),
-            };
-        await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', rowId);
+    // 2. Canal WhatsApp (sauf opt-out) : vraie pièce jointe si fichier importé
+    if (wantWa && p.phone) {
+      try {
+        if (await whatsappOptedOut(p.parent_id)) {
+          errorMsg = [errorMsg, 'Opt-out WhatsApp (STOP)'].filter(Boolean).join(' | ');
+        } else {
+          let r;
+          if (isImage) r = await sendImage(comm.school_id, p.phone, comm.attachment_url, waText);
+          else if (isDoc) r = await sendDocument(comm.school_id, p.phone, comm.attachment_url, comm.attachment_name || 'document.pdf', waText);
+          else r = await sendText(comm.school_id, p.phone, waText);
+          if (r?.success) {
+            waOk = true;
+            if (r.data?.msgId) patch.provider_msg_id = String(r.data.msgId);
+          } else {
+            errorMsg = [errorMsg, r?.message || 'Échec WhatsApp'].filter(Boolean).join(' | ');
+          }
+        }
+      } catch (e) {
+        errorMsg = [errorMsg, e.message || 'Erreur réseau'].filter(Boolean).join(' | ');
       }
-    } catch (e) {
-      failed++;
-      console.error(`[commScheduler] parent ${p.parent_id}:`, e.message);
-      if (rowId) {
-        await supabaseAdmin
-          .from('whatsapp_message_recipients')
-          .update({ status: 'failed', error_message: e.message || 'Erreur' })
-          .eq('id', rowId);
-      }
+    }
+
+    const reached = waOk || appOk;
+    if (reached) sent++; else failed++;
+    patch.status = reached ? 'sent' : 'failed';
+    if (reached) patch.sent_at = new Date().toISOString();
+    if (errorMsg) patch.error_message = errorMsg;
+
+    if (rowId) {
+      await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', rowId);
     }
 
     if (tracking) {

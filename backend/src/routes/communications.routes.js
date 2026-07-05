@@ -69,7 +69,7 @@ router.post('/', async (req, res) => {
 
     const {
       title, body, type = 'normal', deadline_date,
-      attachment_url, attachment_name, target, scheduled_at, send_now,
+      attachment_url, attachment_name, attachment_type, channels, target, scheduled_at, send_now,
     } = req.body || {};
 
     if (!title) return res.status(400).json({ error: 'Titre requis' });
@@ -80,6 +80,10 @@ router.post('/', async (req, res) => {
     const when = (send_now || type === 'urgent') ? new Date().toISOString() : scheduled_at;
     if (!when) return res.status(400).json({ error: 'Date d\'envoi requise' });
 
+    // Cible valide = toute l'école, des classes, ou des parents sélectionnés
+    const validTarget = target && (target.all || target.class_ids?.length || target.parent_ids?.length)
+      ? target : { all: true };
+
     const payload = {
       school_id: schoolId,
       created_by: req.user.id,
@@ -88,10 +92,12 @@ router.post('/', async (req, res) => {
       type,
       // Boîte cible figée selon le rôle (le tracking whatsapp_messages en hérite)
       category: resolveCategoryForSending(req.body?.category, req.user?.role),
+      channels: ['whatsapp', 'push', 'both'].includes(channels) ? channels : 'both',
       deadline_date: type === 'deadline' ? (deadline_date || null) : null,
       attachment_url: attachment_url || null,
       attachment_name: attachment_name || null,
-      target: target && (target.all || target.class_ids?.length) ? target : { all: true },
+      attachment_type: ['image', 'document'].includes(attachment_type) ? attachment_type : null,
+      target: validTarget,
       scheduled_at: when,
       status: 'scheduled',
     };
@@ -101,10 +107,12 @@ router.post('/', async (req, res) => {
       .insert(payload)
       .select()
       .single();
-    // Migration ADD_SCHEDULED_COMM_TRACKING pas encore appliquée → retente
-    // sans la colonne category (la création ne doit pas être bloquée).
-    if (error && /category/i.test(error.message || '')) {
+    // Migrations pas toutes appliquées → retente sans les colonnes récentes
+    // (la création ne doit jamais être bloquée par une colonne manquante).
+    if (error && /column|category|channels|attachment_type/i.test(error.message || '')) {
       delete payload.category;
+      delete payload.channels;
+      delete payload.attachment_type;
       ({ data, error } = await supabaseAdmin
         .from('scheduled_communications')
         .insert(payload)
