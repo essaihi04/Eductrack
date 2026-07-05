@@ -48,14 +48,7 @@ const DashboardLayout = () => {
     const checkOrientation = () => {
       // Détecter le mode paysage : largeur > hauteur ET hauteur < 600px (typique mobile)
       const isMobileLandscape = window.innerWidth > window.innerHeight && window.innerHeight < 600;
-      
-      console.log('[DashboardLayout] Orientation check:', {
-        width: window.innerWidth,
-        height: window.innerHeight,
-        isMobileLandscape,
-        pathname: location.pathname
-      });
-      
+
       setIsLandscape(isMobileLandscape);
       
       // Fermer automatiquement la sidebar en mode paysage
