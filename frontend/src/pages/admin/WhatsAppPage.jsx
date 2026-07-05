@@ -174,6 +174,7 @@ const WhatsAppPage = () => {
   // ===================== TAB: PLANNING (communications) =====================
   const [comms, setComms] = useState([]);
   const [commsLoading, setCommsLoading] = useState(false);
+  const [showCommForm, setShowCommForm] = useState(false); // ouvre la fenêtre de planification
   const [commForm, setCommForm] = useState({
     title: '', body: '', type: 'normal', deadline_date: '',
     attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false,
@@ -971,6 +972,7 @@ const WhatsAppPage = () => {
         setCommForm({ title: '', body: '', type: 'normal', deadline_date: '', attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false });
         setCommClassIds([]); removeCommMedia();
         setCommParentMode('all'); setCommSelectedParents([]); setCommParentsList([]);
+        setShowCommForm(false);
         fetchComms();
       } else setCommError(data.error || 'Erreur lors de la création');
     } catch (e) {
@@ -3145,17 +3147,37 @@ const WhatsAppPage = () => {
       {/* ===================== TAB: CONNECTION ===================== */}
       {activeTab === 'planning' && (
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="max-w-3xl mx-auto space-y-6">
-            {/* Formulaire de création */}
-            <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-indigo-600" /> Planifier une communication
-              </h2>
-              <p className="text-xs text-gray-500">
-                Préparez un message à envoyer plus tard (ou tout de suite). Choisissez le canal,
-                importez une image ou un document, ciblez des classes ou des parents précis.
-                Le suivi <strong>vu / répondu</strong> apparaît ensuite comme pour les envois directs.
-              </p>
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* En-tête tableau de bord + bouton d'ouverture de la fenêtre de planification */}
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-indigo-600" /> Communications
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">Suivi des messages planifiés et envoyés — vu / répondu par parent.</p>
+              </div>
+              <button onClick={() => { setCommError(''); setShowCommForm(true); }}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium flex-shrink-0">
+                <Plus className="w-4 h-4" /> Planifier une communication
+              </button>
+            </div>
+
+            {/* Formulaire de création — fenêtre modale */}
+            {showCommForm && (
+              <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setShowCommForm(false)}>
+                <div className="w-full max-w-2xl my-6" onClick={(e) => e.stopPropagation()}>
+                  <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-xl space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2">
+                        <Calendar className="w-5 h-5 text-indigo-600" /> Planifier une communication
+                      </h2>
+                      <button onClick={() => setShowCommForm(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Préparez un message à envoyer plus tard (ou tout de suite). Choisissez le canal,
+                      importez une image ou un document, ciblez des classes ou des parents précis.
+                      Le suivi <strong>vu / répondu</strong> apparaît ensuite comme pour les envois directs.
+                    </p>
 
               <div>
                 <label className="text-xs font-semibold text-gray-700 block mb-1">Titre *</label>
@@ -3379,12 +3401,21 @@ const WhatsAppPage = () => {
                 </div>
               )}
 
-              <button onClick={submitComm} disabled={commSaving || commUploading}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
-                {commSaving || commUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                {commUploading ? 'Upload…' : commForm.type === 'urgent' || commForm.send_now ? 'Envoyer' : 'Planifier'}
-              </button>
-            </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button onClick={submitComm} disabled={commSaving || commUploading}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
+                        {commSaving || commUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        {commUploading ? 'Upload…' : commForm.type === 'urgent' || commForm.send_now ? 'Envoyer' : 'Planifier'}
+                      </button>
+                      <button onClick={() => setShowCommForm(false)} disabled={commSaving || commUploading}
+                        className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
+                        Annuler
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Bandeau KPI — vue d'ensemble des communications */}
             {comms.length > 0 && (
