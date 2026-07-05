@@ -860,17 +860,27 @@ router.post('/messages/:messageId/resend', async (req, res) => {
     const { data: orig, error: oErr } = await mq.single();
     if (oErr || !orig) return res.status(404).json({ error: 'Message introuvable' });
 
-    // 2. Destinataires d'origine + filtrage (union des critères cochés)
+    // 2. Destinataires d'origine + filtrage. Priorité à une sélection explicite
+    // (cases cochées côté UI) ; sinon union des critères non vus/répondus/échec.
     const { data: recs, error: rErr } = await supabaseAdmin
       .from('whatsapp_message_recipients')
-      .select('parent_id, phone_e164, status, read_at, responded_at')
+      .select('id, parent_id, phone_e164, status, read_at, responded_at')
       .eq('message_id', messageId);
     if (rErr) throw rErr;
-    const match = (r) => criteria.some((c) =>
-      c === 'unread' ? !r.read_at
-        : c === 'unresponded' ? !r.responded_at
-        : c === 'undelivered' ? r.status !== 'sent' : false);
-    let targets = (recs || []).filter(match);
+    const explicitIds = Array.isArray(req.body?.recipient_ids)
+      ? req.body.recipient_ids.map(String).filter(Boolean)
+      : null;
+    let targets;
+    if (explicitIds && explicitIds.length) {
+      const idSet = new Set(explicitIds);
+      targets = (recs || []).filter((r) => idSet.has(String(r.id)));
+    } else {
+      const match = (r) => criteria.some((c) =>
+        c === 'unread' ? !r.read_at
+          : c === 'unresponded' ? !r.responded_at
+          : c === 'undelivered' ? r.status !== 'sent' : false);
+      targets = (recs || []).filter(match);
+    }
     if (!wantWa) targets = targets.filter((r) => r.parent_id);        // app seul → besoin d'un parent
     if (!wantPush) {                                                   // WhatsApp seul → numéro unique
       const seen = new Set();

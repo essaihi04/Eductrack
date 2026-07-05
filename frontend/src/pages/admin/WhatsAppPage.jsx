@@ -87,6 +87,8 @@ const WhatsAppPage = () => {
   const [resendChannel, setResendChannel] = useState('app'); // app | whatsapp | both
   const [resendBusy, setResendBusy] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
+  const [resendSelected, setResendSelected] = useState(new Set()); // ids destinataires cochés
+  const [resendSearch, setResendSearch] = useState('');
   const [availableLevels, setAvailableLevels] = useState([]);
 
   // Parent selection
@@ -564,10 +566,10 @@ const WhatsAppPage = () => {
     } catch (error) { console.error('Erreur détails:', error); }
   };
 
-  // Nombre de destinataires correspondant aux critères de renvoi (aperçu).
-  const resendMatchCount = (recs) => {
+  // Destinataires correspondant aux critères de renvoi + canal (liste cochable).
+  const resendMatchList = (recs) => {
     const crit = resendCriteria;
-    if (!crit.unread && !crit.unresponded && !crit.undelivered) return 0;
+    if (!crit.unread && !crit.unresponded && !crit.undelivered) return [];
     let matched = (recs || []).filter(r =>
       (crit.unread && !r.read_at) ||
       (crit.unresponded && !r.responded_at) ||
@@ -577,20 +579,36 @@ const WhatsAppPage = () => {
       const seen = new Set();
       matched = matched.filter(r => r.phone_e164 && !seen.has(r.phone_e164) && seen.add(r.phone_e164));
     }
-    return matched.length;
+    return matched;
   };
+
+  // À chaque changement de critères / canal / message : coche tous les correspondants.
+  useEffect(() => {
+    if (!detailMessage) return;
+    setResendSelected(new Set(resendMatchList(detailMessage.recipients).map(r => r.id)));
+    setResendSearch('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resendCriteria, resendChannel, detailMessage]);
+
+  const toggleResendPick = (id) => setResendSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const submitResend = async () => {
     if (!detailMessage?.message?.id) return;
     const criteria = Object.entries(resendCriteria).filter(([, v]) => v).map(([k]) => k);
     if (!criteria.length) { setResendMsg('Choisissez au moins un critère.'); return; }
+    const recipient_ids = [...resendSelected];
+    if (!recipient_ids.length) { setResendMsg('Sélectionnez au moins un destinataire.'); return; }
     setResendBusy(true); setResendMsg('');
     try {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/messages/${detailMessage.message.id}/resend`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ criteria, channel: resendChannel }),
+        body: JSON.stringify({ criteria, channel: resendChannel, recipient_ids }),
       });
       const data = await res.json();
       if (data.success) {
@@ -3954,14 +3972,61 @@ const WhatsAppPage = () => {
                       </div>
                     </div>
                     {(() => {
-                      const n = resendMatchCount(detailMessage.recipients);
+                      const matches = resendMatchList(detailMessage.recipients);
+                      const q = resendSearch.trim().toLowerCase();
+                      const visible = q
+                        ? matches.filter(r => {
+                            const name = `${r.parent?.first_name || ''} ${r.parent?.last_name || ''}`.toLowerCase();
+                            return name.includes(q) || (r.phone_e164 || '').toLowerCase().includes(q);
+                          })
+                        : matches;
+                      const allVisibleChecked = visible.length > 0 && visible.every(r => resendSelected.has(r.id));
                       return (
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-gray-500">{n} destinataire(s) ciblé(s)</span>
-                          <button onClick={submitResend} disabled={resendBusy || n === 0}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
-                            {resendBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Renvoyer
-                          </button>
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <p className="text-[11px] font-semibold text-gray-500">Destinataires ({resendSelected.size}/{matches.length})</p>
+                            {visible.length > 0 && (
+                              <button type="button"
+                                onClick={() => setResendSelected(prev => {
+                                  const next = new Set(prev);
+                                  if (allVisibleChecked) visible.forEach(r => next.delete(r.id));
+                                  else visible.forEach(r => next.add(r.id));
+                                  return next;
+                                })}
+                                className="text-[11px] text-indigo-600 hover:underline">
+                                {allVisibleChecked ? 'Tout décocher' : 'Tout cocher'}
+                              </button>
+                            )}
+                          </div>
+                          <div className="relative mb-1.5">
+                            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                            <input value={resendSearch} onChange={(e) => setResendSearch(e.target.value)}
+                              placeholder="Rechercher un parent ou un numéro…"
+                              className="w-full pl-7 pr-2 py-1.5 rounded-lg border border-gray-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
+                          </div>
+                          <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 bg-white divide-y divide-gray-100">
+                            {visible.length === 0 ? (
+                              <p className="text-xs text-gray-400 text-center py-4">Aucun destinataire.</p>
+                            ) : visible.map(r => (
+                              <label key={r.id} className="flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-gray-50 cursor-pointer">
+                                <input type="checkbox" checked={resendSelected.has(r.id)} onChange={() => toggleResendPick(r.id)} />
+                                <span className="flex-1 min-w-0 truncate text-gray-700">
+                                  {r.parent ? `${r.parent.first_name || ''} ${r.parent.last_name || ''}`.trim() : (r.phone_e164 || '📲 App')}
+                                  {r.parent && r.phone_e164 && <span className="text-gray-400 text-xs ml-1">· {r.phone_e164}</span>}
+                                </span>
+                                <span className="flex-shrink-0 flex gap-1">
+                                  {!r.read_at && <span className="text-[9px] px-1 rounded bg-amber-50 text-amber-600">non vu</span>}
+                                  {r.status !== 'sent' && <span className="text-[9px] px-1 rounded bg-red-50 text-red-600">échec</span>}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-end gap-2 mt-2">
+                            <button onClick={submitResend} disabled={resendBusy || resendSelected.size === 0}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
+                              {resendBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Renvoyer ({resendSelected.size})
+                            </button>
+                          </div>
                         </div>
                       );
                     })()}
