@@ -14,6 +14,7 @@ import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { sendPushToUser } from '../services/webPush.js';
+import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 
 const router = express.Router();
 
@@ -1334,9 +1335,10 @@ router.get('/engagement/parents', async (req, res) => {
   }
 });
 
-// POST /upload — upload vers Supabase Storage (bucket whatsapp-media)
-// Avec Baileys, on n'a plus besoin du proxy Wasender. Le base64 est uploadé
-// dans Supabase Storage et l'URL publique est retournée.
+// POST /upload — upload d'un média (base64) vers le bucket public partagé.
+// Passe par uploadBuffer (utils/storage.js) qui garantit l'existence du bucket
+// (ensureBuckets) → fini l'erreur « Bucket not found » du bucket whatsapp-media
+// jamais créé. Sert l'onglet Parents ET le planificateur.
 router.post('/upload', async (req, res) => {
   try {
     const { base64, mimetype } = req.body;
@@ -1344,22 +1346,17 @@ router.post('/upload', async (req, res) => {
 
     const buffer = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
     const ext = (mimetype || '').split('/')[1] || 'bin';
-    const filename = `wa-media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const file = {
+      buffer,
+      mimetype: mimetype || 'application/octet-stream',
+      originalname: `wa-media.${ext}`,
+    };
 
-    const { error: upErr } = await supabaseAdmin.storage
-      .from('whatsapp-media')
-      .upload(filename, buffer, { contentType: mimetype || 'application/octet-stream', upsert: false });
-
-    if (upErr) {
-      console.error('Erreur upload Supabase Storage:', upErr);
-      return res.status(400).json({ error: upErr.message || 'Erreur upload' });
-    }
-
-    const { data: pub } = supabaseAdmin.storage.from('whatsapp-media').getPublicUrl(filename);
-    res.json({ success: true, publicUrl: pub.publicUrl });
+    const { publicUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: 'whatsapp-media', file, prefix: 'wa' });
+    res.json({ success: true, publicUrl });
   } catch (error) {
     console.error('Erreur upload média:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 
