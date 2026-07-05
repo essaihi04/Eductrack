@@ -4925,10 +4925,13 @@ router.post('/students/import', async (req, res) => {
       if (existingProfile) {
         console.log(`[Import] Élève existant: ${email}`);
         // Re-synchroniser sa position sur le fichier courant (même après 1000 réimports,
-        // l'élève garde EXACTEMENT la place qu'il occupe dans le fichier Excel).
+        // l'élève garde EXACTEMENT la place qu'il occupe dans le fichier Excel) et le
+        // rattacher à la classe cible (import « élèves dans cette classe »).
+        const existingPatch = { import_order: importOrder };
+        if (classId) existingPatch.class_id = classId;
         await supabaseAdmin
           .from('profiles')
-          .update({ import_order: importOrder })
+          .update(existingPatch)
           .eq('id', existingProfile.id);
         existingStudents.push({
           ...existingProfile,
@@ -4986,6 +4989,48 @@ router.post('/students/import', async (req, res) => {
         password,
         originalEmail: email
       });
+    }
+
+    // Inscriptions de l'année active (student_enrollments) — INDISPENSABLE :
+    // les pages Élèves/Finance filtrent sur ces lignes, pas sur profiles.class_id.
+    // Sans ce bloc, un élève importé est visible dans « Classes » mais invisible
+    // partout ailleurs. On n'insère que les manquantes pour ne pas écraser un
+    // statut existant (ex. RI posé par une réinscription, ou NR).
+    try {
+      const enrollYear = req.body.academicYear || (() => {
+        const now = new Date();
+        const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+        return `${y}/${y + 1}`;
+      })();
+      const importedIds = [...createdStudents, ...existingStudents]
+        .map(s => s.id).filter(Boolean);
+      if (importedIds.length) {
+        const { data: existingEnrolls } = await supabaseAdmin
+          .from('student_enrollments')
+          .select('student_id')
+          .eq('academic_year', enrollYear)
+          .in('student_id', importedIds);
+        const alreadyEnrolled = new Set((existingEnrolls || []).map(e => e.student_id));
+        const toEnroll = importedIds
+          .filter(id => !alreadyEnrolled.has(id))
+          .map(id => ({
+            school_id: getSchoolId(req),
+            student_id: id,
+            class_id: classId || null,
+            academic_year: enrollYear,
+            status: 'NI',
+            created_by: req.user?.id || null,
+          }));
+        if (toEnroll.length) {
+          const { error: enrollError } = await supabaseAdmin
+            .from('student_enrollments')
+            .upsert(toEnroll, { onConflict: 'student_id,academic_year' });
+          if (enrollError) console.error('[Import] Inscriptions échouées:', enrollError.message);
+          else console.log(`[Import] ${toEnroll.length} inscription(s) ${enrollYear} créée(s)`);
+        }
+      }
+    } catch (enrollErr) {
+      console.error('[Import] Erreur inscriptions:', enrollErr?.message);
     }
 
     console.log(`[Import] ${createdStudents.length} élèves créés, ${existingStudents.length} élèves existants, ${errors.length} erreurs`);

@@ -937,7 +937,7 @@ const ClassesPage = () => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ students, classId })
+        body: JSON.stringify({ students, classId, academicYear: year })
       });
 
       setImportProgress({ current: 80, total: 100, message: 'Traitement des comptes utilisateurs...' });
