@@ -4,6 +4,7 @@
 // jamais de push en arrière-plan (WebView). On enregistre un jeton d'appareil
 // FCM que le backend utilise pour faire sonner le téléphone, app fermée.
 import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
 import { pushApi } from './transportApi';
 
 export const isNativePush = () => Capacitor?.isNativePlatform?.() === true;
@@ -11,9 +12,10 @@ export const isNativePush = () => Capacitor?.isNativePlatform?.() === true;
 let listenersReady = false;
 let lastToken = null;
 
+// Import STATIQUE (dans le bundle principal) : l'import dynamique séparé restait
+// bloqué à jamais dans le WebView Capacitor (le chunk ne se chargeait pas).
 async function loadPlugin() {
-  const mod = await import('@capacitor/push-notifications');
-  return mod.PushNotifications;
+  return PushNotifications;
 }
 
 async function setupListeners(PushNotifications) {
