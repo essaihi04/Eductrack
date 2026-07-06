@@ -25,6 +25,16 @@
 
         </activity>
 
+        <!-- Notifications enrichies (logo école, nom école, image, cloche) :
+             priorité > service du plugin Capacitor pour recevoir les messages FCM -->
+        <service
+            android:name=".SchoolMessagingService"
+            android:exported="false">
+            <intent-filter android:priority="1">
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

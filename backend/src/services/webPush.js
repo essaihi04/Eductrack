@@ -17,25 +17,26 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 export const isPushConfigured = () => Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 export const getVapidPublicKey = () => VAPID_PUBLIC_KEY || null;
 
-// Logo de l'école d'un utilisateur (URL publique), avec cache 1 h : affiché
-// comme icône (web) et grande image par défaut (Android) des notifications.
-const _logoCache = new Map(); // user_id -> { url, ts }
-const LOGO_TTL = 60 * 60 * 1000;
-async function schoolLogoUrlForUser(userId) {
-  const hit = _logoCache.get(userId);
-  if (hit && Date.now() - hit.ts < LOGO_TTL) return hit.url;
-  let url = null;
+// Logo + nom de l'école d'un utilisateur (cache 1 h) : logo affiché en icône
+// de la notification (web + icône ronde Android), nom en sous-titre (Android).
+const _schoolCache = new Map(); // user_id -> { logo, name, ts }
+const SCHOOL_TTL = 60 * 60 * 1000;
+async function schoolInfoForUser(userId) {
+  const hit = _schoolCache.get(userId);
+  if (hit && Date.now() - hit.ts < SCHOOL_TTL) return hit;
+  const info = { logo: null, name: null, ts: Date.now() };
   try {
     const { data: prof } = await supabaseAdmin
       .from('profiles').select('school_id').eq('id', userId).maybeSingle();
     if (prof?.school_id) {
       const { data: school } = await supabaseAdmin
-        .from('schools').select('logo_url').eq('id', prof.school_id).maybeSingle();
-      url = school?.logo_url || null;
+        .from('schools').select('logo_url, name').eq('id', prof.school_id).maybeSingle();
+      info.logo = school?.logo_url || null;
+      info.name = school?.name || null;
     }
-  } catch { /* logo facultatif */ }
-  _logoCache.set(userId, { url, ts: Date.now() });
-  return url;
+  } catch { /* facultatif */ }
+  _schoolCache.set(userId, info);
+  return info;
 }
 
 /** Envoi Web Push seul (navigateur / PWA). */
@@ -89,13 +90,14 @@ async function sendWebPushToUser(userId, payload) {
  */
 export async function sendPushToUser(userId, payload) {
   if (!userId) return { sent: 0 };
-  // Logo de l'école : icône de la notification (web) et grande image par
-  // défaut (Android) quand l'envoi n'a pas de pièce jointe image.
-  const logo = await schoolLogoUrlForUser(userId);
+  // Identité de l'école dans la notification : logo (icône web + icône ronde
+  // Android via SchoolMessagingService) et nom (sous-titre Android).
+  const school = await schoolInfoForUser(userId);
   const p = {
     ...payload,
-    icon: payload.icon || logo || undefined,
-    image: payload.image || logo || undefined,
+    icon: payload.icon || school.logo || undefined,
+    logo: payload.logo || school.logo || undefined,
+    schoolName: payload.schoolName || school.name || undefined,
   };
   const [web, native] = await Promise.all([
     sendWebPushToUser(userId, p).catch(() => 0),

@@ -73,31 +73,23 @@ export async function sendFcmToUser(userId, payload) {
   if (!rows?.length) return { sent: 0 };
 
   const tokens = rows.map((r) => r.token);
-  // Grande image de la notification : pièce jointe image si présente, sinon
-  // logo de l'école (payload.image est résolu en amont par webPush.sendPushToUser).
-  const imageUrl = payload.image || undefined;
+  // Message DATA-ONLY : la notification est construite en natif par
+  // SchoolMessagingService (APK) — seul moyen d'afficher le logo de l'école
+  // en icône ronde (largeIcon), le nom de l'école en sous-titre, l'image
+  // jointe en grand et la sonnerie de cloche. Toutes les valeurs de `data`
+  // doivent être des chaînes (contrainte FCM).
   const message = {
     tokens,
-    notification: {
-      title: payload.title,
-      body: payload.body,
-      ...(imageUrl ? { imageUrl } : {}),
-    },
     data: {
+      title: String(payload.title || 'Eductrack'),
+      body: String(payload.body || ''),
       url: String(payload.url || '/'),
       ...(payload.tag ? { tag: String(payload.tag) } : {}),
+      ...(payload.image ? { image: String(payload.image) } : {}),
+      ...(payload.logo ? { logo: String(payload.logo) } : {}),
+      ...(payload.schoolName ? { schoolName: String(payload.schoolName) } : {}),
     },
-    android: {
-      priority: 'high',
-      notification: {
-        // Canal créé côté app (nativePush.ensureSchoolChannel) : sonnerie de
-        // cloche d'école. `sound` sert de repli pour Android < 8.
-        channelId: 'school',
-        sound: 'school_bell',
-        ...(imageUrl ? { imageUrl } : {}),
-      },
-    },
-    apns: { payload: { aps: { sound: 'default' } } },
+    android: { priority: 'high' },
   };
 
   let sent = 0;
