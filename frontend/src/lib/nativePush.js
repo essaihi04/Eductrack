@@ -105,6 +105,11 @@ export async function nativePushState() {
  * précisément où ça casse. `onStep(steps)` est appelé après chaque étape pour
  * l'affichage en direct. Retourne la liste des étapes.
  */
+const withTimeout = (promise, ms, what) => Promise.race([
+  promise,
+  new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} : aucune réponse après ${ms / 1000}s`)), ms)),
+]);
+
 export async function diagnoseNativePush(onStep) {
   const steps = [];
   const add = (label, ok, detail = '') => { steps.push({ label, ok: !!ok, detail: String(detail) }); onStep?.([...steps]); };
@@ -113,18 +118,18 @@ export async function diagnoseNativePush(onStep) {
     add('Plateforme native (Capacitor)', false, "isNativePlatform=false → l'app ne tourne pas en natif");
     return steps;
   }
-  add('Plateforme native', true, Capacitor.getPlatform?.() || '');
+  add('Plateforme native (v2)', true, Capacitor.getPlatform?.() || '');
 
   let PN;
-  try { PN = await loadPlugin(); add('Plugin push chargé', true); }
+  try { PN = await withTimeout(loadPlugin(), 8000, 'chargement du plugin'); add('Plugin push chargé', true); }
   catch (e) { add('Plugin push chargé', false, e?.message || e); return steps; }
 
   let perm;
-  try { perm = await PN.checkPermissions(); add('Permission actuelle', true, perm.receive); }
+  try { perm = await withTimeout(PN.checkPermissions(), 8000, 'checkPermissions'); add('Permission actuelle', true, perm.receive); }
   catch (e) { add('checkPermissions', false, e?.message || e); return steps; }
 
   if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
-    try { perm = await PN.requestPermissions(); add('Réponse à la demande', true, perm.receive); }
+    try { perm = await withTimeout(PN.requestPermissions(), 60000, 'requestPermissions'); add('Réponse à la demande', true, perm.receive); }
     catch (e) { add('requestPermissions', false, e?.message || e); return steps; }
   }
   if (perm.receive !== 'granted') { add('Permission accordée', false, perm.receive); return steps; }
