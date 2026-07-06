@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserX, Search, Download, RefreshCw, Check, X, Phone, Calendar, MessageCircle, Eye } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { supabase } from '../../lib/supabase';
+import { openBlob } from '../../lib/download';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
@@ -20,15 +19,6 @@ const FILTERS = [
   { key: 'month', label: 'Mois' },
   { key: 'period', label: 'Période' },
 ];
-
-// Charge une image en dataURL (pour l'insérer dans le PDF). null si échec.
-const toDataURL = (url) => new Promise((resolve) => {
-  if (!url) return resolve(null);
-  fetch(url)
-    .then(r => r.ok ? r.blob() : Promise.reject())
-    .then(blob => { const fr = new FileReader(); fr.onload = () => resolve(fr.result); fr.onerror = () => resolve(null); fr.readAsDataURL(blob); })
-    .catch(() => resolve(null));
-});
 
 const StudentAvatar = ({ row, size = 36 }) => {
   const url = resolveAvatar(row.avatar_url);
@@ -109,55 +99,21 @@ export default function AbsencesPage() {
     } catch (e) { alert('Erreur: ' + e.message); }
   };
 
+  // Le PDF est généré côté backend (PDFKit + police NotoNaskhArabic) afin que les
+  // noms d'élèves/parents en arabe s'affichent correctement — jsPDF (Helvetica)
+  // ne gère ni les glyphes arabes ni le shaping RTL. L'export couvre toute la
+  // période affichée (le filtre de recherche local n'est pas appliqué).
   const exportPDF = async () => {
     setExporting(true);
     try {
       const { start, end } = range();
-      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      doc.setFontSize(14);
-      doc.text('Liste des élèves absents', 14, 14);
-      doc.setFontSize(10);
-      doc.setTextColor(120);
-      doc.text(start === end ? `Date : ${start}` : `Période : ${start} → ${end}`, 14, 20);
-      doc.setTextColor(0);
-
-      // Précharger les photos
-      const images = {};
-      await Promise.all(filtered.map(async (r) => { images[r.key] = await toDataURL(resolveAvatar(r.avatar_url)); }));
-
-      const body = filtered.map(r => ([
-        '', // photo (dessinée en didDrawCell)
-        r.student_name,
-        `${r.class_name}${r.class_level ? ` (${r.class_level})` : ''}`,
-        r.date,
-        [...new Set(r.sessions.map(s => s.end_time ? `${s.start_time}-${s.end_time}` : s.start_time).filter(Boolean))].join(', ') || '—',
-        [...new Set(r.sessions.map(s => s.subject).filter(v => v && v !== '—'))].join(', ') || '—',
-        r.parents.map(p => p.name).join(', ') || '—',
-        r.parents.map(p => p.phone).filter(Boolean).join(', ') || '—',
-        r.absence_notified ? 'Oui' : 'Non',
-        r.seen_by_parent ? 'Oui' : 'Non',
-        r.justified === null ? 'Non traité' : (r.justified ? 'Justifiée' : 'Non justifiée'),
-        r.justification_comment || '',
-      ]));
-
-      autoTable(doc, {
-        startY: 24,
-        head: [['Photo', 'Élève', 'Classe', 'Date', 'Créneau', 'Matière', 'Parent(s)', 'Téléphone', 'Abs. envoyée', 'Vue', 'Justifié', 'Commentaire']],
-        body,
-        styles: { fontSize: 7.5, cellPadding: 1.3, valign: 'middle' },
-        headStyles: { fillColor: [37, 99, 235], fontSize: 7.5 },
-        columnStyles: { 0: { cellWidth: 11, minCellHeight: 12 }, 11: { cellWidth: 32 } },
-        didDrawCell: (data) => {
-          if (data.section === 'body' && data.column.index === 0) {
-            const r = filtered[data.row.index];
-            const img = images[r?.key];
-            if (img) {
-              try { doc.addImage(img, 'JPEG', data.cell.x + 1.5, data.cell.y + 1, 9, 9); } catch (_) { /* ignore */ }
-            }
-          }
-        },
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${apiUrl}/api/admin/absences/export-pdf?start=${start}&end=${end}`, {
+        headers: { Authorization: `Bearer ${session?.access_token}` },
       });
-      doc.save(`eleves-absents-${start}${start !== end ? `_${end}` : ''}.pdf`);
+      if (!res.ok) throw new Error('Échec');
+      const blob = await res.blob();
+      await openBlob(blob, `eleves-absents-${start}${start !== end ? `_${end}` : ''}.pdf`);
     } catch (e) { console.error(e); alert('Erreur export PDF'); }
     finally { setExporting(false); }
   };

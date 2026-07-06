@@ -8,6 +8,8 @@ import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhot
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
+import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
+import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 
 const router = express.Router();
 
@@ -5355,19 +5357,16 @@ router.get('/teachers/tracking-dashboard', async (req, res) => {
 
 // ==================== ÉLÈVES ABSENTS ====================
 
-// Liste des absences sur une période, agrégées par élève + jour.
-// Query: ?start=YYYY-MM-DD&end=YYYY-MM-DD
-router.get('/absences', async (req, res) => {
-  try {
+// Construit la liste des absences agrégées par élève + jour sur une période.
+// Réutilisé par la route JSON GET /absences et par l'export PDF backend.
+// Retourne un tableau d'absences (vide si aucune ou scope pédagogique vide).
+async function collectAbsencesList(req, start, end) {
     const schoolId = getSchoolId(req);
-    const today = new Date().toISOString().split('T')[0];
-    const start = req.query.start || today;
-    const end = req.query.end || today;
 
     // Scope pédagogique (responsable = ses classes ; autres = toute l'école)
     const scopedIds = await getScopedClassIds(req); // null = pas de restriction
     if (scopedIds !== null && scopedIds.length === 0) {
-      return res.json({ period: { start, end }, absences: [] });
+      return [];
     }
 
     // 1. Enregistrements « absent » sur la période
@@ -5382,7 +5381,7 @@ router.get('/absences', async (req, res) => {
     const { data: rows, error } = await q;
     if (error) throw error;
     const absent = rows || [];
-    if (absent.length === 0) return res.json({ period: { start, end }, absences: [] });
+    if (absent.length === 0) return [];
 
     // 2. Élèves concernés (photo + classe) — requêtes séparées pour éviter toute
     //    ambiguïté de relation FK sur l'embed classes.
@@ -5466,9 +5465,62 @@ router.get('/absences', async (req, res) => {
     const absences = Array.from(map.values()).sort((a, b) =>
       (b.date || '').localeCompare(a.date || '') || a.student_name.localeCompare(b.student_name)
     );
+    return absences;
+}
+
+// Liste des absences sur une période, agrégées par élève + jour.
+// Query: ?start=YYYY-MM-DD&end=YYYY-MM-DD
+router.get('/absences', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const start = req.query.start || today;
+    const end = req.query.end || today;
+    const absences = await collectAbsencesList(req, start, end);
     res.json({ period: { start, end }, absences });
   } catch (e) {
     console.error('Erreur liste absences:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Export PDF de la liste des élèves absents — généré côté backend (PDFKit +
+// police NotoNaskhArabic) pour que les noms arabes s'affichent correctement,
+// contrairement au jsPDF client (Helvetica sans glyphes arabes).
+// Query: ?start=YYYY-MM-DD&end=YYYY-MM-DD
+router.get('/absences/export-pdf', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const start = req.query.start || today;
+    const end = req.query.end || today;
+    const absences = await collectAbsencesList(req, start, end);
+
+    // En-tête : nom + logo de l'école
+    const schoolId = getSchoolId(req);
+    let school = null;
+    if (schoolId) {
+      const { data } = await supabaseAdmin
+        .from('schools').select('name, logo_url').eq('id', schoolId).maybeSingle();
+      school = data || null;
+    }
+    const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
+
+    // Photos des élèves (avatars) préchargées en buffers pour le PDF.
+    const photos = {};
+    await Promise.all(absences.map(async (r) => {
+      if (r.avatar_url) photos[r.key] = await fetchSchoolLogoBuffer(r.avatar_url);
+    }));
+
+    const pdfBuffer = await generateAbsencesListPdf({
+      absences, period: { start, end },
+      schoolName: school?.name || '', logoBuffer, photos,
+    });
+
+    const fname = `eleves-absents-${start}${start !== end ? `_${end}` : ''}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fname}"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    console.error('Erreur export PDF absences:', e);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
