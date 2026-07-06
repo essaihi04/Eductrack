@@ -64,15 +64,20 @@ export async function enableNativePush() {
 }
 
 /**
- * Au démarrage : si la permission est déjà accordée, (re)enregistre l'appareil
- * pour rafraîchir le jeton — SANS afficher de pop-up de permission.
+ * Au démarrage (après login) sur l'app installée :
+ *  - permission jamais demandée  → on l'affiche automatiquement (1ʳᵉ ouverture) ;
+ *  - permission accordée         → on (re)enregistre l'appareil (rafraîchit le jeton) ;
+ *  - permission refusée          → rien (l'utilisateur devra l'activer dans les réglages).
  */
 export async function ensureNativePushRegistered() {
   if (!isNativePush()) return;
   try {
     const PushNotifications = await loadPlugin();
     await setupListeners(PushNotifications);
-    const perm = await PushNotifications.checkPermissions();
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
+      perm = await PushNotifications.requestPermissions(); // pop-up système
+    }
     if (perm.receive === 'granted') await PushNotifications.register();
   } catch (e) {
     console.error('[nativePush] ensureRegistered:', e?.message || e);
