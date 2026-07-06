@@ -17,6 +17,27 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
 export const isPushConfigured = () => Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 export const getVapidPublicKey = () => VAPID_PUBLIC_KEY || null;
 
+// Logo de l'école d'un utilisateur (URL publique), avec cache 1 h : affiché
+// comme icône (web) et grande image par défaut (Android) des notifications.
+const _logoCache = new Map(); // user_id -> { url, ts }
+const LOGO_TTL = 60 * 60 * 1000;
+async function schoolLogoUrlForUser(userId) {
+  const hit = _logoCache.get(userId);
+  if (hit && Date.now() - hit.ts < LOGO_TTL) return hit.url;
+  let url = null;
+  try {
+    const { data: prof } = await supabaseAdmin
+      .from('profiles').select('school_id').eq('id', userId).maybeSingle();
+    if (prof?.school_id) {
+      const { data: school } = await supabaseAdmin
+        .from('schools').select('logo_url').eq('id', prof.school_id).maybeSingle();
+      url = school?.logo_url || null;
+    }
+  } catch { /* logo facultatif */ }
+  _logoCache.set(userId, { url, ts: Date.now() });
+  return url;
+}
+
 /** Envoi Web Push seul (navigateur / PWA). */
 async function sendWebPushToUser(userId, payload) {
   if (!isPushConfigured() || !userId) return 0;
@@ -33,7 +54,8 @@ async function sendWebPushToUser(userId, payload) {
     body: payload.body,
     url: payload.url || '/',
     tag: payload.tag,
-    icon: payload.icon || '/icon-192.png'
+    icon: payload.icon || '/icon-192.png',
+    ...(payload.image ? { image: payload.image } : {})
   });
 
   let sent = 0;
@@ -67,9 +89,17 @@ async function sendWebPushToUser(userId, payload) {
  */
 export async function sendPushToUser(userId, payload) {
   if (!userId) return { sent: 0 };
+  // Logo de l'école : icône de la notification (web) et grande image par
+  // défaut (Android) quand l'envoi n'a pas de pièce jointe image.
+  const logo = await schoolLogoUrlForUser(userId);
+  const p = {
+    ...payload,
+    icon: payload.icon || logo || undefined,
+    image: payload.image || logo || undefined,
+  };
   const [web, native] = await Promise.all([
-    sendWebPushToUser(userId, payload).catch(() => 0),
-    sendFcmToUser(userId, payload).catch(() => ({ sent: 0 })),
+    sendWebPushToUser(userId, p).catch(() => 0),
+    sendFcmToUser(userId, p).catch(() => ({ sent: 0 })),
   ]);
   return { sent: web + (native.sent || 0) };
 }

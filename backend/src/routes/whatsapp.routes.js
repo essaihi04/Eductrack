@@ -570,7 +570,9 @@ router.post('/send', async (req, res) => {
             title: notifTitle,
             body: (message || notifBody).slice(0, 140),
             url: '/parent/notifications',
-            tag: `comm-msg-${msgLog.id}`
+            tag: `comm-msg-${msgLog.id}`,
+            // Pièce jointe image → grande image dans la notification (sinon logo école)
+            image: messageType === 'image' && mediaUrl ? mediaUrl : undefined
           });
           patch.push_status = pushRes.sent > 0 ? 'sent' : 'no_subscription';
         } catch (pushErr) {
@@ -964,6 +966,8 @@ router.post('/messages/:messageId/resend', async (req, res) => {
             body: (orig.content || notifBody).slice(0, 140),
             url: '/parent/notifications',
             tag: `comm-msg-${msgLog.id}`,
+            // Pièce jointe image → grande image dans la notification (sinon logo école)
+            image: messageType === 'image' && orig.media_url ? orig.media_url : undefined,
           });
           patch.push_status = pr.sent > 0 ? 'sent' : 'no_subscription';
         } catch (e) {

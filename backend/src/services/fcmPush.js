@@ -73,14 +73,30 @@ export async function sendFcmToUser(userId, payload) {
   if (!rows?.length) return { sent: 0 };
 
   const tokens = rows.map((r) => r.token);
+  // Grande image de la notification : pièce jointe image si présente, sinon
+  // logo de l'école (payload.image est résolu en amont par webPush.sendPushToUser).
+  const imageUrl = payload.image || undefined;
   const message = {
     tokens,
-    notification: { title: payload.title, body: payload.body },
+    notification: {
+      title: payload.title,
+      body: payload.body,
+      ...(imageUrl ? { imageUrl } : {}),
+    },
     data: {
       url: String(payload.url || '/'),
       ...(payload.tag ? { tag: String(payload.tag) } : {}),
     },
-    android: { priority: 'high', notification: { sound: 'default' } },
+    android: {
+      priority: 'high',
+      notification: {
+        // Canal créé côté app (nativePush.ensureSchoolChannel) : sonnerie de
+        // cloche d'école. `sound` sert de repli pour Android < 8.
+        channelId: 'school',
+        sound: 'school_bell',
+        ...(imageUrl ? { imageUrl } : {}),
+      },
+    },
     apns: { payload: { aps: { sound: 'default' } } },
   };
 

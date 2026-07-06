@@ -15,9 +15,31 @@ let lastToken = null;
 // ⚠️ Ne JAMAIS `await` l'objet PushNotifications : c'est un Proxy Capacitor qui
 // intercepte `.then` → le moteur JS le prend pour une promesse et appelle la
 // « méthode native » then, qui ne répond jamais (blocage infini constaté).
+// Canal Android « school » : sonnerie de cloche d'école (school_bell.wav dans
+// res/raw de l'APK) + importance max (heads-up). Créé une fois ; Android fige
+// le son d'un canal après création — changer de son = nouvel id de canal.
+async function ensureSchoolChannel() {
+  if (Capacitor.getPlatform?.() !== 'android') return;
+  try {
+    await PushNotifications.createChannel({
+      id: 'school',
+      name: "École",
+      description: "Messages et alertes de l'école",
+      importance: 5,
+      visibility: 1,
+      sound: 'school_bell.wav',
+      vibration: true,
+      lights: true,
+    });
+  } catch (e) {
+    console.warn('[nativePush] createChannel:', e?.message || e);
+  }
+}
+
 function setupListeners() {
   if (listenersReady) return;
   listenersReady = true;
+  ensureSchoolChannel();
 
   // Jeton d'appareil reçu → on l'envoie au backend (table device_tokens).
   PushNotifications.addListener('registration', async (token) => {

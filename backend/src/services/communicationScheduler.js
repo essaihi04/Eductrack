@@ -246,6 +246,8 @@ export async function sendCommunication(comm) {
           body: pushBody,
           url: '/parent/notifications',
           tag: `comm-${comm.id}`,
+          // Pièce jointe image → grande image dans la notification (sinon logo école)
+          image: isImage ? comm.attachment_url : undefined,
         });
         patch.push_status = pr.sent > 0 ? 'sent' : 'no_subscription';
       } catch (e) {
