@@ -1,6 +1,8 @@
 // Push NATIF via Firebase Cloud Messaging (app Capacitor Android/iOS).
 // Complémentaire de webPush.js (navigateur/PWA). Le backend envoie à FCM avec
 // le compte de service Firebase (clé privée fournie via variable d'environnement).
+import fs from 'fs';
+import path from 'path';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { supabaseAdmin } from '../config/supabase.js';
@@ -8,19 +10,34 @@ import { supabaseAdmin } from '../config/supabase.js';
 let messaging = null;
 let configured = false;
 
-// Lit le compte de service depuis FCM_SERVICE_ACCOUNT_JSON (JSON brut OU base64).
+// Compte de service, dans l'ordre de priorité :
+//   1. FCM_SERVICE_ACCOUNT_JSON — contenu JSON brut OU base64 (idéal PaaS/hébergeur).
+//   2. FCM_SERVICE_ACCOUNT_FILE / GOOGLE_APPLICATION_CREDENTIALS — chemin du fichier .json.
 function loadServiceAccount() {
   const raw = process.env.FCM_SERVICE_ACCOUNT_JSON || process.env.FCM_SERVICE_ACCOUNT;
-  if (!raw) return null;
-  let text = String(raw).trim();
-  if (!text.startsWith('{')) {
-    // Base64 (pratique pour une variable d'env sur une seule ligne).
-    try { text = Buffer.from(text, 'base64').toString('utf8'); } catch { /* ignore */ }
+  if (raw) {
+    let text = String(raw).trim();
+    if (!text.startsWith('{')) {
+      // Base64 (pratique pour une variable d'env sur une seule ligne).
+      try { text = Buffer.from(text, 'base64').toString('utf8'); } catch { /* ignore */ }
+    }
+    try { return JSON.parse(text); } catch (e) {
+      console.error('[FCM] FCM_SERVICE_ACCOUNT_JSON invalide:', e.message);
+      return null;
+    }
   }
-  try { return JSON.parse(text); } catch (e) {
-    console.error('[FCM] FCM_SERVICE_ACCOUNT_JSON invalide:', e.message);
-    return null;
+
+  const file = process.env.FCM_SERVICE_ACCOUNT_FILE || process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (file) {
+    // Chemin relatif résolu depuis le dossier de démarrage du backend.
+    const abs = path.isAbsolute(file) ? file : path.resolve(process.cwd(), file);
+    try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) {
+      console.error('[FCM] lecture du fichier de compte de service échouée:', abs, e.message);
+      return null;
+    }
   }
+
+  return null;
 }
 
 (function init() {

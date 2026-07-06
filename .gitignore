@@ -9,6 +9,12 @@ node_modules/
 */.env
 */.env.local
 
+# Secrets — clés de compte de service Firebase / Google (NE JAMAIS committer)
+*firebase-adminsdk*.json
+*-adminsdk-*.json
+serviceAccount*.json
+**/serviceAccount*.json
+
 # Build outputs
 dist/
 build/
