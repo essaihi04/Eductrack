@@ -35,3 +35,56 @@ export const activeStudentIdSet = async (schoolId, academicYear) => {
     return null;
   }
 };
+
+// Deux chaînes désignent-elles la même année scolaire, quel que soit le format
+// (slash/tiret) ? Compare les chiffres seuls ("2026/2027" == "2026-2027").
+const sameSchoolYear = (a, b) => {
+  const na = String(a || '').replace(/\D/g, '');
+  const nb = String(b || '').replace(/\D/g, '');
+  return !!na && na === nb;
+};
+
+// Rattache un élève à l'année active — MAIS UNIQUEMENT si c'est un élève de cette
+// année (sa classe courante appartient à l'année active). Ne crée jamais de
+// doublon, n'écrase aucun statut, et NE fait PAS remonter un élève d'une année
+// précédente non réinscrit.
+//
+// But : sur la page Parents (scopée par année), le parent qu'on vient de rattacher
+// à un élève courant apparaît aussitôt ; les familles des élèves partis restent
+// masquées. Renvoie { enrolled: bool }.
+export const ensureEnrollmentIfCurrentYear = async (schoolId, studentId, classId, academicYear, createdBy = null) => {
+  if (!studentId || !academicYear) return { enrolled: false };
+  const variants = yearVariants(academicYear);
+  try {
+    // 1. Déjà une inscription (n'importe quel statut) pour cette année → rien à faire.
+    const { data: existing } = await supabaseAdmin
+      .from('student_enrollments')
+      .select('id')
+      .eq('student_id', studentId)
+      .in('academic_year', variants)
+      .limit(1);
+    if (existing && existing.length) return { enrolled: false };
+
+    // 2. La classe COURANTE de l'élève est-elle une classe de l'année active ?
+    //    Sinon → élève d'une autre année : on ne l'inscrit pas (pas de fuite).
+    if (!classId) return { enrolled: false };
+    const { data: cls } = await supabaseAdmin
+      .from('classes').select('academic_year').eq('id', classId).maybeSingle();
+    if (!cls || !sameSchoolYear(cls.academic_year, academicYear)) return { enrolled: false };
+
+    // 3. Inscrire (NI) pour l'année active, dans le MÊME format que la classe
+    //    (cohérence base + lecture tolérante par ailleurs).
+    await supabaseAdmin.from('student_enrollments').insert({
+      school_id: schoolId || null,
+      student_id: studentId,
+      class_id: classId,
+      academic_year: cls.academic_year,
+      status: 'NI',
+      created_by: createdBy || null,
+    });
+    return { enrolled: true };
+  } catch (e) {
+    console.error('ensureEnrollmentIfCurrentYear échoué:', e);
+    return { enrolled: false };
+  }
+};

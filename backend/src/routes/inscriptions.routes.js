@@ -16,6 +16,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
+import { ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 
 const router = Router();
 
@@ -314,6 +315,9 @@ router.post('/students/:id/add-parents', async (req, res) => {
       { onConflict: 'parent_id,student_id' },
     );
     if (linkErr) throw linkErr;
+
+    // Faire apparaître le parent sur la page Parents si l'élève est de l'année active.
+    await ensureEnrollmentIfCurrentYear(schoolId, id, student.class_id, req.body.academic_year, req.user?.id);
 
     res.status(201).json({ success: true, parent_id: parentId, createdParent, contactsCount: contacts.length });
   } catch (error) {

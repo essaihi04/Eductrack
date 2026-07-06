@@ -7,7 +7,7 @@ import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
-import { activeStudentIdSet, yearVariants } from '../utils/enrollmentScope.js';
+import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 
@@ -989,6 +989,13 @@ router.post('/parents/:parentId/link', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Si l'élève lié est un élève de l'année active, l'inscrire pour que le parent
+    // apparaisse sur la page Parents (sans faire remonter les élèves des années passées).
+    const { data: stu } = await supabaseAdmin
+      .from('profiles').select('school_id, class_id').eq('id', student_id).eq('role', 'student').maybeSingle();
+    if (stu) await ensureEnrollmentIfCurrentYear(stu.school_id || getSchoolId(req), student_id, stu.class_id, req.body.academic_year, req.user?.id);
+
     res.status(201).json(data);
   } catch (error) {
     console.error('Erreur link parent-student:', error);
@@ -1144,6 +1151,17 @@ router.post('/students/:studentId/add-parents', async (req, res) => {
         { onConflict: 'parent_id,student_id' }
       );
     if (linkError) throw linkError;
+
+    // Faire apparaître le parent sur la page Parents (scopée par année) SI l'élève
+    // est un élève de l'année active (sa classe appartient à cette année). Aucune
+    // fuite des élèves d'années précédentes.
+    await ensureEnrollmentIfCurrentYear(
+      student.school_id || getSchoolId(req),
+      studentId,
+      student.class_id,
+      req.body.academic_year,
+      req.user?.id
+    );
 
     res.status(201).json({
       success: true,
@@ -1508,6 +1526,10 @@ router.post('/parents/import', async (req, res) => {
           { onConflict: 'parent_id,student_id' }
         );
       if (upsertLinkError) throw upsertLinkError;
+
+      // Inscrire l'élève à l'année active s'il en est un (classe de l'année active),
+      // pour que le parent importé apparaisse sur la page Parents. Pas de fuite.
+      await ensureEnrollmentIfCurrentYear(getSchoolId(req), r.student.id, r.student.class_id, req.body.academic_year, req.user?.id);
 
       commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }
