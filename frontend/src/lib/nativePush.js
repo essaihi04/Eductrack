@@ -98,6 +98,54 @@ export async function nativePushState() {
   }
 }
 
+/**
+ * Diagnostic pas-à-pas (bouton dans l'app) : déroule tout le flux et rapporte
+ * précisément où ça casse. `onStep(steps)` est appelé après chaque étape pour
+ * l'affichage en direct. Retourne la liste des étapes.
+ */
+export async function diagnoseNativePush(onStep) {
+  const steps = [];
+  const add = (label, ok, detail = '') => { steps.push({ label, ok: !!ok, detail: String(detail) }); onStep?.([...steps]); };
+
+  if (!isNativePush()) {
+    add('Plateforme native (Capacitor)', false, "isNativePlatform=false → l'app ne tourne pas en natif");
+    return steps;
+  }
+  add('Plateforme native', true, Capacitor.getPlatform?.() || '');
+
+  let PN;
+  try { PN = await loadPlugin(); add('Plugin push chargé', true); }
+  catch (e) { add('Plugin push chargé', false, e?.message || e); return steps; }
+
+  let perm;
+  try { perm = await PN.checkPermissions(); add('Permission actuelle', true, perm.receive); }
+  catch (e) { add('checkPermissions', false, e?.message || e); return steps; }
+
+  if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
+    try { perm = await PN.requestPermissions(); add('Réponse à la demande', true, perm.receive); }
+    catch (e) { add('requestPermissions', false, e?.message || e); return steps; }
+  }
+  if (perm.receive !== 'granted') { add('Permission accordée', false, perm.receive); return steps; }
+  add('Permission accordée', true);
+
+  let token;
+  try {
+    token = await new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error('pas de jeton après 12s — Google Play Services indisponible ?')), 12000);
+      PN.addListener('registration', (t) => { clearTimeout(to); resolve(t.value); });
+      PN.addListener('registrationError', (err) => { clearTimeout(to); reject(new Error(err?.error || 'registrationError')); });
+      PN.register();
+    });
+    add('Jeton FCM obtenu', true, String(token).slice(0, 20) + '…');
+  } catch (e) { add('Jeton FCM obtenu', false, e?.message || e); return steps; }
+
+  try { await pushApi.registerDeviceToken(token, Capacitor.getPlatform()); add('Enregistré dans device_tokens', true); }
+  catch (e) { add('Enregistré dans device_tokens', false, e?.message || e); return steps; }
+
+  add('Tout est OK ✅', true);
+  return steps;
+}
+
 /** Désenregistre le jeton courant (déconnexion). */
 export async function disableNativePush() {
   if (!isNativePush() || !lastToken) return;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, Settings, ChevronDown, ChevronUp, Save, Sparkles, ThumbsUp, Reply, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
-import { isNativePush, enableNativePush, nativePushState } from '../../lib/nativePush';
+import { isNativePush, enableNativePush, nativePushState, diagnoseNativePush } from '../../lib/nativePush';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -146,6 +146,50 @@ const PushEnableBanner = () => {
   );
 };
 
+// Outil de diagnostic (temporaire) : déroule tout le flux de notification et
+// montre exactement où ça casse. Visible seulement dans l'app installée.
+const PushDiagnostic = () => {
+  const [steps, setSteps] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  if (!isNativePush()) return null;
+
+  const run = async () => {
+    setRunning(true);
+    setSteps([]);
+    try {
+      await diagnoseNativePush(setSteps);
+    } catch (e) {
+      setSteps((s) => [...(s || []), { label: 'Erreur inattendue', ok: false, detail: e?.message || String(e) }]);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <button
+        onClick={run}
+        disabled={running}
+        className="inline-flex items-center gap-2 bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-900 disabled:opacity-50"
+      >
+        🔧 {running ? 'Diagnostic en cours…' : 'Diagnostic notifications'}
+      </button>
+      {steps && (
+        <ul className="mt-3 space-y-1.5 text-sm">
+          {steps.map((s, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span>{s.ok ? '✅' : '❌'}</span>
+              <span className="font-medium text-gray-800">{s.label}</span>
+              {s.detail ? <span className="text-gray-500">— {s.detail}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 const ParentNotificationsPage = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -202,6 +246,8 @@ const ParentNotificationsPage = () => {
       </header>
 
       <PushEnableBanner />
+
+      <PushDiagnostic />
 
       <PreferencesPanel />
 
