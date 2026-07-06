@@ -173,7 +173,7 @@ const PushDiagnostic = () => {
         disabled={running}
         className="inline-flex items-center gap-2 bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-slate-900 disabled:opacity-50"
       >
-        🔧 {running ? 'Diagnostic en cours…' : 'Diagnostic notifications v2'}
+        🔧 {running ? 'Diagnostic en cours…' : 'Diagnostic notifications v3'}
       </button>
       {steps && (
         <ul className="mt-3 space-y-1.5 text-sm">

@@ -12,13 +12,10 @@ export const isNativePush = () => Capacitor?.isNativePlatform?.() === true;
 let listenersReady = false;
 let lastToken = null;
 
-// Import STATIQUE (dans le bundle principal) : l'import dynamique séparé restait
-// bloqué à jamais dans le WebView Capacitor (le chunk ne se chargeait pas).
-async function loadPlugin() {
-  return PushNotifications;
-}
-
-async function setupListeners(PushNotifications) {
+// ⚠️ Ne JAMAIS `await` l'objet PushNotifications : c'est un Proxy Capacitor qui
+// intercepte `.then` → le moteur JS le prend pour une promesse et appelle la
+// « méthode native » then, qui ne répond jamais (blocage infini constaté).
+function setupListeners() {
   if (listenersReady) return;
   listenersReady = true;
 
@@ -52,8 +49,7 @@ async function setupListeners(PushNotifications) {
  */
 export async function enableNativePush() {
   if (!isNativePush()) return false;
-  const PushNotifications = await loadPlugin();
-  await setupListeners(PushNotifications);
+  setupListeners();
 
   let perm = await PushNotifications.checkPermissions();
   if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
@@ -74,8 +70,7 @@ export async function enableNativePush() {
 export async function ensureNativePushRegistered() {
   if (!isNativePush()) return;
   try {
-    const PushNotifications = await loadPlugin();
-    await setupListeners(PushNotifications);
+    setupListeners();
     let perm = await PushNotifications.checkPermissions();
     if (perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') {
       perm = await PushNotifications.requestPermissions(); // pop-up système
@@ -90,7 +85,6 @@ export async function ensureNativePushRegistered() {
 export async function nativePushState() {
   if (!isNativePush()) return 'unsupported';
   try {
-    const PushNotifications = await loadPlugin();
     const perm = await PushNotifications.checkPermissions();
     if (perm.receive === 'granted') return 'granted';
     if (perm.receive === 'denied') return 'denied';
@@ -118,11 +112,11 @@ export async function diagnoseNativePush(onStep) {
     add('Plateforme native (Capacitor)', false, "isNativePlatform=false → l'app ne tourne pas en natif");
     return steps;
   }
-  add('Plateforme native (v2)', true, Capacitor.getPlatform?.() || '');
+  add('Plateforme native (v3)', true, Capacitor.getPlatform?.() || '');
 
-  let PN;
-  try { PN = await withTimeout(loadPlugin(), 8000, 'chargement du plugin'); add('Plugin push chargé', true); }
-  catch (e) { add('Plugin push chargé', false, e?.message || e); return steps; }
+  // Accès direct au plugin — surtout ne pas l'`await` (Proxy Capacitor, cf. haut du fichier).
+  const PN = PushNotifications;
+  add('Plugin push chargé', true);
 
   let perm;
   try { perm = await withTimeout(PN.checkPermissions(), 8000, 'checkPermissions'); add('Permission actuelle', true, perm.receive); }
