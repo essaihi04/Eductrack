@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { YearProvider } from './contexts/YearContext';
 import SchoolSplash, { readSplashCache } from './components/SchoolSplash';
@@ -102,6 +103,10 @@ import ObjetsPerdusPage from './pages/school-life/ObjetsPerdusPage';
 import SondagesPage from './pages/school-life/SondagesPage';
 import SignalementsPage from './pages/school-life/SignalementsPage';
 
+// App installée : mobile (Capacitor) ou desktop (Electron — user-agent par défaut).
+const isInstalledApp = () =>
+  Capacitor?.isNativePlatform?.() === true || /electron/i.test(navigator.userAgent);
+
 const ProtectedRoute = ({ children }) => {
   const { user, profile, school, loading } = useAuth();
   // Splash « logo de l'école » uniquement au chargement initial de la page
@@ -142,7 +147,10 @@ function App() {
       <YearProvider>
       <Router>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          {/* Apps installées (mobile Capacitor / desktop Electron) : pas de page
+              vitrine — ouverture directe sur le login (qui redirige vers le
+              tableau de bord si une session existe déjà). */}
+          <Route path="/" element={isInstalledApp() ? <Navigate to="/login" replace /> : <LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           {/* Choix de l'année scolaire après connexion (plein écran, façon Koolskools) */}
