@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS public.demo_parent_configs (
 DO $$
 DECLARE
   -- ────────────────────────── PARAMÈTRES À AJUSTER ──────────────────────────
-  v_school_name TEXT := NULL;            -- nom EXACT de l'école principale, ou NULL = école avec session WhatsApp connectée
+  v_school_id   UUID := '6d3292a5-848a-4b84-9dd5-3b59525459f9'; -- École Principale (prioritaire sur le nom)
+  v_school_name TEXT := NULL;            -- utilisé seulement si v_school_id est NULL ; NULL = école avec session WhatsApp connectée
   v_year        TEXT := '2025/2026';     -- année scolaire (format slash = classes/inscriptions)
   v_year_dash   TEXT := '2025-2026';     -- même année au format finance (tiret)
   v_level       TEXT := '5AEP';
@@ -39,7 +40,6 @@ DECLARE
   v_director_phone TEXT := '+212641998700';
   -- ───────────────────────────────────────────────────────────────────────────
 
-  v_school_id   UUID;
   v_class_id    UUID;
   v_domain      TEXT;
   v_director_id UUID;
@@ -85,7 +85,11 @@ DECLARE
   v_subject  TEXT;
 BEGIN
   -- ─── 1. École cible ────────────────────────────────────────────────────────
-  IF v_school_name IS NOT NULL THEN
+  IF v_school_id IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM schools WHERE id = v_school_id) THEN
+      RAISE EXCEPTION 'École id % introuvable. Vérifie v_school_id.', v_school_id;
+    END IF;
+  ELSIF v_school_name IS NOT NULL THEN
     SELECT id INTO v_school_id FROM schools WHERE name ILIKE v_school_name LIMIT 1;
     IF v_school_id IS NULL THEN
       RAISE EXCEPTION 'École « % » introuvable. Vérifie v_school_name.', v_school_name;
