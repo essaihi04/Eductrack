@@ -254,7 +254,8 @@ export async function answerSchoolAI({ messageText, schoolInfo }) {
         { role: 'system', content: langDirective },
         {
           role: 'system',
-          content: `ÉCOLE : ${schoolInfo.school_name}\nSTATISTIQUES (utilise UNIQUEMENT ces données) :\n${JSON.stringify(schoolContext, null, 2)}`,
+          // JSON compact : l'indentation multipliait les tokens du prompt sans gain
+          content: `ÉCOLE : ${schoolInfo.school_name}\nSTATISTIQUES (utilise UNIQUEMENT ces données) :\n${JSON.stringify(schoolContext)}`,
         },
         { role: 'user', content: messageText },
       ],

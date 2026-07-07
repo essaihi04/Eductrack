@@ -151,14 +151,73 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     school: parentInfo.school_name,
   };
 
-  // Suivi pédagogique récent (5 dernières séances tracées par les profs)
-  // C'est la VRAIE source de données : présence, comportement, participation.
-  const { data: tracking } = await supabaseAdmin
-    .from('session_tracking')
-    .select('presence, participation, discipline, attitude, homework, comment, session:sessions(date, subjects(name))')
-    .eq('student_id', student.id)
-    .order('created_at', { ascending: false })
-    .limit(10);
+  // Les données pédagogiques ne sont chargées que si la question les concerne :
+  // pour finance / emploi du temps / bulletin, les directives interdisent de
+  // s'en servir → les charger ralentirait pour rien (DB + taille du prompt).
+  const includePedagogy = !includeFinance && !includeBulletins && !includeTimetable;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const threeMonthsAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  const none = Promise.resolve({ data: null });
+
+  // ⚡ Toutes les requêtes de base en PARALLÈLE (avant : 6-8 allers-retours
+  // séquentiels vers Supabase = ~1 s perdue avant même d'appeler l'IA).
+  const [
+    { data: tracking },
+    { data: allTracking },
+    { data: hwAll },
+    { data: gradeRows },
+    { data: ttSlots },
+    { data: bulletinRows },
+    { data: invoiceRows },
+  ] = await Promise.all([
+    includePedagogy ? supabaseAdmin
+      .from('session_tracking')
+      .select('presence, participation, discipline, attitude, homework, comment, session:sessions(date, subjects(name))')
+      .eq('student_id', student.id)
+      .order('created_at', { ascending: false })
+      .limit(10) : none,
+    includePedagogy ? supabaseAdmin
+      .from('session_tracking')
+      .select('presence, session:sessions(date)')
+      .eq('student_id', student.id)
+      .limit(500) : none,
+    includePedagogy ? supabaseAdmin
+      .from('homework')
+      .select('id, title, due_date, target_type, created_by, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
+      .eq('class_id', student.class_id)
+      .gte('due_date', threeMonthsAgo)
+      .order('due_date', { ascending: false })
+      .limit(40) : none,
+    includePedagogy ? supabaseAdmin
+      .from('control_notes')
+      .select('note, appreciation, controls_plan!inner(id, name, date, class_id, teacher_id)')
+      .eq('student_id', student.id)
+      .eq('controls_plan.class_id', student.class_id)
+      .gte('controls_plan.date', '2000-01-01')
+      .order('controls_plan(date)', { ascending: false })
+      .limit(60) : none,
+    includeTimetable ? supabaseAdmin
+      .from('class_timetable')
+      .select('day_of_week, slot_order, start_time, end_time, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
+      .eq('class_id', student.class_id)
+      .order('slot_order', { ascending: true }) : none,
+    includeBulletins ? supabaseAdmin
+      .from('bulletins')
+      .select('academic_year, semester, general_average, general_rank, total_students_in_class, mention, status')
+      .eq('student_id', student.id)
+      .in('status', ['published', 'sent'])
+      .order('academic_year', { ascending: false })
+      .order('semester', { ascending: false })
+      .limit(4) : none,
+    includeFinance ? supabaseAdmin
+      .from('invoices')
+      .select('total, amount_paid, status')
+      .eq('student_id', student.id)
+      .neq('status', 'cancelled') : none,
+  ]);
+
+  if (includePedagogy) {
   ctx.recent_tracking = (tracking || [])
     .filter((t) => t.session)
     .map((t) => ({
@@ -174,12 +233,6 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
 
   // Stats de présence avec ventilation par semestre (S1 / S2 / total)
   // Important : un RETARD (late) compte comme PRÉSENT pour le taux d'assiduité.
-  const { data: allTracking } = await supabaseAdmin
-    .from('session_tracking')
-    .select('presence, session:sessions(date)')
-    .eq('student_id', student.id)
-    .limit(500);
-
   if (allTracking?.length) {
     // Bornes des semestres pour l'année en cours
     const academicYear = getCurrentAcademicYear();
@@ -225,16 +278,6 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   // Un devoir est "non soumis" si l'élève n'a aucune homework_submissions
   // avec status ∈ ('submitted', 'graded'). Les autres status (pending,
   // late, missing) ou l'absence totale comptent comme non soumis.
-  const today = new Date().toISOString().slice(0, 10);
-  const threeMonthsAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-  const { data: hwAll } = await supabaseAdmin
-    .from('homework')
-    .select('id, title, due_date, target_type, created_by, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
-    .eq('class_id', student.class_id)
-    .gte('due_date', threeMonthsAgo)
-    .order('due_date', { ascending: false })
-    .limit(40);
-
   const isAssignedToStudent = (h) =>
     h.target_type === 'all' ||
     (h.homework_students || []).some((hs) => hs.student_id === student.id);
@@ -246,19 +289,24 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   const teacherIdsForHw = [
     ...new Set(assignedHw.filter((h) => !h.subjects?.name && h.created_by).map((h) => h.created_by)),
   ];
-  const hwTeacherSubjectMap = {};
-  if (teacherIdsForHw.length > 0) {
+  // ⚡ Une SEULE requête teacher_subjects pour les devoirs ET les notes
+  // (avant : 2 requêtes séquentielles).
+  const teacherIdsForGrades = [...new Set((gradeRows || []).map((g) => g.controls_plan?.teacher_id).filter(Boolean))];
+  const allTeacherIds = [...new Set([...teacherIdsForHw, ...teacherIdsForGrades])];
+  const teacherSubjectMap = {}; // teacher_id -> [subjects]
+  if (allTeacherIds.length > 0) {
     const { data: tSubs } = await supabaseAdmin
       .from('teacher_subjects')
       .select('teacher_id, subjects(name)')
-      .in('teacher_id', teacherIdsForHw);
+      .in('teacher_id', allTeacherIds);
     (tSubs || []).forEach((ts) => {
       const name = ts.subjects?.name;
       if (!name) return;
-      if (!hwTeacherSubjectMap[ts.teacher_id]) hwTeacherSubjectMap[ts.teacher_id] = [];
-      if (!hwTeacherSubjectMap[ts.teacher_id].includes(name)) hwTeacherSubjectMap[ts.teacher_id].push(name);
+      if (!teacherSubjectMap[ts.teacher_id]) teacherSubjectMap[ts.teacher_id] = [];
+      if (!teacherSubjectMap[ts.teacher_id].includes(name)) teacherSubjectMap[ts.teacher_id].push(name);
     });
   }
+  const hwTeacherSubjectMap = teacherSubjectMap;
 
   const myHw = assignedHw.map((h) => {
     const mySub = (h.homework_submissions || []).find((s) => s.student_id === student.id);
@@ -296,30 +344,7 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   //   1. teacher_subjects (si le prof enseigne une seule matière dans la classe)
   //   2. match du nom du contrôle avec les noms de matières connues
   //   3. fallback : nom du contrôle
-  const { data: gradeRows } = await supabaseAdmin
-    .from('control_notes')
-    .select('note, appreciation, controls_plan!inner(id, name, date, class_id, teacher_id)')
-    .eq('student_id', student.id)
-    .eq('controls_plan.class_id', student.class_id)
-    .gte('controls_plan.date', '2000-01-01')
-    .order('controls_plan(date)', { ascending: false })
-    .limit(60);
-
-  // Récupère la liste des matières liées à la classe via class_teachers + teacher_subjects
-  const teacherIds = [...new Set((gradeRows || []).map((g) => g.controls_plan?.teacher_id).filter(Boolean))];
-  let teacherSubjectMap = {}; // teacher_id -> [subjects]
-  let allClassSubjects = []; // toutes les matières enseignées dans la classe
-  if (teacherIds.length > 0) {
-    const { data: ts } = await supabaseAdmin
-      .from('teacher_subjects')
-      .select('teacher_id, subjects(id, name)')
-      .in('teacher_id', teacherIds);
-    (ts || []).forEach((t) => {
-      if (!teacherSubjectMap[t.teacher_id]) teacherSubjectMap[t.teacher_id] = [];
-      if (t.subjects?.name) teacherSubjectMap[t.teacher_id].push(t.subjects.name);
-    });
-    allClassSubjects = [...new Set(Object.values(teacherSubjectMap).flat())];
-  }
+  const allClassSubjects = [...new Set(Object.values(teacherSubjectMap).flat())];
 
   const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const inferSubject = (controlName, teacherId) => {
@@ -337,7 +362,7 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     return controlName || 'Contrôle';
   };
 
-  ctx.recent_grades = (gradeRows || []).map((g) => ({
+  const allGrades = (gradeRows || []).map((g) => ({
     control: g.controls_plan?.name || null,
     subject: inferSubject(g.controls_plan?.name, g.controls_plan?.teacher_id),
     date: g.controls_plan?.date || null,
@@ -345,10 +370,13 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     max: 20,
     appreciation: g.appreciation || null,
   }));
+  // ⚡ Prompt allégé : le détail complet vit dans grades_by_subject ; on ne
+  // garde ici que les 10 dernières notes (avant : 60 notes envoyées en double).
+  ctx.recent_grades = allGrades.slice(0, 10);
 
   // Groupage par matière
   const bySubject = {};
-  ctx.recent_grades.forEach((g) => {
+  allGrades.forEach((g) => {
     const key = g.subject || 'Autre';
     if (!bySubject[key]) bySubject[key] = [];
     bySubject[key].push({ control: g.control, date: g.date, note: g.note, max: g.max });
@@ -366,24 +394,20 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     };
   }).sort((a, b) => b.count - a.count);
 
-  if (ctx.recent_grades.length > 0) {
-    const sum = ctx.recent_grades.reduce((s, g) => s + g.note, 0);
+  if (allGrades.length > 0) {
+    const sum = allGrades.reduce((s, g) => s + g.note, 0);
     ctx.grade_stats = {
-      count: ctx.recent_grades.length,
-      average: Math.round((sum / ctx.recent_grades.length) * 10) / 10,
-      best: Math.max(...ctx.recent_grades.map((g) => g.note)),
-      worst: Math.min(...ctx.recent_grades.map((g) => g.note)),
+      count: allGrades.length,
+      average: Math.round((sum / allGrades.length) * 10) / 10,
+      best: Math.max(...allGrades.map((g) => g.note)),
+      worst: Math.min(...allGrades.map((g) => g.note)),
     };
   }
+  } // fin includePedagogy
 
   // ───── Emploi du temps — UNIQUEMENT si la question concerne le planning ─────
   if (includeTimetable) {
-    const { data: slots } = await supabaseAdmin
-      .from('class_timetable')
-      .select('day_of_week, slot_order, start_time, end_time, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
-      .eq('class_id', student.class_id)
-      .order('slot_order', { ascending: true });
-
+    const slots = ttSlots;
     const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const DAY_FR = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi' };
 
@@ -417,14 +441,7 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
 
   // ───── Bulletins publiés — UNIQUEMENT si la question concerne le bulletin ─────
   if (includeBulletins) {
-    const { data: bulletins } = await supabaseAdmin
-      .from('bulletins')
-      .select('academic_year, semester, general_average, general_rank, total_students_in_class, mention, status')
-      .eq('student_id', student.id)
-      .in('status', ['published', 'sent'])
-      .order('academic_year', { ascending: false })
-      .order('semester', { ascending: false })
-      .limit(4);
+    const bulletins = bulletinRows;
     ctx.published_bulletins = (bulletins || []).map(b => ({
       academic_year: b.academic_year,
       semester: b.semester,
@@ -440,11 +457,7 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   // Sinon on ne l'inclut PAS dans le contexte, pour éviter que l'IA ne
   // mentionne les impayés dans des réponses purement pédagogiques.
   if (includeFinance) {
-    const { data: invoices } = await supabaseAdmin
-      .from('invoices')
-      .select('total, amount_paid, status')
-      .eq('student_id', student.id)
-      .neq('status', 'cancelled');
+    const invoices = invoiceRows;
     const totalDue = (invoices || []).reduce((s, i) => s + (Number(i.total) - Number(i.amount_paid || 0)), 0);
     ctx.finance = {
       total_due: totalDue,
@@ -522,7 +535,9 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
         { role: 'system', content: semesterDirective },
         {
           role: 'system',
-          content: `DONNÉES DE L'ÉLÈVE (utilise UNIQUEMENT ces données) :\n${JSON.stringify(studentContext, null, 2)}`,
+          // JSON compact : l'indentation multipliait les tokens du prompt
+          // (prefill plus long) sans rien apporter au modèle.
+          content: `DONNÉES DE L'ÉLÈVE (utilise UNIQUEMENT ces données) :\n${JSON.stringify(studentContext)}`,
         },
         { role: 'user', content: messageText },
       ],
