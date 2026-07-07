@@ -36,6 +36,7 @@ import { MENUS, sendMenu, matchMenuOption } from './menus.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery } from './ai.js';
 import { getReceptionistByPhone, answerSchoolAI, receptionistWelcome, receptionistFooter } from './adminAi.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
+import { maybeHandleDemoParent } from './demoParent.js';
 import { handleAbsenceReply } from './absenceJustification.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
@@ -1028,6 +1029,18 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
   if (existing?.processed) {
     console.log('[chatbot] Message déjà traité, ignoré:', id);
     return;
+  }
+
+  // 0.bis Mode démo commercial : mot-clé « DEMO PARENT » (QR scanné par un
+  // prospect) → création automatique d'un parent lié à l'élève suivant de la
+  // classe démo. Ne concerne QUE les écoles avec demo_parent_configs enabled.
+  if (text && !location && !image) {
+    try {
+      const demoHandled = await maybeHandleDemoParent({ phone, text, schoolId, providerMessageId: id });
+      if (demoHandled) return;
+    } catch (e) {
+      console.error('[chatbot] demo parent hook:', e.message);
+    }
   }
 
   // 1. Identifier le parent

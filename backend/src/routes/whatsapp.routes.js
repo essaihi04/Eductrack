@@ -1635,6 +1635,61 @@ router.get('/session-qr', async (req, res) => {
   }
 });
 
+// GET /demo-parent-qr — QR du mode démo commercial (école principale).
+// Renvoie le lien wa.me (numéro Baileys connecté + mot-clé pré-rempli) et son
+// QR : un prospect le scanne → envoie « DEMO PARENT » → devient parent d'un
+// élève de la classe démo. 404 si l'école n'a pas de config démo activée.
+router.get('/demo-parent-qr', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const { data: cfg } = await supabaseAdmin
+      .from('demo_parent_configs')
+      .select('class_id, keyword, enabled')
+      .eq('school_id', schoolId)
+      .eq('enabled', true)
+      .maybeSingle();
+    if (!cfg) return res.status(404).json({ error: 'Mode démo non activé pour cette école (exécuter SEED_CLASSE_DEMO.sql)' });
+
+    // Numéro WhatsApp de l'école : session en mémoire, sinon table de mapping
+    const status = getStatus(schoolId);
+    let phone = status?.phone || null;
+    if (!phone) {
+      const { data: row } = await supabaseAdmin
+        .from('whatsapp_school_sessions')
+        .select('phone_number, status')
+        .eq('school_id', schoolId)
+        .maybeSingle();
+      phone = row?.phone_number || null;
+    }
+    if (!phone) {
+      return res.json({ success: false, error: 'Session WhatsApp non connectée : connectez d\'abord le numéro de l\'école (onglet Connexion).' });
+    }
+
+    const digits = String(phone).replace(/[^0-9]/g, '');
+    const waLink = `https://wa.me/${digits}?text=${encodeURIComponent(cfg.keyword || 'DEMO PARENT')}`;
+    const QRCode = (await import('qrcode')).default;
+    const qrDataUrl = await QRCode.toDataURL(waLink, { width: 512, margin: 2 });
+
+    const { demoRemainingCount } = await import('../services/whatsapp/chatbot/demoParent.js');
+    const counts = await demoRemainingCount(cfg.class_id);
+
+    res.json({
+      success: true,
+      waLink,
+      qrDataUrl,
+      keyword: cfg.keyword || 'DEMO PARENT',
+      phone: `+${digits}`,
+      total: counts.total,
+      remaining: counts.remaining,
+    });
+  } catch (error) {
+    console.error('Erreur demo-parent-qr:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // POST /session-pairing-code — connexion par CODE (alternative au QR).
 // Body : { phone }. Renvoie un code à 8 caractères à saisir dans WhatsApp →
 // Appareils connectés → « Lier avec numéro de téléphone ».

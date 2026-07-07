@@ -789,6 +789,21 @@ const WhatsAppPage = () => {
   };
 
   // ===================== CONNECTION LOGIC =====================
+  // QR du mode démo commercial (wa.me + mot-clé). null = école sans config
+  // démo (cas normal : la carte ne s'affiche pas).
+  const [demoQr, setDemoQr] = useState(null);
+  const fetchDemoQr = useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/demo-parent-qr`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.status === 404) { setDemoQr(null); return; }
+      const data = await res.json();
+      setDemoQr(data);
+    } catch { setDemoQr(null); }
+  }, [apiUrl]);
+
   // silent=true (polling auto) → ne déclenche PAS le spinner plein écran de la
   // section (sinon la partie connexion « se recharge » toutes les 2s et masque le QR).
   const fetchStatus = useCallback(async (silent = false) => {
@@ -810,8 +825,8 @@ const WhatsAppPage = () => {
   }, [apiUrl]);
 
   useEffect(() => {
-    if (activeTab === 'connection') fetchStatus();
-  }, [activeTab, fetchStatus]);
+    if (activeTab === 'connection') { fetchStatus(); fetchDemoQr(); }
+  }, [activeTab, fetchStatus, fetchDemoQr]);
 
   // Statut de session dès l'arrivée (pill d'en-tête + avertissement du
   // sélecteur de canal), sans spinner.
@@ -3659,6 +3674,48 @@ const WhatsAppPage = () => {
                 <p className="text-gray-500 text-sm">Impossible de récupérer le statut.</p>
               )}
             </div>
+
+            {/* QR démo commercial : visible UNIQUEMENT si l'école a une config
+                demo_parent_configs (école principale). Un prospect scanne →
+                envoie « DEMO PARENT » → devient parent d'un élève démo. */}
+            {demoQr && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50 p-6 shadow-sm">
+                <h2 className="text-base font-semibold text-violet-900 flex items-center gap-2">
+                  <QrCode className="w-5 h-5" /> QR Démo — « Devenez parent d'essai »
+                </h2>
+                <p className="text-xs text-violet-700 mt-1 mb-4">
+                  Faites scanner ce QR à un directeur invité : WhatsApp s'ouvre avec le message
+                  « <strong>{demoQr.keyword}</strong> » pré-rempli vers <strong>{demoQr.phone || 'le numéro de l\'école'}</strong>.
+                  Dès l'envoi, il est associé automatiquement à un élève de la classe démo et reçoit
+                  ses identifiants parent par WhatsApp.
+                </p>
+                {demoQr.success ? (
+                  <div className="flex flex-col sm:flex-row items-center gap-5">
+                    <img src={demoQr.qrDataUrl} alt="QR démo parent" className="w-48 h-48 rounded-lg border border-violet-200 bg-white p-2" />
+                    <div className="space-y-2 text-sm">
+                      <p className="text-violet-900">
+                        👥 Élèves démo disponibles : <strong>{demoQr.remaining}</strong> / {demoQr.total}
+                      </p>
+                      <a href={demoQr.waLink} target="_blank" rel="noreferrer"
+                        className="inline-block px-3 py-1.5 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700">
+                        Ouvrir le lien wa.me
+                      </a>
+                      <button onClick={() => { navigator.clipboard?.writeText(demoQr.waLink); }}
+                        className="ml-2 inline-block px-3 py-1.5 text-xs border border-violet-300 text-violet-700 rounded-lg hover:bg-violet-100">
+                        Copier le lien
+                      </button>
+                      <p className="text-xs text-violet-600">
+                        Chaque nouveau numéro qui scanne = un nouvel élève associé.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    ⚠️ {demoQr.error || 'Connectez d\'abord la session WhatsApp de l\'école pour générer le QR.'}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Cloud API onboarding (numéro officiel Meta) */}
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-6 shadow-sm space-y-4">
