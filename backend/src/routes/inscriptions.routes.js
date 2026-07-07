@@ -202,6 +202,65 @@ router.get('/students/:id', async (req, res) => {
   }
 });
 
+// PUT /api/inscriptions/students/:id
+// Mise à jour de la fiche d'inscription d'un élève déjà inscrit (mêmes champs
+// que l'édition admin, hors identifiants auth), scopée à l'école du demandeur.
+// Si la classe change, l'inscription de l'année (student_enrollments) est
+// synchronisée pour que le roster finance reflète aussitôt la nouvelle classe.
+router.put('/students/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { id } = req.params;
+    const { data: existing } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .eq('role', 'student')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
+
+    const { classId } = req.body;
+    if (classId) {
+      const { data: cls } = await supabaseAdmin
+        .from('classes').select('id').eq('id', classId).eq('school_id', schoolId).maybeSingle();
+      if (!cls) return res.status(404).json({ error: 'Classe introuvable dans votre école' });
+    }
+
+    const updateData = mapStudentOptionalFields(req.body);
+    if (typeof req.body.firstName === 'string' && req.body.firstName.trim()) updateData.first_name = req.body.firstName.trim();
+    if (typeof req.body.lastName === 'string' && req.body.lastName.trim()) updateData.last_name = req.body.lastName.trim();
+    if (req.body.classId !== undefined) updateData.class_id = classId || null;
+    updateData.updated_at = new Date().toISOString();
+
+    const { data: profile, error } = await supabaseAdmin
+      .from('profiles')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    if (req.body.classId !== undefined) {
+      // L'année peut être stockée au format slash OU tiret selon la source.
+      const y = req.body.academicYear || currentYear();
+      const variants = [...new Set([y, String(y).replace('/', '-'), String(y).replace('-', '/')])];
+      const { error: enrollError } = await supabaseAdmin
+        .from('student_enrollments')
+        .update({ class_id: classId || null })
+        .eq('student_id', id)
+        .eq('school_id', schoolId)
+        .in('academic_year', variants);
+      if (enrollError) console.error('Sync classe (student_enrollments) échouée:', enrollError);
+    }
+
+    res.json(profile);
+  } catch (e) {
+    console.error('PUT /inscriptions/students/:id:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // POST /api/inscriptions/students/:id/photo
 // Upload de la photo d'un élève (même stockage que l'admin), scopé à l'école.
 router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (req, res) => {

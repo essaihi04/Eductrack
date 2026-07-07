@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Users, Search, Plus, RefreshCw, Check, ArrowRightLeft, X, AlertTriangle, RotateCcw, Download } from 'lucide-react';
+import { Users, Search, Plus, RefreshCw, Check, ArrowRightLeft, X, AlertTriangle, RotateCcw, Download, Pencil } from 'lucide-react';
 import { PageHeader, FilterBar, Button } from '../../../components/finance/ui';
 import {
   CardGrid, StudentCard, StudentRow, GridListToggle, StatusPill, DetailDrawer, FieldRow,
@@ -9,7 +9,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useYear } from '../../../contexts/YearContext';
 import { enrollmentsApi } from '../../../lib/enrollmentsApi';
 import { inscriptionsApi } from '../../../lib/inscriptionsApi';
-import { LEVEL_ORDER, nextLevel, distinctLevels } from '../../../lib/levelProgression';
+import { nextLevel, allLevelOptions, baseLevel } from '../../../lib/levelProgression';
 import { prevYearStr, toDashYear } from '../../../lib/schoolYear';
 import { printInscriptionFiche } from '../../../utils/inscriptionFiche';
 
@@ -39,7 +39,9 @@ export default function InscriptionsStudentsPage() {
   const [activeEntry, setActiveEntry] = useState(null);
   const [ficheBusy, setFicheBusy] = useState(false); // téléchargement de la fiche d'inscription en cours
 
-  const [showForm, setShowForm] = useState(false); // modale « Nouvel élève »
+  const [showForm, setShowForm] = useState(false); // modale « Nouvel élève » / édition
+  const [editStudent, setEditStudent] = useState(null); // fiche complète → mode édition
+  const [editBusy, setEditBusy] = useState(false); // chargement de la fiche à éditer
 
   // Modale « Récupérer un élève d'un autre établissement » (établissements
   // associés par le super admin) — recopiée de la fiche élève admin.
@@ -92,10 +94,12 @@ export default function InscriptionsStudentsPage() {
     inscriptionsApi.listClasses(prevYear).then((data) => setPrevClasses(Array.isArray(data) ? data : []))
       .catch(() => setPrevClasses([]));
   }, [prevYear]);
-  // Niveaux proposés dans la fiche d'inscription : ceux de l'année précédente
-  // + ceux de l'année active, triés selon la progression scolaire.
+  // Niveaux proposés dans la fiche d'inscription : catalogue complet du système
+  // marocain (maternelle → 2BAC, filières lycée incluses : TC Technique,
+  // 1BAC Sciences Math…) + niveaux hors référentiel déjà utilisés par les
+  // classes de l'année précédente ou active.
   const levelOptions = useMemo(
-    () => distinctLevels([...prevClasses, ...classes]),
+    () => allLevelOptions([...prevClasses, ...classes]),
     [prevClasses, classes],
   );
 
@@ -169,7 +173,26 @@ export default function InscriptionsStudentsPage() {
     return list;
   }, [roster, classFilter, search]);
 
-  const openForm = () => setShowForm(true);
+  const openForm = () => { setEditStudent(null); setShowForm(true); };
+
+  // Ouvre la fiche d'inscription en MODE ÉDITION pour un élève déjà inscrit :
+  // charge le profil complet (parents, documents, médical…) puis pré-remplit
+  // la même modale que « Nouvel élève ».
+  const openEdit = async (entry) => {
+    const sid = entry.student_id || entry.student?.id;
+    if (!sid) return;
+    setEditBusy(true);
+    try {
+      const full = await inscriptionsApi.getStudent(sid);
+      setEditStudent({ ...full, class_id: entry.class_id ?? full.class_id });
+      setActiveEntry(null);
+      setShowForm(true);
+    } catch (e) {
+      alert(e.message || 'Erreur lors du chargement de la fiche élève');
+    } finally {
+      setEditBusy(false);
+    }
+  };
 
   // ── Récupération d'élèves d'un établissement associé ──────────────────────
   // Ouvre la modale et liste d'emblée les élèves des établissements associés.
@@ -388,7 +411,7 @@ export default function InscriptionsStudentsPage() {
         </div>
       )}
 
-      {/* Fiche élève — lecture seule (édition pédagogique réservée à l'admin) */}
+      {/* Fiche élève — consultation + accès à la modification de la fiche */}
       <DetailDrawer open={!!activeEntry} onClose={() => setActiveEntry(null)} title={activeEntry ? `${activeEntry.student?.last_name || ''} ${activeEntry.student?.first_name || ''}`.trim() : ''}>
         {activeEntry && (
           <div>
@@ -398,11 +421,21 @@ export default function InscriptionsStudentsPage() {
             <FieldRow label="Statut" value={activeEntry.status === 'RI' ? 'Réinscrit' : activeEntry.status === 'NI' ? 'Nouveau' : 'Non réinscrit'} />
             <FieldRow label="Code Massar" value={activeEntry.student?.massar_code || '—'} mono />
 
+            {/* Modifier la fiche d'inscription (formulaire pré-rempli) */}
+            <button
+              onClick={() => openEdit(activeEntry)}
+              disabled={editBusy}
+              className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+            >
+              {editBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Pencil className="w-4 h-4" />}
+              {editBusy ? 'Chargement…' : 'Modifier la fiche élève'}
+            </button>
+
             {/* Télécharger la fiche d'inscription (identique à l'admin) */}
             <button
               onClick={() => downloadFiche(activeEntry)}
               disabled={ficheBusy}
-              className="mt-5 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
             >
               {ficheBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               {ficheBusy ? 'Préparation…' : "Télécharger la fiche d'inscription"}
@@ -428,14 +461,16 @@ export default function InscriptionsStudentsPage() {
         )}
       </DetailDrawer>
 
-      {/* Nouvel élève — fiche d'inscription complète (identique à l'admin) */}
+      {/* Fiche d'inscription complète (identique à l'admin) : création d'un
+          nouvel élève, ou édition pré-remplie si editStudent est fourni. */}
       <StudentInscriptionModal
         open={showForm}
-        onClose={() => setShowForm(false)}
+        onClose={() => { setShowForm(false); setEditStudent(null); }}
         classes={classes}
         levels={levelOptions}
         academicYear={year}
         onCreated={load}
+        student={editStudent}
       />
 
       {/* Fenêtre de réinscription : élèves de l'année précédente + établissements associés */}
@@ -479,7 +514,7 @@ export default function InscriptionsStudentsPage() {
                   title="Filtrer par niveau"
                 >
                   <option value="">Niveau…</option>
-                  {(crossLevels.length ? crossLevels : LEVEL_ORDER).map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                  {(crossLevels.length ? crossLevels : levelOptions).map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
                 </select>
               </div>
               <p className="text-[11px] text-gray-400 -mt-2">
@@ -495,7 +530,7 @@ export default function InscriptionsStudentsPage() {
                     className="border rounded-lg text-sm px-2 py-1.5 w-28"
                   >
                     <option value="">(même)</option>
-                    {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                    {levelOptions.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
                   </select>
                   <button
                     onClick={reinscribeWholeLevel}
@@ -578,7 +613,11 @@ export default function InscriptionsStudentsPage() {
                 <label className="block text-xs font-medium text-gray-600 mb-1">Niveau de réinscription (proposé automatiquement)</label>
                 <select value={reinscribeLevel} onChange={(e) => { setReinscribeLevel(e.target.value); setReinscribeClassId(''); }}
                   className="w-full px-3 py-2 border rounded-lg text-sm">
-                  {LEVEL_ORDER.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                  {/* niveau proposé hors référentiel → gardé sélectionnable */}
+                  {reinscribeLevel && !levelOptions.includes(reinscribeLevel) && (
+                    <option value={reinscribeLevel}>{reinscribeLevel}</option>
+                  )}
+                  {levelOptions.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
                 </select>
               </div>
 
@@ -588,7 +627,10 @@ export default function InscriptionsStudentsPage() {
                   className="w-full px-3 py-2 border rounded-lg text-sm">
                   <option value="">Niveau seul — à affecter à une classe plus tard</option>
                   {classes
-                    .filter((c) => !reinscribeLevel || c.level === reinscribeLevel)
+                    // même niveau exact, ou même niveau de base (une classe « 1BAC »
+                    // reste proposée quand on choisit « 1BAC Sciences Math »)
+                    .filter((c) => !reinscribeLevel || c.level === reinscribeLevel
+                      || (baseLevel(c.level) && baseLevel(c.level) === baseLevel(reinscribeLevel)))
                     .map((c) => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
                 </select>
                 {!reinscribeClassId && (
