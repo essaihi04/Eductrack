@@ -4,8 +4,13 @@
 -- ║  Crée dans UNE seule école (v_school_name ci-dessous) :                   ║
 -- ║   • 1 classe « CLASSE DÉMO » (5AEP) — 50 élèves marocains réalistes       ║
 -- ║     (Massar D2026xxx + secret, genre, naissance, inscriptions 2025/2026)  ║
--- ║   • 3 profs démo (Math, Français, Arabe) + contrôles + notes              ║
--- ║   • 24 séances + suivi rapide complet (présence, participation…)          ║
+-- ║   • 3 profs démo (Math, Français, Arabe) + emploi du temps (6 créneaux)   ║
+-- ║   • Contrôles S1 (oct/nov/déc) + S2 (fév/mar/avr) + notes (progression)   ║
+-- ║   • Séances hebdo de la rentrée à AUJOURD'HUI (~90 % réalisées → le       ║
+-- ║     « Suivi des profs » montre créneaux attendus/réalisés/manqués)        ║
+-- ║   • Suivi rapide par élève (présence/participation…) → alimente aussi     ║
+-- ║     la page « Élèves absents » (presence = absent)                        ║
+-- ║   • Devoirs (~1 toutes les 3 semaines par matière)                        ║
 -- ║   • Finance : modèle de frais + plans + factures sept→juin + paiements    ║
 -- ║     variés (payé / partiel / impayé) pour simuler encaissement réel       ║
 -- ║   • Transport : 1 bus démo + 20 élèves affectés + géolocalisation         ║
@@ -83,6 +88,7 @@ DECLARE
                           'Mernissi','Naji','Ouali','Rhoul','Saidi','Temsamani','Wahbi','Yacoubi','Zerouali','Benchekroun'];
   v_subjects TEXT[] := ARRAY['Mathématiques','Français','Arabe'];
   v_subject  TEXT;
+  r_slot     RECORD;
 BEGIN
   -- ─── 1. École cible ────────────────────────────────────────────────────────
   IF v_school_id IS NOT NULL THEN
@@ -115,9 +121,25 @@ BEGIN
   v_pwd_dir := crypt('Directeur2026', gen_salt('bf'));
 
   -- ─── 2. Nettoyage (re-seed) ────────────────────────────────────────────────
-  -- Les FK ON DELETE CASCADE emportent : enrollments, factures, paiements,
-  -- affectations bus, suivi, notes, liens parents…
+  -- Certaines FK n'ont PAS de ON DELETE CASCADE (sessions.teacher_id,
+  -- controls_plan.teacher_id, teacher_subjects…) → supprimer d'abord les
+  -- données pédagogiques des profs/classe démo, PUIS les profils.
   DELETE FROM demo_parent_configs WHERE school_id = v_school_id;
+
+  -- Séances (le suivi élève session_tracking part en cascade)
+  DELETE FROM sessions WHERE teacher_id IN (SELECT id FROM profiles WHERE email LIKE '%@eductrack.demo');
+  DELETE FROM sessions WHERE class_id   IN (SELECT id FROM classes WHERE school_id = v_school_id AND name = v_class_name);
+  -- Contrôles (les notes control_notes partent en cascade)
+  DELETE FROM controls_plan WHERE teacher_id IN (SELECT id FROM profiles WHERE email LIKE '%@eductrack.demo');
+  DELETE FROM controls_plan WHERE class_id   IN (SELECT id FROM classes WHERE school_id = v_school_id AND name = v_class_name);
+  -- Liaisons profs et devoirs
+  DELETE FROM teacher_subjects WHERE teacher_id IN (SELECT id FROM profiles WHERE email LIKE '%@eductrack.demo');
+  DELETE FROM homework WHERE created_by IN (SELECT id FROM profiles WHERE email LIKE '%@eductrack.demo');
+  -- Historique chatbot des parents démo (FK parent_id sans cascade possible)
+  BEGIN
+    DELETE FROM whatsapp_incoming_messages WHERE parent_id IN (SELECT id FROM profiles WHERE email LIKE '%@eductrack.demo');
+  EXCEPTION WHEN undefined_table THEN NULL; END;
+
   DELETE FROM profiles   WHERE email LIKE '%@eductrack.demo';
   DELETE FROM auth.users WHERE email LIKE '%@eductrack.demo';
   DELETE FROM buses      WHERE school_id = v_school_id AND plate_number = 'DEMO-BUS';
@@ -282,8 +304,9 @@ BEGIN
   END LOOP;
   RAISE NOTICE '✓ 50 élèves créés (inscriptions, finance, transport)';
 
-  -- ─── 8. Profs + matières + contrôles + notes + séances + suivi ────────────
-  FOREACH v_subject IN ARRAY v_subjects LOOP
+  -- ─── 8. Profs + emploi du temps + contrôles S1/S2 + devoirs ───────────────
+  FOR i IN 1 .. array_length(v_subjects, 1) LOOP
+    v_subject := v_subjects[i];
     SELECT id INTO v_subject_id FROM subjects WHERE school_id = v_school_id AND name = v_subject LIMIT 1;
     IF v_subject_id IS NULL THEN
       INSERT INTO subjects (school_id, name, code)
@@ -309,26 +332,76 @@ BEGIN
     VALUES (v_teacher_id, v_email, 'Prof Démo', v_subject, 'teacher', v_school_id);
     INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES (v_teacher_id, v_subject_id);
 
-    -- 2 contrôles S1 + notes pour les 50 élèves
-    FOR m IN 1..2 LOOP
+    -- Emploi du temps : 2 créneaux hebdo par matière. Le « Suivi des profs »
+    -- compare ces créneaux (attendus) aux séances réellement saisies.
+    IF i = 1 THEN      -- Mathématiques
+      INSERT INTO class_timetable (class_id, day_of_week, slot_order, start_time, end_time, subject_id, teacher_id, school_id) VALUES
+        (v_class_id, 'monday',    1, TIME '08:00', TIME '09:00', v_subject_id, v_teacher_id, v_school_id),
+        (v_class_id, 'wednesday', 1, TIME '08:00', TIME '09:00', v_subject_id, v_teacher_id, v_school_id);
+    ELSIF i = 2 THEN   -- Français
+      INSERT INTO class_timetable (class_id, day_of_week, slot_order, start_time, end_time, subject_id, teacher_id, school_id) VALUES
+        (v_class_id, 'tuesday',   1, TIME '08:00', TIME '09:00', v_subject_id, v_teacher_id, v_school_id),
+        (v_class_id, 'thursday',  1, TIME '08:00', TIME '09:00', v_subject_id, v_teacher_id, v_school_id);
+    ELSE               -- Arabe
+      INSERT INTO class_timetable (class_id, day_of_week, slot_order, start_time, end_time, subject_id, teacher_id, school_id) VALUES
+        (v_class_id, 'monday',    2, TIME '10:00', TIME '11:00', v_subject_id, v_teacher_id, v_school_id),
+        (v_class_id, 'thursday',  2, TIME '10:00', TIME '11:00', v_subject_id, v_teacher_id, v_school_id);
+    END IF;
+
+    -- 3 contrôles S1 (oct/nov/déc) + 3 contrôles S2 (fév/mar/avr) + notes.
+    -- Notes S2 légèrement meilleures (progression visible dans Évaluation).
+    FOR m IN 1..6 LOOP
+      v_due := CASE m
+        WHEN 1 THEN DATE '2025-10-20' WHEN 2 THEN DATE '2025-11-17' WHEN 3 THEN DATE '2025-12-15'
+        WHEN 4 THEN DATE '2026-02-16' WHEN 5 THEN DATE '2026-03-16' ELSE DATE '2026-04-20' END;
       INSERT INTO controls_plan (teacher_id, class_id, name, date, kind, status)
-      VALUES (v_teacher_id, v_class_id, v_subject || ' — Contrôle S1 #' || m,
-              make_date(2025, 9 + m, 20), 'control', 'completed')
+      VALUES (v_teacher_id, v_class_id,
+              v_subject || ' — Contrôle ' || (CASE WHEN m <= 3 THEN 'S1' ELSE 'S2' END)
+                        || ' #' || (CASE WHEN m <= 3 THEN m ELSE m - 3 END),
+              v_due, 'control', 'completed')
       RETURNING id INTO v_session_id;  -- réutilisé comme control id
       INSERT INTO control_notes (control_id, student_id, note)
       SELECT v_session_id, p.id,
-        round((CASE WHEN p.import_order % 3 = 1 THEN 13 + random() * 6
-                    WHEN p.import_order % 3 = 2 THEN 10 + random() * 5
-                    ELSE 6 + random() * 6 END)::numeric, 2)
+        LEAST(20, round((
+          (CASE WHEN p.import_order % 3 = 1 THEN 13 + random() * 6
+                WHEN p.import_order % 3 = 2 THEN 10 + random() * 5
+                ELSE 6 + random() * 6 END)
+          + (CASE WHEN m > 3 THEN 0.75 ELSE 0 END)  -- progression S2
+        )::numeric, 2))
       FROM profiles p WHERE p.class_id = v_class_id AND p.role = 'student';
     END LOOP;
 
-    -- 8 séances + suivi rapide par élève
-    FOR m IN 1..8 LOOP
-      INSERT INTO sessions (class_id, teacher_id, subject_id, date, start_time, end_time, topic)
-      VALUES (v_class_id, v_teacher_id, v_subject_id,
-              DATE '2025-09-08' + ((m - 1) * 7), TIME '08:00', TIME '09:00',
-              v_subject || ' — Séance #' || m)
+    -- Devoirs : ~1 toutes les 3 semaines depuis la rentrée (suivi des profs)
+    v_due := DATE '2025-09-15';
+    WHILE v_due <= LEAST(CURRENT_DATE, DATE '2026-06-20') LOOP
+      INSERT INTO homework (title, description, type, class_id, target_type, due_date, created_by, created_at)
+      VALUES (v_subject || ' — Exercices du ' || to_char(v_due, 'DD/MM'),
+              'Devoir de démonstration', 'exercice', v_class_id, 'all',
+              v_due + 7, v_teacher_id, v_due::timestamptz);
+      v_due := v_due + 21;
+    END LOOP;
+  END LOOP;
+  RAISE NOTICE '✓ Profs, emploi du temps, contrôles S1+S2, notes et devoirs créés';
+
+  -- ─── 8bis. Séances S1+S2 (rentrée → aujourd'hui) + suivi + absences ───────
+  -- Pour chaque jour depuis la rentrée : les créneaux du jour sont réalisés à
+  -- ~90 % (séance + suivi élève) ; les ~10 % restants = créneaux « manqués »
+  -- visibles dans le Suivi des profs. Les élèves absents (presence = absent)
+  -- alimentent la page « Élèves absents » sur toute l'année.
+  FOR v_due IN SELECT generate_series(DATE '2025-09-08', CURRENT_DATE, INTERVAL '1 day')::date LOOP
+    FOR r_slot IN
+      SELECT ct.*, s.name AS subject_name
+      FROM class_timetable ct LEFT JOIN subjects s ON s.id = ct.subject_id
+      WHERE ct.class_id = v_class_id
+        AND ct.day_of_week = trim(to_char(v_due, 'day'))
+    LOOP
+      CONTINUE WHEN random() < 0.10;  -- séance manquée (créneau non réalisé)
+
+      INSERT INTO sessions (class_id, teacher_id, subject_id, date, start_time, end_time, topic, school_id)
+      VALUES (v_class_id, r_slot.teacher_id, r_slot.subject_id, v_due,
+              r_slot.start_time, r_slot.end_time,
+              coalesce(r_slot.subject_name, 'Séance') || ' — ' || to_char(v_due, 'DD/MM/YYYY'),
+              v_school_id)
       RETURNING id INTO v_session_id;
 
       FOR v_student_id, v_profile IN
@@ -353,7 +426,7 @@ BEGIN
       END LOOP;
     END LOOP;
   END LOOP;
-  RAISE NOTICE '✓ Profs, contrôles, notes, séances et suivi créés';
+  RAISE NOTICE '✓ Séances S1+S2 (rentrée → aujourd''hui) + suivi + absences créés';
 
   -- ─── 9. Config année scolaire (si absente) ────────────────────────────────
   IF NOT EXISTS (SELECT 1 FROM school_year_config WHERE school_id = v_school_id AND academic_year = v_year) THEN
@@ -369,6 +442,13 @@ BEGIN
   RAISE NOTICE '════════════════════════════════════════════════';
   RAISE NOTICE '✅ SEED CLASSE DÉMO TERMINÉ';
   RAISE NOTICE '   Classe : % (50 élèves, année %)', v_class_name, v_year;
+  RAISE NOTICE '   Séances : % (rentrée → aujourd''hui, S1+S2)',
+    (SELECT COUNT(*) FROM sessions WHERE class_id = v_class_id);
+  RAISE NOTICE '   Suivis élèves : % (dont % absences)',
+    (SELECT COUNT(*) FROM session_tracking st JOIN sessions s ON s.id = st.session_id WHERE s.class_id = v_class_id),
+    (SELECT COUNT(*) FROM session_tracking st JOIN sessions s ON s.id = st.session_id WHERE s.class_id = v_class_id AND st.presence = 'absent');
+  RAISE NOTICE '   Contrôles : % (S1 + S2) + notes',
+    (SELECT COUNT(*) FROM controls_plan WHERE class_id = v_class_id);
   RAISE NOTICE '   Directeur : directeur.demo@eductrack.demo / Directeur2026';
   RAISE NOTICE '   Élèves/Profs : mot de passe Demo2026';
   RAISE NOTICE '   QR démo : mot-clé « DEMO PARENT » activé pour cette école';

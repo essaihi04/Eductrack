@@ -55,7 +55,7 @@ const welcomeMessage = ({ schoolName, student, email, password }) => [
   '',
   `🔐 *Vos identifiants d'accès (application parent) :*`,
   `📧 Email : ${email}`,
-  `🔑 Mot de passe : *${password}*`,
+  password ? `🔑 Mot de passe : *${password}*` : `🔑 Mot de passe : celui de votre compte existant`,
   `🌐 https://etrack.ma/login`,
   '',
   `💬 Ici même sur WhatsApp, écrivez *menu* pour découvrir le chatbot :`,
@@ -63,6 +63,34 @@ const welcomeMessage = ({ schoolName, student, email, password }) => [
   '',
   `_Ceci est un environnement de démonstration._`,
 ].filter((l) => l !== null).join('\n');
+
+/**
+ * Résout le parent EXACTEMENT comme le chatbot (getParentByPhone) :
+ * parent_contacts (canal whatsapp) d'abord, puis profiles.phone — toujours
+ * scopé à l'école. INDISPENSABLE : le parent démo doit être LE MÊME profil
+ * que celui que le chatbot résoudra aux messages suivants, sinon un numéro
+ * déjà connu comme parent (ancien test) recevrait « aucun enfant rattaché ».
+ */
+async function resolveParentByPhone(phone, schoolId) {
+  const { data: contacts } = await supabaseAdmin
+    .from('parent_contacts')
+    .select('parent_id, parent:parent_id!inner(id, email, first_name, last_name, school_id, role)')
+    .eq('phone_e164', phone)
+    .eq('channel', 'whatsapp')
+    .eq('parent.school_id', schoolId)
+    .eq('parent.role', 'parent')
+    .limit(1);
+  if (contacts?.length) return contacts[0].parent;
+
+  const { data: profs } = await supabaseAdmin
+    .from('profiles')
+    .select('id, email, first_name, last_name')
+    .eq('role', 'parent')
+    .eq('phone', phone)
+    .eq('school_id', schoolId)
+    .limit(1);
+  return profs?.[0] || null;
+}
 
 /**
  * Point d'entrée appelé pour CHAQUE message texte entrant, AVANT
@@ -97,29 +125,46 @@ export async function maybeHandleDemoParent({ phone, text, schoolId, providerMes
   const schoolName = school?.name || 'École Démo';
 
   try {
-    // 3. Ce numéro est-il déjà un parent démo associé ? → renvoi idempotent
-    const existing = await findExistingDemoParent(phone, cfg.class_id);
-    if (existing) {
-      const password = buildDemoPassword(existing.student.first_name);
-      await supabaseAdmin.auth.admin.updateUserById(existing.parent_id, { password });
-      await sendText(schoolId, phone, welcomeMessage({
-        schoolName, student: existing.student, email: existing.email, password,
-      }), { urgent: true });
-      await logIncoming({ phone, schoolId, text, providerMessageId, parentId: existing.parent_id });
+    // 3. Parent résolu par téléphone (même logique que le chatbot). S'il
+    // existe déjà, on RÉUTILISE ce profil (pas de doublon) : le chatbot le
+    // retrouvera avec son enfant démo aux messages suivants.
+    const resolved = await resolveParentByPhone(phone, schoolId);
+
+    if (resolved) {
+      // 3.a Déjà lié à un élève de la classe démo → renvoi idempotent
+      const existing = await demoLinkOfParent(resolved.id, cfg.class_id);
+      if (existing) {
+        const password = await tryResetPassword(resolved.id, existing.first_name);
+        await sendText(schoolId, phone, welcomeMessage({
+          schoolName, student: existing, email: resolved.email, password,
+        }), { urgent: true });
+        await logIncoming({ phone, schoolId, text, providerMessageId, parentId: resolved.id });
+        return true;
+      }
+
+      // 3.b Parent existant sans élève démo → lui associer l'élève suivant
+      const student = await nextFreeStudent(cfg.class_id);
+      if (!student) return await replyDemoFull({ schoolId, phone, schoolName, text, providerMessageId });
+
+      const { error: linkErr } = await supabaseAdmin.from('parent_students').insert({
+        parent_id: resolved.id,
+        student_id: student.id,
+        relationship: 'tuteur',
+      });
+      if (linkErr) throw linkErr;
+      await ensureWhatsappContact(resolved.id, phone);
+
+      const password = await tryResetPassword(resolved.id, student.first_name);
+      console.log(`[demo-parent] ✓ (parent existant) ${phone} → ${student.first_name} ${student.last_name} (${student.massar_code})`);
+      await sendText(schoolId, phone, welcomeMessage({ schoolName, student, email: resolved.email, password }), { urgent: true });
+      await logIncoming({ phone, schoolId, text, providerMessageId, parentId: resolved.id });
       return true;
     }
 
-    // 4. Élève suivant de la classe démo sans parent
+    // 4. Numéro inconnu → élève suivant + création complète du parent
     const student = await nextFreeStudent(cfg.class_id);
-    if (!student) {
-      await sendText(schoolId, phone,
-        `🚫 *La démo est complète !*\n\nTous les élèves de la classe démo ont déjà un parent associé.\nContactez l'école *${schoolName}* pour réinitialiser la démonstration.`,
-        { urgent: true });
-      await logIncoming({ phone, schoolId, text, providerMessageId, parentId: null });
-      return true;
-    }
+    if (!student) return await replyDemoFull({ schoolId, phone, schoolName, text, providerMessageId });
 
-    // 5. Création du parent (auth + profil + contact WhatsApp + lien élève)
     const email = `parent.demo.${(student.massar_code || student.id.slice(0, 8)).toLowerCase()}@${DEMO_EMAIL_DOMAIN}`;
     const password = buildDemoPassword(student.first_name);
 
@@ -143,14 +188,7 @@ export async function maybeHandleDemoParent({ phone, text, schoolId, providerMes
     });
     if (profErr) throw profErr;
 
-    await supabaseAdmin.from('parent_contacts').insert({
-      parent_id: parentId,
-      phone_e164: phone,
-      channel: 'whatsapp',
-      is_primary: true,
-      consent_status: 'pending',
-      label: 'Démo',
-    });
+    await ensureWhatsappContact(parentId, phone);
 
     const { error: linkErr } = await supabaseAdmin.from('parent_students').insert({
       parent_id: parentId,
@@ -173,36 +211,61 @@ export async function maybeHandleDemoParent({ phone, text, schoolId, providerMes
   }
 }
 
-/** Parent déjà associé à un élève de la classe démo via ce numéro. */
-async function findExistingDemoParent(phone, classId) {
-  // Numéro → parents candidats (contacts WhatsApp puis profils)
-  const ids = new Set();
-  const { data: contacts } = await supabaseAdmin
-    .from('parent_contacts').select('parent_id').eq('phone_e164', phone);
-  (contacts || []).forEach((c) => ids.add(c.parent_id));
-  const { data: profs } = await supabaseAdmin
-    .from('profiles').select('id').eq('role', 'parent').eq('phone', phone);
-  (profs || []).forEach((p) => ids.add(p.id));
-  if (ids.size === 0) return null;
-
+/** Élève de la classe démo déjà lié à ce parent (null si aucun). */
+async function demoLinkOfParent(parentId, classId) {
   const { data: links } = await supabaseAdmin
     .from('parent_students')
-    .select('parent_id, student:student_id!inner(id, first_name, last_name, class_id, massar_code, classes!fk_profiles_class(name))')
-    .in('parent_id', [...ids])
+    .select('student:student_id!inner(id, first_name, last_name, class_id, massar_code, classes!fk_profiles_class(name))')
+    .eq('parent_id', parentId)
     .eq('student.class_id', classId)
     .limit(1);
   if (!links || links.length === 0) return null;
-
-  const { data: parent } = await supabaseAdmin
-    .from('profiles').select('id, email').eq('id', links[0].parent_id).single();
-  if (!parent) return null;
-
   const s = links[0].student;
-  return {
-    parent_id: parent.id,
-    email: parent.email,
-    student: { ...s, class_name: s.classes?.name || null },
-  };
+  return { ...s, class_name: s.classes?.name || null };
+}
+
+/** Contact WhatsApp du parent : créé s'il n'existe pas déjà pour ce numéro. */
+async function ensureWhatsappContact(parentId, phone) {
+  const { data: existing } = await supabaseAdmin
+    .from('parent_contacts')
+    .select('id')
+    .eq('parent_id', parentId)
+    .eq('phone_e164', phone)
+    .eq('channel', 'whatsapp')
+    .limit(1);
+  if (existing?.length) return;
+  await supabaseAdmin.from('parent_contacts').insert({
+    parent_id: parentId,
+    phone_e164: phone,
+    channel: 'whatsapp',
+    is_primary: true,
+    consent_status: 'pending',
+    label: 'Démo',
+  });
+}
+
+/**
+ * Régénère le mot de passe du parent (compte auth existant). Renvoie le
+ * nouveau mot de passe, ou null si le profil n'a pas de compte auth (le
+ * message de bienvenue indique alors de garder ses identifiants actuels).
+ */
+async function tryResetPassword(parentId, studentFirstName) {
+  try {
+    const password = buildDemoPassword(studentFirstName);
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(parentId, { password });
+    return error ? null : password;
+  } catch {
+    return null;
+  }
+}
+
+/** Réponse « démo complète » (plus d'élève libre) + log. Renvoie true. */
+async function replyDemoFull({ schoolId, phone, schoolName, text, providerMessageId }) {
+  await sendText(schoolId, phone,
+    `🚫 *La démo est complète !*\n\nTous les élèves de la classe démo ont déjà un parent associé.\nContactez l'école *${schoolName}* pour réinitialiser la démonstration.`,
+    { urgent: true });
+  await logIncoming({ phone, schoolId, text, providerMessageId, parentId: null });
+  return true;
 }
 
 /** Prochain élève de la classe démo sans AUCUN parent lié (ordre import_order). */
