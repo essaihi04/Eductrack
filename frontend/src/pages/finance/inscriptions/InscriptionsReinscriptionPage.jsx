@@ -216,6 +216,7 @@ const InscriptionsReinscriptionPage = () => {
                         <th className="px-3 py-2">Élève</th>
                         <th className="px-3 py-2">Classe {year}</th>
                         <th className="px-3 py-2">Classe {toYear}</th>
+                        <th className="px-3 py-2">Niveau {toYear}</th>
                         <th className="px-3 py-2">Statut</th>
                       </tr>
                     </thead>
@@ -247,6 +248,18 @@ const InscriptionsReinscriptionPage = () => {
                             </select>
                           </td>
                           <td className="px-3 py-2">
+                            {(() => {
+                              if (r.status === 'NR') return <span className="text-xs text-muted-foreground italic">—</span>;
+                              const sel = targetClasses.find((c) => String(c.id) === String(r.new_class_id));
+                              if (!sel) return <span className="text-xs text-muted-foreground">—</span>;
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
+                                  {sel.level}{sel.filiere ? ` · ${sel.filiere}` : ''}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-3 py-2">
                             <div className="inline-flex rounded-lg border border-border overflow-hidden">
                               <button
                                 onClick={() => updateRow(idx, { status: 'RI' })}
@@ -261,7 +274,7 @@ const InscriptionsReinscriptionPage = () => {
                         </tr>
                       ))}
                       {rows.length === 0 && (
-                        <tr><td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">Aucun élève à réinscrire pour {year}.</td></tr>
+                        <tr><td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">Aucun élève à réinscrire pour {year}.</td></tr>
                       )}
                     </tbody>
                   </table>
