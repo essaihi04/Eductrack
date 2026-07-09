@@ -1754,11 +1754,16 @@ router.post('/classes/import-massar-secrets', async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Import des NOMS FRANÇAIS (latin) depuis le fichier Massar « ListEleveFR ».
-// Aligné par CODE MASSAR sur les élèves existants (dont le nom principal est en
-// arabe) → remplit first_name_fr / last_name_fr pour la recherche bilingue.
+// Aligné par CODE MASSAR sur les élèves existants. En plus de remplir
+// first_name_fr / last_name_fr, si le nom PRINCIPAL de l'élève est en écriture
+// arabe, il est déplacé vers first_name_ar / last_name_ar (sans écraser des
+// champs _ar déjà remplis) et le nom français devient le nom principal —
+// la fiche affiche alors le français en haut et l'arabe dans les champs (ar).
+// Idempotent : au 2e passage le nom principal est déjà latin, rien ne bouge.
 // Body: { rows: [{ massar_code, first_name_fr, last_name_fr }], dryRun }
 // Le matching se fait sur toute l'école (le fichier couvre plusieurs classes).
 // ─────────────────────────────────────────────────────────────────────────
+const ARABIC_RE = /[؀-ۿ]/; // bloc Unicode « Arabic »
 router.post('/students/import-french-names', async (req, res) => {
   try {
     const { rows, dryRun } = req.body;
@@ -1770,7 +1775,7 @@ router.post('/students/import-french-names', async (req, res) => {
     // Index des élèves de l'école par code Massar.
     let query = supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, massar_code')
+      .select('id, first_name, last_name, first_name_ar, last_name_ar, massar_code')
       .eq('role', 'student');
     if (schoolId) query = query.eq('school_id', schoolId);
     const { data: students, error: studentsError } = await query;
@@ -1800,12 +1805,20 @@ router.post('/students/import-french-names', async (req, res) => {
       seen.add(code);
       const m = byMassar.get(code);
       if (m) {
+        // Nom principal en arabe → il passera dans les champs _ar et le
+        // français prendra sa place comme nom principal.
+        const mainIsArabic = ARABIC_RE.test(`${m.first_name || ''}${m.last_name || ''}`);
         results.push({
           row,
           matchStatus: 'matched',
-          student: { id: m.id, first_name: m.first_name, last_name: m.last_name },
+          student: {
+            id: m.id,
+            first_name: m.first_name, last_name: m.last_name,
+            first_name_ar: m.first_name_ar, last_name_ar: m.last_name_ar,
+          },
           first_name_fr: firstFr,
           last_name_fr: lastFr,
+          willSwap: mainIsArabic,
         });
       } else {
         results.push({ row, matchStatus: 'not_found' });
@@ -1814,23 +1827,34 @@ router.post('/students/import-french-names', async (req, res) => {
 
     const matchedCount = results.filter(r => r.matchStatus === 'matched').length;
     const notFoundCount = results.filter(r => r.matchStatus === 'not_found').length;
+    const swapCount = results.filter(r => r.matchStatus === 'matched' && r.willSwap).length;
 
     if (dryRun === true) {
-      return res.json({ dryRun: true, results, matchedCount, notFoundCount });
+      return res.json({ dryRun: true, results, matchedCount, notFoundCount, swapCount });
     }
 
     let updated = 0;
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
+      const updates = { first_name_fr: r.first_name_fr || null, last_name_fr: r.last_name_fr || null };
+      if (r.willSwap) {
+        // Nom arabe déplacé vers les champs _ar (sans écraser un _ar déjà
+        // saisi), nom français en nom principal (champ par champ : si le
+        // fichier n'a qu'un des deux, l'autre reste tel quel).
+        updates.first_name_ar = r.student.first_name_ar || r.student.first_name || null;
+        updates.last_name_ar = r.student.last_name_ar || r.student.last_name || null;
+        if (r.first_name_fr) updates.first_name = r.first_name_fr;
+        if (r.last_name_fr) updates.last_name = r.last_name_fr;
+      }
       const { error: upErr } = await supabaseAdmin
         .from('profiles')
-        .update({ first_name_fr: r.first_name_fr || null, last_name_fr: r.last_name_fr || null })
+        .update(updates)
         .eq('id', r.student.id);
       if (upErr) throw upErr;
       updated++;
     }
 
-    res.json({ dryRun: false, updated, matchedCount, notFoundCount, results });
+    res.json({ dryRun: false, updated, matchedCount, notFoundCount, swapCount, results });
   } catch (error) {
     console.error('Erreur import noms français:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

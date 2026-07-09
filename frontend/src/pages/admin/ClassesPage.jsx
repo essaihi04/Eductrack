@@ -513,8 +513,9 @@ const ClassesPage = () => {
       const ok = confirm(
         `Fichier lu : ${rows.length} élève(s) en français.\n\n` +
         `✅ Correspondances par code Massar : ${dry.matchedCount}\n` +
-        `❓ Sans correspondance (ignorés) : ${dry.notFoundCount}\n\n` +
-        `Enregistrer les noms français sur les ${dry.matchedCount} élève(s) correspondant(s) ?`
+        `❓ Sans correspondance (ignorés) : ${dry.notFoundCount}\n` +
+        (dry.swapCount ? `🔁 Fiches à réorganiser : ${dry.swapCount} (nom arabe → champs (ar), nom français → nom principal)\n` : '') +
+        `\nEnregistrer les noms français sur les ${dry.matchedCount} élève(s) correspondant(s) ?`
       );
       if (!ok) return;
       // 2) Enregistrement réel.
@@ -524,7 +525,11 @@ const ClassesPage = () => {
         body: JSON.stringify({ rows, dryRun: false }),
       }).then(r => r.json());
       if (done.error) { alert('Erreur : ' + done.error); return; }
-      alert(`✅ Noms français enregistrés pour ${done.updated} élève(s).\nLa recherche fonctionne désormais en arabe ou en français.`);
+      alert(
+        `✅ Noms français enregistrés pour ${done.updated} élève(s).` +
+        (done.swapCount ? `\n🔁 ${done.swapCount} fiche(s) réorganisée(s) : nom français en principal, nom arabe dans les champs (ar).` : '') +
+        `\nLa recherche fonctionne en arabe ou en français.`
+      );
     } catch (err) {
       console.error('Erreur import noms français:', err);
       alert('Erreur de lecture du fichier.');
