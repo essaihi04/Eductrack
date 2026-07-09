@@ -123,6 +123,27 @@ export function isBulletinQuery(text) {
   return BULLETIN_KEYWORDS_RE.test(text || '');
 }
 
+// Mots-clés "code Massar" : le parent demande le code Massar / code secret de
+// son enfant en texte libre (FR / arabe / darija). Déclenche une réponse
+// déterministe avec getMassarCode au lieu de passer par l'IA (qui n'a pas ces
+// codes dans son contexte).
+const MASSAR_KEYWORDS_RE = new RegExp(
+  [
+    // Français / latin
+    'massar', 'masar', 'code de l[\'\\s]?[eé]l[eè]ve', 'code [eé]l[eè]ve', 'code secret',
+    'rmz', 'code massar', 'numero massar', 'num[eé]ro massar',
+    // Arabe standard
+    'مسار', 'ماسار', 'كود مسار', 'الكود', 'رقم التلميذ', 'رقم مسار',
+    'الرمز السري', 'الرمز', 'رقم مسار', 'كود ماسار',
+    // Darija (translittérée)
+    'kod masar', 'code masar', 'l?kod dyal masar', 'raqm masar', 'rmz sir',
+  ].join('|'),
+  'i',
+);
+export function isMassarQuery(text) {
+  return MASSAR_KEYWORDS_RE.test(text || '');
+}
+
 /**
  * Détecte si la question vise un semestre précis.
  * Retourne 1, 2 ou null.

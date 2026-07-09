@@ -33,7 +33,7 @@ const __dirname = dirname(__filename);
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { MENUS, sendMenu, matchMenuOption } from './menus.js';
-import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery } from './ai.js';
+import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery, isMassarQuery } from './ai.js';
 import { getReceptionistByPhone, answerSchoolAI, receptionistWelcome, receptionistFooter } from './adminAi.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
 import { maybeHandleDemoParent } from './demoParent.js';
@@ -136,6 +136,21 @@ async function sendBulletinPdfs(schoolId, phone, student, semester = null) {
     console.error('[chatbot] sendBulletinPdfs error:', e.message);
     return 0;
   }
+}
+
+/**
+ * Répond directement au parent qui demande le code Massar / code secret de son
+ * enfant en texte libre (FR / arabe / darija), sans passer par l'IA. Retourne
+ * true si la demande a été détectée et traitée.
+ */
+async function maybeAnswerMassar(schoolId, phone, student, parentInfo, text) {
+  if (!isMassarQuery(text)) return false;
+  const reply = await A.getMassarCode(student, parentInfo);
+  await sendText(schoolId, phone, reply, { urgent: true });
+  setTimeout(() => {
+    sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+  }, 1500);
+  return true;
 }
 
 /**
@@ -1129,6 +1144,30 @@ export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, 
       .eq('id', incomingMsg?.id);
     await markProcessed(incomingMsg?.id);
     return;
+  }
+
+  // 3.0 Demande du code Massar en texte libre (FR / arabe / darija) — court-
+  // circuite le menu et l'IA. On résout l'enfant comme pour les identifiants :
+  // enfant sélectionné, sinon enfant unique. Si plusieurs enfants sans
+  // sélection, on laisse le flux normal demander de choisir l'enfant d'abord.
+  if (isMassarQuery(text)) {
+    const st = State.getState(schoolId, phone);
+    let massarStudent = st?.studentId ? await getStudentById(st.studentId) : null;
+    if (!massarStudent) {
+      const children = await getParentChildren(parentInfo.parent_id);
+      if (children.length === 1) massarStudent = await getStudentById(children[0].id);
+    }
+    if (massarStudent) {
+      await maybeAnswerMassar(parentInfo.school_id, phone, massarStudent, parentInfo, text);
+      await supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .update({ category: 'pedagogical', ai_response_sent: true })
+        .eq('id', incomingMsg?.id);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+    // Plusieurs enfants sans sélection → on continue le flux normal (le menu de
+    // sélection d'enfant sera affiché ; le parent pourra redemander ensuite).
   }
 
   // 3.bis Commandes spéciales (toujours prioritaires)
