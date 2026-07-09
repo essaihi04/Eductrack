@@ -15,7 +15,7 @@ const SCHOOL_MONTHS = [
 const defaultItem = () => ({
   category: 'tuition',
   name: CATEGORY_LABELS['tuition'] || 'Scolarité',
-  amount: 0,
+  amount: '',
   recurrence: 'monthly',
   due_month: null,
   start_month: 9,
@@ -542,7 +542,9 @@ export default function FeeTemplatesPage() {
                         className="col-span-3 px-2 py-1.5 text-sm border border-gray-300 rounded">
                         {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                       </select>
-                      <input type="number" value={it.amount} onChange={e => updateItem(idx, 'amount', e.target.value)}
+                      <input type="number" min="0" step="any" inputMode="decimal"
+                        value={it.amount === 0 ? '' : it.amount}
+                        onChange={e => updateItem(idx, 'amount', e.target.value)}
                         placeholder="Montant"
                         className="col-span-2 px-2 py-1.5 text-sm border border-gray-300 rounded" />
                       <select value={it.recurrence} onChange={e => updateItem(idx, 'recurrence', e.target.value)}

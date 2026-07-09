@@ -1753,6 +1753,91 @@ router.post('/classes/import-massar-secrets', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// Import des NOMS FRANÇAIS (latin) depuis le fichier Massar « ListEleveFR ».
+// Aligné par CODE MASSAR sur les élèves existants (dont le nom principal est en
+// arabe) → remplit first_name_fr / last_name_fr pour la recherche bilingue.
+// Body: { rows: [{ massar_code, first_name_fr, last_name_fr }], dryRun }
+// Le matching se fait sur toute l'école (le fichier couvre plusieurs classes).
+// ─────────────────────────────────────────────────────────────────────────
+router.post('/students/import-french-names', async (req, res) => {
+  try {
+    const { rows, dryRun } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: 'rows requis' });
+    }
+    const schoolId = getSchoolId(req);
+
+    // Index des élèves de l'école par code Massar.
+    let query = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code')
+      .eq('role', 'student');
+    if (schoolId) query = query.eq('school_id', schoolId);
+    const { data: students, error: studentsError } = await query;
+    if (studentsError) throw studentsError;
+
+    const byMassar = new Map();
+    for (const s of students || []) {
+      const code = String(s.massar_code || '').trim().toUpperCase();
+      if (code) byMassar.set(code, s);
+    }
+
+    // Dédoublonne les lignes du fichier par code Massar (garde la dernière).
+    const seen = new Set();
+    const results = [];
+    for (const row of rows) {
+      const code = String(row?.massar_code || '').trim().toUpperCase();
+      const firstFr = String(row?.first_name_fr || '').trim();
+      const lastFr = String(row?.last_name_fr || '').trim();
+      if (!code || (!firstFr && !lastFr)) {
+        results.push({ row, matchStatus: 'invalid', reason: 'Code Massar ou nom manquant' });
+        continue;
+      }
+      if (seen.has(code)) {
+        results.push({ row, matchStatus: 'duplicate' });
+        continue;
+      }
+      seen.add(code);
+      const m = byMassar.get(code);
+      if (m) {
+        results.push({
+          row,
+          matchStatus: 'matched',
+          student: { id: m.id, first_name: m.first_name, last_name: m.last_name },
+          first_name_fr: firstFr,
+          last_name_fr: lastFr,
+        });
+      } else {
+        results.push({ row, matchStatus: 'not_found' });
+      }
+    }
+
+    const matchedCount = results.filter(r => r.matchStatus === 'matched').length;
+    const notFoundCount = results.filter(r => r.matchStatus === 'not_found').length;
+
+    if (dryRun === true) {
+      return res.json({ dryRun: true, results, matchedCount, notFoundCount });
+    }
+
+    let updated = 0;
+    for (const r of results) {
+      if (r.matchStatus !== 'matched' || !r.student?.id) continue;
+      const { error: upErr } = await supabaseAdmin
+        .from('profiles')
+        .update({ first_name_fr: r.first_name_fr || null, last_name_fr: r.last_name_fr || null })
+        .eq('id', r.student.id);
+      if (upErr) throw upErr;
+      updated++;
+    }
+
+    res.json({ dryRun: false, updated, matchedCount, notFoundCount, results });
+  } catch (error) {
+    console.error('Erreur import noms français:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // Import EN VRAC des notes de contrôle continu (fichiers Massar « NotesCC »).
 // Multi-fichiers : 1 fichier = 1 classe + 1 matière. Le client parse les .xlsx
 // et envoie du JSON structuré. Le backend résout classe/matière/prof/semestre,

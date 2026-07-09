@@ -169,6 +169,50 @@ const parseMassarInfoEleve = (workbook) => {
   return { className, rows };
 };
 
+// Parse le fichier Massar « ListEleveFR » (liste des élèves en FRANÇAIS).
+// Un onglet par classe ; colonnes : Code (Massar), Nom, Prénom (latin).
+// Retourne rows: [{ massar_code, first_name_fr, last_name_fr }] sur TOUS les
+// onglets (le matching côté serveur se fait par code Massar, toutes classes).
+const parseListEleveFR = (workbook) => {
+  const rows = [];
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    // Ligne d'en-tête : contient « Code » ET « Nom ».
+    let headerIdx = -1, codeCol = -1, nomCol = -1, prenomCol = -1;
+    for (let i = 0; i < Math.min(raw.length, 20); i++) {
+      const row = raw[i] || [];
+      let cCode = -1, cNom = -1, cPrenom = -1;
+      for (let j = 0; j < row.length; j++) {
+        const v = String(row[j] || '').trim().toLowerCase();
+        if (v === 'code') cCode = j;
+        else if (v === 'nom') cNom = j;
+        else if (v.startsWith('pr') && v.includes('nom')) cPrenom = j; // Prénom / Pr�nom
+      }
+      if (cCode !== -1 && cNom !== -1) {
+        headerIdx = i; codeCol = cCode; nomCol = cNom;
+        prenomCol = cPrenom !== -1 ? cPrenom : cNom + 1;
+        break;
+      }
+    }
+    if (headerIdx === -1) continue; // onglet sans en-tête reconnu
+
+    for (let i = headerIdx + 1; i < raw.length; i++) {
+      const r = raw[i];
+      if (!r) continue;
+      const code = String(r[codeCol] || '').trim().toUpperCase();
+      const nom = String(r[nomCol] || '').trim();
+      const prenom = String(r[prenomCol] || '').trim();
+      // Ne garder que les lignes avec un vrai code Massar (commence par lettre/chiffre)
+      if (!code || !/^[A-Z]?\d/.test(code) || code.includes('CODE')) continue;
+      rows.push({ massar_code: code, first_name_fr: prenom, last_name_fr: nom });
+    }
+  }
+  return rows;
+};
+
 // Mini-courbe d'évolution (7 jours). Couleur selon la tendance : vert (hausse),
 // rouge (baisse), gris (stable). Affiche un trait plat si <2 points.
 const Sparkline = ({ points = [], dir = 'flat', width = 46, height = 16 }) => {
@@ -242,6 +286,7 @@ const ClassesPage = () => {
   // massarFiles: [{ key, fileName, className, classId, rows, result, error }]
   const [massarFiles, setMassarFiles] = useState([]);
   const [massarBusy, setMassarBusy] = useState(false);
+  const [frenchBusy, setFrenchBusy] = useState(false); // import noms français (ListEleveFR)
   const [massarCoverage, setMassarCoverage] = useState({});
   const [quickSendingClassId, setQuickSendingClassId] = useState(null);
   const [fixMassarNames, setFixMassarNames] = useState(true);
@@ -438,6 +483,53 @@ const ClassesPage = () => {
       if (!dryRun) fetchMassarCoverage(token);
     } finally {
       setMassarBusy(false);
+    }
+  };
+
+  // Import des NOMS FRANÇAIS (fichier « ListEleveFR ») → aligne par code Massar
+  // sur les élèves existants (nom arabe) et remplit first_name_fr/last_name_fr
+  // pour la recherche bilingue. Un seul fichier multi-onglets couvre l'école.
+  const handleFrenchNamesFile = async (e) => {
+    const file = (e.target.files || [])[0];
+    e.target.value = '';
+    if (!file) return;
+    setFrenchBusy(true);
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const rows = parseListEleveFR(workbook);
+      if (rows.length === 0) {
+        alert('Aucun élève reconnu. Vérifiez que c\'est bien le fichier « ListEleveFR » (colonnes Code / Nom / Prénom).');
+        return;
+      }
+      const token = await getMassarToken();
+      // 1) Aperçu (dryRun) : combien de codes Massar correspondent ?
+      const dry = await fetch(`${apiUrl}/api/admin/students/import-french-names`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, dryRun: true }),
+      }).then(r => r.json());
+      if (dry.error) { alert('Erreur : ' + dry.error); return; }
+      const ok = confirm(
+        `Fichier lu : ${rows.length} élève(s) en français.\n\n` +
+        `✅ Correspondances par code Massar : ${dry.matchedCount}\n` +
+        `❓ Sans correspondance (ignorés) : ${dry.notFoundCount}\n\n` +
+        `Enregistrer les noms français sur les ${dry.matchedCount} élève(s) correspondant(s) ?`
+      );
+      if (!ok) return;
+      // 2) Enregistrement réel.
+      const done = await fetch(`${apiUrl}/api/admin/students/import-french-names`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, dryRun: false }),
+      }).then(r => r.json());
+      if (done.error) { alert('Erreur : ' + done.error); return; }
+      alert(`✅ Noms français enregistrés pour ${done.updated} élève(s).\nLa recherche fonctionne désormais en arabe ou en français.`);
+    } catch (err) {
+      console.error('Erreur import noms français:', err);
+      alert('Erreur de lecture du fichier.');
+    } finally {
+      setFrenchBusy(false);
     }
   };
 
@@ -1987,6 +2079,14 @@ const ClassesPage = () => {
             <FileSpreadsheet className="w-4 h-4" />
             Codes Massar
           </button>
+          <label
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg cursor-pointer text-white ${frenchBusy ? 'bg-teal-400 cursor-wait' : 'bg-teal-600 hover:bg-teal-700'}`}
+            title="Importer les noms en français (ListEleveFR) — aligne par code Massar pour la recherche bilingue"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            {frenchBusy ? 'Import…' : 'Noms français'}
+            <input type="file" accept=".xlsx,.xls" onChange={handleFrenchNamesFile} className="hidden" disabled={frenchBusy} />
+          </label>
           <button
             onClick={() => {
               if (!showForm && !formData.academicYear) {

@@ -259,10 +259,18 @@ const StudentsPage = () => {
         }
       }
 
-      // Filtre par nom
+      // Filtre par nom — recherche BILINGUE : on teste le nom principal
+      // (arabe), le nom français (latin, aligné par code Massar) et le nom
+      // arabe de la fiche d'inscription. La recherche marche donc que l'admin
+      // tape en arabe ou en français.
       if (filters.searchName) {
-        const fullName = `${student.first_name} ${student.last_name}`.toLowerCase();
-        if (!fullName.includes(filters.searchName.toLowerCase())) {
+        const needle = filters.searchName.toLowerCase();
+        const haystack = [
+          student.first_name, student.last_name,
+          student.first_name_fr, student.last_name_fr,
+          student.first_name_ar, student.last_name_ar,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(needle)) {
           return false;
         }
       }
