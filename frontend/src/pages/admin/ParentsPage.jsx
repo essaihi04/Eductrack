@@ -185,33 +185,50 @@ const parseGenericParents = (workbook) => {
 };
 
 // Parse la « Liste globale des élèves » exportée par KoolSchool.
-// Structure : quelques lignes de titre, puis un en-tête
-//   N° | Code massar | Nom et prénom | Nom et prénom (ar) | Classe | Tél parent 1 | Tél parent 2 | ...
+// Structure : quelques lignes de titre, puis un en-tête. Deux variantes gérées :
+//   • Ancienne : N° | Code massar | Nom et prénom | … | Tél parent 1 | Tél parent 2
+//   • Récente  : … | Nom et prénom parent 1 | Tél parent 1 | E-mail… | CIN… | Profession… |
+//                    Nom et prénom parent 2 | Tél parent 2 | …
 // C'est une liste GLOBALE (toutes classes), donc le matching se fait par code Massar.
-// Le fichier ne contient PAS de nom de parent → on reprend le nom de l'élève (la famille).
-// Renvoie { rows } ou null si l'en-tête n'est pas reconnu.
+// Quand le fichier fournit le NOM du parent, on l'utilise ; sinon on retombe sur le
+// nom de l'élève (la famille). Renvoie { rows } ou null si l'en-tête n'est pas reconnu.
 const parseKoolSchool = (workbook) => {
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return null;
   const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-  // Repérer l'en-tête : une ligne contenant « code massar » ET « tél parent 1 ».
-  let headerIdx = -1, colCode = -1, colName = -1, colNameAr = -1, colPhone1 = -1, colPhone2 = -1;
+  // Repérer l'en-tête : une ligne contenant « code massar » ET au moins une colonne
+  // « tél parent N ». Détection PRÉCISE des colonnes de chaque bloc parent (1 et 2) :
+  // on distingue « Tél parent N » (téléphone) de « Nom et prénom parent N » (nom) —
+  // l'ancien code écrasait la colonne téléphone par « Profession parent N » (bug :
+  // aucun parent n'était importé car il lisait un texte à la place du numéro).
+  let headerIdx = -1, colCode = -1, colName = -1, colNameAr = -1;
+  const pName = [-1, -1], pPhone = [-1, -1]; // index 0 = parent 1, index 1 = parent 2
   for (let i = 0; i < Math.min(raw.length, 30); i++) {
     const row = raw[i] || [];
-    let code = -1, name = -1, nameAr = -1, p1 = -1, p2 = -1;
+    let code = -1, name = -1, nameAr = -1;
+    const nm = [-1, -1], ph = [-1, -1];
     for (let j = 0; j < row.length; j++) {
       const cell = String(row[j] || '').trim().toLowerCase();
       if (!cell) continue;
-      if (code === -1 && cell.includes('code massar')) code = j;
+      if (code === -1 && cell.includes('code massar')) { code = j; continue; }
       // « Nom et prénom (ar) » → colonne arabe ; « Nom et prénom » → colonne latine.
-      else if (cell.includes('nom et pr') && (cell.includes('(ar)') || cell.includes('ar)'))) nameAr = j;
-      else if (cell === 'nom et prénom' || cell === 'nom et prenom') name = j;
-      else if (cell.includes('parent 1') || cell.includes('parent1')) p1 = j;
-      else if (cell.includes('parent 2') || cell.includes('parent2')) p2 = j;
+      if (cell.includes('nom et pr') && (cell.includes('(ar)') || cell.includes('ar)'))) { nameAr = j; continue; }
+      if (cell === 'nom et prénom' || cell === 'nom et prenom') { name = j; continue; }
+      // Blocs parent 1 / parent 2 : on classe chaque colonne « … parent N ».
+      // Nom → colonne nom ; téléphone → tout ce qui n'est ni nom, ni e-mail, ni
+      // CIN, ni profession (« Tél parent N » ou en-tête « Parent N » nu). Sans ça,
+      // l'ancien code prenait « Profession parent N » comme téléphone → 0 parent.
+      for (const k of [0, 1]) {
+        if (!cell.includes(`parent ${k + 1}`) && !cell.includes(`parent${k + 1}`)) continue;
+        if (cell.includes('nom')) { nm[k] = j; continue; }
+        if (cell.includes('mail') || cell.includes('e-mail') || cell.includes('cin') || cell.includes('profession')) continue;
+        if (ph[k] === -1) ph[k] = j; // 1re colonne « téléphone » du bloc
+      }
     }
-    if (code !== -1 && p1 !== -1) {
-      headerIdx = i; colCode = code; colName = name; colNameAr = nameAr; colPhone1 = p1; colPhone2 = p2;
+    if (code !== -1 && (ph[0] !== -1 || ph[1] !== -1)) {
+      headerIdx = i; colCode = code; colName = name; colNameAr = nameAr;
+      pName[0] = nm[0]; pName[1] = nm[1]; pPhone[0] = ph[0]; pPhone[1] = ph[1];
       break;
     }
   }
@@ -229,24 +246,25 @@ const parseKoolSchool = (workbook) => {
     // On ne saute que les lignes totalement vides.
     if (!massar && !studentName && !studentNameAr) continue;
 
-    // Le fichier ne fournit pas de nom de parent → on utilise le nom de l'élève (la famille).
+    // Un contact par bloc parent, avec son VRAI nom si fourni (sinon nom de l'élève).
     const seen = new Set();
     const contacts = [];
-    [colPhone1, colPhone2].forEach((col) => {
-      if (col === -1) return;
-      const phone = validMoroccoMobile(r[col]);
-      if (!phone || seen.has(phone)) return;
+    for (const k of [0, 1]) {
+      if (pPhone[k] === -1) continue;
+      const phone = validMoroccoMobile(r[pPhone[k]]);
+      if (!phone || seen.has(phone)) continue;
       seen.add(phone);
-      contacts.push({ phone, name: studentName, relationship: undefined });
-    });
+      const parentName = pName[k] !== -1 ? String(r[pName[k]] || '').trim() : '';
+      contacts.push({ phone, name: parentName || studentName || studentNameAr, relationship: undefined });
+    }
     if (contacts.length === 0) continue;
 
     rows.push({
       massar_code: massar,
       student_full_name: studentName,
       student_full_name_ar: studentNameAr || undefined,
-      // Nom du parent = nom de l'élève (FR si dispo, sinon AR) — fichier sans nom de parent.
-      parent_full_name: studentName || studentNameAr,
+      // Nom du parent principal = nom du 1er contact (fichier récent) sinon nom de l'élève.
+      parent_full_name: contacts[0].name || studentName || studentNameAr,
       phone_1: contacts[0].phone,
       relationship: undefined,
       contacts
