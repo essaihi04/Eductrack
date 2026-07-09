@@ -24,6 +24,32 @@ const academicYearRange = (year) => {
   return { start: `${y1}-09-01`, end: `${y1 + 1}-08-31` };
 };
 
+// Plage ÉLARGIE incluant l'été précédent (juin→août), période où l'on encaisse
+// déjà les frais d'inscription/réinscription de l'année à venir. Sert de pré-filtre
+// SQL large ; le rattachement précis à l'année se fait ensuite via le libellé.
+const academicYearRangeWide = (year) => {
+  const y1 = parseInt(String(year || '').split(/[/\-]/)[0], 10);
+  if (Number.isNaN(y1)) return null;
+  return { start: `${y1}-06-01`, end: `${y1 + 1}-08-31` };
+};
+
+// Normalise une année scolaire pour comparaison : « 2026/2027 » → « 2026-2027 ».
+const normYear = (y) => String(y || '').replace('/', '-').trim();
+
+// Année scolaire (« 2026-2027 ») déduite d'un libellé de période (« Septembre 2026 »).
+// Un paiement/facture est rattaché à SON année via ce libellé, même s'il est
+// encaissé hors de la plage sept→août (frais payés durant l'été précédent).
+const MONTH_NAMES_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const academicYearOfLabel = (label) => {
+  if (!label) return null;
+  const parts = String(label).trim().split(/\s+/);
+  const month = MONTH_NAMES_FR.indexOf((parts[0] || '').toLowerCase()) + 1;
+  const cal = parseInt(parts[parts.length - 1], 10);
+  if (!month || Number.isNaN(cal)) return null;
+  const y1 = month >= 9 ? cal : cal - 1; // sept→déc = 1re moitié ; janv→août = 2de
+  return `${y1}-${y1 + 1}`;
+};
+
 // Mapping catégorie facture -> flux de recette (aligné sur financeAccounting.routes.js)
 const STREAM_OF_CATEGORY = { tuition: 'tuition', transport: 'transport', registration: 'fi', supplies: 'fr' };
 const streamOfCategory = (c) => STREAM_OF_CATEGORY[c] || 'other';
@@ -1315,14 +1341,31 @@ router.get('/invoices', async (req, res) => {
     if (student_id) query = query.eq('student_id', student_id);
     if (from) query = query.gte('issue_date', from);
     if (to) query = query.lte('issue_date', to);
-    // Scope par année scolaire (plage de dates) si fournie et sans from/to explicites.
-    const invRange = academicYearRange(academic_year);
-    if (invRange && !from && !to) query = query.gte('issue_date', invRange.start).lte('issue_date', invRange.end);
+    // Scope par année scolaire : pré-filtre SQL élargi à l'été précédent, puis
+    // rattachement précis via le libellé de période (voir plus bas). Sans ça,
+    // une facture émise en juillet/août (réinscription) restait invisible pour
+    // l'année à venir car hors de la plage sept→août.
+    // Pour un seul élève : aucun pré-filtre date (jamais 500 factures) → le
+    // rattachement par libellé plus bas suffit, même très hors saison. Sinon
+    // (liste globale) on borne la requête à la plage élargie.
+    const invWide = academicYearRangeWide(academic_year);
+    if (invWide && !from && !to && !student_id) query = query.gte('issue_date', invWide.start).lte('issue_date', invWide.end);
 
     const { data, error } = await query;
     if (error) throw error;
 
     let filtered = data || [];
+    // Ne garder que les factures de l'année demandée : d'abord via leur libellé
+    // de période (fiable même hors plage), sinon repli sur la plage stricte.
+    const invStrict = academicYearRange(academic_year);
+    if (academic_year && !from && !to && invStrict) {
+      const want = normYear(academic_year);
+      filtered = filtered.filter((i) => {
+        const ly = academicYearOfLabel(i.period_label);
+        if (ly) return ly === want;
+        return i.issue_date >= invStrict.start && i.issue_date <= invStrict.end;
+      });
+    }
     if (class_id) filtered = filtered.filter(i => i.student?.class_id === class_id);
     if (search) {
       const q = search.toLowerCase();
@@ -1627,16 +1670,35 @@ router.get('/payments', async (req, res) => {
     if (schoolId) query = query.eq('school_id', schoolId);
     if (from) query = query.gte('payment_date', from);
     if (to) query = query.lte('payment_date', to);
-    // Scope par année scolaire (plage de dates) si fournie et sans from/to explicites.
-    const payRange = academicYearRange(academic_year);
-    if (payRange && !from && !to) query = query.gte('payment_date', payRange.start).lte('payment_date', payRange.end);
+    // Scope par année scolaire : pré-filtre SQL élargi à l'été précédent, puis
+    // rattachement précis via le libellé de la facture (voir plus bas). Sans ça,
+    // un encaissement de juillet/août (réinscription) restait invisible pour
+    // l'année à venir car hors de la plage sept→août.
+    // Pour un seul élève : aucun pré-filtre date (jamais 500 paiements) → le
+    // rattachement par libellé plus bas suffit, même très hors saison. Sinon
+    // (liste globale) on borne la requête à la plage élargie.
+    const payWide = academicYearRangeWide(academic_year);
+    if (payWide && !from && !to && !student_id) query = query.gte('payment_date', payWide.start).lte('payment_date', payWide.end);
     if (method) query = query.eq('method', method);
     if (student_id) query = query.eq('student_id', student_id);
     if (invoice_id) query = query.eq('invoice_id', invoice_id);
 
     const { data, error } = await query;
     if (error) throw error;
-    res.json({ payments: data || [] });
+
+    // Ne garder que les paiements de l'année demandée : d'abord via le libellé
+    // de leur facture (fiable même hors plage), sinon repli sur la plage stricte.
+    let payments = data || [];
+    const payStrict = academicYearRange(academic_year);
+    if (academic_year && !from && !to && payStrict) {
+      const want = normYear(academic_year);
+      payments = payments.filter((p) => {
+        const ly = academicYearOfLabel(p.invoice?.period_label);
+        if (ly) return ly === want;
+        return p.payment_date >= payStrict.start && p.payment_date <= payStrict.end;
+      });
+    }
+    res.json({ payments });
   } catch (error) {
     console.error('Erreur fetch payments:', error);
     res.status(500).json({ error: 'Erreur serveur' });
