@@ -6,7 +6,7 @@ import { Avatar } from '../../components/directory/ui';
 import { useYear } from '../../contexts/YearContext';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { nextYearStr } from '../../lib/schoolYear';
-import { nextLevel, isTerminalLevel } from '../../lib/levelProgression';
+import { nextLevel, isTerminalLevel, allLevelOptions } from '../../lib/levelProgression';
 import { supabase } from '../../lib/supabase';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -93,6 +93,9 @@ const ReinscriptionPage = () => {
           currentClass: e.class?.name || '—',
           currentLevel: lvl,
           new_class_id: target?.id || '',
+          // Pas de classe cible pour ce niveau → niveau seul pré-proposé
+          // (la classe sera affectée plus tard).
+          new_level: target ? '' : (targetLvl || ''),
           // Élève en classe terminale → proposé non réinscrit (diplômé) par défaut.
           status: isTerminalLevel(lvl) ? 'NR' : 'RI',
         };
@@ -116,13 +119,14 @@ const ReinscriptionPage = () => {
     try {
       const mappings = rows.map((r) => ({
         student_id: r.student_id,
-        new_class_id: r.status === 'NR' ? null : r.new_class_id,
+        new_class_id: r.status === 'NR' ? null : (r.new_class_id || null),
+        new_level: r.status === 'NR' ? null : (r.new_class_id ? null : (r.new_level || null)),
         status: r.status,
       }));
-      // Validation : tout élève réinscrit doit avoir une classe cible.
-      const missing = rows.filter((r) => r.status === 'RI' && !r.new_class_id);
+      // Validation : tout élève réinscrit doit avoir une classe OU un niveau cible.
+      const missing = rows.filter((r) => r.status === 'RI' && !r.new_class_id && !r.new_level);
       if (missing.length > 0) {
-        setError(`${missing.length} élève(s) réinscrit(s) sans classe cible. Choisissez une classe ou marquez-les « Non réinscrit ».`);
+        setError(`${missing.length} élève(s) réinscrit(s) sans classe ni niveau cible. Choisissez une classe ou un niveau, ou marquez-les « Non réinscrit ».`);
         setSubmitting(false);
         return;
       }
@@ -143,6 +147,9 @@ const ReinscriptionPage = () => {
 
   const riCount = rows.filter((r) => r.status === 'RI').length;
   const nrCount = rows.filter((r) => r.status === 'NR').length;
+  // Catalogue complet des niveaux (+ niveaux hors référentiel des classes cibles) :
+  // permet de réinscrire vers un niveau même sans classe créée pour l'année cible.
+  const levelChoices = allLevelOptions(targetClasses);
 
   return (
     <div className="p-2 md:p-6 max-w-6xl mx-auto space-y-6">
@@ -207,9 +214,10 @@ const ReinscriptionPage = () => {
                   <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
                     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                     <span>
-                      Aucune classe pour l'année <strong>{toYear}</strong>. Créez d'abord les classes
-                      cibles dans <Link to="/classes" className="underline font-medium">Classes</Link>{' '}
-                      (passez le sélecteur d'année sur {toYear}), puis revenez ici.
+                      Aucune classe pour l'année <strong>{toYear}</strong>. Vous pouvez réinscrire vers
+                      un <strong>niveau seul</strong> (classe affectée plus tard), ou créer d'abord les
+                      classes cibles dans <Link to="/classes" className="underline font-medium">Classes</Link>{' '}
+                      (passez le sélecteur d'année sur {toYear}).
                     </span>
                   </div>
                 )}
@@ -255,27 +263,40 @@ const ReinscriptionPage = () => {
                           </td>
                           <td className="px-3 py-2">
                             <select
-                              value={r.new_class_id}
+                              value={r.new_class_id || (r.new_level ? `level:${r.new_level}` : '')}
                               disabled={r.status === 'NR'}
-                              onChange={(e) => updateRow(idx, { new_class_id: e.target.value })}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v.startsWith('level:')) updateRow(idx, { new_class_id: '', new_level: v.slice(6) });
+                                else updateRow(idx, { new_class_id: v, new_level: '' });
+                              }}
                               className="w-full border rounded px-2 py-1 bg-background disabled:opacity-50"
                             >
                               <option value="">— choisir —</option>
-                              {targetClasses.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name} ({c.level}{c.filiere ? ` · ${c.filiere}` : ''})
-                                </option>
-                              ))}
+                              {targetClasses.length > 0 && (
+                                <optgroup label={`Classes ${toYear}`}>
+                                  {targetClasses.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.name} ({c.level}{c.filiere ? ` · ${c.filiere}` : ''})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              <optgroup label="Niveau seul — classe à affecter plus tard">
+                                {levelChoices.map((lvl) => (
+                                  <option key={lvl} value={`level:${lvl}`}>{lvl}</option>
+                                ))}
+                              </optgroup>
                             </select>
                           </td>
                           <td className="px-3 py-2">
                             {(() => {
                               if (r.status === 'NR') return <span className="text-xs text-muted-foreground italic">—</span>;
                               const sel = targetClasses.find((c) => String(c.id) === String(r.new_class_id));
-                              if (!sel) return <span className="text-xs text-muted-foreground">—</span>;
+                              if (!sel && !r.new_level) return <span className="text-xs text-muted-foreground">—</span>;
                               return (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                                  {sel.level}{sel.filiere ? ` · ${sel.filiere}` : ''}
+                                  {sel ? `${sel.level}${sel.filiere ? ` · ${sel.filiere}` : ''}` : `${r.new_level} · sans classe`}
                                 </span>
                               );
                             })()}

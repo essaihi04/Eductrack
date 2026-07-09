@@ -212,8 +212,12 @@ router.get('/', async (req, res) => {
 });
 
 // --- POST /api/enrollments/reinscription -----------------------------------
-// Promeut une liste d'élèves de from_year vers to_year.
-// body: { from_year, to_year, mappings:[{student_id, new_class_id, status}], options:{ carryFeePlan, keepMassar } }
+// Promeut une liste d'élèves de from_year vers to_year. Chaque mapping cible
+// soit une classe existante (new_class_id), soit un NIVEAU seul (new_level,
+// class_id null — l'affectation à une classe se fera plus tard), comme
+// /reinscribe. Permet de réinscrire vers un niveau du catalogue même si
+// aucune classe n'a encore été créée pour l'année cible.
+// body: { from_year, to_year, mappings:[{student_id, new_class_id?, new_level?, status}], options:{ carryFeePlan, keepMassar } }
 router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -261,15 +265,19 @@ router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
         continue;
       }
 
-      // Réinscription (RI) — nécessite une classe cible.
-      if (!m.new_class_id) { errors.push({ student_id: sid, error: 'new_class_id manquant' }); continue; }
+      // Réinscription (RI) — nécessite une classe cible OU un niveau seul.
+      const newLevel = String(m.new_level || '').trim().toUpperCase() || null;
+      if (!m.new_class_id && !newLevel) {
+        errors.push({ student_id: sid, error: 'new_class_id ou new_level manquant' });
+        continue;
+      }
 
       const { error: enrErr } = await supabaseAdmin
         .from('student_enrollments')
         .upsert({
           school_id: schoolId,
           student_id: sid,
-          class_id: m.new_class_id,
+          class_id: m.new_class_id || null,
           academic_year: to_year,
           status: 'RI',
           previous_class_id: prevClassId,
@@ -277,9 +285,13 @@ router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
         }, { onConflict: 'student_id,academic_year' });
       if (enrErr) { errors.push({ student_id: sid, error: enrErr.message }); continue; }
 
-      // La classe courante du profil suit la nouvelle inscription.
+      // La classe courante du profil suit la nouvelle inscription ; niveau seul
+      // → class_id null + niveau mis à jour (l'admin affectera la classe ensuite).
       // (Les liens parent_students et le code Massar sont indépendants de l'année → préservés.)
-      await supabaseAdmin.from('profiles').update({ class_id: m.new_class_id }).eq('id', sid);
+      const profileUpdate = m.new_class_id
+        ? { class_id: m.new_class_id }
+        : { class_id: null, level: newLevel };
+      await supabaseAdmin.from('profiles').update(profileUpdate).eq('id', sid);
 
       // Reconduction du plan de frais.
       if (carryFeePlan) {
