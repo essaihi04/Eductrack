@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Wallet, Users, History, Search, Plus, X, CheckCircle2,
   Printer, Ban, CreditCard, Pencil, Save, ChevronDown, ChevronRight, ArrowLeft, RotateCcw,
+  LayoutGrid, List,
 } from 'lucide-react';
 import { financeApi, formatMAD, METHOD_LABELS, CATEGORY_LABELS } from '../../lib/financeApi';
 import { Button } from '../../components/finance/ui';
@@ -31,8 +32,12 @@ const MONTH_HEAD = {
 // Libellé lisible d'un service (Scolarité, Transport…) à partir d'une ligne.
 const serviceLabel = (svc) => svc?.label || (svc?.category ? (CATEGORY_LABELS[svc.category] || svc.category) : 'Mensualité');
 
-export default function StudentFinanceWorkspace({ student, allStudents = [], academicYear, onClose, onChanged, onOpenPlan }) {
-  const [tab, setTab] = useState('collect');
+export default function StudentFinanceWorkspace({ student, allStudents = [], academicYear, onClose, onChanged, onOpenPlan, initialTab = 'collect', headerActions = null }) {
+  const [tab, setTab] = useState(initialTab);
+
+  // Si l'utilisateur ouvre le même espace via un autre bouton (ex : Historique),
+  // on suit l'onglet demandé.
+  useEffect(() => { setTab(initialTab); }, [initialTab, student.id]);
 
   return (
     <div className="space-y-4">
@@ -51,9 +56,12 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
             </p>
           </div>
         </div>
-        {onOpenPlan && (
-          <Button variant="secondary" onClick={onOpenPlan}>Plan de frais</Button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {onOpenPlan && (
+            <Button variant="secondary" onClick={onOpenPlan}>Plan de frais</Button>
+          )}
+          {headerActions}
+        </div>
       </div>
 
       {/* Onglets */}
@@ -82,8 +90,16 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
 // ── Grille mois × service réutilisable ───────────────────────────────────────
 // sel : { 'month:category' -> { checked, amount } }. Les services déjà payés
 // (remaining<=0) sont verrouillés et marqués payés.
+// Deux vues (hors mode compact) : « cartes » = un mois par carte, défilement
+// horizontal avec accroche ; « liste » = mois empilés (comportement historique).
 function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, onCancelService, onAddService, onRestoreService, serviceCatalog }) {
-  const amtCls = compact ? 'w-16 px-1.5 py-1 text-xs' : 'w-28 px-2 py-1 text-sm';
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem('financeMonthsView') || 'cards'; } catch { return 'cards'; }
+  });
+  const switchView = (v) => { setView(v); try { localStorage.setItem('financeMonthsView', v); } catch { /* stockage indisponible */ } };
+  const cards = !compact && view === 'cards';
+  const dense = compact || cards; // largeurs réduites dans les colonnes famille et les cartes
+  const amtCls = dense ? 'w-20 px-1.5 py-1 text-xs' : 'w-28 px-2 py-1 text-sm';
   // Ajout d'un service : mois en cours d'ajout + catégorie + montant.
   const [addMonth, setAddMonth] = useState(null);
   const [addCat, setAddCat] = useState('');
@@ -109,20 +125,33 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
   };
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
+      {!compact && (
+        <div className="flex items-center justify-end gap-1">
+          {[{ k: 'cards', label: 'Cartes', icon: LayoutGrid }, { k: 'list', label: 'Liste', icon: List }].map(v => (
+            <button key={v.k} onClick={() => switchView(v.k)}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                view === v.k ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
+              }`}>
+              <v.icon className="w-3.5 h-3.5" /> {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className={cards ? 'flex items-stretch gap-3 overflow-x-auto pb-3 snap-x snap-mandatory' : 'space-y-2.5'}>
       {(months || []).map(m => {
         const head = MONTH_HEAD[m.status] || MONTH_HEAD.unpaid;
         const presentCats = new Set(m.services.map(s => s.category).filter(Boolean));
         const freeCats = catalog.filter(([c]) => !presentCats.has(c));
         return (
-          <div key={m.month} className="border border-gray-200 rounded-lg overflow-hidden">
+          <div key={m.month} className={`border border-gray-200 rounded-lg overflow-hidden ${cards ? 'w-[320px] flex-shrink-0 snap-start flex flex-col bg-white' : ''}`}>
             <div className={`flex items-center justify-between px-3 py-1.5 text-sm border-b ${head}`}>
               <span className="font-semibold">{m.label}</span>
               <span className="text-xs">
                 {m.remaining > 0 ? `Reste ${formatMAD(m.remaining)}` : 'Payé ✓'}
               </span>
             </div>
-            <div className="divide-y divide-gray-100">
+            <div className={`divide-y divide-gray-100 ${cards ? 'flex-1' : ''}`}>
               {m.services.map(svc => {
                 const k = keyOf(m.month, svc.category);
                 const excluded = svc.status === 'excluded' || svc.excluded;
@@ -145,19 +174,19 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
                       {svc.extra && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 align-middle no-underline">ajouté</span>}
                       {excluded && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-gray-200 text-gray-500 align-middle no-underline">exclu</span>}
                     </span>
-                    {!compact && !excluded && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
+                    {!dense && !excluded && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
                     {excluded ? (
-                      <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-gray-400 flex-shrink-0`}>Exclu</span>
+                      <span className={`${dense ? 'w-20' : 'w-28'} text-right text-xs text-gray-400 flex-shrink-0`}>Exclu</span>
                     ) : payable ? (
                       checked ? (
                         <input type="number" step="0.01" min="0" max={svc.remaining} value={sel[k].amount}
                           onChange={e => onAmount(m.month, svc.category, e.target.value)}
                           className={`${amtCls} border border-gray-300 rounded text-right flex-shrink-0`} />
                       ) : (
-                        <span className={`${compact ? 'w-16 text-xs' : 'w-28'} text-right font-medium text-orange-600 flex-shrink-0`}>{formatMAD(svc.remaining)}</span>
+                        <span className={`${dense ? 'w-20 text-xs' : 'w-28'} text-right font-medium text-orange-600 flex-shrink-0`}>{formatMAD(svc.remaining)}</span>
                       )
                     ) : (
-                      <span className={`${compact ? 'w-16' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
+                      <span className={`${dense ? 'w-20' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
                     )}
                     {/* Exclu → réintégrer ; sinon annuler le paiement / supprimer / exclure avant paiement */}
                     {onRestoreService && excluded ? (
@@ -176,18 +205,20 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
             {/* Ajouter un service à ce mois */}
             {onAddService && (
               addMonth === m.month ? (
-                <div className="flex items-center gap-2 px-2.5 py-2 bg-purple-50/40 border-t border-gray-100">
-                  <select value={addCat} onChange={e => setAddCat(e.target.value)} className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm">
+                <div className={`px-2.5 py-2 bg-purple-50/40 border-t border-gray-100 ${cards ? 'space-y-1.5' : 'flex items-center gap-2'}`}>
+                  <select value={addCat} onChange={e => setAddCat(e.target.value)} className={`${cards ? 'w-full' : 'flex-1'} px-2 py-1.5 border border-gray-300 rounded text-sm`}>
                     {freeCats.length === 0 && <option value="">Tous les services sont déjà présents</option>}
                     {freeCats.map(([c, v]) => <option key={c} value={c}>{v}</option>)}
                   </select>
-                  <input type="number" step="0.01" min="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
-                    placeholder="Montant (auto si plan)" className="w-36 px-2 py-1.5 border border-gray-300 rounded text-sm" />
-                  <button onClick={() => submitAdd(m.month)} disabled={adding || !addCat}
-                    className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50">
-                    {adding ? '...' : 'Ajouter'}
-                  </button>
-                  <button onClick={() => setAddMonth(null)} className="p-1.5 hover:bg-gray-200 rounded"><X className="w-4 h-4 text-gray-500" /></button>
+                  <div className={cards ? 'flex items-center gap-1.5' : 'contents'}>
+                    <input type="number" step="0.01" min="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
+                      placeholder="Montant (auto si plan)" className={`${cards ? 'flex-1 min-w-0' : 'w-36'} px-2 py-1.5 border border-gray-300 rounded text-sm`} />
+                    <button onClick={() => submitAdd(m.month)} disabled={adding || !addCat}
+                      className="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex-shrink-0">
+                      {adding ? '...' : 'Ajouter'}
+                    </button>
+                    <button onClick={() => setAddMonth(null)} className="p-1.5 hover:bg-gray-200 rounded flex-shrink-0"><X className="w-4 h-4 text-gray-500" /></button>
+                  </div>
                 </div>
               ) : (
                 <button onClick={() => openAdd(m.month, presentCats)}
@@ -199,6 +230,7 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
