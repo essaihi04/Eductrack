@@ -1,18 +1,35 @@
-import { useState, useEffect } from 'react';
-import { Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, Wallet } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, Wallet,
+  DollarSign, Layers, History, Pencil, Download, ArrowRightLeft, RotateCcw, RefreshCw,
+} from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
+import { enrollmentsApi } from '../../lib/enrollmentsApi';
+import { inscriptionsApi } from '../../lib/inscriptionsApi';
+import { allLevelOptions } from '../../lib/levelProgression';
+import { prevYearStr, toDashYear } from '../../lib/schoolYear';
+import { printInscriptionFiche } from '../../utils/inscriptionFiche';
 import { PageHeader, KpiGrid, KpiCard, FilterBar, Drawer, Button } from '../../components/finance/ui';
 import {
   CardGrid, StudentCard, StudentRow, GridListToggle, StatusPill,
 } from '../../components/directory/ui';
+import StudentInscriptionModal from '../../components/students/StudentInscriptionModal';
+import ReinscriptionFlow from '../../components/students/ReinscriptionFlow';
+import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
-import { toDashYear } from '../../lib/schoolYear';
 import StudentFinanceWorkspace from './StudentFinanceWorkspace';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
 
+// Page ÉLÈVES unique de la finance : tout se fait ici, depuis la carte de
+// l'élève, via des icônes dédiées — encaissement ($), plan de frais, historique
+// & factures, modification de la fiche, fiche d'inscription PDF — plus les
+// boutons « Nouvel élève » et « Réinscription » en tête de page.
+// (Fusion des anciennes pages Recettes→Élèves et Inscriptions→Élèves.)
 export default function FinanceStudentsPage() {
+  const { profile } = useAuth();
+  const school = profile?.school || {};
   const { year } = useYear();
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -20,12 +37,30 @@ export default function FinanceStudentsPage() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ class_id: '', search: '' });
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
-  const [activeStudent, setActiveStudent] = useState(null); // espace finance ouvert (panneau latéral)
+  const [activeStudent, setActiveStudent] = useState(null); // espace finance ouvert
+  const [wsTab, setWsTab] = useState('collect'); // onglet initial de l'espace finance
   const [selectedStudent, setSelectedStudent] = useState(null); // modale plan de frais
+
+  // Inscriptions (fusion de l'ancienne page Inscriptions→Élèves)
+  const [roster, setRoster] = useState([]); // inscriptions de l'année active (statut RI/NI)
+  const [prevRoster, setPrevRoster] = useState([]); // année précédente (candidats à réinscrire)
+  const [prevClasses, setPrevClasses] = useState([]);
+  const [showForm, setShowForm] = useState(false); // fiche d'inscription (création / édition)
+  const [editStudent, setEditStudent] = useState(null);
+  const [busyId, setBusyId] = useState(null); // élève dont la fiche se charge (édition / PDF)
+  const [reinscribeOpen, setReinscribeOpen] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+
+  // Année précédente, dans le même format (slash ou tiret) que l'année active.
+  const prevYear = useMemo(() => {
+    const p = prevYearStr(year);
+    return p && String(year).includes('-') ? toDashYear(p) : p;
+  }, [year]);
 
   useEffect(() => {
     loadClasses();
     loadTemplates();
+    loadRoster();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year]);
 
@@ -50,7 +85,9 @@ export default function FinanceStudentsPage() {
 
   const loadClasses = async () => {
     try {
-      const data = await financeApi.listClasses(year);
+      // inscriptionsApi : renvoie aussi le niveau de chaque classe (nécessaire
+      // pour la fiche d'inscription et le flux de réinscription).
+      const data = await inscriptionsApi.listClasses(year);
       setClasses(Array.isArray(data) ? data : (data.classes || []));
     } catch (e) { console.error(e); }
   };
@@ -61,6 +98,42 @@ export default function FinanceStudentsPage() {
       setTemplates(data.templates || []);
     } catch (e) { console.error(e); }
   };
+
+  // Inscriptions de l'année active + année précédente (+ classes N-1 pour les niveaux).
+  const loadRoster = async () => {
+    try {
+      const [data, prevData, prevCls] = await Promise.all([
+        enrollmentsApi.list(year),
+        prevYear ? enrollmentsApi.list(prevYear).catch(() => []) : Promise.resolve([]),
+        prevYear ? inscriptionsApi.listClasses(prevYear).catch(() => []) : Promise.resolve([]),
+      ]);
+      setRoster(Array.isArray(data) ? data : []);
+      setPrevRoster(Array.isArray(prevData) ? prevData : []);
+      setPrevClasses(Array.isArray(prevCls) ? prevCls : []);
+    } catch (e) { console.error(e); }
+  };
+
+  const reloadAll = () => { load(); loadRoster(); };
+
+  // Inscription de l'année active par élève (statut RI/NI, classe…).
+  const entryByStudent = useMemo(() => {
+    const m = new Map();
+    roster.forEach((e) => { const sid = e.student_id || e.student?.id; if (sid) m.set(sid, e); });
+    return m;
+  }, [roster]);
+
+  // Candidats à réinscrire : inscrits l'an dernier (hors NR) mais pas encore
+  // dans l'année active.
+  const candidates = useMemo(() => {
+    const activeIds = new Set(roster.map((e) => e.student_id || e.student?.id).filter(Boolean));
+    return prevRoster
+      .filter((e) => e.status !== 'NR')
+      .filter((e) => { const sid = e.student_id || e.student?.id; return sid && !activeIds.has(sid); });
+  }, [prevRoster, roster]);
+
+  // Niveaux proposés dans la fiche d'inscription (catalogue complet + niveaux
+  // hors référentiel déjà utilisés par les classes N-1 ou actives).
+  const levelOptions = useMemo(() => allLevelOptions([...prevClasses, ...classes]), [prevClasses, classes]);
 
   const filtered = filters.search
     ? students.filter(s => `${s.first_name} ${s.last_name}`.toLowerCase().includes(filters.search.toLowerCase()))
@@ -84,6 +157,76 @@ export default function FinanceStudentsPage() {
     return <StatusPill tone="gray" icon={XCircle}>Sans plan</StatusPill>;
   };
 
+  // Ouvre l'espace finance de l'élève sur l'onglet demandé.
+  const openWorkspace = (s, tab = 'collect') => { setWsTab(tab); setActiveStudent(s); };
+
+  // Charge la fiche complète (parents, documents, médical…) puis ouvre la
+  // fiche d'inscription en mode ÉDITION.
+  const openEdit = async (s) => {
+    setBusyId(s.id);
+    try {
+      const full = await inscriptionsApi.getStudent(s.id);
+      const entry = entryByStudent.get(s.id);
+      setEditStudent({ ...full, class_id: entry?.class_id ?? full.class_id });
+      setShowForm(true);
+    } catch (e) { alert(e.message || 'Erreur lors du chargement de la fiche élève'); }
+    finally { setBusyId(null); }
+  };
+
+  // Télécharge la fiche d'inscription PDF (identique à l'admin).
+  const downloadFiche = async (s) => {
+    setBusyId(s.id);
+    try {
+      const full = await inscriptionsApi.getStudent(s.id);
+      const entry = entryByStudent.get(s.id);
+      const student = { ...full, class_id: entry?.class_id ?? full.class_id };
+      printInscriptionFiche({ student, school, classes, apiBase: apiUrl, academicYear: year });
+    } catch (e) { alert(e.message || 'Erreur lors de la récupération de la fiche'); }
+    finally { setBusyId(null); }
+  };
+
+  // Annule la réinscription : remet l'élève dans son état précédent.
+  const undoReinscription = async (s) => {
+    const name = `${s.first_name || ''} ${s.last_name || ''}`.trim();
+    if (!window.confirm(`Annuler la réinscription de ${name} pour ${year} ? L'élève sera remis dans son état précédent (classe et niveau) et son inscription ${year} sera supprimée.`)) return;
+    setUndoing(true);
+    try {
+      await enrollmentsApi.undoReinscribe(s.id, year);
+      setActiveStudent(null);
+      reloadAll();
+    } catch (e) { alert(e.message || "Erreur lors de l'annulation de la réinscription"); }
+    finally { setUndoing(false); }
+  };
+
+  // Icônes d'actions de la carte élève : chaque action a son icône dédiée.
+  const cardActions = (s) => [
+    { icon: DollarSign, label: 'Encaisser un paiement', tone: 'green', onClick: () => openWorkspace(s, 'collect') },
+    { icon: Layers, label: 'Plan de frais', tone: 'blue', onClick: () => setSelectedStudent(s) },
+    { icon: History, label: 'Historique & factures', tone: 'purple', onClick: () => openWorkspace(s, 'history') },
+    { icon: Pencil, label: 'Modifier la fiche élève', tone: 'amber', onClick: () => openEdit(s) },
+    { icon: busyId === s.id ? RefreshCw : Download, label: "Fiche d'inscription (PDF)", tone: 'gray', onClick: () => downloadFiche(s) },
+  ];
+
+  // Boutons supplémentaires de l'en-tête de l'espace finance (fiche ouverte).
+  const workspaceActions = (s) => {
+    const entry = entryByStudent.get(s.id);
+    return (
+      <>
+        <Button variant="secondary" icon={Pencil} onClick={() => openEdit(s)} disabled={busyId === s.id}>
+          Modifier la fiche
+        </Button>
+        <Button variant="secondary" icon={Download} onClick={() => downloadFiche(s)} disabled={busyId === s.id}>
+          Fiche PDF
+        </Button>
+        {entry && (entry.status === 'RI' || entry.status === 'NI') && (
+          <Button variant="secondary" icon={RotateCcw} onClick={() => undoReinscription(s)} disabled={undoing}>
+            {undoing ? 'Annulation…' : 'Annuler la réinscription'}
+          </Button>
+        )}
+      </>
+    );
+  };
+
   return (
     <div className="p-6 space-y-5">
       {/* Espace finance plein écran de l'élève (remplit l'interface) */}
@@ -92,14 +235,32 @@ export default function FinanceStudentsPage() {
           student={activeStudent}
           allStudents={students}
           academicYear={toDashYear(year)}
+          initialTab={wsTab}
           onClose={() => setActiveStudent(null)}
           onChanged={load}
           onOpenPlan={() => setSelectedStudent(activeStudent)}
+          headerActions={workspaceActions(activeStudent)}
         />
       ) : (
         <>
           <PageHeader icon={Users} title="Élèves — Finance" color="green"
-            subtitle={`${filtered.length} élève(s)`} onRefresh={load} loading={loading} />
+            subtitle={`${filtered.length} élève(s)${candidates.length ? ` · ${candidates.length} à réinscrire` : ''}`}
+            onRefresh={reloadAll} loading={loading}
+            actions={
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  icon={ArrowRightLeft}
+                  onClick={() => setReinscribeOpen(true)}
+                  title="Réinscrire des élèves de l'année précédente ou d'un établissement associé"
+                >
+                  Réinscription{candidates.length ? ` (${candidates.length})` : ''}
+                </Button>
+                <Button icon={Plus} onClick={() => { setEditStudent(null); setShowForm(true); }}>
+                  Nouvel élève
+                </Button>
+              </div>
+            } />
 
           <KpiGrid cols={4}>
             <KpiCard label="Total facturé" value={formatMAD(totals.invoiced)} tone="blue" />
@@ -120,26 +281,30 @@ export default function FinanceStudentsPage() {
               <option value="">Toutes classes</option>
               {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            <GridListToggle value={viewMode} onChange={setViewMode} />
           </FilterBar>
 
-          {/* Bascule grille / liste */}
-          <div className="flex items-center justify-end">
-            <GridListToggle value={viewMode} onChange={setViewMode} />
-          </div>
-
           {filtered.length === 0 ? (
-            <p className="text-center py-10 text-gray-400">Aucun élève</p>
+            <div className="text-center py-10 space-y-3">
+              <p className="text-gray-400">Aucun élève</p>
+              {candidates.length > 0 && (
+                <Button variant="secondary" icon={ArrowRightLeft} onClick={() => setReinscribeOpen(true)} className="mx-auto">
+                  Réinscrire des élèves ({candidates.length} en attente)
+                </Button>
+              )}
+            </div>
           ) : viewMode === 'grid' ? (
-            <CardGrid min={180}>
+            <CardGrid min={200}>
               {filtered.map((s) => (
                 <StudentCard
                   key={s.id}
                   name={`${s.first_name} ${s.last_name}`}
                   photo={resolveAvatar(s.avatar_url)}
                   gender={s.gender || ''}
-                  classLabel={s.classes?.name || '—'}
+                  className={s.classes?.name || '—'}
                   status={financeStatus(s)}
-                  onClick={() => setActiveStudent(s)}
+                  actions={cardActions(s)}
+                  onClick={() => openWorkspace(s, 'collect')}
                 />
               ))}
             </CardGrid>
@@ -151,10 +316,11 @@ export default function FinanceStudentsPage() {
                   name={`${s.first_name} ${s.last_name}`}
                   photo={resolveAvatar(s.avatar_url)}
                   gender={s.gender || ''}
-                  classLabel={s.classes?.name || '—'}
+                  className={s.classes?.name || '—'}
                   sub={s.total_due > 0 ? `Reste dû ${formatMAD(s.total_due)}` : 'À jour'}
                   status={financeStatus(s)}
-                  onClick={() => setActiveStudent(s)}
+                  actions={cardActions(s)}
+                  onClick={() => openWorkspace(s, 'collect')}
                 />
               ))}
             </div>
@@ -171,6 +337,29 @@ export default function FinanceStudentsPage() {
           onSaved={() => { setSelectedStudent(null); load(); }}
         />
       )}
+
+      {/* Fiche d'inscription complète (identique à l'admin) : création d'un
+          nouvel élève, ou édition pré-remplie si editStudent est fourni. */}
+      <StudentInscriptionModal
+        open={showForm}
+        onClose={() => { setShowForm(false); setEditStudent(null); }}
+        classes={classes}
+        levels={levelOptions}
+        academicYear={year}
+        onCreated={reloadAll}
+        student={editStudent}
+      />
+
+      {/* Flux de réinscription (année précédente + établissements associés) */}
+      <ReinscriptionFlow
+        open={reinscribeOpen}
+        onClose={() => setReinscribeOpen(false)}
+        year={year}
+        classes={classes}
+        levelOptions={levelOptions}
+        candidates={candidates}
+        onDone={reloadAll}
+      />
     </div>
   );
 }

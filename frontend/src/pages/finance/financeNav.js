@@ -62,7 +62,9 @@ export const FINANCE_POLES = [
     color: 'amber',
     tabs: [
       { label: 'Tableau de bord', path: '/finance/inscriptions', end: true, icon: LayoutDashboard },
-      { label: 'Élèves', path: '/finance/inscriptions/eleves', icon: Users },
+      // L'onglet « Élèves » a fusionné avec Recettes → Élèves (/finance/students) :
+      // une seule page multifonctionnelle (encaissement, plan de frais, fiche,
+      // nouvel élève, réinscription…).
       { label: 'Réinscription', path: '/finance/inscriptions/reinscription', icon: UserCheck },
     ],
   },

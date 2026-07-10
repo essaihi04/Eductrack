@@ -440,7 +440,7 @@ export function ClassCard({ name, section, subtitle, count, boys, girls, teacher
 // pastel doux (pas de bandeau qui masque la photo). Nom coloré + pastille de
 // statut. Photo toujours pleinement visible. Effet de survol (élévation + zoom).
 export function StudentCard({
-  name, className: classLabel, photo, gender, status, selected, selectable, onToggleSelect, onClick, menu,
+  name, className: classLabel, photo, gender, status, selected, selectable, onToggleSelect, onClick, menu, actions = [],
 }) {
   const accent = toneFor(name);
   const t = TONES[accent] || TONES.gray;
@@ -476,13 +476,18 @@ export function StudentCard({
       <div className={`relative z-10 font-semibold text-sm mt-3 truncate w-full ${t.text}`}>{name}</div>
       {classLabel && <div className="relative z-10 text-xs text-muted-foreground mt-0.5">{classLabel}</div>}
       {status && <div className="relative z-10 mt-2">{status}</div>}
+      {actions.length > 0 && (
+        <div className="relative z-10 mt-2.5" onClick={(e) => e.stopPropagation()}>
+          <ActionIconBar actions={actions} />
+        </div>
+      )}
     </div>
   );
 }
 
 // Ligne Élève (vue liste) : variante dense de la carte.
 export function StudentRow({
-  name, className: classLabel, sub, photo, gender, status, right, selected, selectable, onToggleSelect, onClick,
+  name, className: classLabel, sub, photo, gender, status, right, selected, selectable, onToggleSelect, onClick, actions = [],
 }) {
   return (
     <div
@@ -503,6 +508,11 @@ export function StudentRow({
         <div className="text-xs text-muted-foreground truncate">{[classLabel, sub].filter(Boolean).join(' · ')}</div>
       </div>
       {status}
+      {actions.length > 0 && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <ActionIconBar actions={actions} />
+        </div>
+      )}
       {right}
     </div>
   );
