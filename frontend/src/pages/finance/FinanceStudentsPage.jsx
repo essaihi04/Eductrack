@@ -294,7 +294,7 @@ export default function FinanceStudentsPage() {
               )}
             </div>
           ) : viewMode === 'grid' ? (
-            <CardGrid min={200}>
+            <CardGrid min={220}>
               {filtered.map((s) => (
                 <StudentCard
                   key={s.id}

@@ -477,7 +477,7 @@ export function StudentCard({
       {classLabel && <div className="relative z-10 text-xs text-muted-foreground mt-0.5">{classLabel}</div>}
       {status && <div className="relative z-10 mt-2">{status}</div>}
       {actions.length > 0 && (
-        <div className="relative z-10 mt-2.5" onClick={(e) => e.stopPropagation()}>
+        <div className="relative z-10 mt-2.5 flex justify-center w-full" onClick={(e) => e.stopPropagation()}>
           <ActionIconBar actions={actions} />
         </div>
       )}
