@@ -1005,6 +1005,13 @@ router.post('/students/:studentId/services/cancel-payment', async (req, res) => 
       return res.json({ success: true, excluded: true });
     }
 
+    // Périmètre : la facture doit appartenir à l'école ET à cet élève (sinon
+    // la branche cancel_invoice pouvait annuler une facture d'une autre école).
+    let invOwnQ = supabaseAdmin.from('invoices').select('id').eq('id', invoice_id).eq('student_id', studentId);
+    if (schoolId) invOwnQ = invOwnQ.eq('school_id', schoolId);
+    const { data: invOwned } = await invOwnQ.maybeSingle();
+    if (!invOwned) return res.status(404).json({ error: 'Facture introuvable pour cet élève dans votre école' });
+
     let payQ = supabaseAdmin
       .from('payments')
       .select('id')
@@ -1541,15 +1548,21 @@ export async function generateInvoicesForMonth({ schoolId, academic_year, month,
 
       if (applicableLines.length === 0) { skippedCount++; continue; }
 
-      // Vérifier doublon (même élève, même période)
-      const { data: existing } = await supabaseAdmin
+      // Vérifier doublon (même élève, même période) — factures groupées ET
+      // mois×service confondues. SURTOUT PAS .maybeSingle() : avec 2+ factures
+      // de service (scolarité + transport payés au guichet), maybeSingle renvoie
+      // une erreur et data=null → le doublon n'était pas détecté → le cron
+      // créait une facture groupée EN PLUS (mois facturé deux fois, et la fiche
+      // élève masquait les services déjà payés au profit du bundle impayé).
+      const { data: existing, error: dupErr } = await supabaseAdmin
         .from('invoices')
         .select('id')
         .eq('student_id', plan.student_id)
         .eq('period_label', periodLabel)
         .neq('status', 'cancelled')
-        .maybeSingle();
-      if (existing) { skippedCount++; continue; }
+        .limit(1);
+      if (dupErr) { errors.push(dupErr.message); continue; }
+      if (existing && existing.length > 0) { skippedCount++; continue; }
 
       const invoiceNumber = await getNextCounter(schoolId, 'invoice');
 
@@ -1606,6 +1619,13 @@ router.put('/invoices/:id/cancel', async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
+
+    // Périmètre école : on n'annule que ses propres factures.
+    const cancelSchoolId = getSchoolId(req);
+    let ownQ = supabaseAdmin.from('invoices').select('id').eq('id', id);
+    if (cancelSchoolId) ownQ = ownQ.eq('school_id', cancelSchoolId);
+    const { data: owned } = await ownQ.maybeSingle();
+    if (!owned) return res.status(404).json({ error: 'Facture introuvable dans votre école' });
 
     // Bloquer l'annulation d'une facture ayant des paiements confirmés
     // (sinon l'argent encaissé resterait sans facture → écart de caisse).
@@ -1887,7 +1907,12 @@ router.put('/payments/:id/cancel', async (req, res) => {
     const { reason } = req.body;
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
 
-    const { data: cur } = await supabaseAdmin.from('payments').select('invoice_id').eq('id', id).maybeSingle();
+    // Périmètre école : on n'annule que les paiements de sa propre école.
+    const schoolId = getSchoolId(req);
+    let curQ = supabaseAdmin.from('payments').select('invoice_id').eq('id', id);
+    if (schoolId) curQ = curQ.eq('school_id', schoolId);
+    const { data: cur } = await curQ.maybeSingle();
+    if (!cur) return res.status(404).json({ error: 'Paiement introuvable dans votre école' });
 
     const { error } = await supabaseAdmin
       .from('payments')
@@ -1916,13 +1941,16 @@ router.put('/payments/:id', async (req, res) => {
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut modifier un paiement' });
     const { amount, method, payment_date, reference, notes } = req.body;
 
-    const { data: current, error: curErr } = await supabaseAdmin
+    // Périmètre école : on ne modifie que les paiements de sa propre école.
+    const schoolId = getSchoolId(req);
+    let curQ = supabaseAdmin
       .from('payments')
       .select('id, invoice_id, status')
-      .eq('id', id)
-      .single();
+      .eq('id', id);
+    if (schoolId) curQ = curQ.eq('school_id', schoolId);
+    const { data: current, error: curErr } = await curQ.maybeSingle();
     if (curErr) throw curErr;
-    if (!current) return res.status(404).json({ error: 'Paiement introuvable' });
+    if (!current) return res.status(404).json({ error: 'Paiement introuvable dans votre école' });
     if (current.status === 'cancelled') return res.status(400).json({ error: 'Paiement annulé : modification impossible' });
 
     const patch = {};

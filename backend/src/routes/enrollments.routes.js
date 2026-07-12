@@ -78,15 +78,20 @@ const prevYearStr = (year) => {
 const toDash = (year) => String(year || '').replace('/', '-');
 
 // Reconduit le plan de frais d'un élève d'une année à l'autre (format finance = tiret).
+// Copie INTÉGRALE : modèle + remises (fratrie, bourse, remise perso) + items
+// personnalisés (student_fee_plan_items). L'ancienne version ne copiait que
+// template_id → les familles avec remise repartaient plein tarif, et les plans
+// 100 % personnalisés (sans modèle) n'étaient pas reconduits du tout.
 // Renvoie true si un plan a été créé.
 const carryFeePlanForStudent = async (schoolId, sid, fromYear, toYear, userId) => {
   const { data: prevPlan } = await supabaseAdmin
     .from('student_fee_plans')
-    .select('template_id')
+    .select('*, custom_items:student_fee_plan_items(*)')
     .eq('student_id', sid)
     .eq('academic_year', toDash(fromYear))
     .maybeSingle();
-  if (!prevPlan?.template_id) return false;
+  // Seul un plan ACTIF se reconduit (pas de résurrection d'un plan annulé).
+  if (!prevPlan || prevPlan.status !== 'active') return false;
   const { data: exists } = await supabaseAdmin
     .from('student_fee_plans')
     .select('id')
@@ -94,10 +99,23 @@ const carryFeePlanForStudent = async (schoolId, sid, fromYear, toYear, userId) =
     .eq('academic_year', toDash(toYear))
     .maybeSingle();
   if (exists) return false;
-  const { error } = await supabaseAdmin
+
+  // Toutes les colonnes du plan sont copiées telles quelles (remises comprises),
+  // hors identifiants/horodatage — robuste aux colonnes ajoutées par migration.
+  const { id: _id, created_at: _c, updated_at: _u, custom_items, ...planFields } = prevPlan;
+  const { data: created, error } = await supabaseAdmin
     .from('student_fee_plans')
-    .insert({ school_id: schoolId, student_id: sid, template_id: prevPlan.template_id, academic_year: toDash(toYear), created_by: userId });
-  return !error;
+    .insert({ ...planFields, school_id: schoolId, academic_year: toDash(toYear), created_by: userId, status: 'active' })
+    .select('id')
+    .single();
+  if (error || !created) return false;
+
+  const items = (custom_items || []).map(({ id: _i, created_at: _ic, plan_id: _p, ...it }) => ({ ...it, plan_id: created.id }));
+  if (items.length) {
+    const { error: itemsErr } = await supabaseAdmin.from('student_fee_plan_items').insert(items);
+    if (itemsErr) console.error('carryFeePlan: copie des items personnalisés échouée:', itemsErr.message);
+  }
+  return true;
 };
 
 // Transforme le nom d'une classe en remplaçant le code de niveau (ex: "1AC-3" → "2AC-3").
