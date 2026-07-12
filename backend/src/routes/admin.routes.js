@@ -3773,7 +3773,10 @@ router.post('/classes/import', async (req, res) => {
         // 2. Créer les élèves de cette classe
         const classStudents = [];
         if (Array.isArray(studentsList) && studentsList.length > 0) {
-          const processStudent = async (student) => {
+          const processStudent = async (student, studentIdx) => {
+            // Position de l'élève dans le fichier Massar (1-based) = ordre
+            // d'affichage verrouillé (import_order), jamais alphabétique.
+            const importOrder = studentIdx + 1;
             const firstName = String(student.firstName || '').replace(/\s+/g, ' ').trim();
             let lastName = String(student.lastName || '').replace(/\s+/g, ' ').trim();
             const { birthDate, birthPlace, gender } = student;
@@ -3847,8 +3850,9 @@ router.post('/classes/import', async (req, res) => {
                 let finalExistingProfile = existingProfile;
                 let wasReassigned = false;
 
-                // Patch : (re)affectation de classe + complétion des champs Massar
-                const profPatch = {};
+                // Patch : (re)affectation de classe + complétion des champs Massar.
+                // import_order re-synchronisé sur la position du fichier courant.
+                const profPatch = { import_order: importOrder };
                 if (existingProfile.class_id !== newClass.id) profPatch.class_id = newClass.id;
                 if (massarCode && !existingProfile.massar_code) profPatch.massar_code = massarCode;
                 if (birthDate) profPatch.date_of_birth = birthDate;
@@ -3942,7 +3946,8 @@ router.post('/classes/import', async (req, res) => {
                 class_id: newClass.id,
                 school_id: schoolId,
                 date_of_birth: birthDate || null,
-                massar_code: massarCode || null
+                massar_code: massarCode || null,
+                import_order: importOrder
               };
               let { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
@@ -3983,8 +3988,8 @@ router.post('/classes/import', async (req, res) => {
           const CONCURRENCY = 6;
           for (let k = 0; k < studentsList.length; k += CONCURRENCY) {
             await Promise.all(
-              studentsList.slice(k, k + CONCURRENCY).map(s =>
-                processStudent(s).catch(e =>
+              studentsList.slice(k, k + CONCURRENCY).map((s, j) =>
+                processStudent(s, k + j).catch(e =>
                   console.error('[Import Class] élève (lot) échec:', e?.message))
               )
             );

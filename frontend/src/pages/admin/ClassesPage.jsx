@@ -1576,9 +1576,10 @@ const ClassesPage = () => {
           total: files.length,
           message: `Analyse de ${file.name}...`
         });
-        // parseExcelFile renvoie un tableau de classes (un onglet = une classe)
+        // parseExcelFile renvoie un tableau de classes (un onglet = une classe).
+        // Chaque classe est cochée par défaut ; l'admin peut en décocher avant import.
         const classList = await parseExcelFile(file);
-        (Array.isArray(classList) ? classList : [classList]).forEach(c => parsed.push(c));
+        (Array.isArray(classList) ? classList : [classList]).forEach(c => parsed.push({ ...c, selected: true }));
       } catch (error) {
         errors.push({ fileName: file.name, error: error.message });
       }
@@ -1590,12 +1591,21 @@ const ClassesPage = () => {
     setIsBulkImporting(false);
   };
 
-  // Submit parsed classes to backend
+  // Coche/décoche une classe détectée avant import
+  const toggleParsedClass = (idx) => {
+    setParsedClasses(prev => prev.map((c, i) => i === idx ? { ...c, selected: !c.selected } : c));
+  };
+  const toggleAllParsedClasses = (value) => {
+    setParsedClasses(prev => prev.map(c => ({ ...c, selected: value })));
+  };
+
+  // Submit parsed classes to backend (uniquement les classes cochées)
   const submitBulkImport = async () => {
-    if (parsedClasses.length === 0) return;
+    const toImport = parsedClasses.filter(c => c.selected !== false);
+    if (toImport.length === 0) return;
 
     setIsBulkImporting(true);
-    const total = parsedClasses.length;
+    const total = toImport.length;
     setBulkImportProgress({ current: 0, total, message: 'Création des classes et élèves...' });
 
     // Import CLASSE PAR CLASSE : chaque classe = 1 requête courte → évite le
@@ -1608,8 +1618,8 @@ const ClassesPage = () => {
     const aggErrors = [];
     let aggStudents = 0, aggExisting = 0, aggReassigned = 0, aggOther = 0, aggRateLimited = 0;
 
-    for (let i = 0; i < parsedClasses.length; i++) {
-      const pc = parsedClasses[i];
+    for (let i = 0; i < toImport.length; i++) {
+      const pc = toImport[i];
       setBulkImportProgress({
         current: i, total,
         message: `Import ${i + 1}/${total} : ${pc.className} (${pc.studentCount} élèves)…`
@@ -2320,22 +2330,44 @@ const ClassesPage = () => {
             {/* Parsed Classes Preview */}
             {parsedClasses.length > 0 && !bulkImportResult && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-medium">Classes détectées ({parsedClasses.length})</h4>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <h4 className="font-medium">
+                      Classes détectées ({parsedClasses.filter(c => c.selected !== false).length}/{parsedClasses.length} sélectionnée{parsedClasses.filter(c => c.selected !== false).length > 1 ? 's' : ''})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => toggleAllParsedClasses(!parsedClasses.every(c => c.selected !== false))}
+                      className="text-xs text-indigo-600 hover:underline"
+                    >
+                      {parsedClasses.every(c => c.selected !== false) ? 'Tout décocher' : 'Tout cocher'}
+                    </button>
+                  </div>
                   <button
                     onClick={submitBulkImport}
-                    disabled={isBulkImporting}
+                    disabled={isBulkImporting || parsedClasses.every(c => c.selected === false)}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                   >
-                    {isBulkImporting ? 'Importation...' : 'Confirmer l\'import'}
+                    {isBulkImporting ? 'Importation...' : `Importer ${parsedClasses.filter(c => c.selected !== false).length} classe(s)`}
                   </button>
                 </div>
 
                 <div className="max-h-64 overflow-y-auto space-y-2">
                   {parsedClasses.map((cls, idx) => (
-                    <div key={idx} className="border rounded-lg p-3 bg-white">
+                    <div
+                      key={idx}
+                      onClick={() => toggleParsedClass(idx)}
+                      className={`border rounded-lg p-3 cursor-pointer transition ${cls.selected !== false ? 'bg-white' : 'bg-gray-50 opacity-60'}`}
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={cls.selected !== false}
+                            onChange={() => toggleParsedClass(idx)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 accent-green-600 shrink-0"
+                          />
                           <div className="w-8 h-8 rounded bg-green-100 flex items-center justify-center text-green-700 font-bold text-sm">
                             {idx + 1}
                           </div>
