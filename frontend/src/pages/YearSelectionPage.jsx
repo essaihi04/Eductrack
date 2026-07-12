@@ -47,9 +47,10 @@ const YearSelectionPage = () => {
   if (!profile) return <Navigate to="/login" replace />;
   if (!YEAR_SELECT_ROLES.includes(profile.role)) return <Navigate to="/dashboard" replace />;
   const isAdmin = ADMIN_ROLES.includes(profile.role);
-  // Où « Entrer dans l'année » redirige : le financier va au module finance,
-  // tous les autres (admins + responsable pédagogique) au tableau de bord.
-  const entryPath = profile.role === 'finance_manager' ? '/finance' : '/dashboard';
+  // Où « Entrer dans l'année » redirige : le financier arrive directement sur
+  // la liste des élèves (sa page de travail principale), tous les autres
+  // (admins + responsable pédagogique) au tableau de bord.
+  const entryPath = profile.role === 'finance_manager' ? '/finance/students' : '/dashboard';
 
   const handleAuto = async () => {
     if (!window.confirm(`Créer automatiquement les classes de ${toYear} et y réinscrire tous les élèves de ${year} (niveau promu) ?`)) return;

@@ -51,12 +51,8 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
 import { resolveLogoUrl } from '../../lib/schoolLogo';
-import { FINANCE_SIDEBAR_POLES, poleForPath } from '../../pages/finance/financeNav';
+import { FINANCE_POLES, poleForPath, tabForPath } from '../../pages/finance/financeNav';
 import { adminSidebarDomains, domainForPath } from '../../pages/admin/adminNav';
-
-const FINANCE_MENU = FINANCE_SIDEBAR_POLES.map((p) => ({
-  icon: p.icon, label: p.label, path: p.path, poleKey: p.key,
-}));
 
 const Sidebar = () => {
   const location = useLocation();
@@ -140,8 +136,11 @@ const Sidebar = () => {
     }
 
     if (profile?.role === 'finance_manager') {
+      // Compte finance : toute la navigation finance (pôles → onglets →
+      // sous-onglets) vit dans la barre latérale, en accordéon. Le bandeau
+      // d'onglets du haut est masqué (voir FinanceShell) pour gagner de l'espace.
       return [
-        ...FINANCE_MENU,
+        { financeNav: true },
         { icon: MessageSquare, label: 'WhatsApp', path: '/whatsapp' },
       ];
     }
@@ -161,6 +160,91 @@ const Sidebar = () => {
   };
 
   const menuItems = getMenuItems();
+
+  // Un chemin correspond-il exactement à une feuille de navigation finance ?
+  const leafActive = (leaf) =>
+    leaf.end ? location.pathname === leaf.path : location.pathname.startsWith(leaf.path);
+
+  // Arborescence finance en accordéon (compte financier) : les pôles sont
+  // toujours visibles ; le pôle actif déplie ses onglets, et l'onglet actif ses
+  // sous-onglets. Remplace le bandeau d'onglets du haut de l'ancien FinanceShell.
+  const renderFinanceNav = () => {
+    const inFinance = location.pathname.startsWith('/finance');
+    const activePole = inFinance ? poleForPath(location.pathname) : null;
+    return (
+      <div className="space-y-1">
+        {FINANCE_POLES.map((pole) => {
+          const PoleIcon = pole.icon;
+          const isActivePole = activePole?.key === pole.key;
+          const activeTab = isActivePole ? tabForPath(pole, location.pathname) : null;
+          return (
+            <div key={pole.key}>
+              <Link
+                to={pole.tabs[0].path}
+                className={cn(
+                  'flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors text-sm',
+                  isActivePole
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                )}
+              >
+                <PoleIcon className="w-5 h-5 flex-shrink-0" />
+                <span className="font-medium truncate">{pole.label}</span>
+              </Link>
+              {isActivePole && (
+                <div className="ml-4 mt-1 space-y-0.5 border-l border-border pl-2">
+                  {pole.tabs.map((tab) => {
+                    const TabIcon = tab.icon;
+                    const isActiveTab = tab === activeTab;
+                    const subTabs = tab.subTabs || [];
+                    return (
+                      <div key={tab.path}>
+                        <Link
+                          to={tab.path}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-[13px]',
+                            isActiveTab
+                              ? 'bg-accent text-accent-foreground font-medium'
+                              : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
+                          )}
+                        >
+                          {TabIcon && <TabIcon className="w-4 h-4 flex-shrink-0" />}
+                          <span className="truncate">{tab.label}</span>
+                        </Link>
+                        {isActiveTab && subTabs.length > 0 && (
+                          <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border pl-2">
+                            {subTabs.map((sub) => {
+                              const SubIcon = sub.icon;
+                              const active = leafActive(sub);
+                              return (
+                                <Link
+                                  key={sub.path}
+                                  to={sub.path}
+                                  className={cn(
+                                    'flex items-center gap-2 px-3 py-1 rounded-md transition-colors text-xs',
+                                    active
+                                      ? 'bg-primary/10 text-primary font-medium'
+                                      : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
+                                  )}
+                                >
+                                  {SubIcon && <SubIcon className="w-3.5 h-3.5 flex-shrink-0" />}
+                                  <span className="truncate">{sub.label}</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <motion.aside
@@ -224,6 +308,9 @@ const Sidebar = () => {
                 </p>
               </div>
             );
+          }
+          if (item.financeNav) {
+            return <div key="finance-nav">{renderFinanceNav()}</div>;
           }
           const Icon = item.icon;
           let isActive;

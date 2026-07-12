@@ -1,16 +1,31 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FINANCE_POLES, poleForPath, tabForPath, POLE_COLORS } from './financeNav';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Coquille du module finance : Finance est une seule entrée dans la barre
 // latérale. Le passage d'un pôle à l'autre se fait ici (rangée de pôles), puis
 // la rangée d'onglets du pôle actif, puis — si l'onglet en a — la rangée de
 // sous-onglets, puis la page courante via <Outlet/>.
+//
+// Compte finance dédié (finance_manager) : toute cette navigation est reportée
+// dans la barre latérale (arborescence pôle → onglet → sous-onglet), donc on
+// masque entièrement le bandeau du haut pour gagner de l'espace vertical.
 export default function FinanceShell() {
   const { pathname } = useLocation();
+  const { profile } = useAuth();
   const pole = poleForPath(pathname);
   const colors = POLE_COLORS[pole.color] || POLE_COLORS.blue;
   const activeTab = tabForPath(pole, pathname);
   const subTabs = activeTab?.subTabs || [];
+  const hideTopNav = profile?.role === 'finance_manager';
+
+  if (hideTopNav) {
+    return (
+      <div className="min-h-full">
+        <Outlet />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-full">
