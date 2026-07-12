@@ -212,7 +212,7 @@ router.get('/', async (req, res) => {
       .from('student_enrollments')
       .select(`
         id, status, academic_year, student_id, class_id, previous_class_id,
-        student:profiles!student_enrollments_student_id_fkey(id, first_name, last_name, gender, massar_code, avatar, avatar_url),
+        student:profiles!student_enrollments_student_id_fkey(id, first_name, last_name, gender, massar_code, avatar, avatar_url, level),
         class:classes!student_enrollments_class_id_fkey(id, name, level, filiere)
       `)
       .eq('school_id', schoolId)

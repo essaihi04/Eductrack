@@ -79,7 +79,9 @@ const ReinscriptionPage = () => {
       // Construire les lignes à partir des élèves actifs (RI/NI) de l'année source.
       const active = (roster || []).filter((e) => e.status !== 'NR');
       const built = active.map((e) => {
-        const lvl = e.class?.level || '';
+        // Niveau de la classe, sinon niveau propre de l'élève (inscription
+        // « niveau seul » sans classe affectée — profiles.level).
+        const lvl = e.class?.level || e.student?.level || '';
         const fil = e.class?.filiere || '';
         const targetLvl = nextLevel(lvl);
         // Classe cible : même niveau suivant + même filière si possible.
@@ -90,7 +92,7 @@ const ReinscriptionPage = () => {
           name: `${e.student?.last_name || ''} ${e.student?.first_name || ''}`.trim(),
           avatar: e.student?.avatar,
           avatar_url: e.student?.avatar_url,
-          currentClass: e.class?.name || '—',
+          currentClass: e.class?.name || (lvl ? 'Niveau seul' : '—'),
           currentLevel: lvl,
           new_class_id: target?.id || '',
           // Pas de classe cible pour ce niveau → niveau seul pré-proposé
