@@ -34,13 +34,13 @@ const academicYearRangeWide = (year) => {
 };
 
 // Normalise une année scolaire pour comparaison : « 2026/2027 » → « 2026-2027 ».
-const normYear = (y) => String(y || '').replace('/', '-').trim();
+export const normYear = (y) => String(y || '').replace('/', '-').trim();
 
 // Année scolaire (« 2026-2027 ») déduite d'un libellé de période (« Septembre 2026 »).
 // Un paiement/facture est rattaché à SON année via ce libellé, même s'il est
 // encaissé hors de la plage sept→août (frais payés durant l'été précédent).
 const MONTH_NAMES_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
-const academicYearOfLabel = (label) => {
+export const academicYearOfLabel = (label) => {
   if (!label) return null;
   const parts = String(label).trim().split(/\s+/);
   const month = MONTH_NAMES_FR.indexOf((parts[0] || '').toLowerCase()) + 1;
@@ -48,6 +48,16 @@ const academicYearOfLabel = (label) => {
   if (!month || Number.isNaN(cal)) return null;
   const y1 = month >= 9 ? cal : cal - 1; // sept→déc = 1re moitié ; janv→août = 2de
   return `${y1}-${y1 + 1}`;
+};
+
+// Une facture/un paiement appartient-il à l'année scolaire demandée ?
+// Attribution par libellé de période (fiable même encaissé hors plage, ex.
+// réinscription payée en juillet) ; repli sur une date dans la plage stricte.
+const belongsToYear = (periodLabel, dateStr, academicYear, strictRange) => {
+  const ly = academicYearOfLabel(periodLabel);
+  if (ly) return ly === normYear(academicYear);
+  if (!strictRange) return true;
+  return dateStr >= strictRange.start && dateStr <= strictRange.end;
 };
 
 // Mapping catégorie facture -> flux de recette (aligné sur financeAccounting.routes.js)
@@ -1999,15 +2009,20 @@ router.get('/dashboard/summary', async (req, res) => {
     const periodStart = range ? range.start : new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
     const periodEnd = range ? range.end : new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
 
-    // Encaissé sur la période
+    // Encaissé sur la période. Année fournie → pré-filtre élargi à l'été
+    // précédent puis attribution par libellé de facture : une réinscription
+    // 2026-2027 encaissée en juillet 2026 compte pour 2026-2027 (pas pour
+    // l'année en cours), et réciproquement.
+    const wide = academicYearRangeWide(req.query.academic_year);
     let paidQuery = supabaseAdmin
       .from('payments')
-      .select('amount')
+      .select('amount, payment_date, invoice:invoices(period_label)')
       .eq('status', 'confirmed')
-      .gte('payment_date', periodStart)
-      .lte('payment_date', periodEnd);
+      .gte('payment_date', wide ? wide.start : periodStart)
+      .lte('payment_date', wide ? wide.end : periodEnd);
     if (schoolId) paidQuery = paidQuery.eq('school_id', schoolId);
-    const { data: paidRows } = await paidQuery;
+    let { data: paidRows } = await paidQuery;
+    if (range) paidRows = (paidRows || []).filter(r => belongsToYear(r.invoice?.period_label, r.payment_date, req.query.academic_year, range));
     const collectedThisMonth = (paidRows || []).reduce((s, r) => s + Number(r.amount), 0);
 
     // Facturé RÉEL sur la période (factures émises, non annulées) — sert au
@@ -2015,12 +2030,13 @@ router.get('/dashboard/summary', async (req, res) => {
     // « Avancement (prévisionnel) » = encaissé / attendu des plans.
     let realInvoicedQ = supabaseAdmin
       .from('invoices')
-      .select('total')
-      .gte('issue_date', periodStart)
-      .lte('issue_date', periodEnd)
+      .select('total, issue_date, period_label')
+      .gte('issue_date', wide ? wide.start : periodStart)
+      .lte('issue_date', wide ? wide.end : periodEnd)
       .neq('status', 'cancelled');
     if (schoolId) realInvoicedQ = realInvoicedQ.eq('school_id', schoolId);
-    const { data: realInvRows } = await realInvoicedQ;
+    let { data: realInvRows } = await realInvoicedQ;
+    if (range) realInvRows = (realInvRows || []).filter(r => belongsToYear(r.period_label, r.issue_date, req.query.academic_year, range));
     const realInvoiced = (realInvRows || []).reduce((s, r) => s + Number(r.total), 0);
     const realRate = realInvoiced > 0 ? (collectedThisMonth / realInvoiced) * 100 : 0;
 
@@ -2415,12 +2431,15 @@ router.get('/overdue', async (req, res) => {
       .lt('due_date', today)
       .order('due_date', { ascending: true });
     if (schoolId) query = query.eq('school_id', schoolId);
-    // Scope par année scolaire (plage de dates) si fournie.
+    // Scope par année scolaire : pré-filtre élargi puis attribution par libellé
+    // (une facture de réinscription émise en été appartient à l'année à venir).
     const ovRange = academicYearRange(req.query.academic_year);
-    if (ovRange) query = query.gte('issue_date', ovRange.start).lte('issue_date', ovRange.end);
+    const ovWide = academicYearRangeWide(req.query.academic_year);
+    if (ovWide) query = query.gte('issue_date', ovWide.start).lte('issue_date', ovWide.end);
 
-    const { data, error } = await query;
+    let { data, error } = await query;
     if (error) throw error;
+    if (ovRange) data = (data || []).filter(inv => belongsToYear(inv.period_label, inv.issue_date, req.query.academic_year, ovRange));
 
     const enriched = (data || []).map(inv => ({
       ...inv,
@@ -2496,7 +2515,12 @@ router.delete('/expenses/:id', async (req, res) => {
   try {
     if (!isAdminRole(req)) return res.status(403).json({ error: 'Accès admin requis' });
     const { id } = req.params;
-    await supabaseAdmin.from('school_expenses').delete().eq('id', id);
+    // Périmètre école : on ne supprime que ses propres dépenses.
+    const schoolId = getSchoolId(req);
+    let q = supabaseAdmin.from('school_expenses').delete().eq('id', id);
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { error } = await q;
+    if (error) throw error;
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Erreur serveur' });
@@ -2556,15 +2580,19 @@ router.get('/students', async (req, res) => {
     const studentIds = (students || []).map(s => s.id);
     if (studentIds.length === 0) return res.json({ students: [] });
 
-    // Invoices totals per student — scopés à l'année (par dates) si fournie.
+    // Invoices totals per student — scopés à l'année : pré-filtre élargi puis
+    // attribution par libellé (les factures de réinscription payées en été
+    // comptent pour l'année à venir, sinon la carte élève affichait 0).
+    const wideStu = academicYearRangeWide(academic_year);
     let invQ = supabaseAdmin
       .from('invoices')
-      .select('student_id, total, amount_paid, status')
+      .select('student_id, total, amount_paid, status, period_label, issue_date')
       .in('student_id', studentIds)
       .neq('status', 'cancelled');
     if (schoolId) invQ = invQ.eq('school_id', schoolId);
-    if (range) invQ = invQ.gte('issue_date', range.start).lte('issue_date', range.end);
-    const { data: invs } = await invQ;
+    if (wideStu) invQ = invQ.gte('issue_date', wideStu.start).lte('issue_date', wideStu.end);
+    let { data: invs } = await invQ;
+    if (range) invs = (invs || []).filter(i => belongsToYear(i.period_label, i.issue_date, academic_year, range));
 
     // Plans — student_fee_plans stocke l'année au format tiret "YYYY-YYYY" alors
     // que le front envoie le format slash "YYYY/YYYY" : on accepte les deux,
@@ -2635,15 +2663,17 @@ router.get('/students/:studentId/siblings', async (req, res) => {
     if (schoolId) profQ = profQ.eq('school_id', schoolId);
     const { data: profs } = await profQ;
 
-    // Totaux finance (mêmes règles que la liste élèves)
+    // Totaux finance (mêmes règles que la liste élèves : attribution par libellé)
+    const wideSib = academicYearRangeWide(req.query.academic_year);
     let invQ = supabaseAdmin
       .from('invoices')
-      .select('student_id, total, amount_paid, status')
+      .select('student_id, total, amount_paid, status, period_label, issue_date')
       .in('student_id', sibIds)
       .neq('status', 'cancelled');
     if (schoolId) invQ = invQ.eq('school_id', schoolId);
-    if (range) invQ = invQ.gte('issue_date', range.start).lte('issue_date', range.end);
-    const { data: invs } = await invQ;
+    if (wideSib) invQ = invQ.gte('issue_date', wideSib.start).lte('issue_date', wideSib.end);
+    let { data: invs } = await invQ;
+    if (range) invs = (invs || []).filter(i => belongsToYear(i.period_label, i.issue_date, req.query.academic_year, range));
 
     const totals = {};
     (invs || []).forEach(i => {

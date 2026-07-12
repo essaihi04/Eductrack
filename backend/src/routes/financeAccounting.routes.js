@@ -11,7 +11,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { seedDefaultChartOfAccounts, ensureChartSeeded } from '../services/financeChart.js';
-import { planMonthlyForecast } from './finance.routes.js';
+import { planMonthlyForecast, academicYearOfLabel, normYear } from './finance.routes.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -260,10 +260,20 @@ router.get('/reports/annual-matrix', async (req, res) => {
     // Réel ventilé par MOIS DE LA MENSUALITÉ (period_label), pas par date
     // d'émission/paiement : la scolarité de septembre reste en septembre même si
     // la facture a été générée en bloc plus tard. Repli sur la date si pas de période.
-    const { data: invs } = await supabaseAdmin
+    // Fenêtre ÉLARGIE à l'été précédent puis attribution par libellé : une
+    // facture de réinscription émise en juillet appartient à l'année à venir
+    // (et ne doit pas polluer la matrice de l'année en cours).
+    const wideStart = `${y1}-06-01`;
+    const { data: invsRaw } = await supabaseAdmin
       .from('invoices').select('id, issue_date, period_label, status')
       .eq('school_id', schoolId).neq('status', 'cancelled')
-      .gte('issue_date', startDate).lte('issue_date', endDate);
+      .gte('issue_date', wideStart).lte('issue_date', endDate);
+    const yearKey = normYear(academicYear);
+    const invs = (invsRaw || []).filter((i) => {
+      const ly = academicYearOfLabel(i.period_label);
+      if (ly) return ly === yearKey;
+      return i.issue_date >= startDate && i.issue_date <= endDate;
+    });
     const invMonth = {}; (invs || []).forEach((i) => { invMonth[i.id] = periodMonthOf(i.period_label) || monthOf(i.issue_date); });
     const invIds = (invs || []).map((i) => i.id);
 
@@ -280,10 +290,16 @@ router.get('/reports/annual-matrix', async (req, res) => {
       (billed[s] = billed[s] || {})[m] = (billed[s][m] || 0) + Number(l.amount || 0);
     });
 
-    const { data: pays } = await supabaseAdmin
+    // Paiements : fenêtre élargie (été compris) ; un paiement est retenu si sa
+    // facture appartient à l'année (attribution par libellé ci-dessus), sinon
+    // repli sur sa date dans la plage stricte (paiement sans facture).
+    const { data: paysRaw } = await supabaseAdmin
       .from('payments').select('invoice_id, amount, payment_date')
       .eq('school_id', schoolId).eq('status', 'confirmed')
-      .gte('payment_date', startDate).lte('payment_date', endDate);
+      .gte('payment_date', wideStart).lte('payment_date', endDate);
+    const pays = (paysRaw || []).filter((p) =>
+      (p.invoice_id && invMonth[p.invoice_id])
+      || (!p.invoice_id && p.payment_date >= startDate && p.payment_date <= endDate));
     const collected = {};
     const addCollected = (s, m, v) => { (collected[s] = collected[s] || {})[m] = (collected[s][m] || 0) + v; };
     (pays || []).forEach((p) => {
