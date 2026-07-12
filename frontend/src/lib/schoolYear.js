@@ -13,6 +13,17 @@ export const toDashYear = (year) => String(year || '').replace('/', '-');
 // Convertit "YYYY-YYYY" -> "YYYY/YYYY".
 export const toSlashYear = (year) => String(year || '').replace('-', '/');
 
+// Deux chaînes désignent-elles la même année scolaire, quel que soit le format
+// slash/tiret ? ("2026/2027" == "2026-2027"). Indispensable pour comparer une
+// année stockée en base (classes/finance en tiret, inscriptions en slash) au
+// format d'affichage du sélecteur d'année (toujours en slash) : un simple ===
+// masquerait toutes les classes de l'autre format.
+export const sameYear = (a, b) => {
+  const na = String(a || '').replace(/\D/g, '');
+  const nb = String(b || '').replace(/\D/g, '');
+  return !!na && na === nb;
+};
+
 // Première année (entier) d'une chaîne "YYYY/YYYY" ou "YYYY-YYYY".
 export const firstYearOf = (year) => {
   const a = parseInt(String(year).split(/[/\-]/)[0], 10);

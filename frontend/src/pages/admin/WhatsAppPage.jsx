@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
+import { sameYear } from '../../lib/schoolYear';
 import { saveBlob } from '../../lib/download';
 import EngagementDashboard from './communication/EngagementDashboard';
 import {
@@ -330,7 +331,11 @@ const WhatsAppPage = () => {
         // Seules les classes de l'année active (les classes des années passées
         // ne doivent plus servir de cible d'envoi).
         const allCls = Array.isArray(classesData) ? classesData : [];
-        const cls = year ? allCls.filter(c => !c.academic_year || c.academic_year === year) : allCls;
+        // Comparaison tolérante slash/tiret : les classes sont stockées en
+        // "YYYY-YYYY" tandis que le sélecteur d'année est en "YYYY/YYYY" — un ===
+        // strict masquait toutes les classes et vidait la liste des destinataires
+        // (aucun parent récupéré, notamment ceux des élèves réinscrits).
+        const cls = year ? allCls.filter(c => !c.academic_year || sameYear(c.academic_year, year)) : allCls;
         setClasses(cls);
         setSelectedClasses(cls.map(c => c.id));
         const levels = [...new Set(cls.map(c => c.level).filter(Boolean))].sort();

@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import { generateEmail, generatePassword } from '../../utils/studentUtils';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
+import { sameYear } from '../../lib/schoolYear';
 
 // Moroccan education system hierarchy
 const SCHOOL_HIERARCHY = {
@@ -1739,8 +1740,10 @@ const ClassesPage = () => {
     ? SCHOOL_HIERARCHY[editForm.school_type].levels[editForm.level].filieres
     : [];
 
-  // Filtre par année scolaire active (les classes sans année — legacy — restent visibles).
-  const visibleClasses = classes.filter(c => !c.academic_year || c.academic_year === year);
+  // Filtre par année scolaire active (les classes sans année — legacy — restent
+  // visibles). Comparaison tolérante slash/tiret : les classes sont stockées en
+  // "YYYY-YYYY", le sélecteur d'année en "YYYY/YYYY".
+  const visibleClasses = classes.filter(c => !c.academic_year || sameYear(c.academic_year, year));
 
   // Group classes by school_type → level → filiere
   const grouped = {};

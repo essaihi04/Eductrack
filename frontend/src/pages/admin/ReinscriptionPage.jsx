@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Ca
 import { Avatar } from '../../components/directory/ui';
 import { useYear } from '../../contexts/YearContext';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
-import { nextYearStr } from '../../lib/schoolYear';
+import { nextYearStr, sameYear } from '../../lib/schoolYear';
 import { nextLevel, isTerminalLevel, allLevelOptions } from '../../lib/levelProgression';
 import { supabase } from '../../lib/supabase';
 
@@ -61,7 +61,7 @@ const ReinscriptionPage = () => {
       headers: { Authorization: `Bearer ${session?.access_token}` },
     });
     const all = await res.json();
-    return (Array.isArray(all) ? all : []).filter((c) => c.academic_year === toYear);
+    return (Array.isArray(all) ? all : []).filter((c) => sameYear(c.academic_year, toYear));
   };
 
   const openWizard = async () => {

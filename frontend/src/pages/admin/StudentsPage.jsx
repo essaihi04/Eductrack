@@ -13,7 +13,7 @@ import { generateStudentEmail, generatePassword } from '../../utils/studentUtils
 import { DOSSIER_DOC_KEYS } from '../../utils/dossierDocuments';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { LEVEL_ORDER, nextLevel, distinctLevels } from '../../lib/levelProgression';
-import { prevYearStr, toSlashYear } from '../../lib/schoolYear';
+import { prevYearStr, toSlashYear, sameYear } from '../../lib/schoolYear';
 
 const StudentsPage = () => {
   const { profile, availableSchools } = useAuth();
@@ -2457,7 +2457,7 @@ L'administration de ${schoolName}`;
                   className="w-full px-3 py-2 border rounded-lg text-sm">
                   <option value="">Niveau seul — à affecter à une classe plus tard</option>
                   {classes
-                    .filter((c) => (!reinscribeLevel || c.level === reinscribeLevel) && (!c.academic_year || c.academic_year === year))
+                    .filter((c) => (!reinscribeLevel || c.level === reinscribeLevel) && (!c.academic_year || sameYear(c.academic_year, year)))
                     .map((c) => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
                 </select>
                 {!reinscribeClassId && (
