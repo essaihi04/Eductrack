@@ -710,11 +710,11 @@ const TeachersPage = () => {
       {editingTeacher && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setEditingTeacher(null)}>
           <form onSubmit={handleEditSubmit} className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+            <div className="order-0 px-6 py-4 border-b border-gray-200 flex-shrink-0">
               <h3 className="text-lg font-semibold text-gray-900">Modifier le professeur</h3>
               <p className="text-sm text-gray-500 mt-1">Mettre à jour les informations personnelles</p>
             </div>
-            <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
+            <div className="order-2 px-6 py-4 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="text-sm font-semibold text-gray-700 block mb-2">Prénom</label>
                 <input
@@ -748,7 +748,7 @@ const TeachersPage = () => {
               </div>
               <HRFields hr={editFormData.hr} onChange={(hr) => setEditFormData({ ...editFormData, hr })} />
             </div>
-            <div className="px-6 py-4 border-t border-gray-200 flex gap-3 flex-shrink-0 bg-white rounded-b-xl">
+            <div className="order-1 px-6 py-3 border-b border-gray-200 flex gap-3 flex-shrink-0 bg-white z-10">
               <button
                 type="button"
                 onClick={() => setEditingTeacher(null)}

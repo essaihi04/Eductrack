@@ -269,6 +269,18 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="p-4 space-y-5 max-h-[78vh] overflow-y-auto">
+            <div className="sticky top-0 z-20 -mx-4 px-4 py-2 -mt-4 mb-1 flex flex-wrap gap-2 border-b border-gray-200 bg-white/95 backdrop-blur-sm">
+              <button type="submit" disabled={submitting} className="flex-1 min-w-[140px] px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                {submitting ? 'Enregistrement…' : isEdit ? 'Enregistrer les modifications' : 'Valider'}
+              </button>
+              <button type="button" disabled={submitting} onClick={(e) => handleSubmit(e, { thenPrint: true })}
+                className="flex-1 min-w-[180px] px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                <FileText className="w-4 h-4" /> Valider + télécharger la fiche
+              </button>
+              <button type="button" disabled={submitting} onClick={close} className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">
+                Annuler
+              </button>
+            </div>
             {/* ── Informations élève ── */}
             <section className="space-y-3">
               <h4 className="text-sm font-bold text-blue-700">👦 Informations élève</h4>
@@ -451,18 +463,6 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
 
             {error && <p className="text-sm font-medium text-red-600">{error}</p>}
 
-            <div className="flex flex-wrap gap-2 pt-2 border-t">
-              <button type="submit" disabled={submitting} className="flex-1 min-w-[140px] px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-                {submitting ? 'Enregistrement…' : isEdit ? 'Enregistrer les modifications' : 'Valider'}
-              </button>
-              <button type="button" disabled={submitting} onClick={(e) => handleSubmit(e, { thenPrint: true })}
-                className="flex-1 min-w-[180px] px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50 flex items-center justify-center gap-2">
-                <FileText className="w-4 h-4" /> Valider + télécharger la fiche
-              </button>
-              <button type="button" disabled={submitting} onClick={close} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">
-                Annuler
-              </button>
-            </div>
           </form>
         )}
       </div>
