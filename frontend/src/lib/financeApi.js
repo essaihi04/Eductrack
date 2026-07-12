@@ -47,6 +47,9 @@ export const financeApi = {
   // Classes (lecture pour module finance)
   listClasses: (academicYear) => request('/api/finance/classes', { query: { academic_year: academicYear } }),
 
+  // Emplois du temps de toutes les classes (lecture seule)
+  listTimetables: (academicYear) => request('/api/finance/timetables', { query: { academic_year: academicYear } }),
+
   // Templates
   listTemplates: () => request('/api/finance/fee-templates'),
   createTemplate: (data) => request('/api/finance/fee-templates', { method: 'POST', body: data }),

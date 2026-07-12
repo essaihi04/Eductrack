@@ -4,7 +4,7 @@ import {
   Users, FileText, CreditCard, AlertCircle, Layers, Banknote,
   UserCog, Landmark, Scale,
   ListTree, CalendarRange, Building2,
-  UserPlus, UserCheck,
+  UserPlus, UserCheck, CalendarDays,
 } from 'lucide-react';
 
 // Source de navigation finance unique — utilisée par la Sidebar ET le FinanceShell.
@@ -77,6 +77,16 @@ export const FINANCE_POLES = [
       { label: 'Relevés bancaires', path: '/finance/bank', icon: Building2 },
       { label: 'Plan comptable', path: '/finance/chart', icon: ListTree },
       { label: 'Budget', path: '/finance/budget', icon: CalendarRange },
+    ],
+  },
+  {
+    key: 'emplois-du-temps',
+    label: 'Emplois du temps',
+    icon: CalendarDays,
+    color: 'blue',
+    // Consultation seule des emplois du temps de toutes les classes.
+    tabs: [
+      { label: 'Emplois du temps', path: '/finance/timetables', end: true, icon: CalendarDays },
     ],
   },
 ];

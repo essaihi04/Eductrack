@@ -67,6 +67,7 @@ import PayrollPage from './pages/finance/PayrollPage';
 import LoansPage from './pages/finance/LoansPage';
 import TaxesPage from './pages/finance/TaxesPage';
 import BankImportPage from './pages/finance/BankImportPage';
+import FinanceTimetablesPage from './pages/finance/TimetablesPage';
 import InscriptionsDashboardPage from './pages/finance/inscriptions/InscriptionsDashboardPage';
 import InscriptionsReinscriptionPage from './pages/finance/inscriptions/InscriptionsReinscriptionPage';
 import TransportDashboard from './pages/transport/TransportDashboard';
@@ -200,6 +201,7 @@ function App() {
               <Route path="loans" element={<LoansPage />} />
               <Route path="taxes" element={<TaxesPage />} />
               <Route path="bank" element={<BankImportPage />} />
+              <Route path="timetables" element={<FinanceTimetablesPage />} />
               <Route path="inscriptions" element={<InscriptionsDashboardPage />} />
               {/* Fusionné avec la page Élèves unique (Recettes) */}
               <Route path="inscriptions/eleves" element={<Navigate to="/finance/students" replace />} />

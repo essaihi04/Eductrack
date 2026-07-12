@@ -139,6 +139,50 @@ router.get('/classes', async (req, res) => {
 });
 
 // ============================================================
+// EMPLOIS DU TEMPS (LECTURE SEULE)
+// ============================================================
+// Le compte finance peut consulter (sans modifier) les emplois du temps de
+// toutes les classes de l'école. On renvoie les classes de l'école + leurs
+// créneaux, regroupés par classe. La configuration reste réservée à l'admin.
+router.get('/timetables', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+
+    let classQuery = supabaseAdmin
+      .from('classes')
+      .select('id, name, level, school_type, filiere, academic_year');
+    if (schoolId) classQuery = classQuery.eq('school_id', schoolId);
+    if (req.query.academic_year) classQuery = classQuery.eq('academic_year', req.query.academic_year);
+    const { data: classes, error: classErr } = await classQuery.order('name');
+    if (classErr) throw classErr;
+
+    const classIds = (classes || []).map((c) => c.id);
+    if (classIds.length === 0) return res.json([]);
+
+    const { data: slots, error: slotErr } = await supabaseAdmin
+      .from('class_timetable')
+      .select('*, subject:subjects(id, name, code), teacher:profiles!class_timetable_teacher_id_fkey(id, first_name, last_name)')
+      .in('class_id', classIds)
+      .order('slot_order', { ascending: true });
+    if (slotErr) throw slotErr;
+
+    const slotsByClass = (slots || []).reduce((acc, s) => {
+      (acc[s.class_id] = acc[s.class_id] || []).push(s);
+      return acc;
+    }, {});
+
+    const result = (classes || []).map((c) => ({
+      ...c,
+      timetable: slotsByClass[c.id] || [],
+    }));
+    res.json(result);
+  } catch (error) {
+    console.error('Erreur GET /finance/timetables:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// ============================================================
 // MODÈLES DE FRAIS
 // ============================================================
 router.get('/fee-templates', async (req, res) => {
