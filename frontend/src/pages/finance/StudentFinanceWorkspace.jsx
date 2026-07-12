@@ -29,6 +29,14 @@ const MONTH_HEAD = {
   unpaid: 'bg-red-50 text-red-700 border-red-200',
 };
 
+// Bordure de la carte entière du mois (vue « cartes ») selon le statut.
+const MONTH_BORDER = {
+  paid: 'border-green-300',
+  partial: 'border-orange-300',
+  overdue: 'border-red-400',
+  unpaid: 'border-red-300',
+};
+
 // Libellé lisible d'un service (Scolarité, Transport…) à partir d'une ligne.
 const serviceLabel = (svc) => svc?.label || (svc?.category ? (CATEGORY_LABELS[svc.category] || svc.category) : 'Mensualité');
 
@@ -138,18 +146,47 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
           ))}
         </div>
       )}
-      <div className={cards ? 'flex items-stretch gap-3 overflow-x-auto pb-3 snap-x snap-mandatory' : 'space-y-2.5'}>
+      {/* Vue « cartes » : grille qui s'étale sur plusieurs lignes — tous les mois
+          de l'année sont visibles d'un coup, sans défilement horizontal. */}
+      <div className={cards ? 'grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]' : 'space-y-2.5'}>
       {(months || []).map(m => {
         const head = MONTH_HEAD[m.status] || MONTH_HEAD.unpaid;
         const presentCats = new Set(m.services.map(s => s.category).filter(Boolean));
         const freeCats = catalog.filter(([c]) => !presentCats.has(c));
+        // Totaux du mois (hors services exclus) pour le bandeau récapitulatif.
+        const active = m.services.filter(s => !(s.status === 'excluded' || s.excluded));
+        const monthTotal = active.reduce((t, s) => t + Number(s.total || 0), 0);
+        const monthPaid = active.reduce((t, s) => t + Number(s.paid || 0), 0);
+        // Sélection rapide : services encore payables du mois.
+        const payables = active.filter(s => s.remaining > 0);
+        const allChecked = payables.length > 0 && payables.every(s => sel[keyOf(m.month, s.category)]?.checked);
+        const toggleMonth = () => {
+          payables.forEach(s => {
+            const isChecked = !!sel[keyOf(m.month, s.category)]?.checked;
+            if (allChecked ? isChecked : !isChecked) onToggle(m.month, s);
+          });
+        };
         return (
-          <div key={m.month} className={`border border-gray-200 rounded-lg overflow-hidden ${cards ? 'w-[320px] flex-shrink-0 snap-start flex flex-col bg-white' : ''}`}>
-            <div className={`flex items-center justify-between px-3 py-1.5 text-sm border-b ${head}`}>
-              <span className="font-semibold">{m.label}</span>
-              <span className="text-xs">
-                {m.remaining > 0 ? `Reste ${formatMAD(m.remaining)}` : 'Payé ✓'}
-              </span>
+          <div key={m.month} className={`border rounded-lg overflow-hidden ${cards ? `flex flex-col bg-white ${MONTH_BORDER[m.status] || MONTH_BORDER.unpaid}` : 'border-gray-200'}`}>
+            <div className={`px-3 py-1.5 text-sm border-b ${head}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{m.label}</span>
+                <span className="text-xs font-medium">
+                  {m.remaining > 0 ? `Reste ${formatMAD(m.remaining)}` : 'Payé ✓'}
+                </span>
+              </div>
+              {cards && (
+                <div className="flex items-center justify-between gap-2 mt-1">
+                  <span className="text-[11px] opacity-80">Total {formatMAD(monthTotal)} · Payé {formatMAD(monthPaid)}</span>
+                  {payables.length > 0 && onToggle && (
+                    <button onClick={toggleMonth}
+                      title={allChecked ? 'Décocher tous les services du mois' : 'Cocher tous les services restants du mois'}
+                      className="text-[11px] font-semibold px-2 py-0.5 rounded bg-white/80 hover:bg-white border border-gray-300 flex-shrink-0">
+                      {allChecked ? 'Tout décocher' : '⚡ Tout encaisser'}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <div className={`divide-y divide-gray-100 ${cards ? 'flex-1' : ''}`}>
               {m.services.map(svc => {
@@ -169,12 +206,17 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
                       // Déjà payé : case cochée verrouillée (impossible à décocher)
                       <input type="checkbox" checked readOnly disabled className="w-4 h-4 accent-green-600 flex-shrink-0" title="Payé" />
                     )}
+                    {/* Pastille de statut du service : vert payé, orange partiel, rouge non payé */}
+                    {!excluded && (
+                      <span title={!payable ? 'Payé' : hasPaid ? 'Partiellement payé' : 'Non payé'}
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${!payable ? 'bg-green-500' : hasPaid ? 'bg-orange-500' : 'bg-red-500'}`} />
+                    )}
                     <span className={`flex-1 min-w-0 truncate ${excluded ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
                       {serviceLabel(svc)}
                       {svc.extra && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-purple-50 text-purple-600 align-middle no-underline">ajouté</span>}
                       {excluded && <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-gray-200 text-gray-500 align-middle no-underline">exclu</span>}
                     </span>
-                    {!dense && !excluded && <span className="text-xs text-gray-400">{formatMAD(svc.total)}</span>}
+                    {!excluded && <span className="text-xs text-gray-400 flex-shrink-0">{formatMAD(svc.total)}</span>}
                     {excluded ? (
                       <span className={`${dense ? 'w-20' : 'w-28'} text-right text-xs text-gray-400 flex-shrink-0`}>Exclu</span>
                     ) : payable ? (
@@ -186,7 +228,14 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
                         <span className={`${dense ? 'w-20 text-xs' : 'w-28'} text-right font-medium text-orange-600 flex-shrink-0`}>{formatMAD(svc.remaining)}</span>
                       )
                     ) : (
-                      <span className={`${dense ? 'w-20' : 'w-28'} text-right text-xs text-green-600 flex-shrink-0`}>Payé</span>
+                      <span className={`${dense ? 'w-20' : 'w-28'} text-right text-xs text-green-600 font-medium flex-shrink-0`}>Payé ✓</span>
+                    )}
+                    {/* Facturé : impression rapide de la facture du service */}
+                    {billed && (
+                      <button onClick={() => financeApi.openInvoicePdf(svc.invoice_id).catch(e => alert('Erreur impression: ' + e.message))}
+                        title="Imprimer la facture de ce service" className="p-1 hover:bg-blue-100 rounded flex-shrink-0">
+                        <Printer className="w-3.5 h-3.5 text-blue-600" />
+                      </button>
                     )}
                     {/* Exclu → réintégrer ; sinon annuler le paiement / supprimer / exclure avant paiement */}
                     {onRestoreService && excluded ? (
