@@ -136,9 +136,14 @@ const getTeacherSubjectsMap = async (teacherIds) => {
  *     general_average, mention }
  *
  * Sans persistance — utilisable pour preview avant publication.
+ *
+ * withDetail = true → chaque ligne inclut en plus controls_detail / activities_detail :
+ * la liste des épreuves individuelles [{ id, name, date, note }] triées par date
+ * (note = null si l'élève n'a pas encore de note pour cette épreuve). Sert à la
+ * vue « Notes d'élève » (colonnes C1, C2, C3…).
  */
 export const computeStudentBulletin = async ({
-  studentId, classId, schoolId, academicYear, semester, _bounds
+  studentId, classId, schoolId, academicYear, semester, _bounds, withDetail = false
 }) => {
   // 1. Classe + niveau/filière
   const { data: cls } = await supabaseAdmin
@@ -198,13 +203,31 @@ export const computeStudentBulletin = async ({
     if (!subj || !subj.name) continue;
     const key = subj.name.trim();
     if (!buckets[key]) {
-      buckets[key] = { subject_id: subj.id, subject_name: key, controls: [], activities: [] };
+      buckets[key] = { subject_id: subj.id, subject_name: key, controls: [], activities: [], controlsDetail: [], activitiesDetail: [] };
     }
     if (noteByControl.has(ctrl.id)) {
       const note = noteByControl.get(ctrl.id);
       if (ctrl.kind === 'activity') buckets[key].activities.push(note);
       else buckets[key].controls.push(note);
     }
+    if (withDetail) {
+      // Toutes les épreuves de la période, notées ou non (note = null si absente).
+      const detail = {
+        id: ctrl.id, name: ctrl.name, date: ctrl.date,
+        note: noteByControl.has(ctrl.id) ? noteByControl.get(ctrl.id) : null,
+      };
+      if (ctrl.kind === 'activity') buckets[key].activitiesDetail.push(detail);
+      else buckets[key].controlsDetail.push(detail);
+    }
+  }
+
+  if (withDetail) {
+    // Ordre chronologique → C1 = 1re épreuve, C2 = 2e, etc.
+    const byDate = (a, b) => String(a.date || '').localeCompare(String(b.date || ''));
+    Object.values(buckets).forEach(b => {
+      b.controlsDetail.sort(byDate);
+      b.activitiesDetail.sort(byDate);
+    });
   }
 
   // 7. Coefficients (référentiel : on génère une ligne par matière du niveau,
@@ -237,7 +260,11 @@ export const computeStudentBulletin = async ({
       note_20: note20 != null ? round2(note20) : null,
       coefficient: coefEntry.coefficient,
       weighted_note: note20 != null ? round2(note20 * coefEntry.coefficient) : null,
-      display_order: coefEntry.display_order
+      display_order: coefEntry.display_order,
+      ...(withDetail ? {
+        controls_detail: b?.controlsDetail || [],
+        activities_detail: b?.activitiesDetail || [],
+      } : {})
     });
   }
 
@@ -261,7 +288,11 @@ export const computeStudentBulletin = async ({
       note_20: note20 != null ? round2(note20) : null,
       coefficient: 1,
       weighted_note: note20 != null ? round2(note20) : null,
-      display_order: 999
+      display_order: 999,
+      ...(withDetail ? {
+        controls_detail: b.controlsDetail || [],
+        activities_detail: b.activitiesDetail || [],
+      } : {})
     });
   }
 

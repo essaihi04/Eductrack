@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { printHtmlDocument } from '../../lib/download';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw, GraduationCap } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -13,7 +13,8 @@ import { generateStudentEmail, generatePassword } from '../../utils/studentUtils
 import { DOSSIER_DOC_KEYS } from '../../utils/dossierDocuments';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { LEVEL_ORDER, nextLevel, distinctLevels } from '../../lib/levelProgression';
-import { prevYearStr, toSlashYear, sameYear } from '../../lib/schoolYear';
+import { prevYearStr, toSlashYear, toDashYear, sameYear } from '../../lib/schoolYear';
+import StudentNotesModal from '../../components/StudentNotesModal';
 
 const StudentsPage = () => {
   const { profile, availableSchools } = useAuth();
@@ -63,6 +64,7 @@ const StudentsPage = () => {
   const [activeIds, setActiveIds] = useState(new Set());
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer
+  const [notesStudent, setNotesStudent] = useState(null); // fenêtre « Notes d'élève »
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState({
     className: '',
@@ -1878,6 +1880,9 @@ L'administration de ${schoolName}`;
                                 selected={selectedStudents.has(student.id)}
                                 onToggleSelect={() => toggleStudentSelection(student.id)}
                                 onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
+                                actions={isCandidate ? [] : [
+                                  { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => setNotesStudent(student) },
+                                ]}
                               />
                             </div>
                           );
@@ -1903,6 +1908,9 @@ L'administration de ${schoolName}`;
                               selected={selectedStudents.has(student.id)}
                               onToggleSelect={() => toggleStudentSelection(student.id)}
                               onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
+                              actions={isCandidate ? [] : [
+                                { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => setNotesStudent(student) },
+                              ]}
                             />
                           </div>
                         );
@@ -1955,6 +1963,13 @@ L'administration de ${schoolName}`;
                 : 'Non renseignée'} />
               <FieldRow label="Email" value={activeStudent.email} />
             </div>
+
+            <button
+              onClick={() => setNotesStudent(activeStudent)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
+            >
+              <GraduationCap className="w-4 h-4" /> Notes de l'élève (bulletin)
+            </button>
 
             {isAdmin && (
               <button
@@ -2056,6 +2071,16 @@ L'administration de ${schoolName}`;
           </div>
         )}
       </DetailDrawer>
+
+      {/* Fenêtre « Notes d'élève » (bulletin détaillé + envoi parents + impression) */}
+      {notesStudent && (
+        <StudentNotesModal
+          student={notesStudent}
+          classLabel={classes.find((c) => c.id === notesStudent.class_id)?.name || ''}
+          activeYear={toDashYear(year)}
+          onClose={() => setNotesStudent(null)}
+        />
+      )}
 
       {/* Modale d'ajout de parents */}
       {parentModalQueue.length > 0 && (() => {

@@ -37,6 +37,7 @@ import {
   isExamLevel
 } from '../services/bulletins/calculator.js';
 import { generateBulletinPdf } from '../services/bulletins/bulletinPdf.js';
+import { aggregateStudentTracking, trackingSummaryText } from '../services/studentTracking.js';
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
 import { getEstablishmentConfig } from '../services/establishmentHeader.js';
 import { getDefaultYearBounds, getCurrentSemester, getCurrentAcademicYear } from '../services/bulletins/schoolCalendar.js';
@@ -981,11 +982,22 @@ router.get('/pdf/:bulletinId', async (req, res) => {
 // POST /preview — preview PDF sans persister (pour un élève)
 router.post('/preview', requireSchoolAdmin, async (req, res) => {
   try {
-    const { student_id, class_id, academic_year, semester, mode } = req.body;
+    const { student_id, class_id, academic_year, semester, mode, include_tracking } = req.body;
     const schoolId = req.user.school_id;
     const sem = Number(semester);
 
     const result = await computeStudentBulletin({ studentId: student_id, classId: class_id, schoolId, academicYear: academic_year, semester: sem });
+
+    // Optionnel : résumé du suivi rapide en classe dans le bloc « Observations »
+    let trackingNotes;
+    if (include_tracking) {
+      try {
+        const { start, end } = await getSemesterBounds(schoolId, academic_year, sem);
+        const tracking = await aggregateStudentTracking({ studentId: student_id, classId: class_id, start, end });
+        const txt = trackingSummaryText(tracking);
+        if (txt) trackingNotes = `Suivi en classe — ${txt}`;
+      } catch (_) {}
+    }
 
     // Certification (si niveau إشهادية)
     let certification = null;
@@ -1029,6 +1041,7 @@ router.post('/preview', requireSchoolAdmin, async (req, res) => {
       academicYear: academic_year,
       semester: sem,
       certification,
+      notes: trackingNotes,
       logoBuffer
     });
 
@@ -1037,6 +1050,275 @@ router.post('/preview', requireSchoolAdmin, async (req, res) => {
     res.send(pdfBuffer);
   } catch (e) {
     console.error('[Bulletins] preview error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4bis. VUE « NOTES D'ÉLÈVE » (fiche élève admin) — calcul en direct
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /student-notes/:studentId?class_id=&academic_year=&semester=
+// Bulletin détaillé d'UN élève, calculé en direct (pas besoin d'avoir généré
+// les bulletins) : notes individuelles C1..Cn par matière, moyenne matière,
+// coef, MxC, appréciation prof, rang général + rang par matière, moyenne de
+// classe (générale et par matière) et assiduité du semestre.
+router.get('/student-notes/:studentId', requireSchoolAdmin, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { academic_year } = req.query;
+    const semester = Number(req.query.semester) || 1;
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+
+    // Élève + contrôle d'appartenance à l'école
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, class_id, school_id, avatar_url, gender')
+      .eq('id', studentId)
+      .eq('role', 'student')
+      .single();
+    if (!student) return res.status(404).json({ error: 'Élève introuvable' });
+    if (req.user.role !== 'super_admin' && student.school_id !== req.user.school_id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+
+    const classId = req.query.class_id || student.class_id;
+    if (!classId) return res.status(400).json({ error: "L'élève n'est assigné à aucune classe" });
+    const schoolId = student.school_id;
+
+    // Bulletin détaillé de l'élève (avec notes individuelles par épreuve)
+    const result = await computeStudentBulletin({
+      studentId, classId, schoolId,
+      academicYear: academic_year, semester, withDetail: true
+    });
+
+    // Classe entière → rang général, rang + moyenne de classe par matière
+    let classStats = null;
+    try {
+      const cls = await computeClassBulletins({ classId, schoolId, academicYear: academic_year, semester });
+      const subjectClassAvgs = {};
+      for (const [subj] of cls.subjectRankings || []) {
+        const notes = (cls.classBulletins || [])
+          .map(b => b.lines.find(l => l.subject_name === subj)?.note_20)
+          .filter(n => n != null);
+        if (notes.length) {
+          subjectClassAvgs[subj] = Math.round((notes.reduce((s, n) => s + n, 0) / notes.length) * 100) / 100;
+        }
+      }
+      classStats = {
+        general_rank: cls.classRanking?.get(studentId) || null,
+        total_students: cls.totalStudents || null,
+        class_average: cls.classAverage,
+        subject_ranks: Object.fromEntries(
+          [...(cls.subjectRankings || [])].map(([subj, ranks]) => [subj, ranks.get(studentId) || null])
+        ),
+        subject_class_avgs: subjectClassAvgs,
+      };
+    } catch (e) {
+      console.warn('[Bulletins] student-notes class stats:', e.message);
+    }
+
+    // Appréciations des profs (par matière)
+    const { data: apprecs } = await supabaseAdmin
+      .from('teacher_appreciations')
+      .select('subject_name, appreciation')
+      .eq('student_id', studentId)
+      .eq('academic_year', academic_year)
+      .eq('semester', semester);
+    const apprecBySubject = new Map((apprecs || []).map(a => [String(a.subject_name || '').trim(), a.appreciation]));
+
+    // Assiduité sur la période du semestre
+    const { start, end } = await getSemesterBounds(schoolId, academic_year, semester);
+    const { data: att } = await supabaseAdmin
+      .from('attendance')
+      .select('status')
+      .eq('student_id', studentId)
+      .gte('date', start)
+      .lte('date', end);
+    const attendance = { absent: 0, late: 0, excused: 0 };
+    (att || []).forEach(a => { if (attendance[a.status] != null) attendance[a.status] += 1; });
+
+    // Suivi rapide en classe (session_tracking) : présence aux séances,
+    // participation, vigilance, attitude, téléphone, somnolence, devoirs,
+    // cahier, mini-évals + derniers commentaires des profs.
+    let tracking = null;
+    try {
+      tracking = await aggregateStudentTracking({ studentId, classId, start, end });
+    } catch (e) {
+      console.warn('[Bulletins] student-notes tracking:', e.message);
+    }
+
+    const lines = result.lines.map(l => ({
+      ...l,
+      appreciation: apprecBySubject.get(l.subject_name) || null,
+      subject_rank: classStats?.subject_ranks?.[l.subject_name] || null,
+      class_avg: classStats?.subject_class_avgs?.[l.subject_name] ?? null,
+    }));
+
+    res.json({
+      student: {
+        id: student.id, first_name: student.first_name, last_name: student.last_name,
+        massar_code: student.massar_code, avatar_url: student.avatar_url, gender: student.gender,
+      },
+      class: result.class,
+      academic_year,
+      semester,
+      period: { start, end },
+      lines,
+      general_average: result.general_average,
+      mention: result.mention,
+      general_rank: classStats?.general_rank || null,
+      total_students: classStats?.total_students || null,
+      class_average: classStats?.class_average ?? null,
+      attendance,
+      tracking,
+      max_controls: Math.max(0, ...lines.map(l => (l.controls_detail || []).length)),
+      max_activities: Math.max(0, ...lines.map(l => (l.activities_detail || []).length)),
+    });
+  } catch (e) {
+    console.error('[Bulletins] student-notes error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /student-notes/:studentId/send — envoie le bulletin PDF aux parents.
+// body : { class_id?, academic_year, semester, channels: ['whatsapp','app'] }
+//  - whatsapp : PDF du bulletin (avec logo école) en document WhatsApp
+//  - app      : notification in-app (type 'grade') + push best-effort
+router.post('/student-notes/:studentId/send', requireSchoolAdmin, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { academic_year, semester: semRaw, channels } = req.body;
+    const semester = Number(semRaw) || 1;
+    const wantWhatsapp = Array.isArray(channels) && channels.includes('whatsapp');
+    const wantApp = Array.isArray(channels) && channels.includes('app');
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+    if (!wantWhatsapp && !wantApp) return res.status(400).json({ error: 'channels requis (whatsapp et/ou app)' });
+
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, class_id, school_id')
+      .eq('id', studentId)
+      .eq('role', 'student')
+      .single();
+    if (!student) return res.status(404).json({ error: 'Élève introuvable' });
+    if (req.user.role !== 'super_admin' && student.school_id !== req.user.school_id) {
+      return res.status(403).json({ error: 'Accès refusé' });
+    }
+    const classId = req.body.class_id || student.class_id;
+    const schoolId = student.school_id;
+    const studentName = `${student.first_name || ''} ${student.last_name || ''}`.trim();
+
+    // Parents liés (id + téléphone)
+    const { data: parentLinks } = await supabaseAdmin
+      .from('parent_students')
+      .select('parent_id, profiles!parent_students_parent_id_fkey(id, phone, first_name, last_name)')
+      .eq('student_id', studentId);
+    const parents = (parentLinks || []).map(l => l.profiles).filter(Boolean);
+    if (parents.length === 0) return res.status(400).json({ error: 'Aucun parent lié à cet élève' });
+
+    // Bulletin calculé en direct + rang
+    const result = await computeStudentBulletin({
+      studentId, classId, schoolId, academicYear: academic_year, semester
+    });
+    let generalRank = null, totalStudents = null, classAverage = null;
+    try {
+      const cls = await computeClassBulletins({ classId, schoolId, academicYear: academic_year, semester });
+      generalRank = cls.classRanking?.get(studentId) || null;
+      totalStudents = cls.totalStudents || null;
+      classAverage = cls.classAverage;
+    } catch (_) {}
+
+    // Résumé du suivi rapide (assiduité, participation, téléphone, somnolence…)
+    // → intégré au bloc « Observations » du PDF et aux messages parents.
+    let trackingSummary = '';
+    try {
+      const { start, end } = await getSemesterBounds(schoolId, academic_year, semester);
+      const tracking = await aggregateStudentTracking({ studentId, classId, start, end });
+      trackingSummary = trackingSummaryText(tracking);
+    } catch (_) {}
+
+    const out = { whatsapp: null, app: null };
+
+    // ── Canal WhatsApp : PDF avec logo école ──────────────────────────────
+    if (wantWhatsapp) {
+      const { sendDocument, getStatus } = await import('../services/whatsapp/index.js');
+      const status = await getStatus(schoolId);
+      if (!status?.connected) {
+        out.whatsapp = { sent: 0, error: 'Session WhatsApp non connectée' };
+      } else {
+        const { data: config } = await supabaseAdmin
+          .from('school_year_config').select('*')
+          .eq('school_id', schoolId).eq('academic_year', academic_year).maybeSingle();
+        const { data: school } = await supabaseAdmin
+          .from('schools').select('id, name, address, phone, logo_url')
+          .eq('id', schoolId).single();
+        const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
+
+        const pdfBuffer = await generateBulletinPdf({
+          student, cls: result.class || {}, lines: result.lines,
+          generalAverage: result.general_average,
+          generalRank, totalStudents, classAverage,
+          config: config || {}, school: school || {},
+          academicYear: academic_year, semester, logoBuffer,
+          notes: trackingSummary ? `Suivi en classe — ${trackingSummary}` : undefined,
+        });
+
+        let sent = 0; const errors = [];
+        const seenPhones = new Set();
+        for (const p of parents) {
+          const phone = (p.phone || '').trim();
+          if (!phone || seenPhones.has(phone)) continue;
+          seenPhones.add(phone);
+          try {
+            const jid = phone.replace(/^0/, '212').replace(/^\+/, '') + '@s.whatsapp.net';
+            await sendDocument(schoolId, jid, pdfBuffer,
+              `notes_${studentName.replace(/\s+/g, '_')}_S${semester}.pdf`,
+              `📊 Relevé de notes de ${studentName} — Semestre ${semester} (${academic_year})` +
+              (result.general_average != null ? `\nMoyenne générale : ${result.general_average}/20` : '') +
+              (generalRank ? `\nRang : ${generalRank}/${totalStudents}` : '') +
+              (trackingSummary ? `\n\n📋 Suivi en classe :\n${trackingSummary.split(' · ').map(s => `• ${s}`).join('\n')}` : ''));
+            sent++;
+          } catch (err) {
+            errors.push({ parent: `${p.first_name || ''} ${p.last_name || ''}`.trim(), error: err.message });
+          }
+        }
+        out.whatsapp = { sent, errors };
+      }
+    }
+
+    // ── Canal app : notification in-app + push best-effort ───────────────
+    if (wantApp) {
+      const avgTxt = result.general_average != null ? `Moyenne générale : ${result.general_average}/20` : 'Notes disponibles';
+      const rankTxt = generalRank ? ` — Rang ${generalRank}/${totalStudents}` : '';
+      const title = `📊 Notes de ${student.first_name}`;
+      const message = `${avgTxt}${rankTxt} · Semestre ${semester} (${academic_year}).` +
+        (trackingSummary ? ` ${trackingSummary}.` : '') +
+        ` Consultez le détail dans l'application.`;
+      const rows = parents.map(p => ({
+        user_id: p.id, title, message, type: 'grade',
+        data: { student_id: studentId, academic_year, semester },
+      }));
+      let notified = 0;
+      try {
+        const { error } = await supabaseAdmin.from('notifications').insert(rows);
+        if (!error) notified = rows.length;
+      } catch (e) {
+        console.warn('[Bulletins] student-notes notify:', e.message);
+      }
+      // Push (web + natif) best-effort — silencieux si le parent n'a pas l'app.
+      try {
+        const { sendPushToUser } = await import('../services/webPush.js');
+        for (const p of parents) {
+          try { await sendPushToUser(p.id, { title, body: message, url: '/parent' }); } catch (_) {}
+        }
+      } catch (_) {}
+      out.app = { notified, total_parents: parents.length };
+    }
+
+    res.json(out);
+  } catch (e) {
+    console.error('[Bulletins] student-notes send error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
