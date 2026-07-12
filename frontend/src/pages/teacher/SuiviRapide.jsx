@@ -2150,8 +2150,6 @@ const SuiviRapide = () => {
                     });
                     setTracking(resetTracking);
                     setSaving(false);
-                    setSaveError('');
-                    setSaveInfo('');
                     setSessionType('normal');
                     setControlName('');
                     setControlDescription('');
@@ -2168,7 +2166,7 @@ const SuiviRapide = () => {
                     
                   } catch (error) {
                     console.error('Erreur lors de l\'annulation de la séance:', error);
-                    setSaveError('Impossible d\'annuler la séance. Veuillez réessayer.');
+                    setSessionError('Impossible d\'annuler la séance. Veuillez réessayer.');
                   }
                 }}
                 disabled={saving || !currentSession?.id}
