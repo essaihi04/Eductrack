@@ -27,6 +27,7 @@ import {
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 const presenceIcons = {
   present: '✔️',
@@ -598,6 +599,7 @@ const RecommendationCard = ({ recommendation, onAction }) => {
 
 // Composant pour les élèves à risque
 const ProblemStudentCard = ({ student }) => {
+  const navigate = useNavigate();
   const riskColors = {
     high: 'border-red-300 bg-red-50',
     medium: 'border-orange-300 bg-orange-50',
@@ -605,7 +607,11 @@ const ProblemStudentCard = ({ student }) => {
   };
 
   return (
-    <div className={`border ${riskColors[student.riskLevel]} rounded-lg p-3`}>
+    <div
+      className={`border ${riskColors[student.riskLevel]} rounded-lg p-3 ${student.studentId ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={() => student.studentId && navigate(`/students?student=${student.studentId}`)}
+      title={student.studentId ? "Ouvrir la fiche de l'élève (notes, suivi, envoi parents)" : undefined}
+    >
       <div className="flex justify-between items-start">
         <div>
           <p className="font-medium text-sm">{student.studentName}</p>

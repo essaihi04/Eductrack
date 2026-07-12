@@ -1,15 +1,22 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, TrendingUp, AlertCircle, Star, Activity } from 'lucide-react';
+import { ArrowLeft, TrendingUp, AlertCircle, Star, Activity, GraduationCap } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
+import StudentNotesModal from '../../components/StudentNotesModal';
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
   const { studentId } = useParams();
   const { profile } = useAuth();
+  const { year } = useYear();
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showNotes, setShowNotes] = useState(false);
+  // Bouton « Notes de l'élève » réservé à la direction (routes admin côté backend).
+  const canSeeNotes = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -128,11 +135,30 @@ const StudentDashboard = () => {
               Suivi pédagogique • {totalSessions} séances enregistrées
             </p>
           </div>
-          <div className={`px-4 py-2 rounded-full font-semibold text-sm ${badgeColor}`}>
-            {badgeText}
+          <div className="flex items-center gap-2">
+            {canSeeNotes && (
+              <button
+                onClick={() => setShowNotes(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm text-sm font-medium"
+              >
+                <GraduationCap className="w-4 h-4" /> Notes de l'élève
+              </button>
+            )}
+            <div className={`px-4 py-2 rounded-full font-semibold text-sm ${badgeColor}`}>
+              {badgeText}
+            </div>
           </div>
         </div>
       </div>
+
+      {showNotes && (
+        <StudentNotesModal
+          student={{ id: studentId, ...student }}
+          classLabel={student.class_name || ''}
+          activeYear={toDashYear(year)}
+          onClose={() => setShowNotes(false)}
+        />
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

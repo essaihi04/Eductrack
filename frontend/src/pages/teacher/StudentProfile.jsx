@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, BarChart3, TrendingUp, AlertCircle, Users, Target, Phone, Moon, Heart, Eye, PenLine, MessageSquare, Lightbulb } from 'lucide-react';
+import { ChevronLeft, BarChart3, TrendingUp, AlertCircle, Users, Target, Phone, Moon, Heart, Eye, PenLine, MessageSquare, Lightbulb, GraduationCap } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
+import { toDashYear } from '../../lib/schoolYear';
+import StudentNotesModal from '../../components/StudentNotesModal';
 import { 
   LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, 
   ResponsiveContainer, Legend, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
@@ -12,10 +15,15 @@ const StudentProfile = () => {
   const { studentId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { year } = useYear();
   const [student, setStudent] = useState(null);
   const [stats, setStats] = useState(null);
   const [recentTracking, setRecentTracking] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showNotes, setShowNotes] = useState(false);
+  // Le bouton « Notes de l'élève » n'est proposé qu'à la direction (les routes
+  // /api/bulletins/student-notes sont réservées aux rôles admin/direction).
+  const canSeeNotes = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -88,18 +96,35 @@ const StudentProfile = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <button
           onClick={() => navigate(-1)}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
         >
           <ChevronLeft className="w-6 h-6" />
         </button>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-3xl font-bold">{student.first_name} {student.last_name}</h1>
           <p className="text-muted-foreground mt-1">Fiche élève - Lecture seule</p>
         </div>
+        {canSeeNotes && (
+          <button
+            onClick={() => setShowNotes(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
+          >
+            <GraduationCap className="w-4 h-4" /> Notes de l'élève (bulletin)
+          </button>
+        )}
       </div>
+
+      {showNotes && (
+        <StudentNotesModal
+          student={student}
+          classLabel={student.class?.name || student.class_name || ''}
+          activeYear={toDashYear(year)}
+          onClose={() => setShowNotes(false)}
+        />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
