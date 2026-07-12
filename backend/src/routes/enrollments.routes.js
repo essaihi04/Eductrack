@@ -177,12 +177,14 @@ router.get('/funnel', async (req, res) => {
     if (!year) return res.status(400).json({ error: 'academic_year requis' });
     const prev = prevYearStr(year);
 
-    const [{ data: cur }, { data: prevRows }] = await Promise.all([
-      supabaseAdmin.from('student_enrollments').select('student_id, status')
-        .eq('school_id', schoolId).in('academic_year', yearVariants(year)),
-      supabaseAdmin.from('student_enrollments').select('student_id, status')
-        .eq('school_id', schoolId).in('academic_year', yearVariants(prev)),
-    ]);
+    // schoolId null (super admin sans école active) → pas de filtre école,
+    // sinon .eq('school_id', null) ne renvoie rien et tout paraît vide.
+    let curQ = supabaseAdmin.from('student_enrollments').select('student_id, status')
+      .in('academic_year', yearVariants(year));
+    let prevQ = supabaseAdmin.from('student_enrollments').select('student_id, status')
+      .in('academic_year', yearVariants(prev));
+    if (schoolId) { curQ = curQ.eq('school_id', schoolId); prevQ = prevQ.eq('school_id', schoolId); }
+    const [{ data: cur }, { data: prevRows }] = await Promise.all([curQ, prevQ]);
 
     const active = (cur || []).filter((e) => e.status !== 'NR');
     const total = active.length;
@@ -215,8 +217,10 @@ router.get('/', async (req, res) => {
         student:profiles!student_enrollments_student_id_fkey(id, first_name, last_name, gender, massar_code, avatar, avatar_url, level),
         class:classes!student_enrollments_class_id_fkey(id, name, level, filiere)
       `)
-      .eq('school_id', schoolId)
       .in('academic_year', yearVariants(year));
+    // schoolId null (super admin sans école active) → pas de filtre école,
+    // sinon .eq('school_id', null) ne renvoie rien et la liste paraît vide.
+    if (schoolId) q = q.eq('school_id', schoolId);
 
     if (req.query.class_id) q = q.eq('class_id', req.query.class_id);
 

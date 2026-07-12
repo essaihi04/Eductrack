@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, Wallet,
   DollarSign, Layers, History, Pencil, Download, ArrowRightLeft, RotateCcw, RefreshCw,
+  Trash2, CheckSquare, Square,
 } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
@@ -50,6 +51,12 @@ export default function FinanceStudentsPage() {
   const [busyId, setBusyId] = useState(null); // élève dont la fiche se charge (édition / PDF)
   const [reinscribeOpen, setReinscribeOpen] = useState(false);
   const [undoing, setUndoing] = useState(false);
+
+  // Sélection multiple (cartes/lignes) → actions groupées : déplacer / supprimer
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveClassId, setMoveClassId] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Année précédente, dans le même format (slash ou tiret) que l'année active.
   const prevYear = useMemo(() => {
@@ -114,6 +121,68 @@ export default function FinanceStudentsPage() {
   };
 
   const reloadAll = () => { load(); loadRoster(); };
+
+  // Vide la sélection quand la liste change (année, classe…)
+  useEffect(() => { setSelectedIds(new Set()); }, [filters.class_id, year]);
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) =>
+      prev.size === filtered.length && filtered.length > 0
+        ? new Set()
+        : new Set(filtered.map((s) => s.id))
+    );
+  };
+
+  // Suppression groupée — le serveur refuse (409) les élèves avec paiements
+  // encaissés : on remonte ces refus sans bloquer les autres suppressions.
+  const bulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    if (!window.confirm(`Supprimer ${ids.length} élève(s) ? Cette action est définitive (compte, fiche, inscriptions). Les élèves ayant des paiements encaissés seront refusés.`)) return;
+    setBulkBusy(true);
+    const failures = [];
+    for (const id of ids) {
+      try { await inscriptionsApi.deleteStudent(id); }
+      catch (e) {
+        const s = students.find((x) => x.id === id);
+        failures.push(`${s ? `${s.first_name} ${s.last_name}` : id} : ${e.message}`);
+      }
+    }
+    setBulkBusy(false);
+    setSelectedIds(new Set());
+    reloadAll();
+    if (failures.length) alert(`${ids.length - failures.length} supprimé(s), ${failures.length} refusé(s) :\n\n${failures.join('\n')}`);
+  };
+
+  // Déplacement groupé vers une classe donnée (synchronise aussi l'inscription
+  // de l'année via le PUT inscriptions).
+  const bulkMove = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0 || !moveClassId) return;
+    setBulkBusy(true);
+    const failures = [];
+    for (const id of ids) {
+      try { await inscriptionsApi.updateStudent(id, { classId: moveClassId, academicYear: year }); }
+      catch (e) {
+        const s = students.find((x) => x.id === id);
+        failures.push(`${s ? `${s.first_name} ${s.last_name}` : id} : ${e.message}`);
+      }
+    }
+    setBulkBusy(false);
+    setMoveOpen(false);
+    setMoveClassId('');
+    setSelectedIds(new Set());
+    reloadAll();
+    if (failures.length) alert(`${ids.length - failures.length} déplacé(s), ${failures.length} en échec :\n\n${failures.join('\n')}`);
+  };
 
   // Inscription de l'année active par élève (statut RI/NI, classe…).
   const entryByStudent = useMemo(() => {
@@ -284,6 +353,41 @@ export default function FinanceStudentsPage() {
             <GridListToggle value={viewMode} onChange={setViewMode} />
           </FilterBar>
 
+          {/* Barre de sélection multiple : tout sélectionner + actions groupées */}
+          {filtered.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-lg bg-white hover:bg-gray-50"
+              >
+                {selectedIds.size === filtered.length
+                  ? <><CheckSquare className="w-3.5 h-3.5" /> Tout désélectionner</>
+                  : <><Square className="w-3.5 h-3.5" /> Tout sélectionner</>}
+              </button>
+              {selectedIds.size > 0 && (
+                <>
+                  <span className="text-xs text-gray-500">{selectedIds.size} sélectionné(s)</span>
+                  <button
+                    onClick={() => { setMoveClassId(''); setMoveOpen(true); }}
+                    disabled={bulkBusy}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    title="Déplacer les élèves sélectionnés vers une classe"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" /> Déplacer ({selectedIds.size})
+                  </button>
+                  <button
+                    onClick={bulkDelete}
+                    disabled={bulkBusy}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                    title="Supprimer les élèves sélectionnés"
+                  >
+                    {bulkBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Supprimer ({selectedIds.size})
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {filtered.length === 0 ? (
             <div className="text-center py-10 space-y-3">
               <p className="text-gray-400">Aucun élève</p>
@@ -304,6 +408,9 @@ export default function FinanceStudentsPage() {
                   className={s.classes?.name || '—'}
                   status={financeStatus(s)}
                   actions={cardActions(s)}
+                  selectable
+                  selected={selectedIds.has(s.id)}
+                  onToggleSelect={() => toggleSelect(s.id)}
                   onClick={() => openWorkspace(s, 'collect')}
                 />
               ))}
@@ -320,12 +427,48 @@ export default function FinanceStudentsPage() {
                   sub={s.total_due > 0 ? `Reste dû ${formatMAD(s.total_due)}` : 'À jour'}
                   status={financeStatus(s)}
                   actions={cardActions(s)}
+                  selectable
+                  selected={selectedIds.has(s.id)}
+                  onToggleSelect={() => toggleSelect(s.id)}
                   onClick={() => openWorkspace(s, 'collect')}
                 />
               ))}
             </div>
           )}
         </>
+      )}
+
+      {/* Modale « Déplacer la sélection vers une classe » */}
+      {moveOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !bulkBusy && setMoveOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold flex items-center gap-2">
+                <ArrowRightLeft className="w-4 h-4 text-blue-600" /> Déplacer {selectedIds.size} élève(s)
+              </h3>
+              <button onClick={() => setMoveOpen(false)} disabled={bulkBusy} className="p-1 hover:bg-gray-100 rounded">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Classe de destination ({year})</label>
+              <select value={moveClassId} onChange={(e) => setMoveClassId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white">
+                <option value="">— choisir une classe —</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">L'inscription de l'année active est synchronisée automatiquement.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setMoveOpen(false)} disabled={bulkBusy}>Annuler</Button>
+              <Button icon={bulkBusy ? RefreshCw : ArrowRightLeft} onClick={bulkMove} disabled={bulkBusy || !moveClassId}>
+                {bulkBusy ? 'Déplacement…' : 'Déplacer'}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {selectedStudent && (

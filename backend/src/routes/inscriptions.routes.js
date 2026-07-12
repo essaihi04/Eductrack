@@ -261,6 +261,52 @@ router.put('/students/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/inscriptions/students/:id
+// Suppression d'un élève depuis le module finance — scopée à l'école, avec le
+// même garde-fou comptable que la suppression admin (pas de suppression si des
+// paiements sont encaissés : la cascade effacerait l'historique financier).
+router.delete('/students/:id', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { id } = req.params;
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .eq('role', 'student')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    if (!student) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
+
+    try {
+      const { count } = await supabaseAdmin
+        .from('payments')
+        .select('id', { count: 'exact', head: true })
+        .eq('student_id', id)
+        .eq('status', 'confirmed');
+      if ((count || 0) > 0) {
+        return res.status(409).json({
+          error: `Suppression impossible : ${count} paiement(s) encaissé(s) sur cet élève. ` +
+            `Supprimer effacerait son historique financier (recettes comprises). ` +
+            `Marquez-le plutôt « non réinscrit » pour le retirer des listes.`,
+        });
+      }
+    } catch (_) { /* module finance absent → pas de garde-fou */ }
+
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .delete()
+      .eq('id', id);
+    if (profileError) throw profileError;
+
+    await supabaseAdmin.auth.admin.deleteUser(id);
+    res.json({ message: 'Élève supprimé' });
+  } catch (e) {
+    console.error('DELETE /inscriptions/students/:id:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // POST /api/inscriptions/students/:id/photo
 // Upload de la photo d'un élève (même stockage que l'admin), scopé à l'école.
 router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (req, res) => {

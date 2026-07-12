@@ -39,6 +39,8 @@ export const inscriptionsApi = {
   updateStudent: (id, payload) => request(`/api/inscriptions/students/${id}`, { method: 'PUT', body: payload }),
   // Fiche complète d'un élève (profil + parents) — pour imprimer la fiche d'inscription.
   getStudent: (id) => request(`/api/inscriptions/students/${id}`),
+  // Suppression d'un élève (bloquée côté serveur s'il a des paiements encaissés).
+  deleteStudent: (id) => request(`/api/inscriptions/students/${id}`, { method: 'DELETE' }),
   // Photo de l'élève (multipart) — même comportement que la fiche admin.
   uploadPhoto: async (studentId, file) => {
     const token = await getToken();
