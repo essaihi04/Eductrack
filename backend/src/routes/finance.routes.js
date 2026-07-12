@@ -36,6 +36,21 @@ const academicYearRangeWide = (year) => {
 // Normalise une année scolaire pour comparaison : « 2026/2027 » → « 2026-2027 ».
 export const normYear = (y) => String(y || '').replace('/', '-').trim();
 
+// Exécute une requête .in() par LOTS : au-delà de ~200 UUID, l'URL PostgREST
+// dépasse la limite HTTP et la requête échoue (fetch failed) → les grosses
+// écoles (400+ élèves) voyaient des listes vides. buildQuery(chunk) doit
+// renvoyer la requête Supabase pour le sous-ensemble d'ids.
+const IN_CHUNK = 150;
+export const fetchInChunks = async (ids, buildQuery) => {
+  const out = [];
+  for (let i = 0; i < (ids || []).length; i += IN_CHUNK) {
+    const { data, error } = await buildQuery(ids.slice(i, i + IN_CHUNK));
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+};
+
 // Année scolaire (« 2026-2027 ») déduite d'un libellé de période (« Septembre 2026 »).
 // Un paiement/facture est rattaché à SON année via ce libellé, même s'il est
 // encaissé hors de la plage sept→août (frais payés durant l'été précédent).
@@ -2600,11 +2615,12 @@ router.get('/students', async (req, res) => {
         const classByStudent = {};
         enr.forEach(e => { classByStudent[e.student_id] = e.class || null; });
         if (ids.length === 0) return res.json({ students: [] });
-        const { data: profs } = await supabaseAdmin
+        // Par lots : .in() avec des centaines d'ids fait échouer la requête (URL trop longue).
+        const profs = await fetchInChunks(ids, (chunk) => supabaseAdmin
           .from('profiles')
           .select('id, first_name, last_name, class_id, avatar_url, gender')
-          .in('id', ids);
-        students = (profs || []).map(p => ({ ...p, classes: classByStudent[p.id] || null }));
+          .in('id', chunk));
+        students = profs.map(p => ({ ...p, classes: classByStudent[p.id] || null }));
       }
       // enrErr (table absente) → repli ci-dessous
     }
@@ -2628,25 +2644,29 @@ router.get('/students', async (req, res) => {
     // attribution par libellé (les factures de réinscription payées en été
     // comptent pour l'année à venir, sinon la carte élève affichait 0).
     const wideStu = academicYearRangeWide(academic_year);
-    let invQ = supabaseAdmin
-      .from('invoices')
-      .select('student_id, total, amount_paid, status, period_label, issue_date')
-      .in('student_id', studentIds)
-      .neq('status', 'cancelled');
-    if (schoolId) invQ = invQ.eq('school_id', schoolId);
-    if (wideStu) invQ = invQ.gte('issue_date', wideStu.start).lte('issue_date', wideStu.end);
-    let { data: invs } = await invQ;
-    if (range) invs = (invs || []).filter(i => belongsToYear(i.period_label, i.issue_date, academic_year, range));
+    let invs = await fetchInChunks(studentIds, (chunk) => {
+      let invQ = supabaseAdmin
+        .from('invoices')
+        .select('student_id, total, amount_paid, status, period_label, issue_date')
+        .in('student_id', chunk)
+        .neq('status', 'cancelled');
+      if (schoolId) invQ = invQ.eq('school_id', schoolId);
+      if (wideStu) invQ = invQ.gte('issue_date', wideStu.start).lte('issue_date', wideStu.end);
+      return invQ;
+    });
+    if (range) invs = invs.filter(i => belongsToYear(i.period_label, i.issue_date, academic_year, range));
 
     // Plans — student_fee_plans stocke l'année au format tiret "YYYY-YYYY" alors
     // que le front envoie le format slash "YYYY/YYYY" : on accepte les deux,
     // sinon has_plan serait toujours faux.
-    let plansQ = supabaseAdmin.from('student_fee_plans').select('student_id, academic_year, status').in('student_id', studentIds);
-    if (academic_year) {
-      const y = String(academic_year);
-      plansQ = plansQ.in('academic_year', [...new Set([y, y.replace('/', '-'), y.replace('-', '/')])]);
-    }
-    const { data: plans } = await plansQ;
+    const plans = await fetchInChunks(studentIds, (chunk) => {
+      let plansQ = supabaseAdmin.from('student_fee_plans').select('student_id, academic_year, status').in('student_id', chunk);
+      if (academic_year) {
+        const y = String(academic_year);
+        plansQ = plansQ.in('academic_year', [...new Set([y, y.replace('/', '-'), y.replace('-', '/')])]);
+      }
+      return plansQ;
+    });
 
     const totalsByStudent = {};
     (invs || []).forEach(i => {
@@ -3029,12 +3049,18 @@ async function planReceivables(schoolId, academicYear) {
   if (plans.length === 0) return { totalDue: 0, totalOverdue: 0, overdueCount: 0, expectedTotal: 0, paidTotal: 0 };
 
   const studentIds = [...new Set(plans.map(p => p.student_id))];
-  const invs = await fetchAllRows(() => {
-    let q = supabaseAdmin.from('invoices')
-      .select('id, student_id, period_label, service_category, total, amount_paid, status, due_date, invoice_number')
-      .in('student_id', studentIds);
-    if (schoolId) q = q.eq('school_id', schoolId);
-    return q;
+  // Par lots d'ids (URL trop longue au-delà de ~200 UUID) + pagination >1000 lignes.
+  const invs = await fetchInChunks(studentIds, async (chunk) => {
+    try {
+      const rows = await fetchAllRows(() => {
+        let q = supabaseAdmin.from('invoices')
+          .select('id, student_id, period_label, service_category, total, amount_paid, status, due_date, invoice_number')
+          .in('student_id', chunk);
+        if (schoolId) q = q.eq('school_id', schoolId);
+        return q;
+      });
+      return { data: rows, error: null };
+    } catch (e) { return { data: null, error: e }; }
   });
   const invByStudent = {};
   invs.forEach(i => { (invByStudent[i.student_id] = invByStudent[i.student_id] || []).push(i); });
