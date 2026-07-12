@@ -10,16 +10,7 @@ import { printInscriptionFiche } from '../../utils/inscriptionFiche';
 // branchée sur les routes /api/inscriptions accessibles au responsable financier.
 // Après validation, propose de télécharger la même fiche d'inscription PDF.
 
-const DOC_KEYS = [
-  ['livret_famille', 'Livret de famille'],
-  ['carnet_vaccination', 'Carnet de vaccination'],
-  ['cin_pere', 'CIN du père'],
-  ['cin_mere', 'CIN de la mère'],
-  ['photos_4', '4 Photos'],
-  ['cert_scolarite', 'Certificat de scolarité'],
-  ['dossier_medical', 'Dossier médical'],
-  ['bulletin', 'Bulletin de notes'],
-];
+import { DOSSIER_DOC_KEYS as DOC_KEYS } from '../../utils/dossierDocuments';
 
 const emptyForm = {
   email: '', password: '',

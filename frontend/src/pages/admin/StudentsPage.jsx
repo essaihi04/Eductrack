@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
+import { DOSSIER_DOC_KEYS } from '../../utils/dossierDocuments';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { LEVEL_ORDER, nextLevel, distinctLevels } from '../../lib/levelProgression';
 import { prevYearStr, toSlashYear } from '../../lib/schoolYear';
@@ -79,16 +80,7 @@ const StudentsPage = () => {
   // Édition inline des parents DÉJÀ associés dans la modale (nom/prénom/téléphone).
   const [existingEdits, setExistingEdits] = useState({}); // { [parentId]: { last_name, first_name, phone } }
   const [savingExistingId, setSavingExistingId] = useState(null);
-  const DOC_KEYS = [
-    ['livret_famille', 'Livret de famille'],
-    ['carnet_vaccination', 'Carnet de vaccination'],
-    ['cin_pere', 'CIN du père'],
-    ['cin_mere', 'CIN de la mère'],
-    ['photos_4', '4 Photos'],
-    ['cert_scolarite', 'Certificat de scolarité'],
-    ['resultats_en_cours', 'Résultats en cours'],
-    ['cert_massar', 'Certificat MASSAR'],
-  ];
+  const DOC_KEYS = DOSSIER_DOC_KEYS;
   const emptyForm = {
     // Identifiants (accès élève)
     email: '', password: '',

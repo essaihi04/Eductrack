@@ -2,17 +2,7 @@
 // de la fiche élève admin pour être réutilisée à l'identique côté finance.
 // Ouvre une fenêtre d'impression → « Enregistrer en PDF ».
 import { printHtmlDocument } from '../lib/download';
-
-const DOC_KEYS = [
-  ['livret_famille', 'Livret de famille'],
-  ['carnet_vaccination', 'Carnet de vaccination'],
-  ['cin_pere', 'CIN du père'],
-  ['cin_mere', 'CIN de la mère'],
-  ['photos_4', '4 Photos'],
-  ['cert_scolarite', 'Certificat de scolarité'],
-  ['dossier_medical', 'Dossier médical'],
-  ['bulletin', 'Bulletin de notes'],
-];
+import { DOSSIER_DOC_KEYS as DOC_KEYS } from './dossierDocuments';
 
 const currentAcademicYear = () => {
   const d = new Date();
