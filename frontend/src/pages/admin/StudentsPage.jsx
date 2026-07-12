@@ -618,7 +618,9 @@ const StudentsPage = () => {
         const res = await fetch(`${apiUrl}/api/admin/students/${editingStudent.id}`, {
           method: 'PUT',
           headers: { ...authHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify(studentFields),
+          // academicYear : si la classe change, l'inscription de l'année active
+          // (student_enrollments) est synchronisée → le roster finance suit.
+          body: JSON.stringify({ ...studentFields, academicYear: year }),
         });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
@@ -1001,7 +1003,8 @@ L'administration de ${schoolName}`;
       const res = await fetch(`${apiUrl}/api/admin/students/bulk-move`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentIds: Array.from(selectedStudents), classId: moveTargetId }),
+        // academicYear : le déplacement met aussi à jour student_enrollments (roster finance).
+        body: JSON.stringify({ studentIds: Array.from(selectedStudents), classId: moveTargetId, academicYear: year }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { alert(data.error || 'Erreur lors du déplacement'); return; }

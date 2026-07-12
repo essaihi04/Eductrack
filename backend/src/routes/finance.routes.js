@@ -67,10 +67,22 @@ const EXP_DEFAULT_OF_CATEGORY = {
   insurance: 'insurance_rc', transport: 'fuel_gasoil',
 };
 
-// Numérotation atomique des factures/reçus
+// Numérotation des factures/reçus.
+// Chemin normal : fonction SQL next_finance_counter (ADD_ATOMIC_FINANCE_COUNTER.sql),
+// un seul INSERT … ON CONFLICT … RETURNING → deux encaissements simultanés
+// obtiennent forcément deux numéros distincts.
+// Repli (fonction non installée) : ancien chemin lecture+update, NON atomique —
+// une collision y provoque une violation de UNIQUE(school_id, receipt_number).
 async function getNextCounter(schoolId, counterType) {
   const year = new Date().getFullYear();
-  // Upsert + increment atomique via RPC-like approach
+  const prefix = counterType === 'invoice' ? 'F' : 'R';
+
+  const { data: rpcVal, error: rpcErr } = await supabaseAdmin
+    .rpc('next_finance_counter', { p_school_id: schoolId, p_counter_type: counterType, p_year: year });
+  if (!rpcErr && rpcVal != null) {
+    return `${prefix}-${year}-${String(rpcVal).padStart(4, '0')}`;
+  }
+
   const { data: existing } = await supabaseAdmin
     .from('finance_counters')
     .select('id, last_value')
@@ -93,7 +105,6 @@ async function getNextCounter(schoolId, counterType) {
       .insert({ school_id: schoolId, counter_type: counterType, year, last_value: nextVal });
   }
 
-  const prefix = counterType === 'invoice' ? 'F' : 'R';
   return `${prefix}-${year}-${String(nextVal).padStart(4, '0')}`;
 }
 
@@ -1713,6 +1724,29 @@ router.post('/payments', async (req, res) => {
       return res.status(400).json({ error: 'student_id et amount > 0 requis' });
     }
     if (!method) return res.status(400).json({ error: 'Méthode de paiement requise' });
+
+    // L'élève doit appartenir à l'école du caissier.
+    let stuQ = supabaseAdmin.from('profiles').select('id').eq('id', student_id).eq('role', 'student');
+    if (schoolId) stuQ = stuQ.eq('school_id', schoolId);
+    const { data: stu } = await stuQ.maybeSingle();
+    if (!stu) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
+
+    // La facture (si fournie) doit appartenir à l'école ET à cet élève, être
+    // active, et le montant ne peut pas dépasser le restant dû (pas de
+    // surpaiement silencieux — même règle que pay-services).
+    if (invoice_id) {
+      let invQ = supabaseAdmin.from('invoices')
+        .select('id, student_id, total, amount_paid, status').eq('id', invoice_id);
+      if (schoolId) invQ = invQ.eq('school_id', schoolId);
+      const { data: inv } = await invQ.maybeSingle();
+      if (!inv) return res.status(404).json({ error: 'Facture introuvable dans votre école' });
+      if (inv.student_id !== student_id) return res.status(400).json({ error: 'La facture n\'appartient pas à cet élève' });
+      if (inv.status === 'cancelled') return res.status(400).json({ error: 'Facture annulée — encaissement impossible' });
+      const remaining = Number(inv.total) - Number(inv.amount_paid || 0);
+      if (Number(amount) > remaining + 0.005) {
+        return res.status(400).json({ error: `Montant supérieur au restant dû (${remaining.toFixed(2)} MAD)` });
+      }
+    }
 
     const receiptNumber = await getNextCounter(schoolId, 'receipt');
 

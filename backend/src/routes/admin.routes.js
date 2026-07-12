@@ -19,6 +19,14 @@ router.use(authorize('admin', 'school_admin'));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Année scolaire courante (format slash), fallback quand le client n'envoie pas
+// academicYear. Sept→déc = année en cours, janv→août = année précédente.
+const currentSchoolYear = () => {
+  const now = new Date();
+  const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${y}/${y + 1}`;
+};
+
 // D\u00e9tecte une erreur de limitation de d\u00e9bit (rate limit) renvoy\u00e9e par l'API Auth
 // de Supabase. Sur le plan gratuit, cr\u00e9er beaucoup de comptes d'un coup d\u00e9clenche
 // un "rate limit" \u2192 sans gestion, l'\u00e9l\u00e8ve \u00e9tait abandonn\u00e9 (classe \u00e0 0 \u00e9l\u00e8ve).
@@ -2436,6 +2444,17 @@ router.post('/students', async (req, res) => {
     const {
       email, password, firstName, lastName, classId,
     } = req.body;
+    // Mêmes gardes que POST /api/inscriptions/students (cohérence admin/finance).
+    if (!firstName || !lastName) return res.status(400).json({ error: 'Nom et prénom requis' });
+    if (!email || !password) return res.status(400).json({ error: 'Identifiants (email/mot de passe) requis' });
+
+    // La classe cible doit appartenir au périmètre école du demandeur.
+    if (classId) {
+      let clsQ = supabaseAdmin.from('classes').select('id').eq('id', classId);
+      clsQ = applySchoolFilter(clsQ, req);
+      const { data: cls } = await clsQ.maybeSingle();
+      if (!cls) return res.status(404).json({ error: 'Classe introuvable dans votre école' });
+    }
 
     // Créer l'utilisateur dans Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -2465,17 +2484,18 @@ router.post('/students', async (req, res) => {
       .select()
       .single();
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      // Nettoyage : sans lui, le compte auth orphelin bloque toute nouvelle
+      // tentative avec le même email (« User already registered »).
+      try { await supabaseAdmin.auth.admin.deleteUser(authData.user.id); } catch (_) {}
+      throw profileError;
+    }
 
     // Inscription de l'année active — INDISPENSABLE : le roster finance
     // (/api/enrollments) lit uniquement student_enrollments. Sans cette ligne,
     // un élève créé par l'admin n'apparaîtrait jamais côté finance. Statut NI =
     // nouvel inscrit. Même logique que POST /api/inscriptions/students (finance).
-    const academicYear = req.body.academicYear || (() => {
-      const now = new Date();
-      const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-      return `${y}/${y + 1}`;
-    })();
+    const academicYear = req.body.academicYear || currentSchoolYear();
     const { error: enrollError } = await supabaseAdmin
       .from('student_enrollments')
       .upsert({
@@ -2532,6 +2552,16 @@ router.put('/students/bulk-move', async (req, res) => {
       .in('id', allowedIds);
     if (updErr) throw updErr;
 
+    // Synchroniser aussi le roster finance (student_enrollments) de l'année,
+    // sinon les élèves déplacés restent dans l'ancienne classe côté finance.
+    const y = req.body.academicYear || currentSchoolYear();
+    const { error: enrollErr } = await supabaseAdmin
+      .from('student_enrollments')
+      .update({ class_id: classId || null })
+      .in('student_id', allowedIds)
+      .in('academic_year', yearVariants(y));
+    if (enrollErr) console.error('Sync classes (student_enrollments) échouée:', enrollErr);
+
     res.json({ success: true, moved: allowedIds.length, skipped: studentIds.length - allowedIds.length });
   } catch (error) {
     console.error('Erreur PUT /students/bulk-move:', error);
@@ -2567,6 +2597,19 @@ router.put('/students/:id', async (req, res) => {
       .select()
       .single();
     if (updateErr) throw updateErr;
+
+    // Classe changée → synchroniser l'inscription de l'année (roster finance =
+    // student_enrollments). Même logique que PUT /api/inscriptions/students/:id ;
+    // sans ça, l'élève restait affiché dans son ancienne classe côté finance.
+    if (req.body.classId !== undefined) {
+      const y = req.body.academicYear || currentSchoolYear();
+      const { error: enrollErr } = await supabaseAdmin
+        .from('student_enrollments')
+        .update({ class_id: req.body.classId || null })
+        .eq('student_id', id)
+        .in('academic_year', yearVariants(y));
+      if (enrollErr) console.error('Sync classe (student_enrollments) échouée:', enrollErr);
+    }
 
     res.json(profile);
   } catch (error) {
@@ -2639,6 +2682,34 @@ router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (re
 router.delete('/students/:id', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Périmètre école : on ne supprime que ses propres élèves (comme le PUT).
+    let check = supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .eq('role', 'student');
+    check = applySchoolFilter(check, req);
+    const { data: student, error: checkErr } = await check.single();
+    if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
+
+    // Garde-fou comptable : la suppression CASCADE efface factures ET paiements.
+    // Un élève avec des encaissements confirmés ne se supprime pas — le retirer
+    // des listes se fait via la réinscription (statut « non réinscrit »).
+    try {
+      const { count } = await supabaseAdmin
+        .from('payments')
+        .select('id', { count: 'exact', head: true })
+        .eq('student_id', id)
+        .eq('status', 'confirmed');
+      if ((count || 0) > 0) {
+        return res.status(409).json({
+          error: `Suppression impossible : ${count} paiement(s) encaissé(s) sur cet élève. ` +
+            `Supprimer effacerait son historique financier (recettes comprises). ` +
+            `Marquez-le plutôt « non réinscrit » pour le retirer des listes.`,
+        });
+      }
+    } catch (_) { /* module finance absent → pas de garde-fou */ }
 
     // Supprimer le profil (cascade supprimera les données liées)
     const { error: profileError } = await supabaseAdmin
