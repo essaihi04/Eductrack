@@ -277,7 +277,7 @@ const WhatsAppPage = () => {
 
   // Fetch parents list when classes change and mode is 'select'
   const fetchParentsList = useCallback(async () => {
-    if (parentSelectionMode !== 'select' || selectedClasses.length === 0) {
+    if (parentSelectionMode !== 'select') {
       setParentsList([]);
       return;
     }
@@ -396,8 +396,8 @@ const WhatsAppPage = () => {
   }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year]);
 
   useEffect(() => {
-    if (classes.length > 0) fetchRecipientCount();
-  }, [fetchRecipientCount, classes.length]);
+    fetchRecipientCount();
+  }, [fetchRecipientCount]);
 
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true);
