@@ -62,6 +62,7 @@ export const ADMIN_DOMAINS = [
         key: 'evaluation',
         label: 'Évaluation',
         items: [
+          { label: 'Saisie des notes', path: '/admin/notes-saisie', icon: ClipboardList, roles: ALL_ADMIN },
           { label: 'Bulletins', path: '/admin/bulletins', icon: FileText, roles: ALL_ADMIN },
           { label: 'Coefficients', path: '/admin/coefficients', icon: BookOpen, roles: ALL_ADMIN },
           { label: "Notes d'examens", path: '/admin/exam-notes', icon: GraduationCap, roles: ALL_ADMIN },

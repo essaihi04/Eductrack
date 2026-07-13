@@ -443,16 +443,28 @@ router.get('/children/:childId/control-grades', loadChild, async (req, res) => {
       .from('profiles').select('class_id').eq('id', studentId).single();
     if (!profile?.class_id) return res.json([]);
 
-    const { data: controls, error: controlsError } = await supabaseAdmin
-      .from('controls_plan')
-      .select(`
+    // Seuls les contrôles VALIDÉS/PUBLIÉS par l'administration sont visibles
+    // (ADD_NOTES_PUBLICATION.sql) ; repli sans le filtre si migration absente.
+    const controlsSelect = `
         id, name, date, description, status, teacher_id, class_id,
         profiles!controls_plan_teacher_id_fkey(first_name, last_name),
         classes(name, level)
-      `)
+      `;
+    let { data: controls, error: controlsError } = await supabaseAdmin
+      .from('controls_plan')
+      .select(controlsSelect)
       .eq('class_id', profile.class_id)
       .eq('status', 'completed')
+      .eq('published', true)
       .order('date', { ascending: false });
+    if (controlsError && /published/i.test(controlsError.message || '')) {
+      ({ data: controls, error: controlsError } = await supabaseAdmin
+        .from('controls_plan')
+        .select(controlsSelect)
+        .eq('class_id', profile.class_id)
+        .eq('status', 'completed')
+        .order('date', { ascending: false }));
+    }
     if (controlsError) throw controlsError;
 
     const controlIds = (controls || []).map(c => c.id);

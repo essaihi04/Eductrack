@@ -8219,4 +8219,175 @@ router.put('/controls/:controlId/notes', async (req, res) => {
   }
 });
 
+// ==================== SAISIE DES NOTES (grille classe × matière) ====================
+// Page « Saisie des notes » (admin / directeur / responsable pédagogique) :
+// grille type Massar — lignes = élèves de la classe, colonnes = contrôles de la
+// matière (C1, C2…), saisie manuelle, ajout/suppression de contrôle, et
+// VALIDATION/PUBLICATION : un contrôle n'apparaît chez les élèves/parents
+// qu'une fois publié (colonne controls_plan.published — ADD_NOTES_PUBLICATION.sql).
+
+// GET /notes/grid?class_id&subject_id — données complètes de la grille
+router.get('/notes/grid', async (req, res) => {
+  try {
+    const { class_id, subject_id } = req.query;
+    if (!class_id || !subject_id) return res.status(400).json({ error: 'class_id et subject_id requis' });
+    const check = await assertClassInScope(req, class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    // Élèves de la classe — ordre verrouillé sur le fichier Massar (import_order)
+    const { data: students } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, avatar_url, import_order')
+      .eq('class_id', class_id)
+      .eq('role', 'student')
+      .order('import_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+
+    // Contrôles de la classe pour CETTE matière (published peut ne pas exister
+    // si la migration n'est pas appliquée → repli sans la colonne).
+    let controls = null;
+    {
+      let { data, error } = await supabaseAdmin
+        .from('controls_plan')
+        .select('id, name, date, status, subject_id, teacher_id, published, published_at')
+        .eq('class_id', class_id)
+        .eq('subject_id', subject_id)
+        .neq('status', 'cancelled')
+        .order('date', { ascending: true });
+      if (error && /published/i.test(error.message || '')) {
+        ({ data, error } = await supabaseAdmin
+          .from('controls_plan')
+          .select('id, name, date, status, subject_id, teacher_id')
+          .eq('class_id', class_id)
+          .eq('subject_id', subject_id)
+          .neq('status', 'cancelled')
+          .order('date', { ascending: true }));
+        data = (data || []).map(c => ({ ...c, published: c.status === 'completed', published_at: null }));
+      }
+      if (error) throw error;
+      controls = data || [];
+    }
+
+    // Noms des profs (créateur du contrôle)
+    const teacherIds = [...new Set(controls.map(c => c.teacher_id).filter(Boolean))];
+    const nameByTeacher = {};
+    if (teacherIds.length) {
+      const { data: profs } = await supabaseAdmin
+        .from('profiles').select('id, first_name, last_name, role').in('id', teacherIds);
+      (profs || []).forEach(p => {
+        nameByTeacher[p.id] = { name: `${p.first_name || ''} ${p.last_name || ''}`.trim(), role: p.role };
+      });
+    }
+
+    // Notes de tous les contrôles de la grille
+    const controlIds = controls.map(c => c.id);
+    let notes = [];
+    if (controlIds.length) {
+      const { data } = await supabaseAdmin
+        .from('control_notes')
+        .select('control_id, student_id, note, appreciation')
+        .in('control_id', controlIds);
+      notes = data || [];
+    }
+
+    res.json({
+      class: check.cls,
+      students: students || [],
+      controls: controls.map(c => ({
+        ...c,
+        teacher_name: nameByTeacher[c.teacher_id]?.name || null,
+        // Saisi par un prof (à valider) ou créé par l'administration
+        from_teacher: nameByTeacher[c.teacher_id]?.role === 'teacher',
+      })),
+      notes,
+    });
+  } catch (e) {
+    console.error('[Admin] notes grid error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /notes/controls — créer un contrôle manuellement depuis la grille
+router.post('/notes/controls', async (req, res) => {
+  try {
+    const { class_id, subject_id, name, date } = req.body;
+    if (!class_id || !subject_id || !name) {
+      return res.status(400).json({ error: 'class_id, subject_id et name requis' });
+    }
+    const check = await assertClassInScope(req, class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    const base = {
+      teacher_id: req.user.id, // créateur (admin/directeur/responsable)
+      class_id,
+      subject_id,
+      name: String(name).trim(),
+      date: date || new Date().toISOString().split('T')[0],
+      status: 'completed', // saisie directe de notes → contrôle déjà passé
+    };
+    // published=false : n'apparaît chez les élèves/parents qu'après publication.
+    let { data, error } = await supabaseAdmin
+      .from('controls_plan').insert({ ...base, published: false }).select().single();
+    if (error && /published/i.test(error.message || '')) {
+      ({ data, error } = await supabaseAdmin
+        .from('controls_plan').insert(base).select().single());
+    }
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (e) {
+    console.error('[Admin] create control error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /notes/controls/:id — supprimer un contrôle (et ses notes, en cascade)
+router.delete('/notes/controls/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: control } = await supabaseAdmin
+      .from('controls_plan').select('id, class_id').eq('id', id).maybeSingle();
+    if (!control) return res.status(404).json({ error: 'Contrôle introuvable' });
+    const check = await assertClassInScope(req, control.class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    await supabaseAdmin.from('control_notes').delete().eq('control_id', id);
+    const { error } = await supabaseAdmin.from('controls_plan').delete().eq('id', id);
+    if (error) throw error;
+    res.json({ message: 'Contrôle supprimé' });
+  } catch (e) {
+    console.error('[Admin] delete control error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /notes/controls/:id/publish — valider & publier (ou dépublier) un contrôle.
+// Publié = visible chez les élèves et les parents. body: { published: true|false }
+router.post('/notes/controls/:id/publish', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const publish = req.body?.published !== false;
+    const { data: control } = await supabaseAdmin
+      .from('controls_plan').select('id, class_id, status').eq('id', id).maybeSingle();
+    if (!control) return res.status(404).json({ error: 'Contrôle introuvable' });
+    const check = await assertClassInScope(req, control.class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+
+    const patch = publish
+      ? { published: true, published_at: new Date().toISOString(), published_by: req.user.id, status: 'completed' }
+      : { published: false, published_at: null, published_by: null };
+    const { data, error } = await supabaseAdmin
+      .from('controls_plan').update(patch).eq('id', id).select().single();
+    if (error) {
+      if (/published/i.test(error.message || '')) {
+        return res.status(400).json({ error: 'Migration manquante : exécutez ADD_NOTES_PUBLICATION.sql dans Supabase.' });
+      }
+      throw error;
+    }
+    res.json(data);
+  } catch (e) {
+    console.error('[Admin] publish control error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;
