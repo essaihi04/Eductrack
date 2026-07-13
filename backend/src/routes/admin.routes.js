@@ -10,6 +10,7 @@ import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
 import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
+import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
 
 const router = express.Router();
 
@@ -8226,13 +8227,29 @@ router.put('/controls/:controlId/notes', async (req, res) => {
 // VALIDATION/PUBLICATION : un contrôle n'apparaît chez les élèves/parents
 // qu'une fois publié (colonne controls_plan.published — ADD_NOTES_PUBLICATION.sql).
 
-// GET /notes/grid?class_id&subject_id — données complètes de la grille
+// Bornes du semestre pour une classe (calendrier école ou défauts MEN)
+const semesterBoundsForClass = async (cls, semester) => {
+  const academicYear = cls.academic_year || currentSchoolYear();
+  return getSemesterBounds(cls.school_id, academicYear, Number(semester) === 2 ? 2 : 1);
+};
+
+// Rattache un contrôle à un semestre : colonne `semester` si renseignée,
+// sinon déduction par la date (janvier inclus → S1, comme le backfill SQL).
+const controlSemester = (c) => {
+  if (c.semester === 1 || c.semester === 2) return c.semester;
+  const m = parseInt(String(c.date || '').slice(5, 7), 10);
+  if (!m) return null;
+  return (m >= 9 || m === 1) ? 1 : 2;
+};
+
+// GET /notes/grid?class_id&subject_id&semester — données complètes de la grille
 router.get('/notes/grid', async (req, res) => {
   try {
-    const { class_id, subject_id } = req.query;
+    const { class_id, subject_id, semester } = req.query;
     if (!class_id || !subject_id) return res.status(400).json({ error: 'class_id et subject_id requis' });
     const check = await assertClassInScope(req, class_id);
     if (check.error) return res.status(check.error).json({ error: check.message });
+    const sem = semester ? (Number(semester) === 2 ? 2 : 1) : null;
 
     // Élèves de la classe — ordre verrouillé sur le fichier Massar (import_order)
     const { data: students } = await supabaseAdmin
@@ -8243,18 +8260,32 @@ router.get('/notes/grid', async (req, res) => {
       .order('import_order', { ascending: true, nullsFirst: false })
       .order('created_at', { ascending: true });
 
-    // Contrôles de la classe pour CETTE matière (published peut ne pas exister
-    // si la migration n'est pas appliquée → repli sans la colonne).
+    // Contrôles de la classe pour CETTE matière. Les colonnes published /
+    // semester / control_type peuvent ne pas exister si les migrations
+    // (ADD_NOTES_PUBLICATION.sql, ADD_CONTROLS_OFFICIELS.sql) ne sont pas
+    // appliquées → replis successifs sans ces colonnes.
     let controls = null;
+    let hasOfficialCols = true;
     {
       let { data, error } = await supabaseAdmin
         .from('controls_plan')
-        .select('id, name, date, status, subject_id, teacher_id, published, published_at')
+        .select('id, name, date, status, subject_id, teacher_id, published, published_at, semester, control_type, official_key')
         .eq('class_id', class_id)
         .eq('subject_id', subject_id)
         .neq('status', 'cancelled')
         .order('date', { ascending: true });
+      if (error && /semester|control_type|official_key/i.test(error.message || '')) {
+        hasOfficialCols = false;
+        ({ data, error } = await supabaseAdmin
+          .from('controls_plan')
+          .select('id, name, date, status, subject_id, teacher_id, published, published_at')
+          .eq('class_id', class_id)
+          .eq('subject_id', subject_id)
+          .neq('status', 'cancelled')
+          .order('date', { ascending: true }));
+      }
       if (error && /published/i.test(error.message || '')) {
+        hasOfficialCols = false;
         ({ data, error } = await supabaseAdmin
           .from('controls_plan')
           .select('id, name, date, status, subject_id, teacher_id')
@@ -8266,6 +8297,25 @@ router.get('/notes/grid', async (req, res) => {
       }
       if (error) throw error;
       controls = data || [];
+    }
+
+    // Filtre semestre (colonne si présente, sinon déduction par la date)
+    if (sem) controls = controls.filter(c => controlSemester(c) === sem);
+
+    // Contrôles officiels (cadre MEN 080/21) pas encore créés pour cette
+    // grille — proposés à la création côté frontend.
+    let officialMissing = [];
+    let bounds = null;
+    if (sem) {
+      bounds = await semesterBoundsForClass(check.cls, sem);
+      // Sans la migration ADD_CONTROLS_OFFICIELS.sql on ne propose pas la
+      // création d'officiels (official_key non stockable → doublons possibles).
+      if (hasOfficialCols) {
+        const existingKeys = new Set(controls.map(c => c.official_key).filter(Boolean));
+        officialMissing = officialControlsForLevel(check.cls.level, sem)
+          .filter(t => !existingKeys.has(t.key))
+          .map(t => ({ ...t, date: suggestedDate(bounds.start, bounds.end, t.frac) }));
+      }
     }
 
     // Noms des profs (créateur du contrôle)
@@ -8292,6 +8342,11 @@ router.get('/notes/grid', async (req, res) => {
 
     res.json({
       class: check.cls,
+      semester: sem,
+      bounds: bounds ? { start: bounds.start, end: bounds.end } : null,
+      has_official_cols: hasOfficialCols,
+      official_missing: officialMissing,
+      simile_name: SIMILE_NAME,
       students: students || [],
       controls: controls.map(c => ({
         ...c,
@@ -8307,35 +8362,166 @@ router.get('/notes/grid', async (req, res) => {
   }
 });
 
-// POST /notes/controls — créer un contrôle manuellement depuis la grille
+// POST /notes/controls — créer un contrôle manuellement depuis la grille.
+// body : { class_id, subject_id, name, date, semester?, control_type?, official_key? }
+// control_type : official | unified | simile | custom (défaut custom)
 router.post('/notes/controls', async (req, res) => {
   try {
-    const { class_id, subject_id, name, date } = req.body;
+    const { class_id, subject_id, name, date, semester, control_type, official_key } = req.body;
     if (!class_id || !subject_id || !name) {
       return res.status(400).json({ error: 'class_id, subject_id et name requis' });
     }
     const check = await assertClassInScope(req, class_id);
     if (check.error) return res.status(check.error).json({ error: check.message });
 
+    const isoDate = date || new Date().toISOString().split('T')[0];
     const base = {
       teacher_id: req.user.id, // créateur (admin/directeur/responsable)
       class_id,
       subject_id,
       name: String(name).trim(),
-      date: date || new Date().toISOString().split('T')[0],
+      date: isoDate,
       status: 'completed', // saisie directe de notes → contrôle déjà passé
     };
+    const officialFields = {
+      semester: Number(semester) === 2 ? 2 : (Number(semester) === 1 ? 1 : controlSemester({ date: isoDate })),
+      control_type: ['official', 'unified', 'simile'].includes(control_type) ? control_type : 'custom',
+      official_key: official_key || null,
+    };
     // published=false : n'apparaît chez les élèves/parents qu'après publication.
+    // Replis si les migrations (publication / contrôles officiels) manquent.
     let { data, error } = await supabaseAdmin
-      .from('controls_plan').insert({ ...base, published: false }).select().single();
+      .from('controls_plan').insert({ ...base, published: false, ...officialFields }).select().single();
+    if (error && /semester|control_type|official_key/i.test(error.message || '')) {
+      ({ data, error } = await supabaseAdmin
+        .from('controls_plan').insert({ ...base, published: false }).select().single());
+    }
     if (error && /published/i.test(error.message || '')) {
       ({ data, error } = await supabaseAdmin
         .from('controls_plan').insert(base).select().single());
     }
-    if (error) throw error;
+    if (error) {
+      // Doublon d'un contrôle officiel (index unique) → message clair
+      if (/idx_controls_plan_official_unique|duplicate/i.test(error.message || '')) {
+        return res.status(409).json({ error: 'Ce contrôle officiel existe déjà pour cette classe et cette matière.' });
+      }
+      throw error;
+    }
     res.status(201).json(data);
   } catch (e) {
     console.error('[Admin] create control error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /notes/controls/generate-official — crée automatiquement les contrôles
+// officiels (cadre MEN 080/21 : Fard 1, Fard 2 + Fard unifié) pour un semestre.
+// body : { semester (1|2), class_id?, subject_id? }
+//  • class_id + subject_id → la grille affichée seulement
+//  • class_id seul         → toutes les matières de cette classe
+//  • rien                  → TOUTES les classes du périmètre × toutes les matières
+// Idempotent : les contrôles officiels déjà créés (official_key) sont ignorés.
+router.post('/notes/controls/generate-official', async (req, res) => {
+  try {
+    const { semester, class_id, subject_id } = req.body || {};
+    const sem = Number(semester) === 2 ? 2 : 1;
+    const schoolId = getSchoolId(req);
+
+    // Classes cibles (périmètre école + scope responsable pédagogique)
+    let targetClasses = [];
+    if (class_id) {
+      const check = await assertClassInScope(req, class_id);
+      if (check.error) return res.status(check.error).json({ error: check.message });
+      targetClasses = [check.cls];
+    } else {
+      let q = supabaseAdmin.from('classes').select('id, name, level, academic_year, school_id');
+      if (schoolId) q = q.eq('school_id', schoolId);
+      const { data: allCls } = await q;
+      const scoped = await getScopedClassIds(req);
+      targetClasses = (allCls || []).filter(c => scoped === null || scoped.includes(c.id));
+    }
+
+    // Matières cibles (celles de l'école)
+    let subjectIds = [];
+    if (subject_id) {
+      subjectIds = [subject_id];
+    } else {
+      let sq = supabaseAdmin.from('subjects').select('id');
+      if (schoolId) sq = sq.eq('school_id', schoolId);
+      const { data: subj } = await sq;
+      subjectIds = (subj || []).map(s => s.id);
+    }
+    if (!targetClasses.length || !subjectIds.length) {
+      return res.json({ created: 0, skipped: 0, classes: 0 });
+    }
+
+    // Existant : official_key déjà créés (requêtes par lots de classes)
+    const existing = new Set(); // `${class_id}|${subject_id}|${official_key}`
+    for (let i = 0; i < targetClasses.length; i += 100) {
+      const ids = targetClasses.slice(i, i + 100).map(c => c.id);
+      const { data: ex, error } = await supabaseAdmin
+        .from('controls_plan')
+        .select('class_id, subject_id, official_key')
+        .in('class_id', ids)
+        .not('official_key', 'is', null);
+      if (error && /official_key/i.test(error.message || '')) {
+        return res.status(400).json({ error: 'Migration manquante : exécutez ADD_CONTROLS_OFFICIELS.sql dans Supabase.' });
+      }
+      (ex || []).forEach(r => existing.add(`${r.class_id}|${r.subject_id}|${r.official_key}`));
+    }
+
+    // Bornes de semestre par année scolaire (cache — 1 appel par année)
+    const boundsByYear = {};
+    const boundsFor = async (cls) => {
+      const year = cls.academic_year || currentSchoolYear();
+      if (!boundsByYear[year]) boundsByYear[year] = await getSemesterBounds(cls.school_id, year, sem);
+      return boundsByYear[year];
+    };
+
+    const rows = [];
+    let skipped = 0;
+    let classesWithOfficial = 0;
+    for (const cls of targetClasses) {
+      const templates = officialControlsForLevel(cls.level, sem);
+      if (!templates.length) continue; // préscolaire ou niveau hors référentiel
+      classesWithOfficial++;
+      const b = await boundsFor(cls);
+      for (const sid of subjectIds) {
+        for (const t of templates) {
+          if (existing.has(`${cls.id}|${sid}|${t.key}`)) { skipped++; continue; }
+          rows.push({
+            teacher_id: req.user.id,
+            class_id: cls.id,
+            subject_id: sid,
+            name: t.name,
+            date: suggestedDate(b.start, b.end, t.frac),
+            status: 'completed',
+            published: false,
+            semester: sem,
+            control_type: t.type,
+            official_key: t.key,
+          });
+        }
+      }
+    }
+
+    // Insertion par lots
+    let created = 0;
+    for (let i = 0; i < rows.length; i += 200) {
+      const batch = rows.slice(i, i + 200);
+      const { data, error } = await supabaseAdmin.from('controls_plan').insert(batch).select('id');
+      if (error) {
+        if (/semester|control_type|official_key|published/i.test(error.message || '')) {
+          return res.status(400).json({ error: 'Migration manquante : exécutez ADD_CONTROLS_OFFICIELS.sql (et ADD_NOTES_PUBLICATION.sql) dans Supabase.' });
+        }
+        throw error;
+      }
+      created += (data || []).length;
+    }
+
+    res.json({ created, skipped, classes: classesWithOfficial, subjects: subjectIds.length, semester: sem });
+  } catch (e) {
+    console.error('[Admin] generate official controls error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
