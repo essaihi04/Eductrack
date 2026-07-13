@@ -2456,6 +2456,19 @@ router.post('/students', async (req, res) => {
       if (!cls) return res.status(404).json({ error: 'Classe introuvable dans votre école' });
     }
 
+    // Responsable pédagogique (scope par classes assignées) : la classe est
+    // OBLIGATOIRE et doit être dans son périmètre — sinon l'élève créé serait
+    // invisible dans sa propre liste (filtrée par .in('class_id', scope)).
+    const scopedCreate = await getScopedClassIds(req);
+    if (scopedCreate !== null) {
+      if (!classId) {
+        return res.status(400).json({ error: 'Choisissez une classe de votre périmètre : un élève créé sans classe n\'apparaîtrait pas dans votre liste.' });
+      }
+      if (!scopedCreate.includes(classId)) {
+        return res.status(403).json({ error: 'Cette classe est hors de votre périmètre pédagogique.' });
+      }
+    }
+
     // Créer l'utilisateur dans Auth
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
