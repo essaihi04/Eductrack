@@ -517,6 +517,7 @@ router.get('/parents', async (req, res) => {
     // Filtre de scope : ne garder que les parents ayant au moins un enfant dans les classes assignées
     step = 'getScopedClassIds';
     const scopedClassIds = await getScopedClassIds(req);
+    let scopedParentIds = null; // null = pas de restriction (admin/directeur)
     if (scopedClassIds !== null) {
       if (scopedClassIds.length === 0) return res.json([]);
       const { data: scopedStudents } = await supabaseAdmin
@@ -526,18 +527,40 @@ router.get('/parents', async (req, res) => {
         .in('class_id', scopedClassIds);
       const studentIds = (scopedStudents || []).map(s => s.id);
       if (studentIds.length === 0) return res.json([]);
-      const { data: ps } = await supabaseAdmin
-        .from('parent_students')
-        .select('parent_id')
-        .in('student_id', studentIds);
-      const allowedParentIds = [...new Set((ps || []).map(p => p.parent_id))];
-      if (allowedParentIds.length === 0) return res.json([]);
-      parentsQuery = parentsQuery.in('id', allowedParentIds);
+      // Par LOTS : un périmètre de plusieurs niveaux = des centaines d'élèves ;
+      // un seul .in() dépasserait la limite d'URL (échec silencieux → 0 parent).
+      const ps = await selectByIdsInChunks(
+        (ids) => supabaseAdmin
+          .from('parent_students')
+          .select('parent_id')
+          .in('student_id', ids),
+        studentIds
+      );
+      scopedParentIds = [...new Set((ps || []).map(p => p.parent_id))];
+      if (scopedParentIds.length === 0) return res.json([]);
     }
     step = 'parents';
-    const { data: parents, error: parentsError } = await parentsQuery;
-
-    if (parentsError) throw parentsError;
+    let parents;
+    if (scopedParentIds) {
+      // Scope responsable pédagogique : récupération par lots (même raison),
+      // puis tri identique à la requête non scopée (created_at desc).
+      parents = await selectByIdsInChunks(
+        (ids) => {
+          let q = supabaseAdmin
+            .from('profiles')
+            .select('id, email, first_name, last_name, phone, created_at, updated_at')
+            .eq('role', 'parent')
+            .in('id', ids);
+          return applySchoolFilter(q, req);
+        },
+        scopedParentIds
+      );
+      parents.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    } else {
+      const { data, error: parentsError } = await parentsQuery;
+      if (parentsError) throw parentsError;
+      parents = data;
+    }
 
     const parentIds = (parents || []).map(p => p.id);
     if (parentIds.length === 0) {
@@ -825,13 +848,21 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun parent trouvé' });
     }
 
-    // Récupérer les contacts WhatsApp officiels (parent_contacts)
+    // Récupérer les contacts WhatsApp officiels (parent_contacts) — par LOTS :
+    // avec all=true, des centaines d'ids dans un seul .in() font échouer la
+    // requête (URL trop longue) et perdaient tous les numéros officiels.
     const ids = parents.map(p => p.id);
-    const { data: contacts } = await supabaseAdmin
-      .from('parent_contacts')
-      .select('parent_id, phone_e164, channel, is_primary')
-      .in('parent_id', ids)
-      .eq('channel', 'whatsapp');
+    let contacts = [];
+    try {
+      contacts = await selectByIdsInChunks(
+        (part) => supabaseAdmin
+          .from('parent_contacts')
+          .select('parent_id, phone_e164, channel, is_primary')
+          .in('parent_id', part)
+          .eq('channel', 'whatsapp'),
+        ids
+      );
+    } catch (_) { /* table absente → repli sur profiles.phone ci-dessous */ }
     // Tous les numéros par parent, le Principal en premier (repli sur les suivants
     // si l'envoi échoue). Dédup en conservant l'ordre.
     const phonesByParent = new Map();
@@ -2548,32 +2579,41 @@ router.put('/students/bulk-move', async (req, res) => {
     }
 
     // On ne déplace que les élèves du périmètre école du demandeur.
-    let scope = supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('role', 'student')
-      .in('id', studentIds);
-    scope = applySchoolFilter(scope, req);
-    const { data: allowed, error: scopeErr } = await scope;
-    if (scopeErr) throw scopeErr;
+    // Par LOTS : « Tout sélectionner » peut envoyer des centaines d'ids, un
+    // seul .in() dépasserait la limite d'URL (échec de la requête).
+    const allowed = await selectByIdsInChunks(
+      (part) => {
+        let scope = supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .eq('role', 'student')
+          .in('id', part);
+        return applySchoolFilter(scope, req);
+      },
+      studentIds
+    );
     const allowedIds = (allowed || []).map(s => s.id);
     if (allowedIds.length === 0) return res.status(404).json({ error: 'Aucun élève déplaçable' });
 
-    const { error: updErr } = await supabaseAdmin
-      .from('profiles')
-      .update({ class_id: classId || null, updated_at: new Date().toISOString() })
-      .in('id', allowedIds);
-    if (updErr) throw updErr;
+    for (const part of chunkArray(allowedIds, 100)) {
+      const { error: updErr } = await supabaseAdmin
+        .from('profiles')
+        .update({ class_id: classId || null, updated_at: new Date().toISOString() })
+        .in('id', part);
+      if (updErr) throw updErr;
+    }
 
     // Synchroniser aussi le roster finance (student_enrollments) de l'année,
     // sinon les élèves déplacés restent dans l'ancienne classe côté finance.
     const y = req.body.academicYear || currentSchoolYear();
-    const { error: enrollErr } = await supabaseAdmin
-      .from('student_enrollments')
-      .update({ class_id: classId || null })
-      .in('student_id', allowedIds)
-      .in('academic_year', yearVariants(y));
-    if (enrollErr) console.error('Sync classes (student_enrollments) échouée:', enrollErr);
+    for (const part of chunkArray(allowedIds, 100)) {
+      const { error: enrollErr } = await supabaseAdmin
+        .from('student_enrollments')
+        .update({ class_id: classId || null })
+        .in('student_id', part)
+        .in('academic_year', yearVariants(y));
+      if (enrollErr) console.error('Sync classes (student_enrollments) échouée:', enrollErr);
+    }
 
     res.json({ success: true, moved: allowedIds.length, skipped: studentIds.length - allowedIds.length });
   } catch (error) {
@@ -5583,11 +5623,16 @@ async function collectAbsencesList(req, start, end) {
 
     // 2. Élèves concernés (photo + classe) — requêtes séparées pour éviter toute
     //    ambiguïté de relation FK sur l'embed classes.
+    // Par LOTS : sur une longue période, les absents peuvent dépasser la limite
+    // d'URL d'un seul .in() (échec silencieux → noms/parents manquants).
     const studentIds = [...new Set(absent.map(r => r.student_id).filter(Boolean))];
-    const { data: studentsRaw } = await supabaseAdmin
-      .from('profiles')
-      .select('id, first_name, last_name, avatar_url, class_id')
-      .in('id', studentIds);
+    const studentsRaw = await selectByIdsInChunks(
+      (part) => supabaseAdmin
+        .from('profiles')
+        .select('id, first_name, last_name, avatar_url, class_id')
+        .in('id', part),
+      studentIds
+    );
     const studentById = {};
     (studentsRaw || []).forEach(s => { studentById[s.id] = s; });
 
@@ -5603,10 +5648,13 @@ async function collectAbsencesList(req, start, end) {
     }
 
     // 3. Parents + numéros
-    const { data: links } = await supabaseAdmin
-      .from('parent_students')
-      .select('student_id, profiles!parent_id(first_name, last_name, phone)')
-      .in('student_id', studentIds);
+    const links = await selectByIdsInChunks(
+      (part) => supabaseAdmin
+        .from('parent_students')
+        .select('student_id, profiles!parent_id(first_name, last_name, phone)')
+        .in('student_id', part),
+      studentIds
+    );
     const parentsByStudent = {};
     (links || []).forEach(l => {
       const p = l.profiles;
@@ -6967,12 +7015,15 @@ router.get('/behavior/problem-students', async (req, res) => {
     let studentNames = {};
 
     if (studentIds.length > 0) {
-      const { data: profiles } = await supabaseAdmin
-        .from('profiles')
-        .select('id, first_name, last_name')
-        .in('id', studentIds);
-
-      profiles?.forEach(p => {
+      // Par LOTS : toute l'école suivie sur la période = des centaines d'ids.
+      const profiles = await selectByIdsInChunks(
+        (part) => supabaseAdmin
+          .from('profiles')
+          .select('id, first_name, last_name')
+          .in('id', part),
+        studentIds
+      );
+      profiles.forEach(p => {
         studentNames[p.id] = `${p.first_name} ${p.last_name}`;
       });
     }

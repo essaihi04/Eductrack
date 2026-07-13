@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../config/supabase.js';
+import { selectInChunksSafe } from '../utils/chunkedQueries.js';
 import OpenAI from 'openai';
 import cron from 'node-cron';
 import { sendText, getStatus } from './whatsapp/index.js';
@@ -585,12 +586,13 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
     console.log(`[DailyReports] 👥 Found ${students?.length || 0} students`);
     if (!students?.length) return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
 
-    // Get parent links
+    // Get parent links — par LOTS : une école de 400+ élèves dépasse la limite
+    // d'URL d'un seul .in() (échec silencieux → aucun rapport envoyé).
     const studentIds = students.map(s => s.id);
-    const { data: parentLinks } = await supabaseAdmin
+    const parentLinks = await selectInChunksSafe(studentIds, (part) => supabaseAdmin
       .from('parent_students')
       .select('parent_id, student_id')
-      .in('student_id', studentIds);
+      .in('student_id', part));
 
     console.log(`[DailyReports] 👨‍👩‍👧 Found ${parentLinks?.length || 0} parent-student links`);
     if (!parentLinks?.length) return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
@@ -599,22 +601,22 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
 
     // ─── Exclure les parents qui ont défini des préférences personnelles ─────
     // Ceux-ci sont gérés par le scheduler parent dédié (parentReportScheduler.js).
-    const { data: explicitPrefs } = await supabaseAdmin
+    const explicitPrefs = await selectInChunksSafe(parentIds, (part) => supabaseAdmin
       .from('parent_report_preferences')
       .select('parent_id')
-      .in('parent_id', parentIds);
+      .in('parent_id', part));
     const parentsWithExplicitPrefs = new Set((explicitPrefs || []).map(p => p.parent_id));
     if (parentsWithExplicitPrefs.size > 0) {
       console.log(`[DailyReports] ⏭️  ${parentsWithExplicitPrefs.size} parent(s) avec préférences personnelles → ignorés ici (gérés par parentReportScheduler)`);
     }
 
-    // Get parent WhatsApp contacts
-    const { data: contacts } = await supabaseAdmin
+    // Get parent WhatsApp contacts (par lots, même raison)
+    const contacts = await selectInChunksSafe(parentIds, (part) => supabaseAdmin
       .from('parent_contacts')
       .select('parent_id, phone_e164, is_primary')
-      .in('parent_id', parentIds)
+      .in('parent_id', part)
       .eq('channel', 'whatsapp')
-      .order('is_primary', { ascending: false });
+      .order('is_primary', { ascending: false }));
 
     console.log(`[DailyReports] 📱 Found ${contacts?.length || 0} WhatsApp contacts`);
 
