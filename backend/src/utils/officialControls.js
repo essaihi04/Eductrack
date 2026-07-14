@@ -1,33 +1,40 @@
-// Catalogue des contrôles continus OFFICIELS du système éducatif marocain.
+// Catalogue des contrôles continus OFFICIELS du système éducatif marocain,
+// différencié par cycle (aligné sur les mémos MEN d'évaluation et la
+// pratique Massar) :
 //
-// Cadre de référence : mémorandum ministériel 080/21 (وزارة التربية الوطنية),
-// toujours appliqué dans les calendriers MEN (cf. calendrier 2025-2026) :
-//   • فرضان صفيان — 2 contrôles en classe par matière et par أسدس (semestre),
-//     tous cycles (primaire, collégial, qualifiant) ;
-//   • فرض موحد على صعيد المؤسسة — 1 contrôle unifié établissement par أسدس,
-//     SAUF au 2ᵉ semestre de l'année certifiante de chaque cycle
-//     (6AP → examen provincial, 3AC → examen régional, 1BAC → régional,
-//      2BAC → examen national) ;
-//   • le préscolaire (TPS/PS/MS/GS) n'a pas de fards officiels.
+//   • PRIMAIRE (1AP–6AP) : l'année est découpée en 4 étapes (مراحل), un فرض
+//     à la fin de chaque étape → 2 fards par matière et par أسدس (semestre).
+//     Pas de note d'activités dans Massar au primaire.
+//   • COLLÈGE (1AC–3AC) : فروض محروسة + note الأنشطة المندمجة (activités
+//     intégrées = 1/3 de la moyenne selon les mémos d'évaluation du cycle).
+//     → 3 fards + 1 note Activités par matière et par semestre.
+//   • LYCÉE QUALIFIANT (TC, 1BAC, 2BAC — mémo 142) : « فرضان كتابيان
+//     محروسان في كل أسدس » minimum + الأنشطة المندمجة = 25 % de la moyenne ;
+//     les matières à fort volume horaire des filières scientifiques passent
+//     3 fards (pratique Massar) → 3 fards + 1 note Activités (le fard non
+//     utilisé peut être supprimé d'un clic, il reste non publié).
+//   • PRÉSCOLAIRE (TPS/PS/MS/GS) : pas de fards officiels.
 //
-// Le « Similé » (examen blanc / امتحان تجريبي) n'est pas un fard officiel :
-// il est proposé en ajout rapide, surtout pour les années certifiantes.
+// Ces colonnes sont créées AUTOMATIQUEMENT à l'ouverture de la grille de
+// saisie (idempotent via official_key). Le « Similé » (examen blanc /
+// امتحان تجريبي) n'est pas un fard officiel : proposé en ajout manuel.
 
 import { baseLevel } from './levelProgression.js';
 
 const PRESCHOOL = ['TPS', 'PS', 'MS', 'GS'];
-// Années certifiantes : pas de فرض موحد au S2 (remplacé par l'examen certifiant)
-const CERTIFYING = ['6AP', '3AC', '1BAC', '2BAC'];
+const PRIMARY = ['1AP', '2AP', '3AP', '4AP', '5AP', '6AP'];
 
 // frac = position indicative de la date dans le semestre (0 → début, 1 → fin)
-const TEMPLATES = (semester) => [
-  { key: `s${semester}_f1`, type: 'official', frac: 0.35, name: `Contrôle 1 (S${semester}) · الفرض 1` },
-  { key: `s${semester}_f2`, type: 'official', frac: 0.72, name: `Contrôle 2 (S${semester}) · الفرض 2` },
-  { key: `s${semester}_unified`, type: 'unified', frac: 0.92, name: `Contrôle unifié (S${semester}) · الفرض الموحد` },
-];
+const FARD = (semester, n, frac) => ({
+  key: `s${semester}_f${n}`, type: 'official', frac, name: `Contrôle ${n} · الفرض ${n}`,
+});
+const ACTIVITIES = (semester) => ({
+  key: `s${semester}_act`, type: 'official', frac: 0.95, name: 'Activités · الأنشطة',
+});
 
 /**
  * Contrôles officiels attendus pour un niveau et un semestre donnés.
+ * Primaire : 2 fards. Collège & lycée : 3 fards + note d'activités.
  * @param {string} level  niveau de la classe (ex : '6AP', '1BAC Sciences Exp')
  * @param {1|2} semester
  * @returns {{key:string, type:string, frac:number, name:string}[]}
@@ -35,11 +42,17 @@ const TEMPLATES = (semester) => [
 export const officialControlsForLevel = (level, semester) => {
   const base = baseLevel(level);
   if (!base || PRESCHOOL.includes(base)) return [];
-  let list = TEMPLATES(semester);
-  if (semester === 2 && CERTIFYING.includes(base)) {
-    list = list.filter((c) => c.type !== 'unified');
+  if (PRIMARY.includes(base)) {
+    // 2 étapes (مرحلة) par semestre → فرض المرحلة 1 et 2
+    return [FARD(semester, 1, 0.40), FARD(semester, 2, 0.85)];
   }
-  return list;
+  // Collège + lycée qualifiant : 3 fards + activités intégrées
+  return [
+    FARD(semester, 1, 0.30),
+    FARD(semester, 2, 0.55),
+    FARD(semester, 3, 0.80),
+    ACTIVITIES(semester),
+  ];
 };
 
 /**

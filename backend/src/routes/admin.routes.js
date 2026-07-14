@@ -8302,21 +8302,73 @@ router.get('/notes/grid', async (req, res) => {
     // Filtre semestre (colonne si présente, sinon déduction par la date)
     if (sem) controls = controls.filter(c => controlSemester(c) === sem);
 
-    // Contrôles officiels (cadre MEN 080/21) pas encore créés pour cette
-    // grille — proposés à la création côté frontend.
-    let officialMissing = [];
+    // ── Contrôles officiels : présents PAR DÉFAUT ─────────────────────────
+    // À l'ouverture de la grille, les contrôles du cadre officiel marocain
+    // (3 fards + note d'activités par semestre) sont créés automatiquement
+    // s'ils manquent (idempotent via official_key — index unique). Nécessite
+    // la migration ADD_CONTROLS_OFFICIELS.sql, sinon on n'auto-crée rien.
     let bounds = null;
-    if (sem) {
+    if (sem && hasOfficialCols) {
       bounds = await semesterBoundsForClass(check.cls, sem);
-      // Sans la migration ADD_CONTROLS_OFFICIELS.sql on ne propose pas la
-      // création d'officiels (official_key non stockable → doublons possibles).
-      if (hasOfficialCols) {
-        const existingKeys = new Set(controls.map(c => c.official_key).filter(Boolean));
-        officialMissing = officialControlsForLevel(check.cls.level, sem)
-          .filter(t => !existingKeys.has(t.key))
-          .map(t => ({ ...t, date: suggestedDate(bounds.start, bounds.end, t.frac) }));
+      const templates = officialControlsForLevel(check.cls.level, sem);
+      const byKey = new Map(controls.filter(c => c.official_key).map(c => [c.official_key, c]));
+
+      // Nettoyage : contrôles officiels HORS catalogue du niveau (fards
+      // « unifiés » de l'ancien modèle, 3ᵉ fard ou activités au primaire…),
+      // jamais publiés et sans aucune note → supprimés pour coller au cadre.
+      const templateKeys = new Set(templates.map(t => t.key));
+      const stale = controls.filter(c => c.official_key && !templateKeys.has(c.official_key) && !c.published);
+      if (stale.length) {
+        const staleIds = stale.map(c => c.id);
+        const { data: staleNotes } = await supabaseAdmin
+          .from('control_notes').select('control_id').in('control_id', staleIds);
+        const withNotes = new Set((staleNotes || []).map(n => n.control_id));
+        const toDelete = staleIds.filter(id => !withNotes.has(id));
+        if (toDelete.length) {
+          await supabaseAdmin.from('controls_plan').delete().in('id', toDelete);
+          controls = controls.filter(c => !toDelete.includes(c.id));
+        }
       }
+
+      // Renommage doux : aligne le libellé des officiels existants sur le catalogue
+      for (const t of templates) {
+        const existing = byKey.get(t.key);
+        if (existing && existing.name !== t.name) {
+          await supabaseAdmin.from('controls_plan').update({ name: t.name }).eq('id', existing.id);
+          existing.name = t.name;
+        }
+      }
+
+      // Création des officiels manquants
+      const missing = templates.filter(t => !byKey.has(t.key));
+      if (missing.length) {
+        const rows = missing.map(t => ({
+          teacher_id: req.user.id,
+          class_id,
+          subject_id,
+          name: t.name,
+          date: suggestedDate(bounds.start, bounds.end, t.frac),
+          status: 'completed',
+          published: false,
+          semester: sem,
+          control_type: t.type,
+          official_key: t.key,
+        }));
+        // Conflit possible si deux sessions ouvrent la grille en même temps
+        // (index unique) → on insère un par un et on ignore les doublons.
+        const inserted = [];
+        for (const row of rows) {
+          const { data: ins, error: insErr } = await supabaseAdmin
+            .from('controls_plan').insert(row).select().single();
+          if (!insErr && ins) inserted.push(ins);
+        }
+        controls = [...controls, ...inserted].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      }
+    } else if (sem) {
+      bounds = await semesterBoundsForClass(check.cls, sem);
     }
+    // Plus rien à proposer manuellement : les officiels sont auto-créés.
+    const officialMissing = [];
 
     // Noms des profs (créateur du contrôle)
     const teacherIds = [...new Set(controls.map(c => c.teacher_id).filter(Boolean))];

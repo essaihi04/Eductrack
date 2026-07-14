@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   ClipboardList, RefreshCw, Save, Plus, Trash2, X, Check, Eye, EyeOff,
-  AlertTriangle, GraduationCap, BookOpen, CalendarRange, Sparkles, Landmark,
+  AlertTriangle, GraduationCap, BookOpen, CalendarRange,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 
@@ -10,9 +10,8 @@ const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 // Page « Saisie des notes » (admin / directeur / responsable pédagogique).
 // Grille type Massar : lignes = élèves (ordre du fichier Massar), colonnes =
 // contrôles de la classe × matière × SEMESTRE sélectionnés + moyenne.
-//  - contrôles OFFICIELS marocains (mémo MEN 080/21) : Fard 1, Fard 2 + Fard
-//    unifié par semestre (sauf S2 des années certifiantes) — générables
-//    automatiquement pour la grille ou pour toutes les classes × matières
+//  - contrôles OFFICIELS marocains créés PAR DÉFAUT à l'ouverture de la
+//    grille : 3 fards (الفرض 1/2/3) + note d'activités (الأنشطة) par semestre
 //  - ajout d'un contrôle supplémentaire libre ou d'un Similé (examen blanc)
 //  - saisie manuelle des notes (0–20), enregistrement par lot
 //  - VALIDATION & PUBLICATION : un contrôle (saisi par un prof ou ici) n'est
@@ -23,6 +22,12 @@ const TYPE_BADGES = {
   official: { label: 'Officiel', cls: 'bg-indigo-100 text-indigo-700' },
   unified: { label: 'Unifié', cls: 'bg-purple-100 text-purple-700' },
   simile: { label: 'Similé', cls: 'bg-sky-100 text-sky-700' },
+};
+const badgeFor = (c) => {
+  if (String(c.official_key || '').endsWith('_act')) {
+    return { label: 'Activités', cls: 'bg-teal-100 text-teal-700' };
+  }
+  return TYPE_BADGES[c.control_type] || null;
 };
 
 export default function NotesSaisiePage() {
@@ -38,13 +43,12 @@ export default function NotesSaisiePage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busyControl, setBusyControl] = useState('');
-  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
   const [addOpen, setAddOpen] = useState(false);
-  // kind : official (contrôle du cadre MEN restant) | simile | custom
-  const [newControl, setNewControl] = useState({ kind: 'custom', officialKey: '', name: '', date: new Date().toISOString().split('T')[0] });
+  // kind : simile (examen blanc) | custom (contrôle supplémentaire libre)
+  const [newControl, setNewControl] = useState({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
 
   const authHeaders = async () => {
     const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
@@ -137,25 +141,19 @@ export default function NotesSaisiePage() {
     finally { setSaving(false); }
   };
 
-  const officialMissing = grid?.official_missing || [];
-
-  // Ouvre la modale d'ajout : propose d'abord un contrôle officiel restant
+  // Les contrôles officiels (3 fards + activités) sont créés automatiquement
+  // par le backend à l'ouverture de la grille — la modale ne sert qu'aux
+  // ajouts supplémentaires : Similé (examen blanc) ou contrôle personnalisé.
   const openAdd = () => {
-    const first = officialMissing[0];
-    setNewControl(first
-      ? { kind: 'official', officialKey: first.key, name: first.name, date: first.date }
-      : { kind: 'custom', officialKey: '', name: '', date: new Date().toISOString().split('T')[0] });
+    setNewControl({ kind: 'simile', name: grid?.simile_name || 'Similé · امتحان تجريبي', date: new Date().toISOString().split('T')[0] });
     setAddOpen(true);
   };
 
   const setAddKind = (kind) => {
-    if (kind === 'official') {
-      const first = officialMissing[0];
-      setNewControl({ kind, officialKey: first?.key || '', name: first?.name || '', date: first?.date || new Date().toISOString().split('T')[0] });
-    } else if (kind === 'simile') {
-      setNewControl({ kind, officialKey: '', name: grid?.simile_name || 'Similé · امتحان تجريبي', date: new Date().toISOString().split('T')[0] });
+    if (kind === 'simile') {
+      setNewControl({ kind, name: grid?.simile_name || 'Similé · امتحان تجريبي', date: new Date().toISOString().split('T')[0] });
     } else {
-      setNewControl({ kind: 'custom', officialKey: '', name: '', date: new Date().toISOString().split('T')[0] });
+      setNewControl({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
     }
   };
 
@@ -164,9 +162,6 @@ export default function NotesSaisiePage() {
     setBusyControl('new');
     setError('');
     try {
-      const official = newControl.kind === 'official'
-        ? officialMissing.find(o => o.key === newControl.officialKey)
-        : null;
       await api('/api/admin/notes/controls', {
         method: 'POST',
         body: JSON.stringify({
@@ -175,37 +170,14 @@ export default function NotesSaisiePage() {
           name: newControl.name,
           date: newControl.date,
           semester,
-          control_type: official ? official.type : (newControl.kind === 'simile' ? 'simile' : 'custom'),
-          official_key: official?.key || null,
+          control_type: newControl.kind === 'simile' ? 'simile' : 'custom',
         }),
       });
       setAddOpen(false);
-      setNewControl({ kind: 'custom', officialKey: '', name: '', date: new Date().toISOString().split('T')[0] });
+      setNewControl({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
       await loadGrid();
     } catch (e) { setError(e.message); }
     finally { setBusyControl(''); }
-  };
-
-  // Génération automatique des contrôles officiels (mémo MEN 080/21).
-  // scope 'grid' = classe × matière affichées ; 'all' = toutes les classes × matières.
-  const generateOfficial = async (scope) => {
-    const msg = scope === 'all'
-      ? `Créer automatiquement les contrôles officiels du semestre ${semester} (Fard 1, Fard 2 + Fard unifié selon le niveau) pour TOUTES les classes et TOUTES les matières de l'école ?\n\nLes contrôles déjà créés seront ignorés (aucun doublon).`
-      : `Créer les contrôles officiels manquants du semestre ${semester} pour cette classe et cette matière ?`;
-    if (!window.confirm(msg)) return;
-    setGenerating(true);
-    setError(''); setInfo('');
-    try {
-      const body = scope === 'all'
-        ? { semester }
-        : { semester, class_id: classId, subject_id: subjectId };
-      const r = await api('/api/admin/notes/controls/generate-official', {
-        method: 'POST', body: JSON.stringify(body),
-      });
-      setInfo(`Contrôles officiels : ${r.created} créé(s), ${r.skipped} déjà existant(s)${scope === 'all' ? ` — ${r.classes} classe(s) × ${r.subjects} matière(s)` : ''}.`);
-      await loadGrid();
-    } catch (e) { setError(e.message); }
-    finally { setGenerating(false); }
   };
 
   const deleteControl = async (c) => {
@@ -245,45 +217,24 @@ export default function NotesSaisiePage() {
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <ClipboardList className="w-6 h-6 text-primary" /> Saisie des notes
         </h1>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => generateOfficial('all')}
-            disabled={generating || !semester}
-            title="Créer les contrôles officiels (Fard 1, Fard 2, Fard unifié) du semestre pour toutes les classes et toutes les matières — sans doublon"
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 disabled:opacity-50"
-          >
-            {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Générer officiels (école)
-          </button>
-          {grid && (
-            <>
-              {officialMissing.length > 0 && (
-                <button
-                  onClick={() => generateOfficial('grid')}
-                  disabled={generating}
-                  title="Créer les contrôles officiels manquants pour cette classe × matière"
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 disabled:opacity-50"
-                >
-                  <Landmark className="w-4 h-4" /> Officiels manquants ({officialMissing.length})
-                </button>
-              )}
-              <button
-                onClick={openAdd}
-                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-              >
-                <Plus className="w-4 h-4" /> Ajouter un contrôle
-              </button>
-              <button
-                onClick={saveAll}
-                disabled={saving || !dirty}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-              >
-                {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? 'Enregistrement…' : 'Enregistrer'}
-              </button>
-            </>
-          )}
-        </div>
+        {grid && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={openAdd}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              <Plus className="w-4 h-4" /> Ajouter un contrôle
+            </button>
+            <button
+              onClick={saveAll}
+              disabled={saving || !dirty}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Sélecteurs classe + matière */}
@@ -358,15 +309,12 @@ export default function NotesSaisiePage() {
                   <thead>
                     <tr className="bg-muted/50 text-left">
                       <th className="px-3 py-2 sticky left-0 bg-muted/50 z-10 min-w-[180px]">Élève</th>
-                      {grid.controls.map((c, i) => (
+                      {grid.controls.map((c) => (
                         <th key={c.id} className="px-2 py-2 text-center min-w-[110px] align-top">
-                          <div className="font-semibold">C{i + 1} · {c.name}</div>
-                          <div className="text-[10px] font-normal text-muted-foreground">
-                            {c.date}{c.teacher_name ? ` · ${c.teacher_name}` : ''}
-                          </div>
-                          {TYPE_BADGES[c.control_type] && (
-                            <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${TYPE_BADGES[c.control_type].cls}`}>
-                              {TYPE_BADGES[c.control_type].label}
+                          <div className="font-semibold">{c.name}</div>
+                          {badgeFor(c) && (
+                            <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium ${badgeFor(c).cls}`}>
+                              {badgeFor(c).label}
                             </span>
                           )}
                           <div className="flex items-center justify-center gap-1 mt-1">
@@ -459,25 +407,15 @@ export default function NotesSaisiePage() {
               <button onClick={() => setAddOpen(false)} className="p-1 hover:bg-accent rounded"><X className="w-4 h-4" /></button>
             </div>
 
-            {/* Type de contrôle */}
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                onClick={() => setAddKind('official')}
-                disabled={officialMissing.length === 0}
-                title={officialMissing.length === 0 ? 'Tous les contrôles officiels de ce semestre sont déjà créés' : ''}
-                className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors ${
-                  newControl.kind === 'official' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-border hover:bg-accent'
-                } disabled:opacity-40`}
-              >
-                <Landmark className="w-4 h-4 mx-auto mb-1" /> Officiel (MEN)
-              </button>
+            {/* Type de contrôle — les officiels (3 fards + activités) sont déjà créés automatiquement */}
+            <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setAddKind('simile')}
                 className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors ${
                   newControl.kind === 'simile' ? 'border-sky-500 bg-sky-50 text-sky-700' : 'border-border hover:bg-accent'
                 }`}
               >
-                <GraduationCap className="w-4 h-4 mx-auto mb-1" /> Similé (blanc)
+                <GraduationCap className="w-4 h-4 mx-auto mb-1" /> Similé (examen blanc)
               </button>
               <button
                 onClick={() => setAddKind('custom')}
@@ -489,42 +427,20 @@ export default function NotesSaisiePage() {
               </button>
             </div>
 
-            {newControl.kind === 'official' ? (
-              <div>
-                <label className="block text-sm font-medium mb-1">Contrôle officiel à créer</label>
-                <select
-                  value={newControl.officialKey}
-                  onChange={e => {
-                    const o = officialMissing.find(x => x.key === e.target.value);
-                    setNewControl({ ...newControl, officialKey: e.target.value, name: o?.name || '', date: o?.date || newControl.date });
-                  }}
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-background"
-                >
-                  {officialMissing.map(o => (
-                    <option key={o.key} value={o.key}>{o.name}</option>
-                  ))}
-                </select>
+            <div>
+              <label className="block text-sm font-medium mb-1">Nom du contrôle</label>
+              <input
+                type="text" value={newControl.name} autoFocus
+                onChange={e => setNewControl({ ...newControl, name: e.target.value })}
+                placeholder={newControl.kind === 'simile' ? 'Similé · امتحان تجريبي' : 'Ex : Contrôle de rattrapage, فرض إضافي…'}
+                className="w-full px-3 py-2 border border-border rounded-lg bg-background"
+              />
+              {newControl.kind === 'simile' && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Cadre officiel marocain (mémo 080/21) : 2 fards en classe + 1 fard unifié par semestre
-                  (pas de fard unifié au S2 des années certifiantes : 6AP, 3AC, 1BAC, 2BAC).
+                  Examen blanc de préparation — recommandé pour les années certifiantes (6AP, 3AC, 1BAC, 2BAC).
                 </p>
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium mb-1">Nom du contrôle</label>
-                <input
-                  type="text" value={newControl.name} autoFocus
-                  onChange={e => setNewControl({ ...newControl, name: e.target.value })}
-                  placeholder={newControl.kind === 'simile' ? 'Similé · امتحان تجريبي' : 'Ex : Contrôle de rattrapage, فرض إضافي…'}
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-background"
-                />
-                {newControl.kind === 'simile' && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Examen blanc de préparation — recommandé pour les années certifiantes (6AP, 3AC, 1BAC, 2BAC).
-                  </p>
-                )}
-              </div>
-            )}
+              )}
+            </div>
             <div>
               <label className="block text-sm font-medium mb-1">Date</label>
               <input
