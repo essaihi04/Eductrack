@@ -12,8 +12,8 @@ import { useYear } from '../../contexts/YearContext';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
 import { DOSSIER_DOC_KEYS } from '../../utils/dossierDocuments';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
-import { nextLevel, distinctLevels, allLevelOptions, baseLevel } from '../../lib/levelProgression';
-import { prevYearStr, toSlashYear, toDashYear, sameYear } from '../../lib/schoolYear';
+import { nextLevel, allLevelOptions, baseLevel } from '../../lib/levelProgression';
+import { toSlashYear, toDashYear, sameYear } from '../../lib/schoolYear';
 import StudentNotesModal from '../../components/StudentNotesModal';
 import ReinscriptionFlow from '../../components/students/ReinscriptionFlow';
 
@@ -24,19 +24,10 @@ const StudentsPage = () => {
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
-  // Niveaux proposés dans la fiche d'inscription : ceux des classes de
-  // l'année précédente + de l'année active (repli : toutes les années si
-  // aucune classe sur ces deux années).
-  const levelOptions = useMemo(() => {
-    const activeSlash = toSlashYear(year);
-    const prevSlash = prevYearStr(activeSlash);
-    const recent = classes.filter((c) => {
-      const y = toSlashYear(c.academic_year);
-      return y === activeSlash || y === prevSlash;
-    });
-    const lvls = distinctLevels(recent);
-    return lvls.length ? lvls : distinctLevels(classes);
-  }, [classes, year]);
+  // Niveaux proposés (fiche d'inscription, réinscription) : catalogue marocain
+  // COMPLET (filières incluses) + niveaux hors référentiel des classes
+  // existantes — MÊME référentiel que la partie finance (allLevelOptions).
+  const levelOptions = useMemo(() => allLevelOptions(classes), [classes]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState({});
@@ -1032,10 +1023,6 @@ L'administration de ${schoolName}`;
   const activeStudentsList = students.filter((s) => studentYearStatus(s) === 'active');
 
   // ── Fenêtre de réinscription : MÊME composant que la partie finance ──
-  // Niveaux : catalogue marocain complet + niveaux hors référentiel des
-  // classes existantes (aligné sur FinanceStudentsPage — le référentiel des
-  // seules classes récentes n'offrait pas tous les niveaux).
-  const reinscriptionLevels = useMemo(() => allLevelOptions(classes), [classes]);
   // Classes d'accueil proposées : celles de l'année active uniquement.
   const activeYearClasses = useMemo(
     () => classes.filter((c) => !c.academic_year || sameYear(c.academic_year, year)),
@@ -2261,7 +2248,7 @@ L'administration de ${schoolName}`;
         onClose={() => setCrossOpen(false)}
         year={year}
         classes={activeYearClasses}
-        levelOptions={reinscriptionLevels}
+        levelOptions={levelOptions}
         candidates={flowCandidates}
         onDone={async () => { await fetchData(); await refreshActiveIds(); }}
       />
@@ -2303,10 +2290,10 @@ L'administration de ${schoolName}`;
                 <select value={reinscribeLevel} onChange={(e) => { setReinscribeLevel(e.target.value); setReinscribeClassId(''); }}
                   className="w-full px-3 py-2 border rounded-lg text-sm">
                   {/* niveau proposé hors référentiel → gardé sélectionnable */}
-                  {reinscribeLevel && !reinscriptionLevels.includes(reinscribeLevel) && (
+                  {reinscribeLevel && !levelOptions.includes(reinscribeLevel) && (
                     <option value={reinscribeLevel}>{reinscribeLevel}</option>
                   )}
-                  {reinscriptionLevels.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
+                  {levelOptions.map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
                 </select>
               </div>
 
