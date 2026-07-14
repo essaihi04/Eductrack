@@ -11,6 +11,7 @@ import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from 
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
 import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
+import { generateNotesGridPdf } from '../services/notesGridPdf.js';
 
 const router = express.Router();
 
@@ -8462,6 +8463,100 @@ router.post('/notes/controls', async (req, res) => {
     res.status(201).json(data);
   } catch (e) {
     console.error('[Admin] create control error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /notes/grid-pdf?class_id&subject_id&semester&mode=blank|filled&controls=id1,id2
+// PDF une page de la grille : vide (saisie papier) ou remplie (notes saisies).
+// `controls` (optionnel) : ids des contrôles à inclure — reflète le filtre de
+// colonnes actif dans la grille ; absent = tous les contrôles du semestre.
+router.get('/notes/grid-pdf', async (req, res) => {
+  try {
+    const { class_id, subject_id, semester, mode, controls: controlsParam } = req.query;
+    if (!class_id || !subject_id) return res.status(400).json({ error: 'class_id et subject_id requis' });
+    const check = await assertClassInScope(req, class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+    const sem = Number(semester) === 2 ? 2 : 1;
+    const filled = mode === 'filled';
+
+    // Élèves (même ordre Massar que la grille)
+    const { data: students } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, import_order')
+      .eq('class_id', class_id)
+      .eq('role', 'student')
+      .order('import_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+
+    // Contrôles du semestre (mêmes replis de colonnes que /notes/grid)
+    let { data: controls, error: ctrlErr } = await supabaseAdmin
+      .from('controls_plan')
+      .select('id, name, date, status, semester, official_key')
+      .eq('class_id', class_id)
+      .eq('subject_id', subject_id)
+      .neq('status', 'cancelled')
+      .order('date', { ascending: true });
+    if (ctrlErr && /semester|official_key/i.test(ctrlErr.message || '')) {
+      ({ data: controls, error: ctrlErr } = await supabaseAdmin
+        .from('controls_plan')
+        .select('id, name, date, status')
+        .eq('class_id', class_id)
+        .eq('subject_id', subject_id)
+        .neq('status', 'cancelled')
+        .order('date', { ascending: true }));
+    }
+    if (ctrlErr) throw ctrlErr;
+    controls = (controls || []).filter(c => controlSemester(c) === sem);
+
+    // Filtre de colonnes (sélection faite dans la grille)
+    if (controlsParam) {
+      const wanted = new Set(String(controlsParam).split(',').filter(Boolean));
+      if (wanted.size) controls = controls.filter(c => wanted.has(c.id));
+    }
+
+    // Notes (mode rempli uniquement)
+    let notes = [];
+    if (filled && controls.length) {
+      const { data } = await supabaseAdmin
+        .from('control_notes')
+        .select('control_id, student_id, note')
+        .in('control_id', controls.map(c => c.id));
+      notes = data || [];
+    }
+
+    // Matière + école (nom, logo)
+    const { data: subj } = await supabaseAdmin
+      .from('subjects').select('name').eq('id', subject_id).maybeSingle();
+    let school = null;
+    if (check.cls.school_id) {
+      const { data } = await supabaseAdmin
+        .from('schools').select('name, logo_url').eq('id', check.cls.school_id).maybeSingle();
+      school = data || null;
+    }
+    const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
+
+    const pdfBuffer = await generateNotesGridPdf({
+      mode: filled ? 'filled' : 'blank',
+      schoolName: school?.name || '',
+      logoBuffer,
+      className: check.cls.name || '',
+      level: check.cls.level || '',
+      subjectName: subj?.name || '',
+      semester: sem,
+      academicYear: check.cls.academic_year || currentSchoolYear(),
+      students: students || [],
+      controls,
+      notes,
+    });
+
+    const safe = (s) => String(s || '').replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const fname = `notes_${safe(check.cls.name)}_${safe(subj?.name)}_S${sem}_${filled ? 'remplie' : 'vide'}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fname}"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    console.error('[Admin] notes grid pdf error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

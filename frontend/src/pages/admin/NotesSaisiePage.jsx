@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   ClipboardList, RefreshCw, Save, Plus, Trash2, X, Check, Eye, EyeOff,
-  AlertTriangle, GraduationCap, BookOpen, CalendarRange,
+  AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
+import { saveBlob } from '../../lib/download';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -38,6 +39,7 @@ export default function NotesSaisiePage() {
   const [semester, setSemester] = useState(null); // 1 | 2 — initialisé sur le semestre en cours
 
   const [grid, setGrid] = useState(null); // { class, students, controls, notes, official_missing }
+  const [visibleIds, setVisibleIds] = useState(null); // null = tous les contrôles, sinon Set d'ids affichés
   const [cells, setCells] = useState({}); // `${controlId}_${studentId}` -> valeur saisie (string)
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -47,6 +49,7 @@ export default function NotesSaisiePage() {
   const [info, setInfo] = useState('');
 
   const [addOpen, setAddOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(''); // 'blank' | 'filled' pendant le téléchargement
   // kind : simile (examen blanc) | custom (contrôle supplémentaire libre)
   const [newControl, setNewControl] = useState({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
 
@@ -86,6 +89,7 @@ export default function NotesSaisiePage() {
     try {
       const data = await api(`/api/admin/notes/grid?class_id=${cId}&subject_id=${sId}&semester=${sem}`);
       setGrid(data);
+      setVisibleIds(null); // nouveau chargement → toutes les colonnes affichées
       // Initialiser les cellules depuis les notes existantes
       const c = {};
       (data.notes || []).forEach(n => { c[`${n.control_id}_${n.student_id}`] = String(n.note ?? ''); });
@@ -110,18 +114,37 @@ export default function NotesSaisiePage() {
     return isNaN(n) ? null : Math.min(20, Math.max(0, n));
   };
 
-  // Moyenne par élève (sur les contrôles notés seulement)
+  // Contrôles affichés selon le filtre de colonnes (null / vide = tous)
+  const displayedControls = useMemo(() => {
+    if (!grid) return [];
+    if (!visibleIds || visibleIds.size === 0) return grid.controls;
+    return grid.controls.filter(c => visibleIds.has(c.id));
+  }, [grid, visibleIds]);
+
+  const filterActive = !!(visibleIds && visibleIds.size > 0 && grid && visibleIds.size < grid.controls.length);
+
+  // Bascule l'affichage d'un contrôle dans le filtre
+  const toggleVisible = (id) => {
+    setVisibleIds(prev => {
+      if (!prev || prev.size === 0) return new Set([id]); // depuis « tous » → seul celui-ci
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next.size === 0 ? null : next; // plus rien de coché → retour à « tous »
+    });
+  };
+
+  // Moyenne par élève (sur les contrôles AFFICHÉS et notés seulement)
   const avgByStudent = useMemo(() => {
     const map = {};
     if (!grid) return map;
     grid.students.forEach(s => {
-      const vals = grid.controls
+      const vals = displayedControls
         .map(c => parseNote(cells[`${c.id}_${s.id}`]))
         .filter(v => v !== null);
       map[s.id] = vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100 : null;
     });
     return map;
-  }, [grid, cells]);
+  }, [grid, displayedControls, cells]);
 
   const saveAll = async () => {
     if (!grid) return;
@@ -139,6 +162,34 @@ export default function NotesSaisiePage() {
       setDirty(false);
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
+  };
+
+  // Télécharge la grille en PDF (une page) : vide pour la saisie papier,
+  // ou remplie avec les notes saisies. Généré côté backend (PDFKit + arabe).
+  const downloadPdf = async (pdfMode) => {
+    if (!classId || !subjectId || !semester) return;
+    if (pdfMode === 'filled' && dirty
+      && !window.confirm('Des notes ne sont pas enregistrées : elles ne figureront pas dans le PDF. Continuer quand même ? (Enregistrez d\'abord pour un PDF à jour.)')) return;
+    setPdfBusy(pdfMode);
+    setError('');
+    try {
+      const headers = await authHeaders();
+      // Filtre de colonnes actif → le PDF ne contient que les contrôles affichés
+      const ctrlParam = filterActive ? `&controls=${displayedControls.map(c => c.id).join(',')}` : '';
+      const res = await fetch(
+        `${apiUrl}/api/admin/notes/grid-pdf?class_id=${classId}&subject_id=${subjectId}&semester=${semester}&mode=${pdfMode}${ctrlParam}`,
+        { headers },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const cls = classes.find(c => c.id === classId)?.name || 'classe';
+      const subj = subjects.find(s => s.id === subjectId)?.name || 'matiere';
+      await saveBlob(blob, `notes_${cls}_${subj}_S${semester}_${pdfMode === 'filled' ? 'remplie' : 'vide'}.pdf`);
+    } catch (e) { setError(e.message); }
+    finally { setPdfBusy(''); }
   };
 
   // Les contrôles officiels (3 fards + activités) sont créés automatiquement
@@ -220,6 +271,24 @@ export default function NotesSaisiePage() {
         {grid && (
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              onClick={() => downloadPdf('blank')}
+              disabled={!!pdfBusy}
+              title="Télécharger la grille vierge (une page) pour la saisie manuelle sur papier"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent disabled:opacity-50"
+            >
+              {pdfBusy === 'blank' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+              PDF vide
+            </button>
+            <button
+              onClick={() => downloadPdf('filled')}
+              disabled={!!pdfBusy}
+              title="Télécharger la grille avec les notes saisies (une page)"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent disabled:opacity-50"
+            >
+              {pdfBusy === 'filled' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+              PDF rempli
+            </button>
+            <button
               onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
             >
@@ -281,7 +350,7 @@ export default function NotesSaisiePage() {
             </div>
             {grid && (
               <div className="text-sm text-muted-foreground pb-2">
-                {grid.students.length} élève(s) · {grid.controls.length} contrôle(s)
+                {grid.students.length} élève(s) · {filterActive ? `${displayedControls.length}/${grid.controls.length}` : grid.controls.length} contrôle(s)
                 {pendingCount > 0 && (
                   <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
                     <AlertTriangle className="w-3 h-3" /> {pendingCount} à valider
@@ -290,6 +359,44 @@ export default function NotesSaisiePage() {
               </div>
             )}
           </div>
+
+          {/* Filtre de colonnes : n'afficher qu'un ou plusieurs contrôles.
+              Le PDF téléchargé ne contient que les colonnes sélectionnées. */}
+          {grid && grid.controls.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-border">
+              <span className="text-xs font-medium text-muted-foreground flex items-center gap-1 mr-1">
+                <Filter className="w-3.5 h-3.5" /> Contrôles affichés :
+              </span>
+              <button
+                onClick={() => setVisibleIds(null)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${
+                  !filterActive ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-border hover:bg-accent'
+                }`}
+              >
+                Tous
+              </button>
+              {grid.controls.map(c => {
+                const on = filterActive && visibleIds.has(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => toggleVisible(c.id)}
+                    title={c.name}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors max-w-[180px] truncate ${
+                      on ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-border hover:bg-accent'
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+              {filterActive && (
+                <span className="text-[11px] text-muted-foreground ml-1">
+                  Le PDF ne contiendra que ces colonnes.
+                </span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -309,7 +416,7 @@ export default function NotesSaisiePage() {
                   <thead>
                     <tr className="bg-muted/50 text-left">
                       <th className="px-3 py-2 sticky left-0 bg-muted/50 z-10 min-w-[180px]">Élève</th>
-                      {grid.controls.map((c) => (
+                      {displayedControls.map((c) => (
                         <th key={c.id} className="px-2 py-2 text-center min-w-[110px] align-top">
                           <div className="font-semibold">{c.name}</div>
                           {badgeFor(c) && (
@@ -356,7 +463,7 @@ export default function NotesSaisiePage() {
                           <span className="text-xs text-muted-foreground mr-2">{s.import_order ?? idx + 1}</span>
                           <span className="font-medium">{s.last_name} {s.first_name}</span>
                         </td>
-                        {grid.controls.map(c => {
+                        {displayedControls.map(c => {
                           const key = `${c.id}_${s.id}`;
                           const v = cells[key] ?? '';
                           const n = parseNote(v);
