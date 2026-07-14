@@ -20,6 +20,15 @@ import {
   ensureWarmupStarted,
   getStats,
 } from './antiBan.js';
+import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
+
+// Interrupteur global (voir outboundGate.js) : notifications sortantes
+// bloquées, réponses du chatbot toujours autorisées.
+const blockedIfDisabled = (phone) => {
+  if (!isOutboundBlocked()) return null;
+  console.log(`[whatsapp] Envoi bloqué (notifications désactivées) → ${phone}`);
+  return fail(OUTBOUND_DISABLED_MESSAGE, { reason: 'outbound_disabled' });
+};
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -60,6 +69,8 @@ const handleSendError = (schoolId, err) => {
  * @param {object} opts    { urgent?: bool, skipTyping?: bool, skipDelay?: bool }
  */
 export async function sendText(schoolId, phone, text, opts = {}) {
+  const blocked = blockedIfDisabled(phone);
+  if (blocked) return blocked;
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendText(schoolId, phone, text, opts);
 
   const sock = getSocket(schoolId);
@@ -87,6 +98,8 @@ export async function sendText(schoolId, phone, text, opts = {}) {
  * Envoi image depuis URL.
  */
 export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = {}) {
+  const blocked = blockedIfDisabled(phone);
+  if (blocked) return blocked;
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendImage(schoolId, phone, imageUrl, caption, opts);
 
   const sock = getSocket(schoolId);
@@ -116,6 +129,8 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = 
  * Envoi document (PDF, etc.) depuis URL.
  */
 export async function sendDocument(schoolId, phone, documentUrl, fileName, caption = '', mimetype = 'application/pdf', opts = {}) {
+  const blocked = blockedIfDisabled(phone);
+  if (blocked) return blocked;
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype, opts);
 
   const sock = getSocket(schoolId);
@@ -147,6 +162,8 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
  * Envoi média générique depuis un buffer / chemin local (pour upload depuis backend).
  */
 export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'document', fileName, mimetype, caption } = {}, opts = {}) {
+  const blocked = blockedIfDisabled(phone);
+  if (blocked) return blocked;
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption }, opts);
 
   const sock = getSocket(schoolId);

@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import { downloadMediaMessage } from 'baileys';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
+import { runAsChatbot } from '../outboundGate.js';
 import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
 import { markResponded } from '../../communicationTracking.js';
 import {
@@ -1031,7 +1032,14 @@ async function handleReceptionistMessage({ phone, text, providerMessageId, schoo
  * @param {object} [param0.location]  - localisation partagée { lat, lng, name, address }
  * @param {object} [param0.image]     - image partagée { download(), mimetype }
  */
-export async function handleIncomingWhatsAppMessage({ from, text, id, schoolId, location = null, image = null }) {
+// Les deux handlers d'entrée posent le contexte « chatbot » (outboundGate) :
+// les réponses envoyées pendant le traitement d'un message entrant restent
+// autorisées même quand les notifications sortantes sont désactivées.
+export async function handleIncomingWhatsAppMessage(args) {
+  return runAsChatbot(() => handleIncomingImpl(args));
+}
+
+async function handleIncomingImpl({ from, text, id, schoolId, location = null, image = null }) {
   const phone = normalizePhone(from);
   console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"${location ? ` 📍(${location.lat},${location.lng})` : ''}${image ? ' 📷' : ''}`);
 
@@ -1731,7 +1739,11 @@ function unwrapMessage(message) {
   return m;
 }
 
-export async function handleBaileysIncoming({ schoolId, msg, sock }) {
+export async function handleBaileysIncoming(args) {
+  return runAsChatbot(() => handleBaileysImpl(args));
+}
+
+async function handleBaileysImpl({ schoolId, msg, sock }) {
   const m = unwrapMessage(msg.message);
   const text =
     m.conversation ||
