@@ -207,6 +207,13 @@ export const AuthProvider = ({ children }) => {
     setAvailableSchools([]);
   };
 
+  // Recharge le profil (et l'école associée) — utilisé après une mise à jour
+  // côté serveur qui doit se refléter dans l'UI (ex : changement de logo).
+  const refreshProfile = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) await fetchProfile(session.user.id);
+  };
+
   const value = {
     user,
     profile,
@@ -217,6 +224,7 @@ export const AuthProvider = ({ children }) => {
     signIn,
     signUp,
     signOut,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

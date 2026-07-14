@@ -1,6 +1,11 @@
+import { useState, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
+  Camera,
+  Trash2,
+  RefreshCw,
+  X,
   LayoutDashboard,
   Users,
   BookOpen,
@@ -51,12 +56,61 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
 import { resolveLogoUrl } from '../../lib/schoolLogo';
+import { supabase } from '../../lib/supabase';
+
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 import { FINANCE_POLES, poleForPath, tabForPath } from '../../pages/finance/financeNav';
 import { adminSidebarDomains, domainForPath } from '../../pages/admin/adminNav';
 
 const Sidebar = () => {
   const location = useLocation();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, refreshProfile } = useAuth();
+
+  // ── Gestion du logo de l'école par l'admin (clic sur le logo) ──
+  const isSchoolAdmin = profile?.role === 'admin' || profile?.role === 'school_admin';
+  const [logoModalOpen, setLogoModalOpen] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(''); // 'upload' | 'delete'
+  const [logoError, setLogoError] = useState('');
+  const logoInputRef = useRef(null);
+
+  const logoHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return { 'Authorization': `Bearer ${session?.access_token}` };
+  };
+
+  const uploadLogo = async (file) => {
+    if (!file) return;
+    setLogoBusy('upload');
+    setLogoError('');
+    try {
+      const form = new FormData();
+      form.append('logo', file);
+      const res = await fetch(`${apiUrl}/api/admin/school/logo`, {
+        method: 'POST', headers: await logoHeaders(), body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await refreshProfile();
+      setLogoModalOpen(false);
+    } catch (e) { setLogoError(e.message); }
+    finally { setLogoBusy(''); if (logoInputRef.current) logoInputRef.current.value = ''; }
+  };
+
+  const deleteLogo = async () => {
+    if (!window.confirm('Supprimer le logo de l\'école ? Il disparaîtra de l\'application et des documents PDF.')) return;
+    setLogoBusy('delete');
+    setLogoError('');
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/school/logo`, {
+        method: 'DELETE', headers: await logoHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await refreshProfile();
+      setLogoModalOpen(false);
+    } catch (e) { setLogoError(e.message); }
+    finally { setLogoBusy(''); }
+  };
 
   const getMenuItems = () => {
     if (profile?.role === 'super_admin') {
@@ -255,12 +309,30 @@ const Sidebar = () => {
       <div className="p-6 border-b border-border">
         {profile?.school?.logo_url && profile?.role !== 'super_admin' ? (
           <div className="flex flex-col items-center gap-2">
-            <img
-              src={resolveLogoUrl(profile.school)}
-              alt={profile.school.name}
-              className="w-full max-h-14 object-contain"
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
+            {isSchoolAdmin ? (
+              <button
+                onClick={() => { setLogoError(''); setLogoModalOpen(true); }}
+                title="Cliquer pour changer ou supprimer le logo"
+                className="relative group w-full"
+              >
+                <img
+                  src={resolveLogoUrl(profile.school)}
+                  alt={profile.school.name}
+                  className="w-full max-h-14 object-contain"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <span className="absolute inset-0 hidden group-hover:flex items-center justify-center bg-black/40 rounded-lg">
+                  <Camera className="w-5 h-5 text-white" />
+                </span>
+              </button>
+            ) : (
+              <img
+                src={resolveLogoUrl(profile.school)}
+                alt={profile.school.name}
+                className="w-full max-h-14 object-contain"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            )}
             <p className="text-xs text-muted-foreground truncate">
               {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
               {profile?.role === 'teacher' && 'Espace Professeur'}
@@ -280,6 +352,14 @@ const Sidebar = () => {
               {profile?.role === 'finance_manager' && 'Espace Finance'}
               {profile?.role === 'student' && 'Espace Élève'}
             </p>
+            {isSchoolAdmin && (
+              <button
+                onClick={() => { setLogoError(''); setLogoModalOpen(true); }}
+                className="mt-2 flex items-center gap-1.5 text-xs text-primary hover:underline"
+              >
+                <Camera className="w-3.5 h-3.5" /> Ajouter un logo
+              </button>
+            )}
           </div>
         ) : (
           <div>
@@ -376,6 +456,77 @@ const Sidebar = () => {
           <span className="font-medium">Déconnexion</span>
         </button>
       </div>
+
+      {/* Modale : gérer le logo de l'école (admin) */}
+      {logoModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !logoBusy && setLogoModalOpen(false)}
+        >
+          <div className="bg-card rounded-xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Camera className="w-4 h-4 text-primary" /> Logo de l'école
+              </h3>
+              <button
+                onClick={() => setLogoModalOpen(false)}
+                disabled={!!logoBusy}
+                className="p-1 hover:bg-accent rounded disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center bg-muted/40 border border-dashed border-border rounded-lg p-4 min-h-[90px]">
+              {profile?.school?.logo_url ? (
+                <img
+                  src={resolveLogoUrl(profile.school)}
+                  alt="Logo actuel"
+                  className="max-h-20 max-w-full object-contain"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">Aucun logo pour le moment</p>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Le logo apparaît dans la barre latérale, sur l'écran de connexion et sur tous les
+              documents PDF (bulletins, factures, grilles de notes…). Formats image acceptés,
+              il sera converti en PNG.
+            </p>
+
+            {logoError && <p className="text-sm font-medium text-red-600">{logoError}</p>}
+
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => uploadLogo(e.target.files?.[0])}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => logoInputRef.current?.click()}
+                disabled={!!logoBusy}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-50"
+              >
+                {logoBusy === 'upload' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {logoBusy === 'upload' ? 'Import…' : (profile?.school?.logo_url ? 'Remplacer' : 'Importer un logo')}
+              </button>
+              {profile?.school?.logo_url && (
+                <button
+                  onClick={deleteLogo}
+                  disabled={!!logoBusy}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50"
+                >
+                  {logoBusy === 'delete' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  Supprimer
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </motion.aside>
   );
 };

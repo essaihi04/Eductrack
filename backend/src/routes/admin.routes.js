@@ -5,7 +5,7 @@ import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.j
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
 import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
-import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE } from '../utils/storage.js';
+import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE, BUCKET_PUBLIC, normalizeLogoToPng } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
@@ -8719,6 +8719,93 @@ router.post('/notes/controls/:id/publish', async (req, res) => {
     res.json(data);
   } catch (e) {
     console.error('[Admin] publish control error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== LOGO DE L'ÉCOLE (géré par l'admin) ====================
+// L'admin peut remplacer ou supprimer le logo de SA PROPRE école depuis la
+// barre latérale (clic sur le logo). Le super admin garde sa propre gestion
+// via /superadmin/schools/:id/logo.
+
+const schoolLogoUpload = memoryUpload(8);
+const logoStoragePath = (url) => {
+  const marker = `/${BUCKET_PUBLIC}/`;
+  const i = (url || '').indexOf(marker);
+  return i >= 0 ? url.slice(i + marker.length) : null;
+};
+
+// POST /school/logo — importer / remplacer le logo (multipart, champ « logo »)
+router.post('/school/logo', schoolLogoUpload.single('logo'), async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'Compte sans école associée (super admin : passez par la gestion des écoles).' });
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier envoyé' });
+    if (!/^image\//i.test(req.file.mimetype || '')) {
+      return res.status(400).json({ error: 'Le logo doit être une image (PNG, JPEG, WebP…)' });
+    }
+
+    // Supprime l'ancien fichier du Storage (s'il y est hébergé)
+    const { data: oldSchool } = await supabaseAdmin
+      .from('schools').select('logo_url').eq('id', schoolId).single();
+    if (oldSchool?.logo_url) {
+      const oldPath = logoStoragePath(oldSchool.logo_url);
+      if (oldPath) await removeObject(BUCKET_PUBLIC, oldPath).catch(() => {});
+    }
+
+    // Normalise en PNG (≤ 512 px) pour l'affichage dans tous les PDF
+    const file = await normalizeLogoToPng(req.file);
+    const { publicUrl: logoUrl } = await uploadBuffer({ bucket: BUCKET_PUBLIC, folder: 'logos', file, prefix: 'logo' });
+
+    const { data: school, error } = await supabaseAdmin
+      .from('schools').update({ logo_url: logoUrl }).eq('id', schoolId).select().single();
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_log').insert({
+      user_id: req.user.id,
+      school_id: schoolId,
+      action: 'upload_school_logo',
+      target_type: 'school',
+      target_id: schoolId,
+      details: { logo_url: logoUrl, by: 'school_admin' },
+    });
+
+    res.json({ school, logo_url: logoUrl });
+  } catch (e) {
+    console.error('[Admin] upload school logo error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /school/logo — supprimer le logo de l'école
+router.delete('/school/logo', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'Compte sans école associée' });
+
+    const { data: oldSchool } = await supabaseAdmin
+      .from('schools').select('logo_url').eq('id', schoolId).single();
+    if (oldSchool?.logo_url) {
+      const oldPath = logoStoragePath(oldSchool.logo_url);
+      if (oldPath) await removeObject(BUCKET_PUBLIC, oldPath).catch(() => {});
+    }
+
+    const { data: school, error } = await supabaseAdmin
+      .from('schools').update({ logo_url: null }).eq('id', schoolId).select().single();
+    if (error) throw error;
+
+    await supabaseAdmin.from('audit_log').insert({
+      user_id: req.user.id,
+      school_id: schoolId,
+      action: 'delete_school_logo',
+      target_type: 'school',
+      target_id: schoolId,
+      details: { by: 'school_admin' },
+    });
+
+    res.json({ school });
+  } catch (e) {
+    console.error('[Admin] delete school logo error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
