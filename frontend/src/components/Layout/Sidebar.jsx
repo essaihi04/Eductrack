@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -457,10 +458,13 @@ const Sidebar = () => {
         </button>
       </div>
 
-      {/* Modale : gérer le logo de l'école (admin) */}
-      {logoModalOpen && (
+      {/* Modale : gérer le logo de l'école (admin). Rendue en portail sur
+          document.body : la sidebar est animée par framer-motion (transform),
+          ce qui piège le z-index/fixed de tout enfant dans son propre contexte
+          d'empilement → la modale passait SOUS les éléments de la page. */}
+      {logoModalOpen && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
           onClick={() => !logoBusy && setLogoModalOpen(false)}
         >
           <div className="bg-card rounded-xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
@@ -525,7 +529,8 @@ const Sidebar = () => {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </motion.aside>
   );
