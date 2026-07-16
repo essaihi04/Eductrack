@@ -23,6 +23,15 @@ const defaultItem = () => ({
   is_optional: false
 });
 
+// Frais personnalisé : catégorie « Autre » avec un nom saisi manuellement
+// (ex: sortie scolaire, examen blanc) au lieu du catalogue de services.
+const customItem = () => ({
+  ...defaultItem(),
+  category: 'other',
+  name: '',
+  recurrence: 'one_time',
+});
+
 const currentYearStr = () => {
   const y = new Date().getFullYear();
   const m = new Date().getMonth();
@@ -131,6 +140,13 @@ export default function FeeTemplatesPage() {
   };
 
   const save = async () => {
+    // Un frais personnalisé (« Autre ») doit être nommé : c'est ce libellé qui
+    // apparaîtra sur les plans élèves et les factures.
+    const unnamed = editing.items.some(it => it.category === 'other' && !String(it.name || '').trim());
+    if (unnamed) {
+      alert('Donnez un nom à chaque frais personnalisé (catégorie « Autre »).');
+      return;
+    }
     try {
       const payload = {
         name: editing.name,
@@ -159,12 +175,14 @@ export default function FeeTemplatesPage() {
   };
 
   const addItem = () => setEditing({ ...editing, items: [...editing.items, defaultItem()] });
+  const addCustomItem = () => setEditing({ ...editing, items: [...editing.items, customItem()] });
   const removeItem = (idx) => setEditing({ ...editing, items: editing.items.filter((_, i) => i !== idx) });
   const updateItem = (idx, field, value) => {
     const items = [...editing.items];
     items[idx] = { ...items[idx], [field]: value };
-    // Le nom du frais suit le service choisi (la colonne « Nom du frais » a été retirée).
-    if (field === 'category') items[idx].name = CATEGORY_LABELS[value] || value;
+    // Le nom du frais suit le service choisi — sauf « Autre » : le nom est
+    // saisi manuellement (champ dédié affiché sous le sélecteur).
+    if (field === 'category') items[idx].name = value === 'other' ? '' : (CATEGORY_LABELS[value] || value);
     setEditing({ ...editing, items });
   };
 
@@ -522,9 +540,15 @@ export default function FeeTemplatesPage() {
               <div className="border-t border-gray-200 pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-gray-800">Frais inclus</h3>
-                  <button onClick={addItem} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
-                    <Plus className="w-4 h-4" /> Ajouter
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={addItem} className="flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
+                      <Plus className="w-4 h-4" /> Ajouter
+                    </button>
+                    <button onClick={addCustomItem} title="Frais libre : nom saisi manuellement (ex: sortie scolaire, examen blanc)"
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100">
+                      <Plus className="w-4 h-4" /> Frais personnalisé
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -538,10 +562,22 @@ export default function FeeTemplatesPage() {
                   </div>
                   {editing.items.map((it, idx) => (
                     <div key={idx} className="grid grid-cols-12 gap-2 items-center p-3 bg-gray-50 rounded-lg">
-                      <select value={it.category} onChange={e => updateItem(idx, 'category', e.target.value)}
-                        className="col-span-3 px-2 py-1.5 text-sm border border-gray-300 rounded">
-                        {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                      </select>
+                      <div className="col-span-3 space-y-1">
+                        <select value={it.category} onChange={e => updateItem(idx, 'category', e.target.value)}
+                          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded">
+                          {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                            <option key={k} value={k}>{k === 'other' ? 'Autre (personnalisé)' : v}</option>
+                          ))}
+                        </select>
+                        {/* Frais personnalisé : le nom est saisi librement au lieu
+                            de suivre le catalogue de services. */}
+                        {it.category === 'other' && (
+                          <input type="text" value={it.name || ''} autoFocus={!it.name}
+                            onChange={e => updateItem(idx, 'name', e.target.value)}
+                            placeholder="Nom du frais *"
+                            className="w-full px-2 py-1.5 text-sm border border-amber-300 bg-amber-50/50 rounded focus:ring-2 focus:ring-amber-400" />
+                        )}
+                      </div>
                       <input type="number" min="0" step="any" inputMode="decimal"
                         value={it.amount === 0 ? '' : it.amount}
                         onChange={e => updateItem(idx, 'amount', e.target.value)}
