@@ -151,6 +151,19 @@ function buildErrorHTML(logoSrc) {
 </html>`;
 }
 
+// Bug Electron connu (Windows) : après la fermeture d'une fenêtre enfant
+// (impression PDF) ou d'une boîte de dialogue native (« Enregistrer sous »),
+// la fenêtre principale ne redonne plus le focus aux champs texte au clic
+// tant qu'elle n'a pas perdu puis regagné le focus (Alt-Tab). On force ce
+// cycle blur → focus pour que les inputs (ex: login/mot de passe) restent
+// cliquables.
+function refocusWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  win.blur();
+  win.focus();
+  win.webContents.focus();
+}
+
 // Autorise l'ouverture de fenêtres secondaires (impression PDF côté navigateur).
 // window.open(...) est utilisé de deux façons :
 //   - window.open('', '_blank') puis document.write + print() → factures,
@@ -176,6 +189,12 @@ function setupDownloadsAndPopups(win) {
       overrideBrowserWindowOptions: { width: 1000, height: 900, autoHideMenuBar: true },
     };
   });
+
+  // À la fermeture d'une fenêtre enfant (impression), on rend le focus à la
+  // fenêtre principale — sinon les champs texte deviennent incliquables.
+  win.webContents.on('did-create-window', (childWin) => {
+    childWin.on('closed', () => refocusWindow(win));
+  });
 }
 
 // Téléchargements réels (blobs jsPDF, fichiers Supabase, exports Excel, PDF
@@ -191,6 +210,10 @@ function setupSessionDownloads() {
       defaultPath: path.join(app.getPath('downloads'), suggested),
     });
 
+    // La boîte de dialogue native vole le focus : on le rend à la fenêtre
+    // pour que les champs texte restent cliquables ensuite.
+    refocusWindow(parent);
+
     if (!savePath) {
       item.cancel();
       return;
@@ -198,6 +221,7 @@ function setupSessionDownloads() {
     item.setSavePath(savePath);
 
     item.once('done', (e, state) => {
+      refocusWindow(parent);
       if (state === 'completed') {
         shell.openPath(savePath).catch(() => {});
       }
@@ -233,6 +257,13 @@ function createWindow() {
   // Sans ce câblage, Electron bloque window.open (factures/reçus/bulletins) et
   // n'ouvre aucune boîte d'enregistrement pour les blobs jsPDF / fichiers.
   setupDownloadsAndPopups(win);
+
+  // Filet de sécurité : à chaque navigation interne de l'app (React Router —
+  // ex: déconnexion → page de login), on s'assure que le contenu web a bien
+  // le focus, sinon les champs email/mot de passe ne réagissent pas au clic.
+  win.webContents.on('did-navigate-in-page', () => {
+    if (win.isFocused()) win.webContents.focus();
+  });
 
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(LOADING_HTML)}`);
   win.show();
