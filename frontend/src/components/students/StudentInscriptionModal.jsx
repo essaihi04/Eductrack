@@ -4,7 +4,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { inscriptionsApi } from '../../lib/inscriptionsApi';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
 import { printInscriptionFiche } from '../../utils/inscriptionFiche';
-import { MOROCCAN_CITIES, localTodayIso } from '../../utils/moroccanCities';
+import { localTodayIso } from '../../utils/moroccanCities';
+import MoroccanCityInput from '../ui/MoroccanCityInput';
 
 // Fiche d'inscription « Nouvel élève » — reprise à l'identique du formulaire
 // admin (photo, parents P1/P2, scolarité, documents, médical, identifiants),
@@ -313,16 +314,12 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
                 <div><Label>Date de naissance</Label><input type="date" className={inputCls} value={formData.dateOfBirth} onChange={setF('dateOfBirth')} /></div>
                 <div>
                   <Label>Lieu de naissance</Label>
-                  <input
+                  <MoroccanCityInput
+                    id="birth-place-finance"
                     className={inputCls}
-                    list="moroccan-birth-cities-finance"
                     value={formData.birthPlace}
-                    onChange={setF('birthPlace')}
-                    placeholder="Choisir une ville ou saisir manuellement"
+                    onChange={(birthPlace) => setFormData((form) => ({ ...form, birthPlace }))}
                   />
-                  <datalist id="moroccan-birth-cities-finance">
-                    {MOROCCAN_CITIES.map((city) => <option key={city} value={city} />)}
-                  </datalist>
                 </div>
                 <div><Label>Téléphone</Label><input className={inputCls} value={formData.phone} onChange={setF('phone')} /></div>
                 <div><Label>CIN</Label><input className={inputCls} value={formData.cin} onChange={setF('cin')} /></div>

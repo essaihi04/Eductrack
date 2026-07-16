@@ -10,13 +10,14 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
-import { MOROCCAN_CITIES, localTodayIso } from '../../utils/moroccanCities';
+import { localTodayIso } from '../../utils/moroccanCities';
 import { DOSSIER_DOC_KEYS } from '../../utils/dossierDocuments';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { nextLevel, allLevelOptions, baseLevel } from '../../lib/levelProgression';
 import { toSlashYear, toDashYear, sameYear } from '../../lib/schoolYear';
 import StudentNotesModal from '../../components/StudentNotesModal';
 import ReinscriptionFlow from '../../components/students/ReinscriptionFlow';
+import MoroccanCityInput from '../../components/ui/MoroccanCityInput';
 
 const StudentsPage = () => {
   const { profile, availableSchools } = useAuth();
@@ -1560,16 +1561,12 @@ L'administration de ${schoolName}`;
                     <div><Label>Date de naissance</Label><input type="date" className={inputCls} value={formData.dateOfBirth} onChange={setF('dateOfBirth')} /></div>
                     <div>
                       <Label>Lieu de naissance</Label>
-                      <input
+                      <MoroccanCityInput
+                        id="birth-place-admin"
                         className={inputCls}
-                        list="moroccan-birth-cities-admin"
                         value={formData.birthPlace}
-                        onChange={setF('birthPlace')}
-                        placeholder="Choisir une ville ou saisir manuellement"
+                        onChange={(birthPlace) => setFormData((form) => ({ ...form, birthPlace }))}
                       />
-                      <datalist id="moroccan-birth-cities-admin">
-                        {MOROCCAN_CITIES.map((city) => <option key={city} value={city} />)}
-                      </datalist>
                     </div>
                     <div><Label>Téléphone</Label><input className={inputCls} value={formData.phone} onChange={setF('phone')} /></div>
                     <div><Label>CIN</Label><input className={inputCls} value={formData.cin} onChange={setF('cin')} /></div>
