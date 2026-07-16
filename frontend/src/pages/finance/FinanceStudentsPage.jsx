@@ -508,8 +508,8 @@ export default function FinanceStudentsPage() {
 }
 
 function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear }) {
-  const [plan, setPlan] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     academic_year: defaultYear || getCurrentYear(),
     template_id: '',
@@ -546,7 +546,6 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
       const data = await financeApi.getStudentPlan(student.id, form.academic_year);
       const existing = data.plans?.[0];
       if (existing) {
-        setPlan(existing);
         // Récupération automatique : si un modèle est encore attaché, on importe
         // ses frais comme items personnalisés et on détache le modèle, pour
         // permettre de modifier/supprimer chaque frais par élève.
@@ -590,22 +589,59 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
   };
 
   const save = async () => {
+    const unnamedCustomFee = form.custom_items.some(
+      (item) => item.category === 'other' && !String(item.name || '').trim()
+    );
+    if (unnamedCustomFee) {
+      alert('Veuillez saisir le nom de chaque frais personnalisé.');
+      return;
+    }
+
+    const invalidAmount = form.custom_items.some((item) => Number(item.amount) < 0);
+    if (invalidAmount) {
+      alert('Le montant d’un frais ne peut pas être négatif.');
+      return;
+    }
+
+    setSaving(true);
     try {
-      await financeApi.saveStudentPlan(student.id, form);
+      await financeApi.saveStudentPlan(student.id, {
+        ...form,
+        custom_items: form.custom_items.map((item) => ({
+          ...item,
+          name: String(item.name || '').trim(),
+        })),
+      });
       onSaved();
-    } catch (e) { alert('Erreur: ' + e.message); }
+    } catch (e) {
+      alert('Erreur: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const addItem = () => setForm({
     ...form,
     custom_items: [...form.custom_items, {
-      category: 'other', name: '', amount: 0, recurrence: 'one_time', due_month: null, enabled: true
+      category: 'tuition', name: CATEGORY_LABELS.tuition || 'Scolarité', amount: 0,
+      recurrence: 'monthly', due_month: null, start_month: 9, end_month: 6, enabled: true
+    }]
+  });
+
+  const addCustomItem = () => setForm({
+    ...form,
+    custom_items: [...form.custom_items, {
+      category: 'other', name: '', amount: 0, recurrence: 'one_time',
+      due_month: null, start_month: 9, end_month: 6, enabled: true
     }]
   });
 
   const updateItem = (idx, field, value) => {
     const items = [...form.custom_items];
     items[idx] = { ...items[idx], [field]: value };
+    if (field === 'category') {
+      items[idx].name = value === 'other' ? '' : (CATEGORY_LABELS[value] || value);
+    }
     setForm({ ...form, custom_items: items });
   };
 
@@ -650,7 +686,9 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Annuler</Button>
-          <Button color="green" icon={Save} onClick={save}>Enregistrer</Button>
+          <Button color="green" icon={Save} onClick={save} disabled={saving}>
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </Button>
         </>
       }>
         <p className="text-sm text-gray-500 -mt-1">{student.first_name} {student.last_name} · {student.classes?.name}</p>
@@ -765,26 +803,41 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
             <div className="border-t border-gray-200 pt-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-gray-800">Frais de l'élève</h3>
-                <button onClick={addItem} className="flex items-center gap-1 px-3 py-1 text-xs bg-blue-50 text-blue-700 rounded-lg">
-                  <Plus className="w-3 h-3" /> Ajouter
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={addItem}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
+                    <Plus className="w-3 h-3" /> Ajouter un service
+                  </button>
+                  <button type="button" onClick={addCustomItem}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100">
+                    <Plus className="w-3 h-3" /> Frais personnalisé
+                  </button>
+                </div>
               </div>
+              <p className="mb-3 text-xs text-gray-500">
+                Un frais personnalisé est enregistré dans le plan de l’élève avec le nom saisi manuellement.
+              </p>
               <div className="space-y-2">
                 {form.custom_items.map((it, idx) => (
                   <div key={idx} className="grid grid-cols-12 gap-2 p-2 bg-gray-50 rounded-lg">
                     <select value={it.category} onChange={e => updateItem(idx, 'category', e.target.value)}
                       className="col-span-3 px-2 py-1 text-sm border rounded">
-                      {Object.entries(CATEGORY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                      {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                        <option key={k} value={k}>{k === 'other' ? 'Autre (personnalisé)' : v}</option>
+                      ))}
                     </select>
                     <input type="text" value={it.name} onChange={e => updateItem(idx, 'name', e.target.value)}
-                      placeholder="Nom" className="col-span-4 px-2 py-1 text-sm border rounded" />
+                      autoFocus={it.category === 'other' && !it.name}
+                      placeholder={it.category === 'other' ? 'Nom personnalisé du frais *' : 'Nom du frais'}
+                      className={`col-span-4 px-2 py-1 text-sm border rounded ${it.category === 'other' ? 'border-amber-300 bg-amber-50/50' : ''}`} />
                     <input type="number" value={it.amount} onChange={e => updateItem(idx, 'amount', Number(e.target.value))}
+                      min="0" step="0.01" inputMode="decimal"
                       placeholder="Montant" className="col-span-2 px-2 py-1 text-sm border rounded" />
                     <select value={it.recurrence} onChange={e => updateItem(idx, 'recurrence', e.target.value)}
                       className="col-span-2 px-2 py-1 text-sm border rounded">
                       {Object.entries(RECURRENCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
-                    <button onClick={() => removeItem(idx)} className="col-span-1 p-1 hover:bg-red-100 rounded">
+                    <button type="button" onClick={() => removeItem(idx)} className="col-span-1 p-1 hover:bg-red-100 rounded">
                       <X className="w-4 h-4 text-red-500 mx-auto" />
                     </button>
                   </div>

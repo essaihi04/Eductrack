@@ -565,6 +565,61 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
     // Colonne UUID : une chaîne vide doit devenir NULL (sinon erreur / non détaché)
     const templateIdValue = template_id ? template_id : null;
 
+    // Les lignes du formulaire sont persistées dans student_fee_plan_items.
+    // Le champ `name` contient le libellé saisi librement lorsque la catégorie
+    // vaut `other`. Tout est validé avant de toucher aux anciennes lignes.
+    const allowedCategories = new Set([
+      'registration', 'tuition', 'transport', 'canteen',
+      'insurance', 'activity', 'supplies', 'uniform', 'other',
+    ]);
+    const allowedRecurrences = new Set(['one_time', 'monthly', 'quarterly', 'annual']);
+    const validationError = (message) => Object.assign(new Error(message), { httpStatus: 400 });
+    let normalizedItems = null;
+    if (Array.isArray(custom_items)) {
+      normalizedItems = custom_items.map((item, index) => {
+        const category = String(item?.category || '').trim();
+        const name = String(item?.name || '').trim();
+        const recurrence = String(item?.recurrence || 'one_time').trim();
+        const amount = Number(item?.amount);
+
+        if (!allowedCategories.has(category)) {
+          throw validationError(`Catégorie invalide pour le frais n°${index + 1}`);
+        }
+        if (!name) {
+          throw validationError(`Nom requis pour le frais n°${index + 1}`);
+        }
+        if (!allowedRecurrences.has(recurrence)) {
+          throw validationError(`Récurrence invalide pour le frais « ${name} »`);
+        }
+        if (!Number.isFinite(amount) || amount < 0) {
+          throw validationError(`Montant invalide pour le frais « ${name} »`);
+        }
+
+        const dueMonth = item?.due_month == null || item.due_month === '' ? null : Number(item.due_month);
+        const startMonth = item?.start_month == null || item.start_month === '' ? 9 : Number(item.start_month);
+        const endMonth = item?.end_month == null || item.end_month === '' ? 6 : Number(item.end_month);
+        if (dueMonth != null && (!Number.isInteger(dueMonth) || dueMonth < 1 || dueMonth > 12)) {
+          throw validationError(`Mois d'échéance invalide pour le frais « ${name} »`);
+        }
+        if (![startMonth, endMonth].every(month => Number.isInteger(month) && month >= 1 && month <= 12)) {
+          throw validationError(`Période invalide pour le frais « ${name} »`);
+        }
+
+        return {
+          category,
+          name,
+          amount,
+          recurrence,
+          due_month: dueMonth,
+          start_month: startMonth,
+          end_month: endMonth,
+          is_optional: !!item.is_optional,
+          enabled: item.enabled !== false,
+          sort_order: index,
+        };
+      });
+    }
+
     // Upsert
     const { data: existing } = await supabaseAdmin
       .from('student_fee_plans')
@@ -576,7 +631,7 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
     let planId;
     if (existing) {
       planId = existing.id;
-      await supabaseAdmin
+      const { error: updateError } = await supabaseAdmin
         .from('student_fee_plans')
         .update({
           template_id: templateIdValue, sibling_discount_percent: sibling_discount_percent || 0,
@@ -589,6 +644,7 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
           custom_notes, updated_at: new Date().toISOString()
         })
         .eq('id', planId);
+      if (updateError) throw updateError;
     } else {
       const { data: newPlan, error } = await supabaseAdmin
         .from('student_fee_plans')
@@ -614,23 +670,39 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
     }
 
     // Items personnalisés
-    if (Array.isArray(custom_items)) {
-      await supabaseAdmin.from('student_fee_plan_items').delete().eq('plan_id', planId);
-      if (custom_items.length > 0) {
-        const toInsert = custom_items.map((it, idx) => ({
-          plan_id: planId,
-          category: it.category,
-          name: it.name,
-          amount: Number(it.amount) || 0,
-          recurrence: it.recurrence || 'one_time',
-          due_month: it.due_month || null,
-          start_month: it.start_month || 9,
-          end_month: it.end_month || 6,
-          is_optional: !!it.is_optional,
-          enabled: it.enabled !== false,
-          sort_order: idx
-        }));
-        await supabaseAdmin.from('student_fee_plan_items').insert(toInsert);
+    if (normalizedItems) {
+      const { data: previousItems, error: previousItemsError } = await supabaseAdmin
+        .from('student_fee_plan_items')
+        .select('id')
+        .eq('plan_id', planId);
+      if (previousItemsError) throw previousItemsError;
+
+      // Insérer d'abord : en cas d'erreur de schéma ou de validation SQL, les
+      // anciennes lignes du plan restent disponibles.
+      let insertedIds = [];
+      if (normalizedItems.length > 0) {
+        const { data: inserted, error: insertItemsError } = await supabaseAdmin
+          .from('student_fee_plan_items')
+          .insert(normalizedItems.map(item => ({ ...item, plan_id: planId })))
+          .select('id');
+        if (insertItemsError) throw insertItemsError;
+        insertedIds = (inserted || []).map(item => item.id);
+      }
+
+      const previousIds = (previousItems || []).map(item => item.id);
+      if (previousIds.length > 0) {
+        const { error: deleteItemsError } = await supabaseAdmin
+          .from('student_fee_plan_items')
+          .delete()
+          .in('id', previousIds);
+        if (deleteItemsError) {
+          // Tentative de retour arrière si la suppression des anciennes lignes
+          // échoue après l'insertion des nouvelles.
+          if (insertedIds.length > 0) {
+            await supabaseAdmin.from('student_fee_plan_items').delete().in('id', insertedIds);
+          }
+          throw deleteItemsError;
+        }
       }
     }
 
@@ -642,7 +714,11 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
     res.json({ success: true, plan: full });
   } catch (error) {
     console.error('Erreur save student plan:', error);
-    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+    const httpStatus = Number.isInteger(error.httpStatus) ? error.httpStatus : 500;
+    res.status(httpStatus).json({
+      error: httpStatus === 400 ? 'Plan de frais invalide' : 'Erreur serveur',
+      details: error.message,
+    });
   }
 });
 
