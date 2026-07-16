@@ -2,26 +2,26 @@
  * ╔══════════════════════════════════════════════════════════════════════╗
  * ║  INTERRUPTEUR GLOBAL DES ENVOIS WHATSAPP (notifications sortantes)    ║
  * ╠══════════════════════════════════════════════════════════════════════╣
- * ║  DÉSACTIVÉ pour le moment : tous les envois WhatsApp initiés par      ║
- * ║  l'application (absences, notes, factures, devoirs, communications,   ║
- * ║  rapports quotidiens, transport, approbations, envois manuels du hub) ║
- * ║  sont bloqués au niveau du provider (services/whatsapp/index.js).     ║
+ * ║  ACTIVÉ : tous les envois WhatsApp initiés par l'application          ║
+ * ║  (absences, notes, factures, devoirs, communications, rapports        ║
+ * ║  quotidiens, transport, approbations, envois manuels du hub) passent. ║
+ * ║  Pour COUPER : WA_OUTBOUND=off en env, ou DEFAULT_ENABLED=false.      ║
  * ║                                                                        ║
  * ║  ✅ Le CHATBOT reste fonctionnel : toute réponse envoyée pendant le    ║
  * ║  traitement d'un message ENTRANT (parent/réceptionniste qui écrit au  ║
  * ║  numéro de l'école) passe toujours — le contexte est propagé par      ║
  * ║  AsyncLocalStorage depuis les handlers d'entrée du chatbot.           ║
  * ║                                                                        ║
- * ║  ── POUR RÉACTIVER LES NOTIFICATIONS ──                                ║
- * ║  Option 1 : variable d'environnement  WA_OUTBOUND=on  (puis redémarrer)║
- * ║  Option 2 : passer DEFAULT_ENABLED à true ci-dessous                   ║
+ * ║  ── POUR COUPER LES NOTIFICATIONS ──                                   ║
+ * ║  Option 1 : variable d'environnement  WA_OUTBOUND=off (puis redémarrer)║
+ * ║  Option 2 : passer DEFAULT_ENABLED à false ci-dessous                  ║
  * ╚══════════════════════════════════════════════════════════════════════╝
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
 
-// ← Interrupteur : remettre à true pour réactiver toutes les notifications.
-const DEFAULT_ENABLED = false;
+// ← Interrupteur : mettre à false pour couper toutes les notifications.
+const DEFAULT_ENABLED = true;
 
 export const WA_OUTBOUND_ENABLED =
   process.env.WA_OUTBOUND === 'on' ? true
