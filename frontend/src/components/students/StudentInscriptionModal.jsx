@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { inscriptionsApi } from '../../lib/inscriptionsApi';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
 import { printInscriptionFiche } from '../../utils/inscriptionFiche';
+import { MOROCCAN_CITIES, localTodayIso } from '../../utils/moroccanCities';
 
 // Fiche d'inscription « Nouvel élève » — reprise à l'identique du formulaire
 // admin (photo, parents P1/P2, scolarité, documents, médical, identifiants),
@@ -30,6 +31,8 @@ const emptyForm = {
   parent1: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' },
   parent2: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'mere', maritalStatus: '' },
 };
+
+const newStudentForm = () => ({ ...emptyForm, entryDate: localTodayIso() });
 
 // Pré-remplit un bloc parent du formulaire depuis un parent renvoyé par
 // GET /inscriptions/students/:id (snake_case).
@@ -87,7 +90,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
   const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const isEdit = !!student;
 
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, setFormData] = useState(newStudentForm);
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -98,7 +101,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
   // À l'ouverture : formulaire vierge (création) ou pré-rempli (édition).
   useEffect(() => {
     if (!open) return;
-    setFormData(student ? formFromStudent(student) : emptyForm);
+    setFormData(student ? formFromStudent(student) : newStudentForm());
     setPhotoFile(null);
     setPhotoPreview(student?.avatar_url || null);
     setError('');
@@ -123,7 +126,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
   };
 
   const resetAll = () => {
-    setFormData(student ? formFromStudent(student) : emptyForm);
+    setFormData(student ? formFromStudent(student) : newStudentForm());
     setPhotoFile(null);
     setPhotoPreview(student?.avatar_url || null);
     setError('');
@@ -217,9 +220,9 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={close}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl z-10">
+    <div className="fixed inset-0 bg-white z-50 overflow-hidden" onClick={close}>
+      <div className="bg-white w-full h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b bg-white z-10 shrink-0">
           <div className="flex items-center gap-2">
             {isEdit ? <Pencil className="w-5 h-5 text-blue-600" /> : <UserPlus className="w-5 h-5 text-blue-600" />}
             <h3 className="font-semibold">
@@ -234,7 +237,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
 
         {created ? (
           /* ── Écran de confirmation : identifiants + fiche d'inscription ── */
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-4 overflow-y-auto flex-1">
             <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
               <Check className="w-4 h-4 mt-0.5 shrink-0" />
               <span>
@@ -268,7 +271,7 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
             </div>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-4 space-y-5 max-h-[78vh] overflow-y-auto">
+          <form onSubmit={handleSubmit} className="p-4 space-y-5 overflow-y-auto flex-1 min-h-0">
             <div className="sticky top-0 z-20 -mx-4 px-4 py-2 -mt-4 mb-1 flex flex-wrap gap-2 border-b border-gray-200 bg-white/95 backdrop-blur-sm">
               <button type="submit" disabled={submitting} className="flex-1 min-w-[140px] px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
                 {submitting ? 'Enregistrement…' : isEdit ? 'Enregistrer les modifications' : 'Valider'}
@@ -308,7 +311,19 @@ export default function StudentInscriptionModal({ open, onClose, classes = [], l
                   </select>
                 </div>
                 <div><Label>Date de naissance</Label><input type="date" className={inputCls} value={formData.dateOfBirth} onChange={setF('dateOfBirth')} /></div>
-                <div><Label>Lieu de naissance</Label><input className={inputCls} value={formData.birthPlace} onChange={setF('birthPlace')} /></div>
+                <div>
+                  <Label>Lieu de naissance</Label>
+                  <input
+                    className={inputCls}
+                    list="moroccan-birth-cities-finance"
+                    value={formData.birthPlace}
+                    onChange={setF('birthPlace')}
+                    placeholder="Choisir une ville ou saisir manuellement"
+                  />
+                  <datalist id="moroccan-birth-cities-finance">
+                    {MOROCCAN_CITIES.map((city) => <option key={city} value={city} />)}
+                  </datalist>
+                </div>
                 <div><Label>Téléphone</Label><input className={inputCls} value={formData.phone} onChange={setF('phone')} /></div>
                 <div><Label>CIN</Label><input className={inputCls} value={formData.cin} onChange={setF('cin')} /></div>
                 <div><Label>Code Massar</Label><input className={inputCls} value={formData.massarCode} onChange={setF('massarCode')} /></div>

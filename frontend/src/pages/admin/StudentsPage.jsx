@@ -10,6 +10,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { generateStudentEmail, generatePassword } from '../../utils/studentUtils';
+import { MOROCCAN_CITIES, localTodayIso } from '../../utils/moroccanCities';
 import { DOSSIER_DOC_KEYS } from '../../utils/dossierDocuments';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { nextLevel, allLevelOptions, baseLevel } from '../../lib/levelProgression';
@@ -97,7 +98,7 @@ const StudentsPage = () => {
     parent1: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' },
     parent2: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'mere', maritalStatus: '' },
   };
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, setFormData] = useState(() => ({ ...emptyForm, entryDate: localTodayIso() }));
   const [editingStudent, setEditingStudent] = useState(null); // élève en cours d'édition (null = création)
   const [attachParent, setAttachParent] = useState({ open: false, lastName: '', firstName: '', phone: '', email: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' });
   const [photoFile, setPhotoFile] = useState(null);
@@ -484,7 +485,7 @@ const StudentsPage = () => {
   };
 
   const resetForm = () => {
-    setFormData(emptyForm);
+    setFormData({ ...emptyForm, entryDate: localTodayIso() });
     setEditingStudent(null);
     setAttachParent({ open: false, lastName: '', firstName: '', phone: '', email: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' });
     setPhotoFile(null);
@@ -1502,9 +1503,9 @@ L'administration de ${schoolName}`;
           );
         };
         return (
-          <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => { if (!submitting) { resetForm(); setShowForm(false); } }}>
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl my-6" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white rounded-t-xl z-10">
+          <div className="fixed inset-0 bg-white z-50 overflow-hidden" onClick={() => { if (!submitting) { resetForm(); setShowForm(false); } }}>
+            <div className="bg-white w-full h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b bg-white z-10 shrink-0">
                 <div className="flex items-center gap-2">
                   {editingStudent ? <Edit2 className="w-5 h-5 text-blue-600" /> : <UserPlus className="w-5 h-5 text-blue-600" />}
                   <h3 className="font-semibold">
@@ -1514,7 +1515,7 @@ L'administration de ${schoolName}`;
                 <button onClick={() => { if (!submitting) { resetForm(); setShowForm(false); } }} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
               </div>
 
-              <form onSubmit={handleSubmit} className="p-4 space-y-5 max-h-[78vh] overflow-y-auto">
+              <form onSubmit={handleSubmit} className="p-4 space-y-5 overflow-y-auto flex-1 min-h-0">
                 <div className="sticky top-0 z-20 -mx-4 px-4 py-2 -mt-4 mb-1 flex flex-wrap gap-2 border-b border-gray-200 bg-white/95 backdrop-blur-sm">
                   <button type="submit" disabled={submitting} className="flex-1 min-w-[140px] px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
                     {submitting ? 'Enregistrement…' : (editingStudent ? 'Enregistrer' : 'Valider')}
@@ -1557,7 +1558,19 @@ L'administration de ${schoolName}`;
                       </select>
                     </div>
                     <div><Label>Date de naissance</Label><input type="date" className={inputCls} value={formData.dateOfBirth} onChange={setF('dateOfBirth')} /></div>
-                    <div><Label>Lieu de naissance</Label><input className={inputCls} value={formData.birthPlace} onChange={setF('birthPlace')} /></div>
+                    <div>
+                      <Label>Lieu de naissance</Label>
+                      <input
+                        className={inputCls}
+                        list="moroccan-birth-cities-admin"
+                        value={formData.birthPlace}
+                        onChange={setF('birthPlace')}
+                        placeholder="Choisir une ville ou saisir manuellement"
+                      />
+                      <datalist id="moroccan-birth-cities-admin">
+                        {MOROCCAN_CITIES.map((city) => <option key={city} value={city} />)}
+                      </datalist>
+                    </div>
                     <div><Label>Téléphone</Label><input className={inputCls} value={formData.phone} onChange={setF('phone')} /></div>
                     <div><Label>CIN</Label><input className={inputCls} value={formData.cin} onChange={setF('cin')} /></div>
                     <div><Label>Code Massar</Label><input className={inputCls} value={formData.massarCode} onChange={setF('massarCode')} /></div>
