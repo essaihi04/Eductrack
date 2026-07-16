@@ -8,6 +8,11 @@ import { Input } from '../components/ui/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import SchoolSplash, { readSplashCache } from '../components/SchoolSplash';
 
+// App desktop Electron : on donne le focus au champ email dès l'arrivée sur la
+// page (ex: après déconnexion) — le focus clavier programmatique fonctionne
+// même quand la fenêtre a du mal à redonner le focus au clic.
+const isDesktopApp = /electron/i.test(navigator.userAgent);
+
 /** Page d'accueil selon le rôle : admins et finance passent par le choix d'année. */
 const homeFor = (role) => {
   const yearSelectRoles = ['admin', 'school_admin', 'pedagogical_director', 'finance_manager'];
@@ -41,7 +46,9 @@ const Login = () => {
       await signIn(email, password);
       setSplash(true);
     } catch (err) {
-      setError('Email ou mot de passe incorrect');
+      // Message précis quand la cause n'est pas le mot de passe (limite de
+      // requêtes 429, réseau bloqué…) — sinon on induit l'utilisateur en erreur.
+      setError(err?.friendlyMessage || 'Email ou mot de passe incorrect');
       console.error('Login error:', err);
       setLoading(false);
     }
@@ -115,6 +122,7 @@ const Login = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-10"
+                    autoFocus={isDesktopApp}
                     required
                   />
                 </div>

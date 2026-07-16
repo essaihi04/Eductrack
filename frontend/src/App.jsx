@@ -109,10 +109,30 @@ const isInstalledApp = () =>
   Capacitor?.isNativePlatform?.() === true || /electron/i.test(navigator.userAgent);
 
 const ProtectedRoute = ({ children }) => {
-  const { user, profile, school, loading } = useAuth();
+  const { user, profile, school, loading, profileError, refreshProfile } = useAuth();
   // Splash « logo de l'école » uniquement au chargement initial de la page
   // (rechargement / accès direct) : jamais lors des navigations internes.
   const [splashDone, setSplashDone] = useState(() => !loading);
+
+  // Utilisateur connecté mais profil impossible à charger (serveur saturé,
+  // réseau) : écran d'attente avec réessai, plutôt qu'une fausse déconnexion.
+  if (!loading && user && !profile && profileError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
+        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-8 text-center space-y-4">
+          <div className="text-4xl">⏳</div>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Connexion au serveur interrompue</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{profileError}</p>
+          <button
+            onClick={() => refreshProfile()}
+            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors"
+          >
+            Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Rediriger vers login si pas d'utilisateur OU pas de profil
   if (!loading && (!user || !profile)) {

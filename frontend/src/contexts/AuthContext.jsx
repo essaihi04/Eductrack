@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase, supabaseUrl } from '../lib/supabase';
 import { cacheSplashSchool } from '../components/SchoolSplash';
 import { ensureNativePushRegistered, disableNativePush } from '../lib/nativePush';
@@ -8,6 +8,17 @@ const AuthContext = createContext({});
 const classifyAuthError = async (error) => {
   const message = error?.message || '';
   const name = error?.name || '';
+
+  // Limite de requêtes Supabase atteinte (comptée par adresse IP : un Wi-Fi
+  // d'école partagé par plusieurs comptes peut la dépasser). Les identifiants
+  // ne sont pas en cause — il faut juste patienter.
+  if (error?.status === 429 || /rate limit/i.test(message)) {
+    return {
+      ...error,
+      friendlyMessage: 'Trop de tentatives de connexion depuis ce réseau. Patientez 5 à 10 minutes puis réessayez — vos identifiants ne sont pas en cause.',
+      errorCategory: 'rate_limited',
+    };
+  }
 
   if (
     name === 'AuthRetryableFetchError'
@@ -52,19 +63,28 @@ export const useAuth = () => {
   return context;
 };
 
+// Erreurs passagères (limite de requêtes, serveur indisponible) : on réessaie
+// au lieu d'éjecter l'utilisateur vers le login.
+const TRANSIENT_STATUSES = [429, 500, 502, 503, 504];
+const RETRY_DELAYS_MS = [2000, 5000, 10000];
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [school, setSchool] = useState(null);
   const [availableSchools, setAvailableSchools] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState(null);
+  // Numéro de séquence : si un nouveau fetchProfile démarre (ex: changement de
+  // session), les tentatives de l'ancien s'arrêtent au lieu d'écraser l'état.
+  const fetchSeq = useRef(0);
 
   useEffect(() => {
     // Vérifier la session active
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.access_token);
       } else {
         setLoading(false);
       }
@@ -74,9 +94,10 @@ export const AuthProvider = ({ children }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        fetchProfile(session.user.id, session.access_token);
       } else {
         setProfile(null);
+        setProfileError(null);
         setLoading(false);
       }
     });
@@ -84,38 +105,100 @@ export const AuthProvider = ({ children }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchProfile = async (userId) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('No session token available');
-      }
+  const fetchProfile = async (_userId, accessToken = null) => {
+    const seq = ++fetchSeq.current;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    let token = accessToken;
+    let triedRefresh = false;
 
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      const response = await fetch(`${apiUrl}/api/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch profile: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      setProfile(data.profile);
-      const activeSchool = data.profile?.school || data.school || null;
-      setSchool(activeSchool);
-      setAvailableSchools(data.available_schools || []);
-      // Mémorise le logo de l'école pour le splash de bienvenue : au prochain
-      // chargement, l'animation démarre avant même que le profil ne soit chargé.
-      cacheSplashSchool(data.profile?.email, activeSchool);
-      // App installée : rafraîchit le jeton push natif (sans pop-up) si déjà autorisé.
-      ensureNativePushRegistered();
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-    } finally {
+    const done = (fn) => {
+      if (seq !== fetchSeq.current) return true;
+      if (fn) fn();
       setLoading(false);
+      return true;
+    };
+
+    for (let attempt = 0; ; attempt++) {
+      try {
+        if (!token) {
+          const { data: { session } } = await supabase.auth.getSession();
+          token = session?.access_token;
+        }
+        if (seq !== fetchSeq.current) return;
+        if (!token) {
+          // Session pas (encore) disponible — souvent un rafraîchissement
+          // bloqué en 429 : on retente, ce n'est pas une déconnexion.
+          const err = new Error('No session token available');
+          err.transient = true;
+          throw err;
+        }
+
+        const response = await fetch(`${apiUrl}/api/auth/me`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (seq !== fetchSeq.current) return;
+
+        if (response.status === 401 || response.status === 403) {
+          // Jeton refusé par le backend (cas typique : session périmée restée
+          // dans le localStorage d'un PC). Une seule fois : forcer un vrai
+          // rafraîchissement auprès de Supabase.
+          if (!triedRefresh) {
+            triedRefresh = true;
+            const { data, error } = await supabase.auth.refreshSession();
+            if (!error && data?.session?.access_token) {
+              token = data.session.access_token;
+              continue;
+            }
+          }
+          // Session réellement morte : on purge proprement pour repartir sur
+          // un login sain, plutôt que de boucler sur des 401.
+          try { await supabase.auth.signOut({ scope: 'local' }); } catch (_) { /* ignore */ }
+          done(() => {
+            setUser(null);
+            setProfile(null);
+            setSchool(null);
+            setAvailableSchools([]);
+            setProfileError(null);
+          });
+          return;
+        }
+
+        if (!response.ok) {
+          const err = new Error(`Failed to fetch profile: ${response.status}`);
+          err.transient = TRANSIENT_STATUSES.includes(response.status);
+          throw err;
+        }
+
+        const data = await response.json();
+        if (seq !== fetchSeq.current) return;
+        done(() => {
+          setProfile(data.profile);
+          const activeSchool = data.profile?.school || data.school || null;
+          setSchool(activeSchool);
+          setAvailableSchools(data.available_schools || []);
+          setProfileError(null);
+          // Mémorise le logo de l'école pour le splash de bienvenue : au prochain
+          // chargement, l'animation démarre avant même que le profil ne soit chargé.
+          cacheSplashSchool(data.profile?.email, activeSchool);
+          // App installée : rafraîchit le jeton push natif (sans pop-up) si déjà autorisé.
+          ensureNativePushRegistered();
+        });
+        return;
+      } catch (error) {
+        if (seq !== fetchSeq.current) return;
+        // Un échec réseau de fetch() est un TypeError : passager lui aussi.
+        const transient = error.transient === true || error instanceof TypeError;
+        if (transient && attempt < RETRY_DELAYS_MS.length) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+          token = null; // relire la session au prochain essai
+          continue;
+        }
+        console.error('Error fetching profile:', error);
+        done(() => {
+          setProfileError('Le serveur est momentanément saturé ou injoignable. Patientez quelques instants puis réessayez — inutile de retaper vos identifiants.');
+        });
+        return;
+      }
     }
   };
 
@@ -205,13 +288,15 @@ export const AuthProvider = ({ children }) => {
     setProfile(null);
     setSchool(null);
     setAvailableSchools([]);
+    setProfileError(null);
   };
 
   // Recharge le profil (et l'école associée) — utilisé après une mise à jour
-  // côté serveur qui doit se refléter dans l'UI (ex : changement de logo).
+  // côté serveur qui doit se refléter dans l'UI (ex : changement de logo),
+  // ou pour réessayer après une erreur passagère (bouton « Réessayer »).
   const refreshProfile = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) await fetchProfile(session.user.id);
+    setProfileError(null);
+    await fetchProfile();
   };
 
   const value = {
@@ -221,6 +306,7 @@ export const AuthProvider = ({ children }) => {
     availableSchools,
     switchSchool,
     loading,
+    profileError,
     signIn,
     signUp,
     signOut,
