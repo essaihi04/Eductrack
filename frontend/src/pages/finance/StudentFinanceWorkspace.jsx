@@ -40,12 +40,44 @@ const MONTH_BORDER = {
 // Libellé lisible d'un service (Scolarité, Transport…) à partir d'une ligne.
 const serviceLabel = (svc) => svc?.label || (svc?.category ? (CATEGORY_LABELS[svc.category] || svc.category) : 'Mensualité');
 
+// Première année d'une chaîne « 2026/2027 » ou « 2026-2027 ».
+const firstYearNum = (y) => {
+  const a = parseInt(String(y || '').split(/[/\-]/)[0], 10);
+  return Number.isNaN(a) ? null : a;
+};
+
 export default function StudentFinanceWorkspace({ student, allStudents = [], academicYear, onClose, onChanged, onOpenPlan, initialTab = 'collect', headerActions = null }) {
   const [tab, setTab] = useState(initialTab);
 
   // Si l'utilisateur ouvre le même espace via un autre bouton (ex : Historique),
   // on suit l'onglet demandé.
   useEffect(() => { setTab(initialTab); }, [initialTab, student.id]);
+
+  // ── Onglets d'années : consulter (et encaisser) les IMPAYÉS des années
+  // précédentes sans quitter la page. Un badge rouge affiche le reste dû de
+  // chaque année ; ✓ si l'année est soldée. L'année active vient de l'app.
+  const [viewYear, setViewYear] = useState(academicYear);
+  useEffect(() => { setViewYear(academicYear); }, [academicYear, student.id]);
+  const yearTabs = useMemo(() => {
+    const a = firstYearNum(academicYear);
+    if (a === null) return [academicYear];
+    const sep = String(academicYear).includes('-') ? '-' : '/';
+    return [`${a - 1}${sep}${a}`, `${a}${sep}${a + 1}`, `${a + 1}${sep}${a + 2}`];
+  }, [academicYear]);
+  const [yearDues, setYearDues] = useState({}); // année -> reste dû (null = pas de plan)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(yearTabs.map(async (y) => {
+        try {
+          const d = await financeApi.getMonthlyServicesStatus(student.id, y);
+          return [y, d?.plan_exists ? Number(d.summary?.remaining_total || 0) : null];
+        } catch { return [y, null]; }
+      }));
+      if (!cancelled) setYearDues(Object.fromEntries(entries));
+    })();
+    return () => { cancelled = true; };
+  }, [student.id, yearTabs]);
 
   return (
     <div className="space-y-4">
@@ -60,7 +92,7 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
           <div>
             <h1 className="text-xl font-bold text-gray-900">Finance — {fullName(student)}</h1>
             <p className="text-sm text-gray-500 flex items-center gap-2">
-              <CreditCard className="w-4 h-4" /> {student.classes?.name || '—'} · {academicYear}
+              <CreditCard className="w-4 h-4" /> {student.classes?.name || '—'} · {viewYear}
             </p>
           </div>
         </div>
@@ -72,25 +104,48 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
         </div>
       </div>
 
-      {/* Onglets */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {[
-          { k: 'collect', label: 'Encaissement', icon: Wallet },
-          { k: 'family', label: 'Famille / groupé', icon: Users },
-          { k: 'history', label: 'Historique', icon: History },
-        ].map(t => (
-          <button key={t.k} onClick={() => setTab(t.k)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.k ? 'border-green-600 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}>
-            <t.icon className="w-4 h-4" /> {t.label}
-          </button>
-        ))}
+      {/* Onglets + années (impayés des années précédentes visibles d'un coup d'œil) */}
+      <div className="flex items-end justify-between gap-2 flex-wrap border-b border-gray-200">
+        <div className="flex gap-1">
+          {[
+            { k: 'collect', label: 'Encaissement', icon: Wallet },
+            { k: 'family', label: 'Famille / groupé', icon: Users },
+            { k: 'history', label: 'Historique', icon: History },
+          ].map(t => (
+            <button key={t.k} onClick={() => setTab(t.k)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t.k ? 'border-green-600 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}>
+              <t.icon className="w-4 h-4" /> {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 pb-1.5">
+          {yearTabs.map(y => {
+            const due = yearDues[y];
+            const active = viewYear === y;
+            return (
+              <button key={y} onClick={() => setViewYear(y)}
+                title={due == null ? 'Pas de plan de frais cette année' : due > 0 ? `Reste dû : ${formatMAD(due)}` : 'Année soldée'}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                  active ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                }`}>
+                {y}
+                {due != null && due > 0 && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${active ? 'bg-white text-red-600' : 'bg-red-100 text-red-700'}`}>
+                    {formatMAD(due)}
+                  </span>
+                )}
+                {due != null && due <= 0 && <span className={active ? 'text-white' : 'text-green-600'}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {tab === 'collect' && <CollectTab student={student} academicYear={academicYear} onChanged={onChanged} />}
-      {tab === 'family' && <FamilyTab student={student} allStudents={allStudents} academicYear={academicYear} onChanged={onChanged} />}
-      {tab === 'history' && <HistoryTab student={student} academicYear={academicYear} onChanged={onChanged} />}
+      {tab === 'collect' && <CollectTab key={`${student.id}:${viewYear}`} student={student} academicYear={viewYear} onChanged={onChanged} />}
+      {tab === 'family' && <FamilyTab key={`${student.id}:${viewYear}`} student={student} allStudents={allStudents} academicYear={viewYear} onChanged={onChanged} />}
+      {tab === 'history' && <HistoryTab key={`${student.id}:${viewYear}`} student={student} academicYear={viewYear} onChanged={onChanged} />}
     </div>
   );
 }
@@ -285,7 +340,9 @@ function MonthsServicesGrid({ months, sel, onToggle, onAmount, compact = false, 
 }
 
 // Liste récapitulative live des lignes sélectionnées (mise à jour à chaque saisie).
-function SelectionList({ items, title = 'Sélection' }) {
+// Avec onAmount, chaque montant est modifiable directement dans le récapitulatif
+// (appliquer une remise au moment de l'encaissement, ligne par ligne).
+function SelectionList({ items, title = 'Sélection', onAmount }) {
   const total = items.reduce((t, i) => t + (Number(i.amount) || 0), 0);
   if (items.length === 0) return null;
   return (
@@ -293,9 +350,15 @@ function SelectionList({ items, title = 'Sélection' }) {
       <div className="px-3 py-1.5 bg-gray-50 text-xs font-semibold text-gray-600">{title} ({items.length})</div>
       <div className="divide-y divide-gray-100 max-h-48 overflow-y-auto">
         {items.map((i, idx) => (
-          <div key={idx} className="flex items-center justify-between px-3 py-1.5 text-sm">
+          <div key={idx} className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm">
             <span className="text-gray-700 truncate">{i.label}</span>
-            <span className="font-medium text-gray-800 tabular-nums">{formatMAD(i.amount)}</span>
+            {onAmount ? (
+              <input type="number" step="0.01" min="0" value={i.amount}
+                onChange={e => onAmount(i, e.target.value)}
+                className="w-24 px-2 py-1 text-sm text-right border border-gray-300 rounded flex-shrink-0" />
+            ) : (
+              <span className="font-medium text-gray-800 tabular-nums">{formatMAD(i.amount)}</span>
+            )}
           </div>
         ))}
       </div>
@@ -303,6 +366,61 @@ function SelectionList({ items, title = 'Sélection' }) {
         <span className="text-gray-700">Total</span>
         <span className="text-green-700">{formatMAD(total)}</span>
       </div>
+    </div>
+  );
+}
+
+// ── Tuiles mensuelles compactes (cockpit) ────────────────────────────────────
+// Une tuile colorée par mois : RESTE à payer en grand + (CA : total du mois).
+// Émeraude = payé, ambre = partiel, rouge = impayé (foncé si en retard),
+// gris = rien à facturer. Un clic sélectionne/désélectionne le mois entier ;
+// les montants restent ajustables ligne par ligne avant l'encaissement.
+function MonthTiles({ months, isMonthChecked, onToggleMonth, onSelectAll, onClear, hasSelection }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-gray-700">Mois de l'année</h3>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onSelectAll}
+            className="text-xs px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium">
+            ⚡ Tous les mois
+          </button>
+          {hasSelection && (
+            <button type="button" onClick={onClear} className="text-xs px-2.5 py-1 rounded-lg text-gray-500 hover:bg-gray-100">
+              Tout désélectionner
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">
+        {(months || []).map(m => {
+          const active = (m.services || []).filter(s => !(s.status === 'excluded' || s.excluded));
+          const total = active.reduce((t, s) => t + Number(s.total || 0), 0);
+          const remaining = active.reduce((t, s) => t + Number(s.remaining || 0), 0);
+          const selectable = remaining > 0;
+          const checked = isMonthChecked(m);
+          let cls;
+          if (total <= 0) cls = 'bg-gray-100 text-gray-400';
+          else if (remaining <= 0) cls = 'bg-emerald-500 text-white';
+          else if (m.status === 'overdue') cls = 'bg-red-600 text-white';
+          else if (remaining < total) cls = 'bg-amber-400 text-white';
+          else cls = 'bg-red-400 text-white';
+          return (
+            <button key={m.month} type="button" disabled={!selectable} onClick={() => onToggleMonth(m)}
+              title={selectable ? (checked ? 'Désélectionner ce mois' : 'Sélectionner tout le mois') : (total <= 0 ? 'Rien à facturer ce mois' : 'Mois payé ✓')}
+              className={`relative rounded-xl px-3 py-2.5 text-left shadow-sm transition-transform ${cls} ${selectable ? 'hover:scale-[1.03] cursor-pointer' : 'cursor-default'} ${checked ? 'ring-2 ring-offset-2 ring-emerald-600' : ''}`}>
+              {checked && <CheckCircle2 className="w-4 h-4 absolute top-1.5 right-1.5" />}
+              <p className="text-xs font-semibold truncate opacity-90">{m.label}</p>
+              <p className="text-lg font-bold leading-tight tabular-nums">{formatMAD(remaining)}</p>
+              <p className="text-[10px] opacity-80 tabular-nums">(CA : {formatMAD(total)})</p>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-gray-400">
+        Un clic sur un mois le sélectionne en entier ; ajustez ensuite les montants ligne par ligne
+        (remises) dans le détail ou le récapitulatif avant d'encaisser.
+      </p>
     </div>
   );
 }
@@ -350,13 +468,34 @@ function CollectTab({ student, academicYear, onChanged }) {
   const setAmount = (month, category, value) =>
     setSel(prev => ({ ...prev, [keyOf(month, category)]: { ...prev[keyOf(month, category)], amount: value } }));
 
+  // Sélection d'un mois ENTIER depuis une tuile : coche tous les services
+  // restants du mois (ou décoche tout si déjà tous cochés).
+  const monthPayables = (m) => (m.services || []).filter(s => !(s.status === 'excluded' || s.excluded) && s.remaining > 0);
+  const isMonthChecked = (m) => {
+    const p = monthPayables(m);
+    return p.length > 0 && p.every(s => sel[keyOf(m.month, s.category)]?.checked);
+  };
+  const toggleMonth = (m) => {
+    const p = monthPayables(m);
+    if (p.length === 0) return;
+    const all = isMonthChecked(m);
+    p.forEach(s => {
+      const checked = !!sel[keyOf(m.month, s.category)]?.checked;
+      if (all ? checked : !checked) toggle(m.month, s);
+    });
+  };
+  const selectAllMonths = () =>
+    (data?.months || []).forEach(m => monthPayables(m).forEach(s => {
+      if (!sel[keyOf(m.month, s.category)]?.checked) toggle(m.month, s);
+    }));
+
   // Libellé d'une ligne sélectionnée (pour la liste live).
   const labelFor = (item) => {
     const mo = (data?.months || []).find(m => m.month === item.month);
     const svc = mo?.services.find(s => (s.category || 'bundle') === (item.category || 'bundle'));
     return `${mo?.label || item.month} — ${serviceLabel(svc)}`;
   };
-  const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount }));
+  const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount, month: s.month, category: s.category }));
 
   // Annuler / supprimer / exclure un service selon son état :
   //  - payé          → annule le paiement (le service redevient dû)
@@ -445,16 +584,34 @@ function CollectTab({ student, academicYear, onChanged }) {
   const s = data.summary;
   return (
     <div className="space-y-4">
+      {/* Situation élève : chiffre d'affaires / payé / reste, d'un coup d'œil. */}
       {s && (
-        <div className={`rounded-lg p-3 text-sm flex items-center justify-between ${s.all_paid ? 'bg-green-50 border border-green-200' : 'bg-blue-50 border border-blue-200'}`}>
-          {s.all_paid ? (
-            <span className="flex items-center gap-2 text-green-700 font-semibold"><CheckCircle2 className="w-4 h-4" /> Tout payé ✓</span>
-          ) : (
-            <span><span className="text-gray-600">Reste à payer : </span><span className="font-bold text-orange-600">{formatMAD(s.remaining_total)}</span></span>
-          )}
-          <span className="text-xs text-gray-500">{s.paid_months}/{s.total_months} mois payés</span>
+        <div className={`rounded-lg border overflow-hidden ${s.all_paid ? 'border-green-200' : 'border-gray-200'}`}>
+          <div className="grid grid-cols-3 divide-x divide-gray-200 text-center">
+            <div className="p-3 bg-gray-50">
+              <p className="text-[11px] text-gray-500">Chiffre d'affaires</p>
+              <p className="text-lg font-bold text-gray-800 tabular-nums">{formatMAD(s.expected_total)}</p>
+            </div>
+            <div className="p-3 bg-green-50/60">
+              <p className="text-[11px] text-gray-500">Montant payé</p>
+              <p className="text-lg font-bold text-green-700 tabular-nums">{formatMAD(s.paid_total)}</p>
+            </div>
+            <div className={`p-3 ${s.all_paid ? 'bg-green-50/60' : 'bg-orange-50/60'}`}>
+              <p className="text-[11px] text-gray-500">Reste à payer</p>
+              <p className={`text-lg font-bold tabular-nums ${s.all_paid ? 'text-green-700' : 'text-orange-600'}`}>
+                {s.all_paid ? 'Tout payé ✓' : formatMAD(s.remaining_total)}
+              </p>
+            </div>
+          </div>
+          <div className="px-3 py-1 bg-white text-[11px] text-gray-400 text-right border-t border-gray-100">
+            {s.paid_months}/{s.total_months} mois payés
+          </div>
         </div>
       )}
+
+      {/* Tuiles mensuelles : vue d'ensemble + sélection d'un mois en un clic. */}
+      <MonthTiles months={data.months} isMonthChecked={isMonthChecked} onToggleMonth={toggleMonth}
+        onSelectAll={selectAllMonths} onClear={() => setSel({})} hasSelection={checkedItems.length > 0} />
 
       {/* Montant manuel à répartir */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
@@ -481,10 +638,11 @@ function CollectTab({ student, academicYear, onChanged }) {
         onCancelService={cancelService} onAddService={addServiceToMonth} onRestoreService={restoreService}
         serviceCatalog={serviceCatalog} />
 
-      {/* Liste live + encaissement */}
+      {/* Liste live + encaissement — montants modifiables (remise à l'entrée) */}
       {checkedItems.length > 0 && (
         <div className="space-y-3">
-          <SelectionList items={listItems} />
+          <SelectionList items={listItems} title="Paiement en cours"
+            onAmount={(i, v) => setAmount(i.month, i.category, v)} />
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -597,10 +755,15 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
     Object.values(selById[id] || {}).filter(s => s.checked).forEach(s => {
       const mo = (data?.months || []).find(m => m.month === s.month);
       const svc = mo?.services.find(x => (x.category || 'bundle') === (s.category || 'bundle'));
-      listItems.push({ label: `${member ? fullName(member) : ''} · ${mo?.label || s.month} — ${serviceLabel(svc)}`, amount: s.amount });
+      listItems.push({ label: `${member ? fullName(member) : ''} · ${mo?.label || s.month} — ${serviceLabel(svc)}`, amount: s.amount, childId: id, month: s.month, category: s.category });
     });
   });
   const grandTotal = listItems.reduce((t, i) => t + (Number(i.amount) || 0), 0);
+
+  // Total sélectionné par enfant — affiché en direct sur sa carte (façon
+  // « IMRANE 2 150 DH » : on voit la part de chaque enfant dans le paiement).
+  const childSelectedTotal = (id) =>
+    Object.values(selById[id] || {}).filter(s => s.checked).reduce((t, s) => t + (Number(s.amount) || 0), 0);
 
   const runPay = async () => {
     if (listItems.length === 0) return;
@@ -639,6 +802,11 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
                 <div className="text-sm font-medium truncate">{fullName(m)}{m.id === student.id && <span className="text-xs text-gray-400"> (élève)</span>}</div>
                 <div className="text-xs text-gray-500">{m.classes?.name || '—'}</div>
               </div>
+              {childSelectedTotal(m.id) > 0 && (
+                <span className="text-sm font-bold text-emerald-700 tabular-nums px-2 py-0.5 bg-emerald-50 rounded-lg" title="Montant sélectionné pour cet enfant">
+                  {formatMAD(childSelectedTotal(m.id))}
+                </span>
+              )}
               {statusById[m.id]?.summary && (
                 <span className={`text-xs font-medium ${statusById[m.id].summary.remaining_total > 0 ? 'text-orange-600' : 'text-green-600'}`}>
                   {statusById[m.id].summary.remaining_total > 0 ? `Reste ${formatMAD(statusById[m.id].summary.remaining_total)}` : 'À jour'}
@@ -692,10 +860,11 @@ function FamilyTab({ student, allStudents, academicYear, onChanged }) {
         );
       })()}
 
-      {/* Liste live + paiement (sans bouton « Aperçu ») */}
+      {/* Liste live + paiement — montants modifiables (remise à l'entrée) */}
       {listItems.length > 0 && (
         <div className="space-y-3">
-          <SelectionList items={listItems} title="Détail à encaisser" />
+          <SelectionList items={listItems} title="Détail à encaisser"
+            onAmount={(i, v) => setSvcAmount(i.childId, i.month, i.category, v)} />
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
