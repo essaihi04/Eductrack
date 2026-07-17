@@ -368,11 +368,21 @@ router.post('/students/:id/add-parents', async (req, res) => {
     const primary = contacts[0];
     const pn = splitFullName(primary.name);
 
-    // Réutiliser un parent existant si l'un des numéros est déjà connu.
+    // Réutiliser un parent existant si l'un des numéros est déjà connu — mais
+    // UNIQUEMENT dans la même école : la page Parents est filtrée par école,
+    // réutiliser le profil d'une autre école rendrait le parent invisible ici.
     const { data: existing } = await supabaseAdmin
       .from('parent_contacts').select('parent_id').in('phone_e164', contacts.map((c) => c.phone)).eq('channel', 'whatsapp');
 
-    let parentId = existing?.[0]?.parent_id;
+    let parentId = null;
+    const candidateIds = [...new Set((existing || []).map((c) => c.parent_id).filter(Boolean))];
+    if (candidateIds.length > 0) {
+      const { data: sameSchool } = await supabaseAdmin
+        .from('profiles').select('id')
+        .in('id', candidateIds).eq('role', 'parent').eq('school_id', schoolId)
+        .limit(1);
+      parentId = sameSchool?.[0]?.id || null;
+    }
     let createdParent = false;
     if (!parentId) {
       let email = (primary.email || '').trim();
