@@ -375,7 +375,7 @@ function SelectionList({ items, title = 'Sélection', onAmount }) {
 // Émeraude = payé, ambre = partiel, rouge = impayé (foncé si en retard),
 // gris = rien à facturer. Un clic sélectionne/désélectionne le mois entier ;
 // les montants restent ajustables ligne par ligne avant l'encaissement.
-function MonthTiles({ months, isMonthChecked, onToggleMonth, onSelectAll, onClear, hasSelection }) {
+function MonthTiles({ months, isMonthChecked, focusMonth, onOpenMonth, onSelectAll, onClear, hasSelection }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -397,8 +397,9 @@ function MonthTiles({ months, isMonthChecked, onToggleMonth, onSelectAll, onClea
           const active = (m.services || []).filter(s => !(s.status === 'excluded' || s.excluded));
           const total = active.reduce((t, s) => t + Number(s.total || 0), 0);
           const remaining = active.reduce((t, s) => t + Number(s.remaining || 0), 0);
-          const selectable = remaining > 0;
+          const openable = total > 0 || (m.services || []).length > 0;
           const checked = isMonthChecked(m);
+          const focused = focusMonth === m.month;
           let cls;
           if (total <= 0) cls = 'bg-gray-100 text-gray-400';
           else if (remaining <= 0) cls = 'bg-emerald-500 text-white';
@@ -406,9 +407,9 @@ function MonthTiles({ months, isMonthChecked, onToggleMonth, onSelectAll, onClea
           else if (remaining < total) cls = 'bg-amber-400 text-white';
           else cls = 'bg-red-400 text-white';
           return (
-            <button key={m.month} type="button" disabled={!selectable} onClick={() => onToggleMonth(m)}
-              title={selectable ? (checked ? 'Désélectionner ce mois' : 'Sélectionner tout le mois') : (total <= 0 ? 'Rien à facturer ce mois' : 'Mois payé ✓')}
-              className={`relative rounded-xl px-3 py-2.5 text-left shadow-sm transition-transform ${cls} ${selectable ? 'hover:scale-[1.03] cursor-pointer' : 'cursor-default'} ${checked ? 'ring-2 ring-offset-2 ring-emerald-600' : ''}`}>
+            <button key={m.month} type="button" disabled={!openable} onClick={() => onOpenMonth(focused ? null : m.month)}
+              title={openable ? 'Ouvrir la page de ce mois (frais, remises, encaissement)' : 'Rien à facturer ce mois'}
+              className={`relative rounded-xl px-3 py-2.5 text-left shadow-sm transition-transform ${cls} ${openable ? 'hover:scale-[1.03] cursor-pointer' : 'cursor-default'} ${focused ? 'ring-2 ring-offset-2 ring-emerald-600' : checked ? 'ring-2 ring-offset-1 ring-emerald-400' : ''}`}>
               {checked && <CheckCircle2 className="w-4 h-4 absolute top-1.5 right-1.5" />}
               <p className="text-xs font-semibold truncate opacity-90">{m.label}</p>
               <p className="text-lg font-bold leading-tight tabular-nums">{formatMAD(remaining)}</p>
@@ -418,8 +419,8 @@ function MonthTiles({ months, isMonthChecked, onToggleMonth, onSelectAll, onClea
         })}
       </div>
       <p className="text-[10px] text-gray-400">
-        Un clic sur un mois le sélectionne en entier ; ajustez ensuite les montants ligne par ligne
-        (remises) dans le détail ou le récapitulatif avant d'encaisser.
+        Cliquez sur un mois pour ouvrir sa page : sélection des frais, remises (DH ou %),
+        application aux autres mois, ajout d'un frais.
       </p>
     </div>
   );
@@ -451,6 +452,18 @@ function CollectTab({ student, academicYear, onChanged }) {
   const poolNum = Number(pool) || 0;
   const leftover = poolNum - allocated;
 
+  // Mois OUVERT (page du mois) : cartes de frais + remises, façon cockpit.
+  const [focusMonth, setFocusMonth] = useState(null);
+  // Mini-formulaire de remise ouvert sur une carte de frais (clé mois:service).
+  const [remiseFor, setRemiseFor] = useState(null);
+  const [remiseVal, setRemiseVal] = useState('');
+  const [remiseType, setRemiseType] = useState('amount'); // 'amount' (DH) | 'percent'
+  // Ajout d'un frais dans le mois ouvert.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addCat, setAddCat] = useState('');
+  const [addAmount, setAddAmount] = useState('');
+  const [addingSvc, setAddingSvc] = useState(false);
+
   // Coche un service : avec un montant manuel, on lui affecte automatiquement
   // ce qu'il reste du montant (sans dépasser son reste dû).
   const toggle = (month, svc) => {
@@ -462,11 +475,53 @@ function CollectTab({ student, academicYear, onChanged }) {
         const already = Object.values(prev).filter(s => s.checked).reduce((t, s) => t + (Number(s.amount) || 0), 0);
         amount = Math.min(svc.remaining, Math.max(0, poolNum - already));
       }
-      return { ...prev, [k]: { checked: true, amount: String(amount), month, category: svc.category } };
+      return { ...prev, [k]: { checked: true, amount: String(amount), month, category: svc.category, discount: 0, remise: null } };
     });
   };
   const setAmount = (month, category, value) =>
     setSel(prev => ({ ...prev, [keyOf(month, category)]: { ...prev[keyOf(month, category)], amount: value } }));
+
+  // Remise sur un frais d'un mois (DH ou %) : réduit le DÛ (le backend abaisse
+  // le total de la facture) — le frais est soldé après paiement du montant
+  // remisé. value 0 = retirer la remise. Sélectionne la ligne si besoin.
+  const applyRemise = (month, svc, type, value) => {
+    const k = keyOf(month, svc.category);
+    const val = Math.max(0, Number(value) || 0);
+    const disc = type === 'percent'
+      ? Math.min(svc.remaining, Math.round(svc.remaining * val) / 100)
+      : Math.min(svc.remaining, val);
+    setSel(prev => ({
+      ...prev,
+      [k]: {
+        checked: true, month, category: svc.category,
+        amount: String(Math.max(0, Math.round((svc.remaining - disc) * 100) / 100)),
+        discount: disc > 0 ? disc : 0,
+        remise: disc > 0 ? { type, value: val } : null,
+      },
+    }));
+  };
+
+  // Applique la sélection (et les remises) du mois ouvert à TOUS les autres
+  // mois : mêmes services, même remise (le % est recalculé sur chaque mois).
+  const applyToOtherMonths = () => {
+    const fm = (data?.months || []).find(m => m.month === focusMonth);
+    if (!fm) return;
+    const pattern = monthPayables(fm)
+      .filter(s => sel[keyOf(fm.month, s.category)]?.checked)
+      .map(s => ({ category: s.category, remise: sel[keyOf(fm.month, s.category)]?.remise || null }));
+    if (pattern.length === 0) { alert('Sélectionnez d\'abord des frais dans ce mois.'); return; }
+    let applied = 0;
+    (data?.months || []).filter(m => m.month !== fm.month).forEach(m => {
+      pattern.forEach(p => {
+        const svc = monthPayables(m).find(x => x.category === p.category);
+        if (!svc) return;
+        if (p.remise) applyRemise(m.month, svc, p.remise.type, p.remise.value);
+        else if (!sel[keyOf(m.month, svc.category)]?.checked) toggle(m.month, svc);
+        applied++;
+      });
+    });
+    if (applied === 0) alert('Aucun autre mois avec ces frais à payer.');
+  };
 
   // Sélection d'un mois ENTIER depuis une tuile : coche tous les services
   // restants du mois (ou décoche tout si déjà tous cochés).
@@ -493,7 +548,8 @@ function CollectTab({ student, academicYear, onChanged }) {
   const labelFor = (item) => {
     const mo = (data?.months || []).find(m => m.month === item.month);
     const svc = mo?.services.find(s => (s.category || 'bundle') === (item.category || 'bundle'));
-    return `${mo?.label || item.month} — ${serviceLabel(svc)}`;
+    const remise = Number(item.discount) > 0 ? ` · remise ${formatMAD(item.discount)}` : '';
+    return `${mo?.label || item.month} — ${serviceLabel(svc)}${remise}`;
   };
   const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount, month: s.month, category: s.category }));
 
@@ -561,7 +617,10 @@ function CollectTab({ student, academicYear, onChanged }) {
     if (!confirm(`Encaisser ${checkedItems.length} ligne(s) — total ${formatMAD(allocated)} ?`)) return;
     setSaving(true);
     try {
-      const items = checkedItems.map(s => ({ month: s.month, category: s.category || null, amount: Number(s.amount) || undefined }));
+      const items = checkedItems.map(s => ({
+        month: s.month, category: s.category || null, amount: Number(s.amount) || undefined,
+        discount: Number(s.discount) > 0 ? Number(s.discount) : undefined,
+      }));
       const res = await financeApi.payServices(student.id, {
         academic_year: academicYear, items, payment_date: paymentDate, method, reference: reference || undefined,
         batch_id: crypto.randomUUID(),
@@ -609,9 +668,10 @@ function CollectTab({ student, academicYear, onChanged }) {
         </div>
       )}
 
-      {/* Tuiles mensuelles : vue d'ensemble + sélection d'un mois en un clic. */}
-      <MonthTiles months={data.months} isMonthChecked={isMonthChecked} onToggleMonth={toggleMonth}
-        onSelectAll={selectAllMonths} onClear={() => setSel({})} hasSelection={checkedItems.length > 0} />
+      {/* Tuiles mensuelles : vue d'ensemble + ouverture de la page d'un mois. */}
+      <MonthTiles months={data.months} isMonthChecked={isMonthChecked} focusMonth={focusMonth}
+        onOpenMonth={setFocusMonth} onSelectAll={selectAllMonths} onClear={() => setSel({})}
+        hasSelection={checkedItems.length > 0} />
 
       {/* Montant manuel à répartir */}
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
@@ -634,9 +694,192 @@ function CollectTab({ student, academicYear, onChanged }) {
         </p>
       </div>
 
-      <MonthsServicesGrid months={data.months} sel={sel} onToggle={toggle} onAmount={setAmount}
-        onCancelService={cancelService} onAddService={addServiceToMonth} onRestoreService={restoreService}
-        serviceCatalog={serviceCatalog} />
+      {/* ── Page du mois ouvert : cartes de frais + remises (façon Koolskools) ── */}
+      {(() => {
+        const focus = (data?.months || []).find(m => m.month === focusMonth);
+        if (!focus) return (
+          <p className="text-sm text-gray-400 italic text-center py-2">
+            Cliquez sur un mois ci-dessus pour ouvrir sa page — frais, remises et encaissement.
+          </p>
+        );
+        const active = focus.services.filter(s => !(s.status === 'excluded' || s.excluded));
+        const monthTotal = active.reduce((t, s) => t + Number(s.total || 0), 0);
+        const monthRemaining = active.reduce((t, s) => t + Number(s.remaining || 0), 0);
+        const payables = monthPayables(focus);
+        const allChecked = isMonthChecked(focus);
+        const presentCats = new Set(focus.services.map(s => s.category).filter(Boolean));
+        // Catalogue d'ajout : services du plan de l'élève + catégories génériques
+        // (permet d'ajouter un frais déjà présent ailleurs OU un tout autre frais).
+        const catalogAll = [...serviceCatalog];
+        Object.entries(CATEGORY_LABELS).forEach(([c, v]) => { if (!catalogAll.some(([cc]) => cc === c)) catalogAll.push([c, v]); });
+        const freeCats = catalogAll.filter(([c]) => !presentCats.has(c));
+        const idx = (data?.months || []).findIndex(m => m.month === focusMonth);
+        const prevM = data.months[idx - 1];
+        const nextM = data.months[idx + 1];
+        return (
+          <div className="border-2 border-emerald-300 rounded-xl bg-white overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 bg-emerald-50 border-b border-emerald-100">
+              <div className="flex items-center gap-1.5">
+                <button disabled={!prevM} onClick={() => setFocusMonth(prevM?.month)} title="Mois précédent"
+                  className="p-1 rounded hover:bg-white disabled:opacity-30"><ChevronRight className="w-4 h-4 rotate-180" /></button>
+                <h3 className="font-bold text-gray-800">{focus.label}</h3>
+                <button disabled={!nextM} onClick={() => setFocusMonth(nextM?.month)} title="Mois suivant"
+                  className="p-1 rounded hover:bg-white disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
+                <span className="text-xs text-gray-500 ml-1">
+                  CA {formatMAD(monthTotal)} · {monthRemaining > 0 ? `reste ${formatMAD(monthRemaining)}` : 'soldé ✓'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {payables.length > 0 && (
+                  <button onClick={() => toggleMonth(focus)}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">
+                    {allChecked ? 'Tout décocher' : '⚡ Tout sélectionner'}
+                  </button>
+                )}
+                <button onClick={applyToOtherMonths}
+                  title="Reproduit la sélection et les remises de ce mois sur tous les autres mois"
+                  className="text-xs px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-medium">
+                  Appliquer aux autres mois
+                </button>
+                <button onClick={() => setFocusMonth(null)} title="Fermer" className="p-1 rounded hover:bg-white">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3 grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
+              {focus.services.map(svc => {
+                const k = keyOf(focus.month, svc.category);
+                const entry = sel[k];
+                const checked = !!entry?.checked;
+                const excluded = svc.status === 'excluded' || svc.excluded;
+                const payable = !excluded && svc.remaining > 0;
+                const hasPaid = Number(svc.paid) > 0;
+                const discount = Number(entry?.discount) || 0;
+                const isRemiseOpen = remiseFor === k;
+                let cardCls = 'border-gray-200 bg-white hover:border-emerald-400 cursor-pointer';
+                if (excluded) cardCls = 'border-gray-200 bg-gray-50 opacity-70';
+                else if (!payable) cardCls = 'border-emerald-200 bg-emerald-50';
+                else if (checked) cardCls = 'border-emerald-600 bg-emerald-500 text-white shadow cursor-pointer';
+                return (
+                  <div key={k} onClick={payable ? () => toggle(focus.month, svc) : undefined}
+                    className={`relative border-2 rounded-xl p-3 text-center transition-colors ${cardCls}`}>
+                    {/* Coin actions : imprimer / exclure-annuler / réintégrer */}
+                    <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
+                      {svc.invoice_id && (
+                        <button onClick={(e) => { e.stopPropagation(); financeApi.openInvoicePdf(svc.invoice_id).catch(err => alert('Erreur impression: ' + err.message)); }}
+                          title="Imprimer la facture" className="p-1 rounded hover:bg-black/10">
+                          <Printer className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-blue-600'}`} />
+                        </button>
+                      )}
+                      {excluded ? (
+                        <button onClick={(e) => { e.stopPropagation(); restoreService(focus.month, svc); }}
+                          title="Réintégrer ce frais" className="p-1 rounded hover:bg-green-100">
+                          <RotateCcw className="w-3.5 h-3.5 text-green-600" />
+                        </button>
+                      ) : (svc.invoice_id || payable) && (
+                        <button onClick={(e) => { e.stopPropagation(); cancelService(focus.month, svc); }}
+                          title={hasPaid ? 'Annuler le paiement' : (svc.invoice_id ? 'Supprimer ce frais' : 'Exclure ce frais')}
+                          className="p-1 rounded hover:bg-black/10">
+                          <Ban className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-red-500'}`} />
+                        </button>
+                      )}
+                    </div>
+                    {/* État sélectionné */}
+                    {checked && <CheckCircle2 className="w-4 h-4 absolute top-1.5 left-1.5 text-white" />}
+                    {!payable && !excluded && <CheckCircle2 className="w-4 h-4 absolute top-1.5 left-1.5 text-emerald-500" />}
+
+                    <p className={`text-sm font-semibold truncate mt-1 ${excluded ? 'line-through text-gray-400' : ''}`}>
+                      {serviceLabel(svc)}
+                    </p>
+
+                    {excluded ? (
+                      <p className="text-xs text-gray-400 mt-1.5">Exclu</p>
+                    ) : !payable ? (
+                      <p className="text-sm font-bold text-emerald-600 mt-1.5">Payé ✓ <span className="font-normal text-xs text-gray-400">({formatMAD(svc.total)})</span></p>
+                    ) : (
+                      <>
+                        {discount > 0 ? (
+                          <p className="mt-1.5 leading-tight">
+                            <span className="text-xs line-through opacity-70">{formatMAD(svc.remaining)}</span>{' '}
+                            <span className="text-lg font-bold tabular-nums">{formatMAD(entry.amount)}</span>
+                          </p>
+                        ) : (
+                          <p className="text-lg font-bold tabular-nums mt-1.5">{formatMAD(checked ? entry.amount : svc.remaining)}</p>
+                        )}
+                        {hasPaid && <p className="text-[10px] opacity-80">déjà payé {formatMAD(svc.paid)}</p>}
+
+                        {/* % Remise : réduit le DÛ (DH ou %) — le frais est soldé après paiement */}
+                        {isRemiseOpen ? (
+                          <div className="mt-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <input type="number" min="0" step="0.01" autoFocus value={remiseVal}
+                              onChange={e => setRemiseVal(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); } }}
+                              className="w-16 px-1.5 py-1 text-xs text-gray-800 border border-gray-300 rounded" placeholder="0" />
+                            <select value={remiseType} onChange={e => setRemiseType(e.target.value)}
+                              className="px-1 py-1 text-xs text-gray-800 border border-gray-300 rounded bg-white">
+                              <option value="amount">DH</option>
+                              <option value="percent">%</option>
+                            </select>
+                            <button onClick={() => { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); }}
+                              className="px-2 py-1 text-xs bg-emerald-700 text-white rounded hover:bg-emerald-800">OK</button>
+                            <button onClick={() => setRemiseFor(null)} className="p-1 rounded hover:bg-black/10">
+                              <X className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-gray-500'}`} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={(e) => {
+                              e.stopPropagation();
+                              setRemiseFor(k);
+                              setRemiseType(entry?.remise?.type || 'amount');
+                              setRemiseVal(entry?.remise ? String(entry.remise.value) : '');
+                            }}
+                            className={`mt-2 px-2.5 py-1 text-xs font-medium rounded-full ${checked ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
+                            % Remise{discount > 0 ? ` (−${formatMAD(discount)})` : ''}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Carte « Ajouter un frais » : service du plan ou tout autre frais */}
+              {addOpen ? (
+                <div className="border-2 border-dashed border-purple-300 rounded-xl p-3 space-y-1.5 bg-purple-50/40">
+                  <select value={addCat} onChange={e => setAddCat(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white">
+                    {freeCats.length === 0 && <option value="">Tous les frais sont déjà présents</option>}
+                    {freeCats.map(([c, v]) => <option key={c} value={c}>{v}</option>)}
+                  </select>
+                  <input type="number" step="0.01" min="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
+                    placeholder="Montant (auto si plan)" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded" />
+                  <div className="flex items-center gap-1.5">
+                    <button disabled={addingSvc || !addCat}
+                      onClick={async () => {
+                        setAddingSvc(true);
+                        const name = (catalogAll.find(([c]) => c === addCat) || [])[1];
+                        try { await addServiceToMonth(focus.month, addCat, addAmount, name); setAddOpen(false); }
+                        finally { setAddingSvc(false); }
+                      }}
+                      className="flex-1 px-2 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
+                      {addingSvc ? '...' : 'Ajouter'}
+                    </button>
+                    <button onClick={() => setAddOpen(false)} className="p-1.5 rounded hover:bg-gray-200">
+                      <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setAddOpen(true); setAddCat(freeCats[0]?.[0] || ''); setAddAmount(''); }}
+                  className="border-2 border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center gap-1 text-sm text-purple-700 hover:border-purple-400 hover:bg-purple-50 min-h-[90px]">
+                  <Plus className="w-5 h-5" /> Ajouter un frais
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Liste live + encaissement — montants modifiables (remise à l'entrée) */}
       {checkedItems.length > 0 && (

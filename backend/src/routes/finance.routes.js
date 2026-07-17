@@ -1139,6 +1139,10 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
     for (const raw of items) {
       const month = Number(raw.month);
       const category = raw.category || null; // null = mois entier (compat)
+      // Remise à l'encaissement (en DH) : réduit le TOTAL dû de la facture du
+      // mois/service — le mois est soldé après paiement du montant remisé
+      // (contrairement à un paiement partiel qui laisse un reste à payer).
+      const lineDiscount = Math.max(0, Number(raw.discount) || 0);
       try {
         let lines, total;
         if (category) {
@@ -1152,6 +1156,7 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
           total = computed.total;
           lines = computed.lines;
         }
+        if (lineDiscount > 0) total = Math.max(0, total - lineDiscount);
 
         const periodLabel = periodLabelFor(academic_year, month);
         const calYear = calendarYearFor(academic_year, month);
@@ -1160,7 +1165,7 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
         // Facture du couple (période, service) ou création automatique
         let invQ = supabaseAdmin
           .from('invoices')
-          .select('id, total, amount_paid')
+          .select('id, total, amount_paid, discount')
           .eq('student_id', studentId)
           .eq('period_label', periodLabel)
           .neq('status', 'cancelled');
@@ -1169,6 +1174,21 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
         const { data: existingInv } = await invQ.maybeSingle();
 
         let invoice = existingInv;
+        // Remise sur une facture DÉJÀ émise : réduire son total (dans la limite
+        // du reste dû) et tracer la remise dans la colonne discount.
+        if (invoice && lineDiscount > 0) {
+          const restant = Number(invoice.total) - Number(invoice.amount_paid || 0);
+          const reduc = Math.min(lineDiscount, Math.max(0, restant));
+          if (reduc > 0) {
+            const { data: upd } = await supabaseAdmin
+              .from('invoices')
+              .update({ total: Number(invoice.total) - reduc, discount: Number(invoice.discount || 0) + reduc })
+              .eq('id', invoice.id)
+              .select('id, total, amount_paid')
+              .single();
+            if (upd) invoice = upd;
+          }
+        }
         if (!invoice) {
           const invoiceNumber = await getNextCounter(schoolId, 'invoice');
           const subtotal = lines.reduce((s, l) => s + Number(l.amount), 0);
