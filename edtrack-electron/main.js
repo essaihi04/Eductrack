@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, session, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, session, shell, dialog, ipcMain, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -229,6 +229,53 @@ function setupSessionDownloads() {
   });
 }
 
+// ── Mémorisation des identifiants (reconnexion automatique) ────────────────
+// Les identifiants sont chiffrés avec safeStorage (DPAPI sous Windows : seul
+// le compte Windows de l'utilisateur peut les déchiffrer) et stockés dans le
+// dossier userData de l'app. Exposés au front via preload → window.desktopAuth.
+const credsFile = () => path.join(app.getPath('userData'), 'edtrack-creds.bin');
+
+function isTrustedSender(event) {
+  const url = event.sender.getURL() || '';
+  return url.startsWith(APP_URL);
+}
+
+function setupCredentialsStore() {
+  ipcMain.handle('edtrack-creds:save', (event, creds) => {
+    if (!isTrustedSender(event)) return false;
+    try {
+      const raw = JSON.stringify({ email: String(creds?.email || ''), password: String(creds?.password || '') });
+      const data = safeStorage.isEncryptionAvailable()
+        ? safeStorage.encryptString(raw)
+        : Buffer.from(raw, 'utf8');
+      fs.writeFileSync(credsFile(), data);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('edtrack-creds:load', (event) => {
+    if (!isTrustedSender(event)) return null;
+    try {
+      const data = fs.readFileSync(credsFile());
+      const raw = safeStorage.isEncryptionAvailable()
+        ? safeStorage.decryptString(data)
+        : data.toString('utf8');
+      const creds = JSON.parse(raw);
+      return creds && creds.email && creds.password ? creds : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  ipcMain.handle('edtrack-creds:clear', (event) => {
+    if (!isTrustedSender(event)) return false;
+    try { fs.unlinkSync(credsFile()); } catch (e) { /* déjà absent */ }
+    return true;
+  });
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null);
 
@@ -307,6 +354,9 @@ app.whenReady().then(() => {
 
   // Route les téléchargements de fichiers vers une boîte « Enregistrer sous ».
   setupSessionDownloads();
+
+  // Stockage chiffré des identifiants pour la reconnexion automatique.
+  setupCredentialsStore();
 
   createWindow();
 });

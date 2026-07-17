@@ -166,9 +166,22 @@ function patchGeolocation() {
   });
 }
 
+// ── Reconnexion automatique ─────────────────────────────────────────────────
+// Pont vers le stockage chiffré des identifiants (main.js / safeStorage).
+// contextIsolation est désactivée : le window du preload est celui de la page.
+function exposeDesktopAuth() {
+  const { ipcRenderer } = require('electron');
+  window.desktopAuth = {
+    save: (email, password) => ipcRenderer.invoke('edtrack-creds:save', { email, password }),
+    load: () => ipcRenderer.invoke('edtrack-creds:load'),
+    clear: () => ipcRenderer.invoke('edtrack-creds:clear'),
+  };
+}
+
 // Patch dès le chargement du document
 try {
   patchGeolocation();
+  exposeDesktopAuth();
   // Marque que c'est l'app Electron desktop
   Object.defineProperty(navigator, 'isElectronDesktop', {
     value: true,

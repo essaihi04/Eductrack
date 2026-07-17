@@ -37,6 +37,35 @@ const Login = () => {
     }
   }, [user, profile, splash, navigate]);
 
+  // ── Reconnexion automatique (app desktop Electron) ──
+  // Les identifiants sont chiffrés côté Electron (safeStorage) et exposés via
+  // window.desktopAuth (preload). Au lancement de l'app : préremplissage +
+  // connexion automatique UNE fois par lancement (le drapeau sessionStorage
+  // évite de reconnecter d'office après une déconnexion volontaire).
+  useEffect(() => {
+    const desktopAuth = window.desktopAuth;
+    if (!desktopAuth || user) return;
+    let cancelled = false;
+    Promise.resolve(desktopAuth.load()).then(async (creds) => {
+      if (cancelled || !creds?.email || !creds?.password) return;
+      setEmail(creds.email);
+      setPassword(creds.password);
+      if (sessionStorage.getItem('desktop-auto-login-done')) return;
+      sessionStorage.setItem('desktop-auto-login-done', '1');
+      setLoading(true);
+      try {
+        await signIn(creds.email, creds.password);
+        if (!cancelled) setSplash(true);
+      } catch (err) {
+        // Mot de passe changé / hors-ligne : formulaire prérempli, sans erreur bloquante.
+        console.warn('[desktop] auto-login échoué:', err?.message);
+        if (!cancelled) setLoading(false);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -44,6 +73,9 @@ const Login = () => {
 
     try {
       await signIn(email, password);
+      // App desktop : mémorise les derniers identifiants valides pour la
+      // reconnexion automatique au prochain lancement.
+      try { await window.desktopAuth?.save(email, password); } catch (_) { /* ignore */ }
       setSplash(true);
     } catch (err) {
       // Message précis quand la cause n'est pas le mot de passe (limite de
