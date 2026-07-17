@@ -563,15 +563,23 @@ export default function FeeTemplatesPage() {
                       const remaining = Math.max(0, (a.total_students || 0) - (a.students_with_plan || 0));
                       const mine = (a.templates || []).find(x => x.template_id === t.id);
                       const others = (a.templates || []).filter(x => x.template_id !== t.id);
+                      // Niveau entièrement couvert par CE modèle → coche verte
+                      // permanente (état enregistré, pas une simple sélection).
+                      const fullyMine = mine && remaining === 0;
                       return (
                         <label key={a.level}
-                          className={`flex items-center gap-2 px-2 py-1.5 text-sm border-b border-gray-50 ${remaining === 0 ? 'opacity-60' : 'hover:bg-indigo-50 cursor-pointer'}`}>
-                          <input type="checkbox" disabled={remaining === 0}
-                            checked={selectedLevels.includes(a.level)}
-                            onChange={() => toggleLevel(a.level)} className="rounded" />
+                          className={`flex items-center gap-2 px-2 py-1.5 text-sm border-b border-gray-50 ${fullyMine ? 'bg-emerald-50/60' : remaining === 0 ? 'opacity-60' : 'hover:bg-indigo-50 cursor-pointer'}`}>
+                          {fullyMine ? (
+                            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" title="Déjà appliqué à ce modèle" />
+                          ) : (
+                            <input type="checkbox" disabled={remaining === 0}
+                              checked={selectedLevels.includes(a.level)}
+                              onChange={() => toggleLevel(a.level)} className="rounded" />
+                          )}
                           <div className="flex-1 min-w-0">
                             <span className="font-medium text-gray-700">
                               {a.level}
+                              {fullyMine && <span className="ml-1 text-[10px] text-emerald-700">· appliqué</span>}
                               {levelsMatch(a.level, t.level) && (
                                 <Sparkles className="inline w-3 h-3 text-emerald-500 ml-1" title="Niveau du modèle" />
                               )}

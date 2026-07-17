@@ -178,10 +178,28 @@ function exposeDesktopAuth() {
   };
 }
 
+// ── Focus après alert()/confirm()/prompt() ──────────────────────────────────
+// Même bug Electron Windows que pour l'impression et « Enregistrer sous » :
+// après la fermeture d'une boîte de dialogue JS native, la fenêtre ne redonne
+// plus le focus aux champs texte (saisie bloquée tant qu'on ne fait pas
+// Alt-Tab). L'app utilise alert/confirm partout (ex: « N plan(s) créé(s) ») →
+// on les enveloppe pour demander au main process un cycle blur → focus.
+function patchDialogFocus() {
+  const { ipcRenderer } = require('electron');
+  const refocus = () => { try { ipcRenderer.send('edtrack:refocus'); } catch (e) { /* ignore */ } };
+  const origAlert = window.alert.bind(window);
+  const origConfirm = window.confirm.bind(window);
+  const origPrompt = window.prompt.bind(window);
+  window.alert = (msg) => { origAlert(msg); refocus(); };
+  window.confirm = (msg) => { const r = origConfirm(msg); refocus(); return r; };
+  window.prompt = (msg, def) => { const r = origPrompt(msg, def); refocus(); return r; };
+}
+
 // Patch dès le chargement du document
 try {
   patchGeolocation();
   exposeDesktopAuth();
+  patchDialogFocus();
   // Marque que c'est l'app Electron desktop
   Object.defineProperty(navigator, 'isElectronDesktop', {
     value: true,

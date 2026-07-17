@@ -240,6 +240,16 @@ function isTrustedSender(event) {
   return url.startsWith(APP_URL);
 }
 
+// Demandé par le preload après chaque alert()/confirm()/prompt() : cycle
+// blur → focus de la fenêtre appelante pour que les champs texte restent
+// cliquables (même bug Windows que pour l'impression / « Enregistrer sous »).
+function setupRefocusChannel() {
+  ipcMain.on('edtrack:refocus', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    refocusWindow(win);
+  });
+}
+
 function setupCredentialsStore() {
   ipcMain.handle('edtrack-creds:save', (event, creds) => {
     if (!isTrustedSender(event)) return false;
@@ -357,6 +367,9 @@ app.whenReady().then(() => {
 
   // Stockage chiffré des identifiants pour la reconnexion automatique.
   setupCredentialsStore();
+
+  // Rend le focus aux champs texte après chaque alert()/confirm() (preload).
+  setupRefocusChannel();
 
   createWindow();
 });
