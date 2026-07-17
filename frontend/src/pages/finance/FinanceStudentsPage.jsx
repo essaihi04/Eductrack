@@ -669,6 +669,19 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
   // Clé d'unicité d'un frais (catégorie|nom|récurrence|montant)
   const itemKey = (it) => `${it.category}|${(it.name || '').trim().toLowerCase()}|${it.recurrence}|${Number(it.amount) || 0}`;
 
+  // Frais du modèle attaché ABSENTS du plan de l'élève (accessoires non
+  // appliqués : l'application par niveau/classe ne facture que inscription +
+  // scolarité). Clé catégorie+nom, indépendante du montant : un frais de base
+  // dont le montant a été personnalisé ne réapparaît pas comme « manquant ».
+  const presenceKey = (it) => `${it.category}|${(it.name || '').trim().toLowerCase()}`;
+  const missingTemplateItems = () => {
+    if (!form.template_id) return [];
+    const present = new Set(form.custom_items.map(presenceKey));
+    return templateItemsToCustom(form.template_id).filter(it => !present.has(presenceKey(it)));
+  };
+  // Ajout en un clic d'un frais du modèle, au MÊME montant que le modèle.
+  const addTemplateItem = (it) => setForm({ ...form, custom_items: [...form.custom_items, { ...it }] });
+
   // Sélection d'un modèle : ses frais sont récupérés comme frais de l'élève
   // (modifiables). Le modèle reste mémorisé comme ÉTIQUETTE (template_id) pour
   // afficher quel modèle a été appliqué. On évite d'ajouter en double.
@@ -820,6 +833,29 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
               <p className="mb-3 text-xs text-gray-500">
                 Un frais personnalisé est enregistré dans le plan de l’élève avec le nom saisi manuellement.
               </p>
+              {/* Accessoires du modèle non appliqués : ajout en un clic au même
+                  montant que le modèle (ex: Transport 400 MAD/mois). */}
+              {(() => {
+                const missing = missingTemplateItems();
+                if (missing.length === 0) return null;
+                return (
+                  <div className="mb-3 p-2.5 bg-indigo-50/60 border border-indigo-100 rounded-lg">
+                    <p className="text-[11px] text-gray-600 mb-1.5">
+                      Frais du modèle non appliqués à cet élève — cliquez pour les ajouter au montant du modèle :
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {missing.map((it, i) => (
+                        <button key={i} type="button" onClick={() => addTemplateItem(it)}
+                          className="flex items-center gap-1 px-2.5 py-1 text-xs bg-white border border-indigo-200 text-indigo-700 rounded-full hover:bg-indigo-100">
+                          <Plus className="w-3 h-3" />
+                          {it.name} · {formatMAD(it.amount)}{it.recurrence === 'monthly' ? ' /mois' : ''}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1.5">N'oubliez pas d'Enregistrer après l'ajout.</p>
+                  </div>
+                );
+              })()}
               <div className="space-y-2">
                 {form.custom_items.map((it, idx) => (
                   <div key={idx} className="grid grid-cols-12 gap-2 p-2 bg-gray-50 rounded-lg">
