@@ -501,26 +501,48 @@ function CollectTab({ student, academicYear, onChanged }) {
     }));
   };
 
-  // Applique la sélection (et les remises) du mois ouvert à TOUS les autres
-  // mois : mêmes services, même remise (le % est recalculé sur chaque mois).
-  const applyToOtherMonths = () => {
+  // ── « Appliquer aux autres mois » : sélecteur de mois cibles (façon
+  // Koolskools) — la sélection + remises du mois ouvert sont reproduites sur
+  // les mois COCHÉS (le % est recalculé sur le montant de chaque mois).
+  const [applyMonthsOpen, setApplyMonthsOpen] = useState(false);
+  const [applyMonthsSel, setApplyMonthsSel] = useState(new Set());
+
+  // Sélection courante du mois ouvert : catégories cochées + leur remise.
+  const currentPattern = () => {
     const fm = (data?.months || []).find(m => m.month === focusMonth);
-    if (!fm) return;
-    const pattern = monthPayables(fm)
+    if (!fm) return [];
+    return monthPayables(fm)
       .filter(s => sel[keyOf(fm.month, s.category)]?.checked)
       .map(s => ({ category: s.category, remise: sel[keyOf(fm.month, s.category)]?.remise || null }));
+  };
+  const openApplyMonths = () => {
+    const pattern = currentPattern();
     if (pattern.length === 0) { alert('Sélectionnez d\'abord des frais dans ce mois.'); return; }
-    let applied = 0;
-    (data?.months || []).filter(m => m.month !== fm.month).forEach(m => {
+    const candidates = (data?.months || []).filter(m =>
+      m.month !== focusMonth && monthPayables(m).some(s => pattern.some(p => p.category === s.category)));
+    if (candidates.length === 0) { alert('Aucun autre mois avec ces frais à payer.'); return; }
+    setApplyMonthsSel(new Set(candidates.map(m => m.month)));
+    setApplyMonthsOpen(true);
+  };
+  const applyToMonths = () => {
+    const pattern = currentPattern();
+    (data?.months || []).filter(m => applyMonthsSel.has(m.month)).forEach(m => {
       pattern.forEach(p => {
         const svc = monthPayables(m).find(x => x.category === p.category);
         if (!svc) return;
         if (p.remise) applyRemise(m.month, svc, p.remise.type, p.remise.value);
         else if (!sel[keyOf(m.month, svc.category)]?.checked) toggle(m.month, svc);
-        applied++;
       });
     });
-    if (applied === 0) alert('Aucun autre mois avec ces frais à payer.');
+    setApplyMonthsOpen(false);
+  };
+
+  // Ajout DIRECT d'un service du plan (montant prédéfini) au mois ouvert.
+  const [quickAdding, setQuickAdding] = useState(null);
+  const quickAddService = async (month, q) => {
+    setQuickAdding(q.category);
+    try { await addServiceToMonth(month, q.category, '', q.name); }
+    finally { setQuickAdding(null); }
   };
 
   // Sélection d'un mois ENTIER depuis une tuile : coche tous les services
@@ -641,6 +663,320 @@ function CollectTab({ student, academicYear, onChanged }) {
   );
 
   const s = data.summary;
+
+  // Couleur d'une pastille/tuile de mois selon son état de paiement.
+  const monthColor = (m) => {
+    const act = (m.services || []).filter(x => !(x.status === 'excluded' || x.excluded));
+    const total = act.reduce((t, x) => t + Number(x.total || 0), 0);
+    const remaining = act.reduce((t, x) => t + Number(x.remaining || 0), 0);
+    if (total <= 0) return 'bg-gray-100 text-gray-400';
+    if (remaining <= 0) return 'bg-emerald-500 text-white';
+    if (m.status === 'overdue') return 'bg-red-600 text-white';
+    if (remaining < total) return 'bg-amber-400 text-white';
+    return 'bg-red-400 text-white';
+  };
+
+  // Panneau d'encaissement (récap modifiable + mode/date/référence) — partagé
+  // entre la vue d'ensemble et la colonne droite de la page d'un mois.
+  const paymentPanel = checkedItems.length === 0 ? (
+    <div className="border border-dashed border-gray-300 rounded-lg p-4 text-center text-xs text-gray-400">
+      Sélectionnez des frais pour préparer l'encaissement.
+    </div>
+  ) : (
+    <div className="space-y-3">
+      <SelectionList items={listItems} title="Paiement en cours" onAmount={(i, v) => setAmount(i.month, i.category, v)} />
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Mode de paiement</label>
+            <select value={method} onChange={e => setMethod(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+              {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
+            <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+        </div>
+        <input type="text" value={reference} onChange={e => setReference(e.target.value)} placeholder="Référence (optionnel)" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-600">{checkedItems.length} ligne(s) · <span className="font-bold text-green-700">{formatMAD(allocated)}</span></span>
+          <Button color="green" icon={Wallet} onClick={submit} disabled={saving}>
+            {saving ? 'Encaissement...' : 'Encaisser'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const focus = (data?.months || []).find(m => m.month === focusMonth);
+
+  // ── PAGE DÉDIÉE DU MOIS : remplace toute la vue (aucun défilement) ─────────
+  if (focus) {
+    const active = focus.services.filter(x => !(x.status === 'excluded' || x.excluded));
+    const monthTotal = active.reduce((t, x) => t + Number(x.total || 0), 0);
+    const monthRemaining = active.reduce((t, x) => t + Number(x.remaining || 0), 0);
+    const payables = monthPayables(focus);
+    const allChecked = isMonthChecked(focus);
+    const presentCats = new Set(focus.services.map(x => x.category).filter(Boolean));
+    // Services du PLAN absents de ce mois → cartes d'ajout direct au montant
+    // prédéfini du plan (repéré sur un autre mois où le service est facturé).
+    const planQuickAdd = serviceCatalog
+      .filter(([c]) => !presentCats.has(c))
+      .map(([c, name]) => {
+        let amount = null;
+        for (const mo of data.months) {
+          const found = (mo.services || []).find(x => x.category === c && !(x.status === 'excluded' || x.excluded));
+          if (found) { amount = found.total; break; }
+        }
+        return { category: c, name, amount };
+      });
+    // Tout autre frais (catégories hors plan) → petit formulaire.
+    const otherCats = Object.entries(CATEGORY_LABELS)
+      .filter(([c]) => !presentCats.has(c) && !serviceCatalog.some(([cc]) => cc === c));
+    const patternCats = new Set(currentPattern().map(p => p.category));
+    const applyCandidates = (data.months || []).filter(m =>
+      m.month !== focus.month && monthPayables(m).some(x => patternCats.has(x.category)));
+
+    return (
+      <div className="space-y-3">
+        {/* Bandeau : retour + pastilles de tous les mois (navigation sans défilement) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setFocusMonth(null)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium">
+            <ArrowLeft className="w-4 h-4" /> Mois
+          </button>
+          {(data.months || []).map(m => (
+            <button key={m.month} onClick={() => setFocusMonth(m.month)} title={m.label}
+              className={`w-9 h-9 rounded-full text-xs font-bold shadow-sm ${monthColor(m)} ${m.month === focus.month ? 'ring-2 ring-offset-1 ring-emerald-600' : ''}`}>
+              {m.month}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid lg:grid-cols-[minmax(0,1fr),330px] gap-4 items-start">
+          {/* Page du mois : cartes de frais */}
+          <div className="border-2 border-emerald-300 rounded-xl bg-white overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 bg-emerald-50 border-b border-emerald-100">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-gray-800">{focus.label}</h3>
+                <span className="text-xs text-gray-500">
+                  CA {formatMAD(monthTotal)} · {monthRemaining > 0 ? `reste ${formatMAD(monthRemaining)}` : 'soldé ✓'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {payables.length > 0 && (
+                  <button onClick={() => toggleMonth(focus)}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">
+                    {allChecked ? 'Tout décocher' : '⚡ Tout sélectionner'}
+                  </button>
+                )}
+                <button onClick={openApplyMonths}
+                  title="Choisissez les mois sur lesquels reproduire la sélection et les remises de ce mois"
+                  className="text-xs px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-medium">
+                  Appliquer à d'autres mois…
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3 grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
+              {focus.services.map(svc => {
+                const k = keyOf(focus.month, svc.category);
+                const entry = sel[k];
+                const checked = !!entry?.checked;
+                const excluded = svc.status === 'excluded' || svc.excluded;
+                const payable = !excluded && svc.remaining > 0;
+                const hasPaid = Number(svc.paid) > 0;
+                const discount = Number(entry?.discount) || 0;
+                const isRemiseOpen = remiseFor === k;
+                let cardCls = 'border-gray-200 bg-white hover:border-emerald-400 cursor-pointer';
+                if (excluded) cardCls = 'border-gray-200 bg-gray-50 opacity-70';
+                else if (!payable) cardCls = 'border-emerald-200 bg-emerald-50';
+                else if (checked) cardCls = 'border-emerald-600 bg-emerald-500 text-white shadow cursor-pointer';
+                return (
+                  <div key={k} onClick={payable ? () => toggle(focus.month, svc) : undefined}
+                    className={`relative border-2 rounded-xl p-3 text-center transition-colors ${cardCls}`}>
+                    <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
+                      {svc.invoice_id && (
+                        <button onClick={(e) => { e.stopPropagation(); financeApi.openInvoicePdf(svc.invoice_id).catch(err => alert('Erreur impression: ' + err.message)); }}
+                          title="Imprimer la facture" className="p-1 rounded hover:bg-black/10">
+                          <Printer className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-blue-600'}`} />
+                        </button>
+                      )}
+                      {excluded ? (
+                        <button onClick={(e) => { e.stopPropagation(); restoreService(focus.month, svc); }}
+                          title="Réintégrer ce frais" className="p-1 rounded hover:bg-green-100">
+                          <RotateCcw className="w-3.5 h-3.5 text-green-600" />
+                        </button>
+                      ) : (svc.invoice_id || payable) && (
+                        <button onClick={(e) => { e.stopPropagation(); cancelService(focus.month, svc); }}
+                          title={hasPaid ? 'Annuler le paiement' : (svc.invoice_id ? 'Supprimer ce frais' : 'Exclure ce frais')}
+                          className="p-1 rounded hover:bg-black/10">
+                          <Ban className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-red-500'}`} />
+                        </button>
+                      )}
+                    </div>
+                    {checked && <CheckCircle2 className="w-4 h-4 absolute top-1.5 left-1.5 text-white" />}
+                    {!payable && !excluded && <CheckCircle2 className="w-4 h-4 absolute top-1.5 left-1.5 text-emerald-500" />}
+
+                    <p className={`text-sm font-semibold truncate mt-1 ${excluded ? 'line-through text-gray-400' : ''}`}>
+                      {serviceLabel(svc)}
+                    </p>
+
+                    {excluded ? (
+                      <p className="text-xs text-gray-400 mt-1.5">Exclu</p>
+                    ) : !payable ? (
+                      <p className="text-sm font-bold text-emerald-600 mt-1.5">Payé ✓ <span className="font-normal text-xs text-gray-400">({formatMAD(svc.total)})</span></p>
+                    ) : (
+                      <>
+                        {discount > 0 ? (
+                          <p className="mt-1.5 leading-tight">
+                            <span className="text-xs line-through opacity-70">{formatMAD(svc.remaining)}</span>{' '}
+                            <span className="text-lg font-bold tabular-nums">{formatMAD(entry.amount)}</span>
+                          </p>
+                        ) : (
+                          <p className="text-lg font-bold tabular-nums mt-1.5">{formatMAD(checked ? entry.amount : svc.remaining)}</p>
+                        )}
+                        {hasPaid && <p className="text-[10px] opacity-80">déjà payé {formatMAD(svc.paid)}</p>}
+
+                        {isRemiseOpen ? (
+                          <div className="mt-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <input type="number" min="0" step="0.01" autoFocus value={remiseVal}
+                              onChange={e => setRemiseVal(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); } }}
+                              className="w-16 px-1.5 py-1 text-xs text-gray-800 border border-gray-300 rounded" placeholder="0" />
+                            <select value={remiseType} onChange={e => setRemiseType(e.target.value)}
+                              className="px-1 py-1 text-xs text-gray-800 border border-gray-300 rounded bg-white">
+                              <option value="amount">DH</option>
+                              <option value="percent">%</option>
+                            </select>
+                            <button onClick={() => { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); }}
+                              className="px-2 py-1 text-xs bg-emerald-700 text-white rounded hover:bg-emerald-800">OK</button>
+                            <button onClick={() => setRemiseFor(null)} className="p-1 rounded hover:bg-black/10">
+                              <X className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-gray-500'}`} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={(e) => {
+                              e.stopPropagation();
+                              setRemiseFor(k);
+                              setRemiseType(entry?.remise?.type || 'amount');
+                              setRemiseVal(entry?.remise ? String(entry.remise.value) : '');
+                            }}
+                            className={`mt-2 px-2.5 py-1 text-xs font-medium rounded-full ${checked ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
+                            % Remise{discount > 0 ? ` (−${formatMAD(discount)})` : ''}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Services du plan non facturés ce mois : ajout direct, montant prédéfini */}
+              {planQuickAdd.map(q => (
+                <button key={q.category} type="button" disabled={quickAdding === q.category}
+                  onClick={() => quickAddService(focus.month, q)}
+                  title="Ajouter ce service du plan à ce mois (montant prédéfini du plan)"
+                  className="border-2 border-dashed border-emerald-300 rounded-xl p-3 flex flex-col items-center justify-center gap-0.5 text-emerald-700 hover:bg-emerald-50 min-h-[90px] disabled:opacity-50">
+                  <Plus className="w-4 h-4" />
+                  <span className="text-sm font-semibold truncate max-w-full">{q.name}</span>
+                  <span className="text-xs">
+                    {quickAdding === q.category ? 'Ajout…' : (q.amount != null ? `${formatMAD(q.amount)} (plan)` : 'montant du plan')}
+                  </span>
+                </button>
+              ))}
+
+              {/* Tout autre frais (hors plan) : catégorie + montant */}
+              {otherCats.length > 0 && (addOpen ? (
+                <div className="border-2 border-dashed border-purple-300 rounded-xl p-3 space-y-1.5 bg-purple-50/40">
+                  <select value={addCat} onChange={e => setAddCat(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white">
+                    {otherCats.map(([c, v]) => <option key={c} value={c}>{v}</option>)}
+                  </select>
+                  <input type="number" step="0.01" min="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
+                    placeholder="Montant" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded" />
+                  <div className="flex items-center gap-1.5">
+                    <button disabled={addingSvc || !addCat}
+                      onClick={async () => {
+                        setAddingSvc(true);
+                        const name = (otherCats.find(([c]) => c === addCat) || [])[1];
+                        try { await addServiceToMonth(focus.month, addCat, addAmount, name); setAddOpen(false); }
+                        finally { setAddingSvc(false); }
+                      }}
+                      className="flex-1 px-2 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
+                      {addingSvc ? '...' : 'Ajouter'}
+                    </button>
+                    <button onClick={() => setAddOpen(false)} className="p-1.5 rounded hover:bg-gray-200">
+                      <X className="w-4 h-4 text-gray-500" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setAddOpen(true); setAddCat(otherCats[0]?.[0] || ''); setAddAmount(''); }}
+                  className="border-2 border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center gap-1 text-sm text-purple-700 hover:border-purple-400 hover:bg-purple-50 min-h-[90px]">
+                  <Plus className="w-5 h-5" /> Autre frais
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Colonne paiement : toujours visible, aucun défilement nécessaire */}
+          <div className="lg:sticky lg:top-3">{paymentPanel}</div>
+        </div>
+
+        {/* Sélecteur des mois cibles (façon Koolskools) */}
+        {applyMonthsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setApplyMonthsOpen(false)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-4 space-y-3" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-gray-800">Appliquer aux mois…</h3>
+                <button onClick={() => setApplyMonthsOpen(false)} className="p-1 rounded hover:bg-gray-100">
+                  <X className="w-4 h-4 text-gray-500" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500">
+                La sélection et les remises de <strong>{focus.label}</strong> seront reproduites sur les
+                mois cochés (un % est recalculé sur le montant de chaque mois).
+              </p>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox"
+                  checked={applyCandidates.length > 0 && applyCandidates.every(m => applyMonthsSel.has(m.month))}
+                  onChange={e => setApplyMonthsSel(e.target.checked ? new Set(applyCandidates.map(m => m.month)) : new Set())}
+                  className="w-4 h-4 accent-emerald-600" />
+                Tous les mois
+              </label>
+              <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
+                {applyCandidates.map(m => {
+                  const on = applyMonthsSel.has(m.month);
+                  return (
+                    <button key={m.month} type="button"
+                      onClick={() => setApplyMonthsSel(prev => { const n = new Set(prev); if (on) n.delete(m.month); else n.add(m.month); return n; })}
+                      className={`rounded-xl px-2 py-2.5 text-center border-2 text-sm font-semibold transition-colors ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-300'}`}>
+                      {m.label}
+                      <span className={`block text-[10px] font-normal ${on ? 'opacity-80' : 'text-gray-400'}`}>
+                        reste {formatMAD(m.remaining)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button onClick={() => setApplyMonthsOpen(false)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+                  Annuler
+                </button>
+                <button onClick={applyToMonths} disabled={applyMonthsSel.size === 0}
+                  className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
+                  Valider ({applyMonthsSel.size})
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Situation élève : chiffre d'affaires / payé / reste, d'un coup d'œil. */}
@@ -694,221 +1030,12 @@ function CollectTab({ student, academicYear, onChanged }) {
         </p>
       </div>
 
-      {/* ── Page du mois ouvert : cartes de frais + remises (façon Koolskools) ── */}
-      {(() => {
-        const focus = (data?.months || []).find(m => m.month === focusMonth);
-        if (!focus) return (
-          <p className="text-sm text-gray-400 italic text-center py-2">
-            Cliquez sur un mois ci-dessus pour ouvrir sa page — frais, remises et encaissement.
-          </p>
-        );
-        const active = focus.services.filter(s => !(s.status === 'excluded' || s.excluded));
-        const monthTotal = active.reduce((t, s) => t + Number(s.total || 0), 0);
-        const monthRemaining = active.reduce((t, s) => t + Number(s.remaining || 0), 0);
-        const payables = monthPayables(focus);
-        const allChecked = isMonthChecked(focus);
-        const presentCats = new Set(focus.services.map(s => s.category).filter(Boolean));
-        // Catalogue d'ajout : services du plan de l'élève + catégories génériques
-        // (permet d'ajouter un frais déjà présent ailleurs OU un tout autre frais).
-        const catalogAll = [...serviceCatalog];
-        Object.entries(CATEGORY_LABELS).forEach(([c, v]) => { if (!catalogAll.some(([cc]) => cc === c)) catalogAll.push([c, v]); });
-        const freeCats = catalogAll.filter(([c]) => !presentCats.has(c));
-        const idx = (data?.months || []).findIndex(m => m.month === focusMonth);
-        const prevM = data.months[idx - 1];
-        const nextM = data.months[idx + 1];
-        return (
-          <div className="border-2 border-emerald-300 rounded-xl bg-white overflow-hidden shadow-sm">
-            <div className="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 bg-emerald-50 border-b border-emerald-100">
-              <div className="flex items-center gap-1.5">
-                <button disabled={!prevM} onClick={() => setFocusMonth(prevM?.month)} title="Mois précédent"
-                  className="p-1 rounded hover:bg-white disabled:opacity-30"><ChevronRight className="w-4 h-4 rotate-180" /></button>
-                <h3 className="font-bold text-gray-800">{focus.label}</h3>
-                <button disabled={!nextM} onClick={() => setFocusMonth(nextM?.month)} title="Mois suivant"
-                  className="p-1 rounded hover:bg-white disabled:opacity-30"><ChevronRight className="w-4 h-4" /></button>
-                <span className="text-xs text-gray-500 ml-1">
-                  CA {formatMAD(monthTotal)} · {monthRemaining > 0 ? `reste ${formatMAD(monthRemaining)}` : 'soldé ✓'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {payables.length > 0 && (
-                  <button onClick={() => toggleMonth(focus)}
-                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-medium">
-                    {allChecked ? 'Tout décocher' : '⚡ Tout sélectionner'}
-                  </button>
-                )}
-                <button onClick={applyToOtherMonths}
-                  title="Reproduit la sélection et les remises de ce mois sur tous les autres mois"
-                  className="text-xs px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-medium">
-                  Appliquer aux autres mois
-                </button>
-                <button onClick={() => setFocusMonth(null)} title="Fermer" className="p-1 rounded hover:bg-white">
-                  <X className="w-4 h-4 text-gray-500" />
-                </button>
-              </div>
-            </div>
+      {/* La page d'un mois s'ouvre en vue dédiée via les tuiles ci-dessus. */}
+      <p className="text-sm text-gray-400 italic text-center py-2">
+        Cliquez sur un mois ci-dessus pour ouvrir sa page — frais, remises et encaissement.
+      </p>
 
-            <div className="p-3 grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
-              {focus.services.map(svc => {
-                const k = keyOf(focus.month, svc.category);
-                const entry = sel[k];
-                const checked = !!entry?.checked;
-                const excluded = svc.status === 'excluded' || svc.excluded;
-                const payable = !excluded && svc.remaining > 0;
-                const hasPaid = Number(svc.paid) > 0;
-                const discount = Number(entry?.discount) || 0;
-                const isRemiseOpen = remiseFor === k;
-                let cardCls = 'border-gray-200 bg-white hover:border-emerald-400 cursor-pointer';
-                if (excluded) cardCls = 'border-gray-200 bg-gray-50 opacity-70';
-                else if (!payable) cardCls = 'border-emerald-200 bg-emerald-50';
-                else if (checked) cardCls = 'border-emerald-600 bg-emerald-500 text-white shadow cursor-pointer';
-                return (
-                  <div key={k} onClick={payable ? () => toggle(focus.month, svc) : undefined}
-                    className={`relative border-2 rounded-xl p-3 text-center transition-colors ${cardCls}`}>
-                    {/* Coin actions : imprimer / exclure-annuler / réintégrer */}
-                    <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
-                      {svc.invoice_id && (
-                        <button onClick={(e) => { e.stopPropagation(); financeApi.openInvoicePdf(svc.invoice_id).catch(err => alert('Erreur impression: ' + err.message)); }}
-                          title="Imprimer la facture" className="p-1 rounded hover:bg-black/10">
-                          <Printer className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-blue-600'}`} />
-                        </button>
-                      )}
-                      {excluded ? (
-                        <button onClick={(e) => { e.stopPropagation(); restoreService(focus.month, svc); }}
-                          title="Réintégrer ce frais" className="p-1 rounded hover:bg-green-100">
-                          <RotateCcw className="w-3.5 h-3.5 text-green-600" />
-                        </button>
-                      ) : (svc.invoice_id || payable) && (
-                        <button onClick={(e) => { e.stopPropagation(); cancelService(focus.month, svc); }}
-                          title={hasPaid ? 'Annuler le paiement' : (svc.invoice_id ? 'Supprimer ce frais' : 'Exclure ce frais')}
-                          className="p-1 rounded hover:bg-black/10">
-                          <Ban className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-red-500'}`} />
-                        </button>
-                      )}
-                    </div>
-                    {/* État sélectionné */}
-                    {checked && <CheckCircle2 className="w-4 h-4 absolute top-1.5 left-1.5 text-white" />}
-                    {!payable && !excluded && <CheckCircle2 className="w-4 h-4 absolute top-1.5 left-1.5 text-emerald-500" />}
-
-                    <p className={`text-sm font-semibold truncate mt-1 ${excluded ? 'line-through text-gray-400' : ''}`}>
-                      {serviceLabel(svc)}
-                    </p>
-
-                    {excluded ? (
-                      <p className="text-xs text-gray-400 mt-1.5">Exclu</p>
-                    ) : !payable ? (
-                      <p className="text-sm font-bold text-emerald-600 mt-1.5">Payé ✓ <span className="font-normal text-xs text-gray-400">({formatMAD(svc.total)})</span></p>
-                    ) : (
-                      <>
-                        {discount > 0 ? (
-                          <p className="mt-1.5 leading-tight">
-                            <span className="text-xs line-through opacity-70">{formatMAD(svc.remaining)}</span>{' '}
-                            <span className="text-lg font-bold tabular-nums">{formatMAD(entry.amount)}</span>
-                          </p>
-                        ) : (
-                          <p className="text-lg font-bold tabular-nums mt-1.5">{formatMAD(checked ? entry.amount : svc.remaining)}</p>
-                        )}
-                        {hasPaid && <p className="text-[10px] opacity-80">déjà payé {formatMAD(svc.paid)}</p>}
-
-                        {/* % Remise : réduit le DÛ (DH ou %) — le frais est soldé après paiement */}
-                        {isRemiseOpen ? (
-                          <div className="mt-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <input type="number" min="0" step="0.01" autoFocus value={remiseVal}
-                              onChange={e => setRemiseVal(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); } }}
-                              className="w-16 px-1.5 py-1 text-xs text-gray-800 border border-gray-300 rounded" placeholder="0" />
-                            <select value={remiseType} onChange={e => setRemiseType(e.target.value)}
-                              className="px-1 py-1 text-xs text-gray-800 border border-gray-300 rounded bg-white">
-                              <option value="amount">DH</option>
-                              <option value="percent">%</option>
-                            </select>
-                            <button onClick={() => { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); }}
-                              className="px-2 py-1 text-xs bg-emerald-700 text-white rounded hover:bg-emerald-800">OK</button>
-                            <button onClick={() => setRemiseFor(null)} className="p-1 rounded hover:bg-black/10">
-                              <X className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-gray-500'}`} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button onClick={(e) => {
-                              e.stopPropagation();
-                              setRemiseFor(k);
-                              setRemiseType(entry?.remise?.type || 'amount');
-                              setRemiseVal(entry?.remise ? String(entry.remise.value) : '');
-                            }}
-                            className={`mt-2 px-2.5 py-1 text-xs font-medium rounded-full ${checked ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
-                            % Remise{discount > 0 ? ` (−${formatMAD(discount)})` : ''}
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-
-              {/* Carte « Ajouter un frais » : service du plan ou tout autre frais */}
-              {addOpen ? (
-                <div className="border-2 border-dashed border-purple-300 rounded-xl p-3 space-y-1.5 bg-purple-50/40">
-                  <select value={addCat} onChange={e => setAddCat(e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white">
-                    {freeCats.length === 0 && <option value="">Tous les frais sont déjà présents</option>}
-                    {freeCats.map(([c, v]) => <option key={c} value={c}>{v}</option>)}
-                  </select>
-                  <input type="number" step="0.01" min="0" value={addAmount} onChange={e => setAddAmount(e.target.value)}
-                    placeholder="Montant (auto si plan)" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded" />
-                  <div className="flex items-center gap-1.5">
-                    <button disabled={addingSvc || !addCat}
-                      onClick={async () => {
-                        setAddingSvc(true);
-                        const name = (catalogAll.find(([c]) => c === addCat) || [])[1];
-                        try { await addServiceToMonth(focus.month, addCat, addAmount, name); setAddOpen(false); }
-                        finally { setAddingSvc(false); }
-                      }}
-                      className="flex-1 px-2 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
-                      {addingSvc ? '...' : 'Ajouter'}
-                    </button>
-                    <button onClick={() => setAddOpen(false)} className="p-1.5 rounded hover:bg-gray-200">
-                      <X className="w-4 h-4 text-gray-500" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => { setAddOpen(true); setAddCat(freeCats[0]?.[0] || ''); setAddAmount(''); }}
-                  className="border-2 border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center gap-1 text-sm text-purple-700 hover:border-purple-400 hover:bg-purple-50 min-h-[90px]">
-                  <Plus className="w-5 h-5" /> Ajouter un frais
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Liste live + encaissement — montants modifiables (remise à l'entrée) */}
-      {checkedItems.length > 0 && (
-        <div className="space-y-3">
-          <SelectionList items={listItems} title="Paiement en cours"
-            onAmount={(i, v) => setAmount(i.month, i.category, v)} />
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Mode de paiement</label>
-                <select value={method} onChange={e => setMethod(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                  {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Date</label>
-                <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-              </div>
-            </div>
-            <input type="text" value={reference} onChange={e => setReference(e.target.value)} placeholder="Référence (optionnel)" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">{checkedItems.length} ligne(s) · <span className="font-bold text-green-700">{formatMAD(allocated)}</span></span>
-              <Button color="green" icon={Wallet} onClick={submit} disabled={saving}>
-                {saving ? 'Encaissement...' : 'Encaisser'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {checkedItems.length > 0 && paymentPanel}
     </div>
   );
 }
