@@ -291,6 +291,14 @@ router.put('/fee-templates/:id', async (req, res) => {
     const { id } = req.params;
     const { name, description, academic_year, level, school_type, is_active, items } = req.body;
 
+    // État avant modification — pour détecter un CHANGEMENT de niveau et
+    // déclencher l'application automatique (comme à la création).
+    const { data: before } = await supabaseAdmin
+      .from('fee_templates')
+      .select('level, academic_year, school_id')
+      .eq('id', id)
+      .maybeSingle();
+
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
@@ -323,12 +331,33 @@ router.put('/fee-templates/:id', async (req, res) => {
       }
     }
 
+    // Niveau nouvellement renseigné ou modifié → application automatique aux
+    // élèves inscrits de ce niveau (les élèves déjà couverts sont ignorés).
+    // Uniquement sur CHANGEMENT de niveau : une simple modification des
+    // montants ne re-crée pas les plans retirés volontairement.
+    let autoApplied = null;
+    const normLvl = (v) => String(v || '').trim().toUpperCase();
+    const newLevel = level !== undefined ? normLvl(level) : normLvl(before?.level);
+    if (newLevel && newLevel !== normLvl(before?.level)) {
+      try {
+        autoApplied = await applyTemplateToLevels({
+          schoolId: before?.school_id || getSchoolId(req),
+          templateId: id,
+          levels: [newLevel],
+          academicYear: academic_year || before?.academic_year,
+          createdBy: req.user.id,
+        });
+      } catch (e) {
+        console.error('Application auto du modèle au niveau (édition) échouée:', e.message);
+      }
+    }
+
     const { data: full } = await supabaseAdmin
       .from('fee_templates')
       .select('*, fee_template_items(*)')
       .eq('id', id)
       .single();
-    res.json({ success: true, template: full });
+    res.json({ success: true, template: full, auto_applied: autoApplied });
   } catch (error) {
     console.error('Erreur update fee-template:', error);
     res.status(500).json({ error: 'Erreur serveur' });

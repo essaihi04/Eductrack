@@ -171,20 +171,19 @@ export default function FeeTemplatesPage() {
         school_type: editing.school_type || null,
         items: editing.items
       };
-      if (editing.id) {
-        await financeApi.updateTemplate(editing.id, payload);
-      } else {
-        const res = await financeApi.createTemplate(payload);
-        // Un modèle créé avec un niveau est appliqué automatiquement aux élèves
-        // déjà inscrits de ce niveau (le serveur ignore ceux déjà couverts).
-        const auto = res.auto_applied;
-        if (auto && (auto.created > 0 || auto.skipped > 0)) {
-          alert(`Modèle créé : appliqué automatiquement à ${auto.created} élève(s) du niveau ${payload.level}`
-            + (auto.skipped > 0 ? ` (${auto.skipped} déjà couvert(s))` : ''));
-        }
-        loadAssignments();
-        loadLevelAssignments();
+      // Un modèle créé avec un niveau — ou dont le niveau vient d'être
+      // renseigné/modifié — est appliqué automatiquement aux élèves inscrits
+      // de ce niveau (le serveur ignore ceux déjà couverts).
+      const res = editing.id
+        ? await financeApi.updateTemplate(editing.id, payload)
+        : await financeApi.createTemplate(payload);
+      const auto = res.auto_applied;
+      if (auto && (auto.created > 0 || auto.skipped > 0)) {
+        alert(`Modèle ${editing.id ? 'modifié' : 'créé'} : appliqué automatiquement à ${auto.created} élève(s) du niveau ${payload.level}`
+          + (auto.skipped > 0 ? ` (${auto.skipped} déjà couvert(s))` : ''));
       }
+      loadAssignments();
+      loadLevelAssignments();
       setShowForm(false);
       setEditing(null);
       load();
