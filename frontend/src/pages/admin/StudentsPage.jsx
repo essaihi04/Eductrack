@@ -80,7 +80,7 @@ const StudentsPage = () => {
     gender: 'M', phone: '', cin: '',
     dateOfBirth: '', birthPlace: '', level: '', classId: '',
     registrationNumber: '', entryDate: '', massarCode: '',
-    dossierStatus: 'complet',
+    dossierStatus: 'incomplet',
     // Scolarité antérieure
     previousSchool: '', previousClass: '',
     // Médical
@@ -505,7 +505,7 @@ const StudentsPage = () => {
     birthPlace: s.birth_place || '', level: s.level || '', classId: s.class_id || '',
     registrationNumber: s.registration_number || '', massarCode: s.massar_code || '',
     entryDate: s.entry_date ? String(s.entry_date).slice(0, 10) : '',
-    dossierStatus: s.dossier_status || 'complet',
+    dossierStatus: s.dossier_status || 'incomplet',
     previousSchool: s.previous_school || '', previousClass: s.previous_class || '',
     hasHealthIssue: !!s.has_health_issue, healthNotes: s.health_notes || '',
     photoAuthorized: s.photo_authorized !== false,
@@ -1575,18 +1575,17 @@ L'administration de ${schoolName}`;
                     <div><Label>Date d'entrée</Label><input type="date" className={inputCls} value={formData.entryDate} onChange={setF('entryDate')} /></div>
                     <div>
                       <Label>Niveau</Label>
-                      {levelOptions.length ? (
-                        <select className={inputCls} value={formData.level} onChange={setF('level')}>
-                          <option value="">Sélectionner un niveau</option>
-                          {/* Un niveau déjà saisi hors liste (édition) reste sélectionnable */}
-                          {formData.level && !levelOptions.includes(formData.level) && (
-                            <option value={formData.level}>{formData.level}</option>
-                          )}
-                          {levelOptions.map((lv) => <option key={lv} value={lv}>{lv}</option>)}
-                        </select>
-                      ) : (
-                        <input className={inputCls} value={formData.level} onChange={setF('level')} placeholder="1APIC" />
-                      )}
+                      {/* Saisie libre + suggestions : taper la 1re lettre filtre la liste */}
+                      <input
+                        className={inputCls}
+                        list="level-options-admin"
+                        value={formData.level}
+                        onChange={setF('level')}
+                        placeholder="Taper pour rechercher un niveau (ex. 1APIC)"
+                      />
+                      <datalist id="level-options-admin">
+                        {levelOptions.map((lv) => <option key={lv} value={lv} />)}
+                      </datalist>
                     </div>
                     <div>
                       <Label>Classe</Label>
