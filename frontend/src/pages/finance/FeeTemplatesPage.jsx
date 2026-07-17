@@ -553,6 +553,8 @@ export default function FeeTemplatesPage() {
                   <p className="text-[11px] text-gray-600">
                     Applique le modèle à tous les élèves inscrits du niveau — y compris
                     ceux <span className="font-medium">sans classe affectée</span> (inscriptions de la nouvelle année).
+                    Seuls les <span className="font-medium">frais d'inscription + scolarité</span> sont
+                    facturés d'office ; les autres frais s'ajoutent élève par élève.
                   </p>
                   {levelAssignments.length === 0 && (
                     <p className="text-xs text-gray-500 italic">Aucun élève inscrit pour cette année.</p>
@@ -625,7 +627,8 @@ export default function FeeTemplatesPage() {
                   </div>
                   {t.level && (
                     <p className="text-[10px] text-gray-500">
-                      Les nouveaux inscrits du niveau {t.level} reçoivent ce plan automatiquement.
+                      Les nouveaux inscrits du niveau {t.level} reçoivent ce plan automatiquement
+                      (inscription + scolarité seulement).
                     </p>
                   )}
                 </div>
@@ -667,6 +670,8 @@ export default function FeeTemplatesPage() {
                   <p className="text-[10px] text-gray-500 mt-1">
                     Avec un niveau, le modèle s'applique automatiquement aux élèves inscrits
                     de ce niveau (même sans classe) et à chaque nouvelle inscription.
+                    Seuls les frais d'inscription et la scolarité sont appliqués d'office —
+                    les autres frais (transport, cantine…) s'ajoutent élève par élève.
                   </p>
                 </div>
                 <div>

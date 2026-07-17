@@ -2,7 +2,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { generateInvoicePdfById, generateBatchReceiptPdfById, fetchBatchForReceipt } from '../services/whatsapp/chatbot/invoicePdf.js';
-import { applyTemplateToLevels, listEnrolledStudentsWithLevel } from '../utils/feeTemplateAutoApply.js';
+import { applyTemplateToLevels, listEnrolledStudentsWithLevel, materializeCorePlanItems } from '../utils/feeTemplateAutoApply.js';
 
 const router = express.Router();
 
@@ -347,13 +347,21 @@ router.delete('/fee-templates/:id', async (req, res) => {
   }
 });
 
-// Appliquer un modèle à toute une classe
+// Appliquer un modèle à toute une classe.
+// Seuls les frais de BASE (inscription + scolarité) sont facturés d'office si
+// le modèle contient aussi des accessoires — ceux-ci s'ajoutent élève par élève.
 router.post('/fee-templates/:id/apply-to-class', async (req, res) => {
   try {
     const { id: templateId } = req.params;
     const { class_id, academic_year } = req.body;
     const schoolId = getSchoolId(req);
     if (!class_id || !academic_year) return res.status(400).json({ error: 'class_id et academic_year requis' });
+
+    const { data: tpl } = await supabaseAdmin
+      .from('fee_templates')
+      .select('id, fee_template_items(*)')
+      .eq('id', templateId)
+      .maybeSingle();
 
     // Récupérer les élèves de la classe
     let studentsQuery = supabaseAdmin
@@ -390,6 +398,8 @@ router.post('/fee-templates/:id/apply-to-class', async (req, res) => {
       if (pErr) continue;
       created.push(plan.id);
     }
+
+    await materializeCorePlanItems(created, tpl?.fee_template_items);
 
     res.json({ success: true, created_count: created.length, skipped_count: skipped.length });
   } catch (error) {
@@ -446,7 +456,8 @@ router.get('/fee-templates/class-assignments', async (req, res) => {
   }
 });
 
-// Appliquer un modèle à plusieurs classes en une fois
+// Appliquer un modèle à plusieurs classes en une fois.
+// Même règle que apply-to-class : frais de base seuls si accessoires présents.
 router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
   try {
     const { id: templateId } = req.params;
@@ -456,9 +467,16 @@ router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
       return res.status(400).json({ error: 'class_ids[] et academic_year requis' });
     }
 
+    const { data: tpl } = await supabaseAdmin
+      .from('fee_templates')
+      .select('id, fee_template_items(*)')
+      .eq('id', templateId)
+      .maybeSingle();
+
     let totalCreated = 0;
     let totalSkipped = 0;
     const perClass = [];
+    const createdPlanIds = [];
 
     for (const classId of class_ids) {
       let studentsQuery = supabaseAdmin
@@ -481,7 +499,7 @@ router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
           .maybeSingle();
         if (existing) { skipped++; continue; }
 
-        const { error: pErr } = await supabaseAdmin
+        const { data: plan, error: pErr } = await supabaseAdmin
           .from('student_fee_plans')
           .insert({
             school_id: schoolId,
@@ -489,13 +507,17 @@ router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
             template_id: templateId,
             academic_year,
             created_by: req.user.id
-          });
-        if (!pErr) created++;
+          })
+          .select('id')
+          .single();
+        if (!pErr && plan) { created++; createdPlanIds.push(plan.id); }
       }
       totalCreated += created;
       totalSkipped += skipped;
       perClass.push({ class_id: classId, created, skipped });
     }
+
+    await materializeCorePlanItems(createdPlanIds, tpl?.fee_template_items);
 
     res.json({ success: true, created_count: totalCreated, skipped_count: totalSkipped, per_class: perClass });
   } catch (error) {

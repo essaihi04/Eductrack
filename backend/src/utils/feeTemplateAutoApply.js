@@ -9,6 +9,13 @@
  *
  * Formats d'année : fee_templates/student_fee_plans = tiret « 2025-2026 »,
  * student_enrollments = slash « 2025/2026 » → variantes partout.
+ *
+ * RÈGLE MÉTIER : l'application (auto ou en masse) ne facture que les frais de
+ * BASE — inscription + scolarité. Les accessoires du modèle (transport,
+ * cantine…) sont ajoutés plus tard élève par élève. Techniquement : si le
+ * modèle contient d'autres catégories, les frais de base sont matérialisés en
+ * items personnalisés du plan (student_fee_plan_items) — la facturation donne
+ * toujours la priorité aux items personnalisés quand il y en a.
  */
 import { supabaseAdmin } from '../config/supabase.js';
 import { baseLevel } from './levelProgression.js';
@@ -49,12 +56,54 @@ const fetchAll = async (buildQuery) => {
   return all;
 };
 
-// Modèles ACTIFS de l'école pour l'année, portant un niveau.
+// Frais de BASE appliqués d'office ; le reste s'ajoute élève par élève.
+export const CORE_FEE_CATEGORIES = ['registration', 'tuition'];
+
+const coreItems = (templateItems) =>
+  (templateItems || []).filter((it) => CORE_FEE_CATEGORIES.includes(it.category));
+
+/**
+ * Matérialise les frais de BASE d'un modèle en items personnalisés des plans
+ * donnés — UNIQUEMENT si le modèle contient aussi des accessoires (sinon le
+ * plan reste lié au modèle pur, dont les frais de base sont déjà le tout).
+ * Un modèle SANS frais de base (accessoires seuls) est appliqué tel quel :
+ * impossible de facturer « rien ».
+ * @returns {Promise<boolean>} true si des items ont été matérialisés
+ */
+export const materializeCorePlanItems = async (planIds, templateItems) => {
+  const all = templateItems || [];
+  const core = coreItems(all).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  if (core.length === 0 || core.length === all.length) return false;
+  if (!planIds || planIds.length === 0) return false;
+
+  const rows = planIds.flatMap((planId) => core.map((it, idx) => ({
+    plan_id: planId,
+    category: it.category,
+    name: it.name,
+    amount: it.amount,
+    recurrence: it.recurrence || 'one_time',
+    due_month: it.due_month ?? null,
+    start_month: it.start_month ?? 9,
+    end_month: it.end_month ?? 6,
+    is_optional: !!it.is_optional,
+    enabled: true,
+    sort_order: idx,
+  })));
+  const { error } = await supabaseAdmin.from('student_fee_plan_items').insert(rows);
+  if (error) {
+    console.error('[fee plan] matérialisation des frais de base échouée:', error.message);
+    return false;
+  }
+  return true;
+};
+
+// Modèles ACTIFS de l'école pour l'année, portant un niveau (avec leurs items,
+// nécessaires à la matérialisation des frais de base).
 export const listLevelTemplates = async (schoolId, academicYear) => {
   const rows = await fetchAll(() => {
     let q = supabaseAdmin
       .from('fee_templates')
-      .select('id, name, level, academic_year, is_active, created_at')
+      .select('id, name, level, academic_year, is_active, created_at, fee_template_items(*)')
       .in('academic_year', yearVariants(academicYear))
       .not('level', 'is', null)
       .order('created_at', { ascending: false });
@@ -109,7 +158,9 @@ const studentsWithPlan = async (schoolId, academicYear) => {
 
 /**
  * Applique un modèle à tous les élèves inscrits des niveaux donnés (année),
- * en ignorant ceux ayant déjà un plan (quel qu'il soit).
+ * en ignorant ceux ayant déjà un plan (quel qu'il soit). Seuls les frais de
+ * BASE (inscription + scolarité) sont facturés si le modèle contient aussi
+ * des accessoires (matérialisation en items personnalisés).
  * @returns {Promise<{created: number, skipped: number}>}
  */
 export const applyTemplateToLevels = async ({ schoolId, templateId, levels, academicYear, createdBy }) => {
@@ -130,8 +181,14 @@ export const applyTemplateToLevels = async ({ schoolId, templateId, levels, acad
   const skipped = targets.length - toCreate.length;
   if (toCreate.length === 0) return { created: 0, skipped };
 
+  const { data: template } = await supabaseAdmin
+    .from('fee_templates')
+    .select('id, fee_template_items(*)')
+    .eq('id', templateId)
+    .maybeSingle();
+
   const dashYear = toDashYear(academicYear);
-  const { error } = await supabaseAdmin.from('student_fee_plans').insert(
+  const { data: createdPlans, error } = await supabaseAdmin.from('student_fee_plans').insert(
     toCreate.map((s) => ({
       school_id: schoolId,
       student_id: s.student_id,
@@ -139,8 +196,10 @@ export const applyTemplateToLevels = async ({ schoolId, templateId, levels, acad
       academic_year: dashYear,
       created_by: createdBy || null,
     }))
-  );
+  ).select('id');
   if (error) throw error;
+
+  await materializeCorePlanItems((createdPlans || []).map((p) => p.id), template?.fee_template_items);
   return { created: toCreate.length, skipped };
 };
 
@@ -187,17 +246,22 @@ export const autoApplyFeePlanForStudent = async ({ schoolId, studentId, level, a
       .limit(1);
     if (existing && existing.length > 0) return { applied: false };
 
-    const { error } = await supabaseAdmin.from('student_fee_plans').insert({
+    const { data: plan, error } = await supabaseAdmin.from('student_fee_plans').insert({
       school_id: schoolId,
       student_id: studentId,
       template_id: template.id,
       academic_year: toDashYear(academicYear),
       created_by: createdBy || null,
-    });
-    if (error) {
-      console.error('[auto fee plan] insertion échouée:', error.message);
+    }).select('id').single();
+    if (error || !plan) {
+      console.error('[auto fee plan] insertion échouée:', error?.message);
       return { applied: false };
     }
+
+    // Seuls les frais de BASE (inscription + scolarité) sont facturés d'office ;
+    // les accessoires du modèle s'ajoutent plus tard élève par élève.
+    await materializeCorePlanItems([plan.id], template.fee_template_items);
+
     return { applied: true, template: { id: template.id, name: template.name } };
   } catch (e) {
     console.error('[auto fee plan] erreur:', e.message);

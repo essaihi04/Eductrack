@@ -549,12 +549,15 @@ function StudentFeePlanModal({ student, templates, onClose, onSaved, defaultYear
         // Récupération automatique : si un modèle est encore attaché, on importe
         // ses frais comme items personnalisés et on détache le modèle, pour
         // permettre de modifier/supprimer chaque frais par élève.
+        // SEULEMENT si le plan n'a AUCUN frais personnalisé : quand il y en a,
+        // ils font foi pour la facturation (règle backend collectPlanItems) —
+        // c'est le cas des plans appliqués par niveau/classe, limités aux frais
+        // de base (inscription + scolarité) ; ré-importer le modèle recréerait
+        // les accessoires que l'on veut ajouter élève par élève.
         const existingItems = existing.custom_items || [];
         const keyOf = (it) => `${it.category}|${(it.name || '').trim().toLowerCase()}|${it.recurrence}|${Number(it.amount) || 0}`;
         const existingKeys = new Set(existingItems.map(keyOf));
-        // Import des frais du modèle encore attaché, en évitant les doublons
-        // avec les frais déjà personnalisés.
-        const tplItems = existing.template_id
+        const tplItems = (existing.template_id && existingItems.length === 0)
           ? (existing.template?.fee_template_items || [])
               .map(it => ({
                 category: it.category,
