@@ -2,6 +2,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { generateInvoicePdfById, generateBatchReceiptPdfById, fetchBatchForReceipt } from '../services/whatsapp/chatbot/invoicePdf.js';
+import { applyTemplateToLevels, listEnrolledStudentsWithLevel } from '../utils/feeTemplateAutoApply.js';
 
 const router = express.Router();
 
@@ -253,12 +254,32 @@ router.post('/fee-templates', async (req, res) => {
       if (itemsErr) throw itemsErr;
     }
 
+    // Modèle avec NIVEAU → application automatique aux élèves déjà inscrits de
+    // ce niveau (avec ou sans classe : en début d'année les classes n'existent
+    // pas encore, l'inscription ne renseigne que le niveau). Les élèves ayant
+    // déjà un plan sont ignorés. Les inscriptions FUTURES du niveau recevront
+    // le plan automatiquement (hook dans les routes d'inscription).
+    let autoApplied = null;
+    if (level && String(level).trim()) {
+      try {
+        autoApplied = await applyTemplateToLevels({
+          schoolId,
+          templateId: template.id,
+          levels: [level],
+          academicYear: academic_year,
+          createdBy: req.user.id,
+        });
+      } catch (e) {
+        console.error('Application auto du modèle au niveau échouée:', e.message);
+      }
+    }
+
     const { data: full } = await supabaseAdmin
       .from('fee_templates')
       .select('*, fee_template_items(*)')
       .eq('id', template.id)
       .single();
-    res.json({ success: true, template: full });
+    res.json({ success: true, template: full, auto_applied: autoApplied });
   } catch (error) {
     console.error('Erreur create fee-template:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
@@ -479,6 +500,82 @@ router.post('/fee-templates/:id/apply-to-classes', async (req, res) => {
     res.json({ success: true, created_count: totalCreated, skipped_count: totalSkipped, per_class: perClass });
   } catch (error) {
     console.error('Erreur apply-to-classes:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Appliquer un modèle à un ou plusieurs NIVEAUX : cible tous les élèves
+// inscrits de l'année dont le niveau correspond (classe affectée OU niveau seul
+// — cas nouvelle année sans classes créées). Élèves déjà couverts ignorés.
+router.post('/fee-templates/:id/apply-to-levels', async (req, res) => {
+  try {
+    const { id: templateId } = req.params;
+    const { levels, academic_year } = req.body;
+    const schoolId = getSchoolId(req);
+    if (!Array.isArray(levels) || levels.length === 0 || !academic_year) {
+      return res.status(400).json({ error: 'levels[] et academic_year requis' });
+    }
+
+    const result = await applyTemplateToLevels({
+      schoolId,
+      templateId,
+      levels,
+      academicYear: academic_year,
+      createdBy: req.user.id,
+    });
+    res.json({ success: true, created_count: result.created, skipped_count: result.skipped });
+  } catch (error) {
+    console.error('Erreur apply-to-levels:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Assignations NIVEAU → modèles pour une année : effectifs inscrits par niveau
+// (élèves sans classe inclus), couverture par plan et modèles utilisés — pour
+// l'écran d'application par niveau des modèles de frais.
+router.get('/fee-templates/level-assignments', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const academic_year = req.query.academic_year;
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+
+    const students = await listEnrolledStudentsWithLevel(schoolId, academic_year);
+
+    // Plans actifs de l'année (tous formats) → couverture + modèle par élève.
+    const yearVariants = [...new Set([academic_year, academic_year.replace('/', '-'), academic_year.replace('-', '/')])];
+    let pQ = supabaseAdmin
+      .from('student_fee_plans')
+      .select('student_id, template_id, template:fee_templates(name)')
+      .in('academic_year', yearVariants)
+      .eq('status', 'active');
+    if (schoolId) pQ = pQ.eq('school_id', schoolId);
+    const { data: plans, error: pErr } = await pQ;
+    if (pErr) throw pErr;
+    const planByStudent = new Map((plans || []).map((p) => [p.student_id, p]));
+
+    const byLevel = {};
+    const seen = new Set();
+    for (const s of students) {
+      if (!s.level || seen.has(s.student_id)) continue;
+      seen.add(s.student_id);
+      const agg = byLevel[s.level] || (byLevel[s.level] = { level: s.level, total_students: 0, students_with_plan: 0, templates: {} });
+      agg.total_students++;
+      const plan = planByStudent.get(s.student_id);
+      if (plan) {
+        agg.students_with_plan++;
+        if (plan.template_id) {
+          const t = agg.templates[plan.template_id] || (agg.templates[plan.template_id] = { template_id: plan.template_id, template_name: plan.template?.name || '', count: 0 });
+          t.count++;
+        }
+      }
+    }
+
+    const assignments = Object.values(byLevel)
+      .map((a) => ({ ...a, templates: Object.values(a.templates) }))
+      .sort((a, b) => String(a.level).localeCompare(String(b.level)));
+    res.json({ assignments });
+  } catch (error) {
+    console.error('Erreur level-assignments:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });

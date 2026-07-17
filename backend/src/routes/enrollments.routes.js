@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireSchoolAdmin, requireSchoolAdminOrFinance } from '../middleware/auth.js';
 import { nextLevel, isTerminalLevel } from '../utils/levelProgression.js';
 import { yearVariants } from '../utils/enrollmentScope.js';
+import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -259,9 +260,20 @@ router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
       .in('academic_year', yearVariants(from_year));
     const fromClassByStudent = new Map((fromEnrollments || []).map((e) => [e.student_id, e.class_id]));
 
+    // Niveaux des classes cibles (pour le plan de frais auto par niveau quand la
+    // réinscription vise une classe plutôt qu'un niveau seul).
+    const { data: toClasses } = await supabaseAdmin
+      .from('classes')
+      .select('id, level')
+      .eq('school_id', schoolId)
+      .in('academic_year', yearVariants(to_year));
+    const toLevelByClass = new Map((toClasses || []).map((c) => [c.id, c.level]));
+    const feeTemplatesCache = {}; // évite de recharger les modèles à chaque élève
+
     let reinscrits = 0;
     let nonReinscrits = 0;
     let feePlansCopied = 0;
+    let feePlansAuto = 0;
     const errors = [];
 
     for (const m of mappings) {
@@ -316,9 +328,25 @@ router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
       await supabaseAdmin.from('profiles').update(profileUpdate).eq('id', sid);
 
       // Reconduction du plan de frais.
+      let planCarried = false;
       if (carryFeePlan) {
-        const done = await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id);
-        if (done) feePlansCopied += 1;
+        planCarried = await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id);
+        if (planCarried) feePlansCopied += 1;
+      }
+
+      // Pas de plan reconduit → modèle de frais du NIVEAU cible appliqué
+      // automatiquement s'il en existe un pour l'année (cas nouvelle année :
+      // réinscription par niveau seul, sans classes créées).
+      if (!planCarried) {
+        const feeAuto = await autoApplyFeePlanForStudent({
+          schoolId,
+          studentId: sid,
+          level: newLevel || toLevelByClass.get(m.new_class_id) || null,
+          academicYear: to_year,
+          createdBy: req.user.id,
+          templatesCache: feeTemplatesCache,
+        });
+        if (feeAuto.applied) feePlansAuto += 1;
       }
 
       reinscrits += 1;
@@ -329,6 +357,7 @@ router.post('/reinscription', requireSchoolAdminOrFinance, async (req, res) => {
       reinscrits,
       non_reinscrits: nonReinscrits,
       fee_plans_copied: feePlansCopied,
+      fee_plans_auto: feePlansAuto,
       errors,
     });
   } catch (e) {
@@ -404,10 +433,13 @@ router.post('/auto-reinscription', requireSchoolAdmin, async (req, res) => {
       .eq('school_id', schoolId)
       .in('academic_year', yearVariants(from_year));
     const srcLevelByClass = new Map((srcClasses || []).map((c) => [c.id, c.level]));
+    const dstLevelByClass = new Map((dstExisting || []).map((c) => [c.id, c.level]));
+    const feeTemplatesCache = {}; // évite de recharger les modèles à chaque élève
 
     let reinscrits = 0;
     let nonReinscrits = 0;
     let feePlansCopied = 0;
+    let feePlansAuto = 0;
     for (const e of (roster || []).filter((r) => r.status !== 'NR')) {
       const sid = e.student_id;
       const srcLevel = srcLevelByClass.get(e.class_id);
@@ -429,11 +461,24 @@ router.post('/auto-reinscription', requireSchoolAdmin, async (req, res) => {
       }, { onConflict: 'student_id,academic_year' });
       if (enrErr) continue;
       await supabaseAdmin.from('profiles').update({ class_id: newClassId }).eq('id', sid);
-      if (carryFee && await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id)) feePlansCopied += 1;
+      if (carryFee && await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id)) {
+        feePlansCopied += 1;
+      } else {
+        // Pas de plan reconduit → modèle de frais du niveau cible s'il existe.
+        const feeAuto = await autoApplyFeePlanForStudent({
+          schoolId,
+          studentId: sid,
+          level: dstLevelByClass.get(newClassId) || null,
+          academicYear: to_year,
+          createdBy: req.user.id,
+          templatesCache: feeTemplatesCache,
+        });
+        if (feeAuto.applied) feePlansAuto += 1;
+      }
       reinscrits += 1;
     }
 
-    res.json({ success: true, to_year, classes_created: classesCreated, reinscrits, non_reinscrits: nonReinscrits, fee_plans_copied: feePlansCopied });
+    res.json({ success: true, to_year, classes_created: classesCreated, reinscrits, non_reinscrits: nonReinscrits, fee_plans_copied: feePlansCopied, fee_plans_auto: feePlansAuto });
   } catch (e) {
     console.error('POST /enrollments/auto-reinscription:', e);
     res.status(500).json({ error: 'Erreur serveur', details: e.message });

@@ -17,6 +17,7 @@ import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
+import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
 
 const router = Router();
 
@@ -154,7 +155,18 @@ router.post('/students', async (req, res) => {
       }, { onConflict: 'student_id,academic_year' });
     if (enrollError) console.error('Inscription (student_enrollments) échouée:', enrollError);
 
-    res.status(201).json({ ...profile, password });
+    // 4. Plan de frais AUTOMATIQUE : si un modèle de frais existe pour le
+    // niveau de l'élève (fiche « niveau seul » ou niveau de la classe), il est
+    // appliqué immédiatement — jamais bloquant pour l'inscription.
+    const feeAuto = await autoApplyFeePlanForStudent({
+      schoolId,
+      studentId: profile.id,
+      level: profile.level,
+      academicYear,
+      createdBy: req.user.id,
+    });
+
+    res.status(201).json({ ...profile, password, fee_plan_template: feeAuto.applied ? feeAuto.template : null });
   } catch (error) {
     console.error('POST /inscriptions/students:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

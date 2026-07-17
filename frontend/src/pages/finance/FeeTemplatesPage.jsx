@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Copy, Save, Layers, Calendar, Users, Check, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Edit2, Copy, Save, Layers, Calendar, Users, Check, Sparkles, GraduationCap } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
 import { PageHeader, EmptyState, Drawer, Button } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
+import { baseLevel } from '../../lib/levelProgression';
 
 // Mois de l'année scolaire (sept → août) pour les sélecteurs de période.
 const SCHOOL_MONTHS = [
@@ -50,11 +51,18 @@ export default function FeeTemplatesPage() {
   const [selectedClassIds, setSelectedClassIds] = useState([]);
   const [applying, setApplying] = useState(false);
   const [assignments, setAssignments] = useState({}); // class_id -> [{template_id, template_name, count}]
+  // Application par NIVEAU (nouvelle année sans classes créées : les élèves
+  // inscrits n'ont qu'un niveau — profiles.level).
+  const [levelAssignments, setLevelAssignments] = useState([]); // [{level, total_students, students_with_plan, templates}]
+  const [applyingLevelsForId, setApplyingLevelsForId] = useState(null);
+  const [selectedLevels, setSelectedLevels] = useState([]);
+  const [applyingLevels, setApplyingLevels] = useState(false);
 
   useEffect(() => {
     load();
     loadClasses();
     loadAssignments();
+    loadLevelAssignments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year]);
 
@@ -83,6 +91,13 @@ export default function FeeTemplatesPage() {
       const map = {};
       (data.assignments || []).forEach(a => { map[a.class_id] = a; });
       setAssignments(map);
+    } catch (e) { console.error(e); }
+  };
+
+  const loadLevelAssignments = async () => {
+    try {
+      const data = await financeApi.getLevelAssignments(dashYear);
+      setLevelAssignments(data.assignments || []);
     } catch (e) { console.error(e); }
   };
 
@@ -156,8 +171,20 @@ export default function FeeTemplatesPage() {
         school_type: editing.school_type || null,
         items: editing.items
       };
-      if (editing.id) await financeApi.updateTemplate(editing.id, payload);
-      else await financeApi.createTemplate(payload);
+      if (editing.id) {
+        await financeApi.updateTemplate(editing.id, payload);
+      } else {
+        const res = await financeApi.createTemplate(payload);
+        // Un modèle créé avec un niveau est appliqué automatiquement aux élèves
+        // déjà inscrits de ce niveau (le serveur ignore ceux déjà couverts).
+        const auto = res.auto_applied;
+        if (auto && (auto.created > 0 || auto.skipped > 0)) {
+          alert(`Modèle créé : appliqué automatiquement à ${auto.created} élève(s) du niveau ${payload.level}`
+            + (auto.skipped > 0 ? ` (${auto.skipped} déjà couvert(s))` : ''));
+        }
+        loadAssignments();
+        loadLevelAssignments();
+      }
       setShowForm(false);
       setEditing(null);
       load();
@@ -209,11 +236,59 @@ export default function FeeTemplatesPage() {
   const openApply = (templateId) => {
     const t = templates.find(x => x.id === templateId);
     const { matches } = sortedClassesFor(t);
+    setApplyingLevelsForId(null);
     setApplyingTemplateId(templateId);
     // Pré-cocher les classes correspondantes SAUF celles dans un autre modèle ou déjà appliquées ici.
     setSelectedClassIds(matches
       .filter(c => !assignedOtherTemplate(c.id, templateId) && !appliedToThisTemplate(c.id, templateId))
       .map(c => c.id));
+  };
+
+  // Correspondance niveau ↔ niveau du modèle (même logique que le backend :
+  // égalité normalisée OU même niveau de base « 1BAC Sciences Math » ↔ « 1BAC »).
+  const levelsMatch = (a, b) => {
+    const na = String(a || '').trim().toUpperCase();
+    const nb = String(b || '').trim().toUpperCase();
+    if (!na || !nb) return false;
+    if (na === nb) return true;
+    const ba = baseLevel(na);
+    const bb = baseLevel(nb);
+    return !!(ba && bb && ba === bb);
+  };
+
+  const openApplyLevels = (templateId) => {
+    const t = templates.find(x => x.id === templateId);
+    setApplyingTemplateId(null);
+    setSelectedClassIds([]);
+    setApplyingLevelsForId(templateId);
+    // Pré-cocher les niveaux du modèle ayant encore des élèves sans plan.
+    setSelectedLevels(levelAssignments
+      .filter(a => levelsMatch(a.level, t?.level) && a.students_with_plan < a.total_students)
+      .map(a => a.level));
+  };
+
+  const toggleLevel = (lvl) =>
+    setSelectedLevels(prev => prev.includes(lvl) ? prev.filter(x => x !== lvl) : [...prev, lvl]);
+
+  const applyToSelectedLevels = async (templateId) => {
+    if (selectedLevels.length === 0) {
+      alert('Sélectionnez au moins un niveau');
+      return;
+    }
+    setApplyingLevels(true);
+    try {
+      const t = templates.find(x => x.id === templateId);
+      const res = await financeApi.applyTemplateToLevels(templateId, {
+        levels: selectedLevels,
+        academic_year: t.academic_year
+      });
+      alert(`${res.created_count} plan(s) créé(s), ${res.skipped_count} élève(s) déjà couvert(s)`);
+      setApplyingLevelsForId(null);
+      setSelectedLevels([]);
+      loadAssignments();
+      loadLevelAssignments();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setApplyingLevels(false); }
   };
 
   const toggleClass = (classId) => {
@@ -473,6 +548,59 @@ export default function FeeTemplatesPage() {
                     </div>
                   );
                 })()
+              ) : applyingLevelsForId === t.id ? (
+                <div className="mt-3 p-3 bg-indigo-50 rounded-lg space-y-2">
+                  <p className="text-[11px] text-gray-600">
+                    Applique le modèle à tous les élèves inscrits du niveau — y compris
+                    ceux <span className="font-medium">sans classe affectée</span> (inscriptions de la nouvelle année).
+                  </p>
+                  {levelAssignments.length === 0 && (
+                    <p className="text-xs text-gray-500 italic">Aucun élève inscrit pour cette année.</p>
+                  )}
+                  <div className="max-h-60 overflow-y-auto border border-indigo-100 rounded bg-white">
+                    {levelAssignments.map(a => {
+                      const remaining = Math.max(0, (a.total_students || 0) - (a.students_with_plan || 0));
+                      const mine = (a.templates || []).find(x => x.template_id === t.id);
+                      const others = (a.templates || []).filter(x => x.template_id !== t.id);
+                      return (
+                        <label key={a.level}
+                          className={`flex items-center gap-2 px-2 py-1.5 text-sm border-b border-gray-50 ${remaining === 0 ? 'opacity-60' : 'hover:bg-indigo-50 cursor-pointer'}`}>
+                          <input type="checkbox" disabled={remaining === 0}
+                            checked={selectedLevels.includes(a.level)}
+                            onChange={() => toggleLevel(a.level)} className="rounded" />
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium text-gray-700">
+                              {a.level}
+                              {levelsMatch(a.level, t.level) && (
+                                <Sparkles className="inline w-3 h-3 text-emerald-500 ml-1" title="Niveau du modèle" />
+                              )}
+                            </span>
+                            <p className="text-[10px] text-gray-500 truncate">
+                              {a.total_students} élève(s) · {remaining > 0 ? `${remaining} sans plan` : 'tous couverts'}
+                              {mine ? ` · ${mine.count} sur ce modèle` : ''}
+                              {others.length > 0 ? ` · aussi : ${others.map(o => o.template_name).join(', ')}` : ''}
+                            </p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => applyToSelectedLevels(t.id)}
+                      disabled={applyingLevels || selectedLevels.length === 0}
+                      className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      <Check className="w-4 h-4" /> {applyingLevels ? 'Application...' : `Appliquer (${selectedLevels.length})`}
+                    </button>
+                    <button
+                      onClick={() => { setApplyingLevelsForId(null); setSelectedLevels([]); }}
+                      className="px-3 py-1.5 text-sm text-gray-600 hover:bg-white rounded"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="mt-3 space-y-2">
                   {appliedClassCount(t.id) > 0 && (
@@ -480,12 +608,26 @@ export default function FeeTemplatesPage() {
                       <Check className="w-3.5 h-3.5" /> Appliqué à {appliedClassCount(t.id)} classe(s)
                     </div>
                   )}
-                  <button
-                    onClick={() => openApply(t.id)}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
-                  >
-                    <Users className="w-4 h-4" /> Appliquer à des classes
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openApply(t.id)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                    >
+                      <Users className="w-4 h-4" /> Par classes
+                    </button>
+                    <button
+                      onClick={() => openApplyLevels(t.id)}
+                      title="Applique aussi aux élèves inscrits sans classe (nouvelle année)"
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-sm bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100"
+                    >
+                      <GraduationCap className="w-4 h-4" /> Par niveau
+                    </button>
+                  </div>
+                  {t.level && (
+                    <p className="text-[10px] text-gray-500">
+                      Les nouveaux inscrits du niveau {t.level} reçoivent ce plan automatiquement.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -520,8 +662,12 @@ export default function FeeTemplatesPage() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Niveau (optionnel)</label>
                   <input type="text" value={editing.level || ''} onChange={e => setEditing({ ...editing, level: e.target.value })}
-                    placeholder="Ex: CP, 6ème, Terminale"
+                    placeholder="Ex: 1AP, 1AC, TC"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    Avec un niveau, le modèle s'applique automatiquement aux élèves inscrits
+                    de ce niveau (même sans classe) et à chaque nouvelle inscription.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Type d'école (optionnel)</label>
