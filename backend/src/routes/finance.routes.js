@@ -1290,9 +1290,12 @@ router.post('/students/:studentId/pay-services', async (req, res) => {
 // confirmés de la facture (le trigger recalcule le payé/reste). Option
 // `cancel_invoice` pour annuler aussi la facture (le service ne sera plus dû).
 // La traçabilité (qui/motif) est portée par les paiements annulés.
+// Permissions GRADUÉES : le personnel financier peut retirer un frais tant
+// qu'AUCUN argent n'a été encaissé (exclusion avant facturation, suppression
+// d'une facture impayée) — c'est son travail au guichet. Dès qu'un paiement
+// confirmé existe, l'annulation touche l'historique financier : admin requis.
 router.post('/students/:studentId/services/cancel-payment', async (req, res) => {
   try {
-    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
     const { invoice_id, reason, cancel_invoice, academic_year, month, category } = req.body;
@@ -1345,6 +1348,13 @@ router.post('/students/:studentId/services/cancel-payment', async (req, res) => 
     if (schoolId) payQ = payQ.eq('school_id', schoolId);
     const { data: pays, error: e1 } = await payQ;
     if (e1) throw e1;
+
+    // Argent déjà encaissé sur ce service → opération réservée aux admins.
+    if (pays && pays.length && !isAdminRole(req)) {
+      return res.status(403).json({
+        error: 'Ce service a déjà été encaissé : seul un admin peut annuler le paiement.',
+      });
+    }
 
     if (pays && pays.length) {
       const { error: e2 } = await supabaseAdmin
@@ -1535,9 +1545,11 @@ router.post('/students/:studentId/apply-discount', async (req, res) => {
 
 // Réintégrer un service exclu : supprime les marqueurs d'exclusion (factures
 // annulées SANS aucun paiement lié) pour (période, catégorie).
+// Contrepartie exacte de l'exclusion (cancel-payment sans paiement) : ouvert au
+// personnel financier, sinon une exclusion faite au guichet serait irréversible
+// sans admin. Aucun paiement n'est touché (marqueurs sans paiement lié).
 router.post('/students/:studentId/services/restore', async (req, res) => {
   try {
-    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut réintégrer un service' });
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
     const { academic_year, month, category } = req.body;
