@@ -380,7 +380,7 @@ function MonthTiles({ months, isMonthChecked, focusMonth, onOpenMonth, onSelectA
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-700">Mois de l'année</h3>
+        <h3 className="text-sm font-semibold text-gray-700">Frais annuels & mois</h3>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onSelectAll}
             className="text-xs px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-medium">
@@ -407,10 +407,15 @@ function MonthTiles({ months, isMonthChecked, focusMonth, onOpenMonth, onSelectA
           else if (m.status === 'overdue') cls = 'bg-red-600 text-white';
           else if (remaining < total) cls = 'bg-amber-400 text-white';
           else cls = 'bg-red-400 text-white';
+          // Les frais annuels (inscription…) ont leur propre tuile, mise en
+          // avant : ce ne sont pas des mensualités.
+          const annualTileHere = m.month === 'FA';
           return (
             <button key={m.month} type="button" disabled={!openable} onClick={() => onOpenMonth(focused ? null : m.month)}
-              title={openable ? 'Ouvrir la page de ce mois (frais, remises, encaissement)' : 'Rien à facturer ce mois'}
-              className={`relative rounded-xl px-3 py-2.5 text-left shadow-sm transition-transform ${cls} ${openable ? 'hover:scale-[1.03] cursor-pointer' : 'cursor-default'} ${focused ? 'ring-2 ring-offset-2 ring-emerald-600' : checked ? 'ring-2 ring-offset-1 ring-emerald-400' : ''}`}>
+              title={openable
+                ? (annualTileHere ? 'Ouvrir les frais annuels (inscription…)' : 'Ouvrir la page de ce mois (frais, remises, encaissement)')
+                : 'Rien à facturer'}
+              className={`relative rounded-xl px-3 py-2.5 text-left shadow-sm transition-transform ${cls} ${annualTileHere ? 'ring-2 ring-offset-1 ring-gray-800/20' : ''} ${openable ? 'hover:scale-[1.03] cursor-pointer' : 'cursor-default'} ${focused ? 'ring-2 ring-offset-2 ring-emerald-600' : checked ? 'ring-2 ring-offset-1 ring-emerald-400' : ''}`}>
               {checked && <CheckCircle2 className="w-4 h-4 absolute top-1.5 right-1.5" />}
               <p className="text-xs font-semibold truncate opacity-90">{m.label}</p>
               <p className="text-lg font-bold leading-tight tabular-nums">{formatMAD(remaining)}</p>
@@ -559,25 +564,64 @@ function CollectTab({ student, academicYear, onChanged }) {
     finally { setQuickAdding(null); }
   };
 
-  // Sélection d'un mois ENTIER depuis une tuile : coche tous les services
-  // restants du mois (ou décoche tout si déjà tous cochés).
+  // ── Frais ANNUELS (inscription, assurance…) présentés à part ───────────────
+  // Ils ne sont dus qu'un seul mois, mais ne sont pas des mensualités : on les
+  // sort des cartes de mois pour en faire une tuile dédiée « Frais annuels »
+  // (comme le total annuel de la maquette). Chaque service garde son VRAI mois
+  // dans `_month` — c'est lui qui sert aux appels serveur.
+  const ANNUAL_KEY = 'FA';
+  const isAnnual = (s) => !!s.annual;
+
+  // Mois « nettoyés » : les frais annuels en sont retirés (totaux recalculés).
+  const monthsOnly = useMemo(() => (data?.months || []).map(m => {
+    const services = (m.services || []).filter(s => !isAnnual(s));
+    const expected = services.reduce((a, s) => a + Number(s.total || 0), 0);
+    const paid = services.reduce((a, s) => a + Number(s.paid || 0), 0);
+    const remaining = services.reduce((a, s) => a + Number(s.remaining || 0), 0);
+    return { ...m, services, expected, paid, remaining };
+  }).filter(m => (m.services || []).length > 0), [data]);
+
+  // Tuile virtuelle des frais annuels (null si le plan n'en contient aucun).
+  const annualTile = useMemo(() => {
+    const services = [];
+    (data?.months || []).forEach(m => (m.services || []).forEach(s => {
+      if (isAnnual(s)) services.push({ ...s, _month: m.month, _monthLabel: m.label });
+    }));
+    if (services.length === 0) return null;
+    const expected = services.reduce((a, s) => a + Number(s.total || 0), 0);
+    const paid = services.reduce((a, s) => a + Number(s.paid || 0), 0);
+    const remaining = services.reduce((a, s) => a + Number(s.remaining || 0), 0);
+    const status = remaining <= 0 && expected > 0 ? 'paid'
+      : services.some(s => s.status === 'overdue') ? 'overdue'
+      : paid > 0 ? 'partial' : 'unpaid';
+    return { month: ANNUAL_KEY, label: 'Frais annuels', services, expected, paid, remaining, status };
+  }, [data]);
+
+  // Tuiles affichées : frais annuels en tête, puis les mois.
+  const tiles = useMemo(() => (annualTile ? [annualTile, ...monthsOnly] : monthsOnly), [annualTile, monthsOnly]);
+
+  // Mois réel d'un service (les frais annuels gardent le leur).
+  const svcMonth = (tile, s) => (s._month != null ? s._month : tile.month);
+
+  // Sélection d'une tuile ENTIÈRE : coche tous les services restants
+  // (ou décoche tout si déjà tous cochés).
   const monthPayables = (m) => (m.services || []).filter(s => !(s.status === 'excluded' || s.excluded) && s.remaining > 0);
   const isMonthChecked = (m) => {
     const p = monthPayables(m);
-    return p.length > 0 && p.every(s => sel[keyOf(m.month, s.category)]?.checked);
+    return p.length > 0 && p.every(s => sel[keyOf(svcMonth(m, s), s.category)]?.checked);
   };
   const toggleMonth = (m) => {
     const p = monthPayables(m);
     if (p.length === 0) return;
     const all = isMonthChecked(m);
     p.forEach(s => {
-      const checked = !!sel[keyOf(m.month, s.category)]?.checked;
-      if (all ? checked : !checked) toggle(m.month, s);
+      const checked = !!sel[keyOf(svcMonth(m, s), s.category)]?.checked;
+      if (all ? checked : !checked) toggle(svcMonth(m, s), s);
     });
   };
   const selectAllMonths = () =>
-    (data?.months || []).forEach(m => monthPayables(m).forEach(s => {
-      if (!sel[keyOf(m.month, s.category)]?.checked) toggle(m.month, s);
+    tiles.forEach(m => monthPayables(m).forEach(s => {
+      if (!sel[keyOf(svcMonth(m, s), s.category)]?.checked) toggle(svcMonth(m, s), s);
     }));
 
   // Libellé d'une ligne sélectionnée (pour la liste live).
@@ -719,16 +763,21 @@ function CollectTab({ student, academicYear, onChanged }) {
     </div>
   );
 
-  const focus = (data?.months || []).find(m => m.month === focusMonth);
+  const focus = tiles.find(m => m.month === focusMonth);
 
   // ── PAGE DÉDIÉE DU MOIS : remplace toute la vue (aucun défilement) ─────────
   if (focus) {
+    const isAnnualPage = focus.month === ANNUAL_KEY;
     const active = focus.services.filter(x => !(x.status === 'excluded' || x.excluded));
     const monthTotal = active.reduce((t, x) => t + Number(x.total || 0), 0);
     const monthRemaining = active.reduce((t, x) => t + Number(x.remaining || 0), 0);
     const payables = monthPayables(focus);
     const allChecked = isMonthChecked(focus);
     const presentCats = new Set(focus.services.map(x => x.category).filter(Boolean));
+    // Catégories ANNUELLES du plan : jamais proposées à l'ajout sur un mois
+    // (l'inscription ne doit pas devenir un service mensuel).
+    const annualCats = new Set();
+    (data?.months || []).forEach(m => (m.services || []).forEach(s => { if (isAnnual(s)) annualCats.add(s.category); }));
     // Catalogue d'ajout direct : items du PLAN de l'élève (personnalisés) PUIS
     // accessoires du MODÈLE non repris dans le plan (transport, cantine… exclus
     // par l'application « frais de base seuls ») — chacun avec son montant
@@ -749,10 +798,13 @@ function CollectTab({ student, academicYear, onChanged }) {
       }
       catalogMap.set(c, { category: c, name, amount });
     });
-    const planQuickAdd = [...catalogMap.values()].filter(q => !presentCats.has(q.category));
+    // Les frais annuels (inscription…) sont exclus de l'ajout : ils ont leur
+    // propre carte et ne doivent pas être facturés sur d'autres mois.
+    const planQuickAdd = isAnnualPage ? [] : [...catalogMap.values()]
+      .filter(q => !presentCats.has(q.category) && !annualCats.has(q.category));
     // Tout autre frais (catégories hors plan/modèle) → petit formulaire.
-    const otherCats = Object.entries(CATEGORY_LABELS)
-      .filter(([c]) => !presentCats.has(c) && !catalogMap.has(c));
+    const otherCats = isAnnualPage ? [] : Object.entries(CATEGORY_LABELS)
+      .filter(([c]) => !presentCats.has(c) && !catalogMap.has(c) && !annualCats.has(c));
     const modalCandidates = remiseModal ? remiseCandidates(remiseModal.category) : [];
 
     return (
@@ -763,10 +815,10 @@ function CollectTab({ student, academicYear, onChanged }) {
             className="flex items-center gap-1 px-2.5 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium">
             <ArrowLeft className="w-4 h-4" /> Mois
           </button>
-          {(data.months || []).map(m => (
+          {tiles.map(m => (
             <button key={m.month} onClick={() => setFocusMonth(m.month)} title={m.label}
-              className={`w-9 h-9 rounded-full text-xs font-bold shadow-sm ${monthColor(m)} ${m.month === focus.month ? 'ring-2 ring-offset-1 ring-emerald-600' : ''}`}>
-              {m.month}
+              className={`${m.month === ANNUAL_KEY ? 'px-3 h-9' : 'w-9 h-9'} rounded-full text-xs font-bold shadow-sm ${monthColor(m)} ${m.month === focus.month ? 'ring-2 ring-offset-1 ring-emerald-600' : ''}`}>
+              {m.month === ANNUAL_KEY ? 'FA' : m.month}
             </button>
           ))}
         </div>
@@ -793,7 +845,10 @@ function CollectTab({ student, academicYear, onChanged }) {
 
             <div className="p-3 grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
               {focus.services.map(svc => {
-                const k = keyOf(focus.month, svc.category);
+                // Mois réel du service : le sien pour un frais annuel, celui de
+                // la tuile sinon — c'est lui qui sert aux appels serveur.
+                const sm = svcMonth(focus, svc);
+                const k = keyOf(sm, svc.category);
                 const entry = sel[k];
                 const checked = !!entry?.checked;
                 const excluded = svc.status === 'excluded' || svc.excluded;
@@ -805,7 +860,7 @@ function CollectTab({ student, academicYear, onChanged }) {
                 else if (!payable) cardCls = 'border-emerald-200 bg-emerald-50';
                 else if (checked) cardCls = 'border-emerald-600 bg-emerald-500 text-white shadow cursor-pointer';
                 return (
-                  <div key={k} onClick={payable ? () => toggle(focus.month, svc) : undefined}
+                  <div key={k} onClick={payable ? () => toggle(sm, svc) : undefined}
                     className={`relative border-2 rounded-xl p-3 text-center transition-colors ${cardCls}`}>
                     <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
                       {svc.invoice_id && (
@@ -815,12 +870,12 @@ function CollectTab({ student, academicYear, onChanged }) {
                         </button>
                       )}
                       {excluded ? (
-                        <button onClick={(e) => { e.stopPropagation(); restoreService(focus.month, svc); }}
+                        <button onClick={(e) => { e.stopPropagation(); restoreService(sm, svc); }}
                           title="Réintégrer ce frais" className="p-1 rounded hover:bg-green-100">
                           <RotateCcw className="w-3.5 h-3.5 text-green-600" />
                         </button>
                       ) : (svc.invoice_id || payable) && (
-                        <button onClick={(e) => { e.stopPropagation(); cancelService(focus.month, svc); }}
+                        <button onClick={(e) => { e.stopPropagation(); cancelService(sm, svc); }}
                           title={hasPaid ? 'Annuler le paiement' : (svc.invoice_id ? 'Supprimer ce frais' : 'Exclure ce frais')}
                           className="p-1 rounded hover:bg-black/10">
                           <Ban className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-red-500'}`} />
@@ -833,6 +888,13 @@ function CollectTab({ student, academicYear, onChanged }) {
                     <p className={`text-sm font-semibold truncate mt-1 ${excluded ? 'line-through text-gray-400' : ''}`}>
                       {serviceLabel(svc)}
                     </p>
+                    {/* Frais annuel : rappel du mois d'échéance (il est facturé
+                        une seule fois, pas tous les mois). */}
+                    {svc._monthLabel && (
+                      <p className={`text-[10px] truncate ${checked ? 'opacity-80' : 'text-gray-400'}`}>
+                        échéance {svc._monthLabel}
+                      </p>
+                    )}
 
                     {excluded ? (
                       <p className="text-xs text-gray-400 mt-1.5">Exclu</p>
@@ -1031,7 +1093,7 @@ function CollectTab({ student, academicYear, onChanged }) {
       )}
 
       {/* Tuiles mensuelles : vue d'ensemble + ouverture de la page d'un mois. */}
-      <MonthTiles months={data.months} isMonthChecked={isMonthChecked} focusMonth={focusMonth}
+      <MonthTiles months={tiles} isMonthChecked={isMonthChecked} focusMonth={focusMonth}
         onOpenMonth={setFocusMonth} onSelectAll={selectAllMonths} onClear={() => setSel({})}
         hasSelection={checkedItems.length > 0} />
 

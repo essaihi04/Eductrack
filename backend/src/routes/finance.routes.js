@@ -3318,6 +3318,7 @@ function buildPlanMonths(plan, academicYear, studentInvoices) {
           invoice_number: inv?.invoice_number || null,
           status: inv ? statusOf(paid, total, inv.due_date) : (excluded ? 'excluded' : 'pending'),
           excluded: excluded || undefined, due_date: inv?.due_date || computedDue,
+          annual: s.annual || undefined, // frais ponctuel (inscription…) → carte à part
         };
       });
       const present = new Set(services.map(s => s.category));
@@ -3513,6 +3514,16 @@ export async function planMonthlyForecast(schoolId, academicYear) {
 function computeMonthServices(plan, month) {
   const { lines, subtotal, total } = computeMonthForPlan(plan, month);
   if (!lines.length) return [];
+  // Catégories issues d'un frais ANNUEL / ponctuel (inscription, assurance…) :
+  // elles ne sont dues qu'un seul mois de l'année. Marquées pour que la fiche
+  // élève les présente à part des mensualités (carte « Frais annuels ») et ne
+  // les propose pas à l'ajout sur les autres mois.
+  const annualCats = new Set(
+    collectPlanItems(plan)
+      .filter(it => (it.recurrence === 'one_time' || it.recurrence === 'annual')
+        && itemAppliesToPlanMonth(plan, it, month) && Number(it.amount) > 0)
+      .map(it => it.category || 'other')
+  );
   const byCat = {};
   for (const l of lines) {
     const cat = l.category || 'other';
@@ -3529,6 +3540,7 @@ function computeMonthServices(plan, month) {
       c.total = Math.round(c.gross * ratio * 100) / 100;
       allocated += c.total;
     }
+    c.annual = annualCats.has(c.category);
   });
   return cats;
 }
