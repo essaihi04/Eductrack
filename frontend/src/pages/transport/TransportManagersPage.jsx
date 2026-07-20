@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { UserCog, Plus, Trash2, Edit2, Key, X } from 'lucide-react';
 import { transportManagersApi } from '../../lib/transportApi';
+import { askPrompt } from '../../lib/prompt';
 
 export default function TransportManagersPage() {
   const [managers, setManagers] = useState([]);
@@ -33,7 +34,7 @@ export default function TransportManagersPage() {
   };
 
   const resetPwd = async (m) => {
-    const np = prompt(`Nouveau mot de passe pour ${m.first_name} ${m.last_name} (min 6 caractères) :`);
+    const np = await askPrompt(`Nouveau mot de passe pour ${m.first_name} ${m.last_name} (min 6 caractères) :`);
     if (!np || np.length < 6) return;
     try { await transportManagersApi.resetPassword(m.id, np); alert(`Mot de passe réinitialisé.\nEmail : ${m.email}\nMot de passe : ${np}`); }
     catch (e) { alert('Erreur : ' + e.message); }

@@ -5,6 +5,7 @@ import {
   LayoutGrid, List,
 } from 'lucide-react';
 import { financeApi, formatMAD, METHOD_LABELS, CATEGORY_LABELS } from '../../lib/financeApi';
+import { askPrompt } from '../../lib/prompt';
 import { Button } from '../../components/finance/ui';
 import { Avatar } from '../../components/directory/ui';
 
@@ -596,13 +597,13 @@ function CollectTab({ student, academicYear, onChanged }) {
     try {
       if (svc.invoice_id) {
         const verb = paid ? 'Annuler le paiement de' : 'Supprimer';
-        const reason = prompt(`${verb} « ${serviceLabel(svc)} » ? Motif :`);
+        const reason = await askPrompt(`${verb} « ${serviceLabel(svc)} » ? Motif :`);
         if (reason === null) return;
         await financeApi.cancelServicePayment(student.id, {
           invoice_id: svc.invoice_id, reason, cancel_invoice: !paid,
         });
       } else {
-        const reason = prompt(`Exclure « ${serviceLabel(svc)} » de ce mois (avant paiement) ? Motif :`);
+        const reason = await askPrompt(`Exclure « ${serviceLabel(svc)} » de ce mois (avant paiement) ? Motif :`);
         if (reason === null) return;
         await financeApi.cancelServicePayment(student.id, {
           reason, cancel_invoice: true, academic_year: academicYear, month, category: svc.category,
@@ -1414,7 +1415,7 @@ function HistoryTab({ student, academicYear, onChanged }) {
   const svcLabel = (p) => p.invoice?.service_category ? (CATEGORY_LABELS[p.invoice.service_category] || p.invoice.service_category) : 'Mensualité';
 
   const cancelGroup = async (g) => {
-    const reason = prompt(`Annuler cet encaissement (${g.lines.length} service(s)) ? Motif :`);
+    const reason = await askPrompt(`Annuler cet encaissement (${g.lines.length} service(s)) ? Motif :`);
     if (reason === null) return;
     try {
       for (const l of g.lines) if (l.status !== 'cancelled') await financeApi.cancelPayment(l.id, reason);
@@ -1430,7 +1431,7 @@ function HistoryTab({ student, academicYear, onChanged }) {
     } catch (e) { alert('Erreur impression: ' + e.message); }
   };
   const cancelLine = async (p) => {
-    const reason = prompt('Motif de l\'annulation de ce service ?');
+    const reason = await askPrompt('Motif de l\'annulation de ce service ?');
     if (reason === null) return;
     try { await financeApi.cancelPayment(p.id, reason); await load(); onChanged?.(); }
     catch (e) { alert('Erreur: ' + e.message); }
@@ -1466,7 +1467,7 @@ function HistoryTab({ student, academicYear, onChanged }) {
     catch (e) { alert('Erreur impression: ' + e.message); }
   };
   const cancelInvoice = async (inv) => {
-    const reason = prompt('Motif de l\'annulation de la facture ?');
+    const reason = await askPrompt('Motif de l\'annulation de la facture ?');
     if (reason === null) return;
     try { await financeApi.cancelInvoice(inv.id, reason); await load(); onChanged?.(); }
     catch (e) { alert('Erreur: ' + e.message); }

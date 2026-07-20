@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { UserCog, Plus, Trash2, Edit2, Key, X, Mail, Phone, Calendar } from 'lucide-react';
 import { financeApi, formatDate } from '../../lib/financeApi';
+import { askPrompt } from '../../lib/prompt';
 
 export default function FinanceManagersPage() {
   const [managers, setManagers] = useState([]);
@@ -41,7 +42,7 @@ export default function FinanceManagersPage() {
   };
 
   const resetPassword = async (manager) => {
-    const newPassword = prompt(`Nouveau mot de passe pour ${manager.first_name} ${manager.last_name} (min 6 caractères):`);
+    const newPassword = await askPrompt(`Nouveau mot de passe pour ${manager.first_name} ${manager.last_name} (min 6 caractères):`);
     if (!newPassword || newPassword.length < 6) return;
     try {
       await financeApi.resetManagerPassword(manager.id, newPassword);

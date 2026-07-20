@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { GraduationCap, Plus, Trash2, Edit2, Key, X, Mail, Phone, Calendar } from 'lucide-react';
 import { pedagogicalApi, formatDate } from '../../lib/pedagogicalApi';
+import { askPrompt } from '../../lib/prompt';
 
 export default function PedagogicalDirectorsPage() {
   const [directors, setDirectors] = useState([]);
@@ -41,7 +42,7 @@ export default function PedagogicalDirectorsPage() {
   };
 
   const resetPassword = async (d) => {
-    const newPassword = prompt(`Nouveau mot de passe pour ${d.first_name} ${d.last_name} (min 6 caractères):`);
+    const newPassword = await askPrompt(`Nouveau mot de passe pour ${d.first_name} ${d.last_name} (min 6 caractères):`);
     if (!newPassword || newPassword.length < 6) return;
     try {
       await pedagogicalApi.resetPassword(d.id, newPassword);

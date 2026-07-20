@@ -6,6 +6,7 @@ import { useYear } from '../../contexts/YearContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { toDashYear } from '../../lib/schoolYear';
 import { printStudentInvoice } from '../../lib/printDocs';
+import { askPrompt } from '../../lib/prompt';
 
 const STATUS_TONE = { draft: 'gray', issued: 'blue', partial: 'yellow', paid: 'green', overdue: 'red', cancelled: 'gray' };
 
@@ -70,7 +71,7 @@ export default function InvoicesPage() {
   };
 
   const cancelInvoice = async (id) => {
-    const reason = prompt('Motif de l\'annulation ?');
+    const reason = await askPrompt('Motif de l\'annulation ?');
     if (!reason) return;
     try {
       await financeApi.cancelInvoice(id, reason);

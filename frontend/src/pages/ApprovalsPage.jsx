@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck, Settings, Inbox, Check, X, Loader2, Clock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { askPrompt } from '../lib/prompt';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -61,7 +62,7 @@ const ApprovalsPage = () => {
     setBusy(id + decision);
     try {
       let reason = null;
-      if (decision === 'reject') { reason = prompt('Motif du refus (optionnel) :') || null; }
+      if (decision === 'reject') { reason = (await askPrompt('Motif du refus (optionnel) :')) || null; }
       await api(`/api/approvals/requests/${id}/${decision === 'reject' ? 'reject' : 'approve'}`, { method: 'POST', body: { reason } });
       await load();
     } catch (e) { alert(e.message); }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ListTree, Trash2, RotateCcw, Lock } from 'lucide-react';
 import { financeApi } from '../../lib/financeApi';
+import { askPrompt } from '../../lib/prompt';
 import { PageHeader, Button } from '../../components/finance/ui';
 
 const STREAMS = [
@@ -34,12 +35,12 @@ export default function ChartOfAccountsPage() {
   };
 
   const addLine = async (kind, sectionId) => {
-    const name = prompt('Nom du nouveau poste :'); if (!name) return;
+    const name = await askPrompt('Nom du nouveau poste :'); if (!name) return;
     try { await financeApi.createAccount({ kind, node_type: 'line', name, parent_id: sectionId, sort_order: 900 }); load(); }
     catch (e) { alert('Erreur: ' + e.message); }
   };
   const addSection = async (kind) => {
-    const name = prompt('Nom de la nouvelle section :'); if (!name) return;
+    const name = await askPrompt('Nom de la nouvelle section :'); if (!name) return;
     try { await financeApi.createAccount({ kind, node_type: 'section', name, sort_order: 990 }); load(); }
     catch (e) { alert('Erreur: ' + e.message); }
   };

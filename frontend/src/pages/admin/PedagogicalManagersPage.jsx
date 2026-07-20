@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Users, Plus, Trash2, Edit2, Key, X, Mail, Phone, Calendar, GraduationCap } from 'lucide-react';
 import { pedagogicalManagersApi } from '../../lib/pedagogicalManagersApi';
 import { supabase } from '../../lib/supabase';
+import { askPrompt } from '../../lib/prompt';
 
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR') : '';
 
@@ -74,7 +75,7 @@ export default function PedagogicalManagersPage() {
   };
 
   const resetPassword = async (m) => {
-    const newPassword = prompt(`Nouveau mot de passe pour ${m.first_name} ${m.last_name} (min 6 caractères):`);
+    const newPassword = await askPrompt(`Nouveau mot de passe pour ${m.first_name} ${m.last_name} (min 6 caractères):`);
     if (!newPassword || newPassword.length < 6) return;
     try {
       await pedagogicalManagersApi.resetPassword(m.id, newPassword);

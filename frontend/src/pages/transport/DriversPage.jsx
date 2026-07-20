@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { User, Plus, Trash2, Edit2, Key, X, Bus } from 'lucide-react';
 import { driversApi } from '../../lib/transportApi';
+import { askPrompt } from '../../lib/prompt';
 
 export default function DriversPage() {
   const [drivers, setDrivers] = useState([]);
@@ -26,7 +27,7 @@ export default function DriversPage() {
     } catch (e) { alert('Erreur : ' + e.message); }
   };
   const resetPwd = async (m) => {
-    const np = prompt(`Nouveau mot de passe pour ${m.first_name} ${m.last_name} (min 6 caractères) :`);
+    const np = await askPrompt(`Nouveau mot de passe pour ${m.first_name} ${m.last_name} (min 6 caractères) :`);
     if (!np || np.length < 6) return;
     try { await driversApi.resetPassword(m.id, np); alert(`Mot de passe réinitialisé.\nEmail : ${m.email}\nMot de passe : ${np}`); }
     catch (e) { alert('Erreur : ' + e.message); }

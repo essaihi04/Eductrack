@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Banknote, Search, Wallet, CheckCircle2, X, User, Ban, ChevronRight } from 'lucide-react';
 import { financeApi, formatMAD, METHOD_LABELS, CATEGORY_LABELS } from '../../lib/financeApi';
+import { askPrompt } from '../../lib/prompt';
 import { PageHeader, Card, EmptyState, Button, Badge } from '../../components/finance/ui';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear, toSlashYear } from '../../lib/schoolYear';
@@ -122,7 +123,7 @@ export default function QuickCollectPage() {
   // Annulation d'un service : on annule le(s) paiement(s) confirmé(s) de sa facture.
   const cancelService = async (s) => {
     if (!s.invoice_id || s.paid <= 0) return;
-    const reason = prompt(`Annuler le paiement de "${svcLabel(s)}" ?\nMotif :`);
+    const reason = await askPrompt(`Annuler le paiement de "${svcLabel(s)}" ?\nMotif :`);
     if (!reason) return;
     try {
       const { payments } = await financeApi.listPayments({ invoice_id: s.invoice_id });

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { CreditCard, Search, Ban, Printer, LayoutGrid, List } from 'lucide-react';
 import { financeApi, formatMAD, formatDate, METHOD_LABELS } from '../../lib/financeApi';
 import { printHtmlDocument } from '../../lib/download';
+import { askPrompt } from '../../lib/prompt';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
@@ -29,7 +30,7 @@ export default function PaymentsPage() {
 
   const cancelPayment = async (id) => {
     if (!isAdmin) return;
-    const reason = prompt('Motif de l\'annulation ?');
+    const reason = await askPrompt('Motif de l\'annulation ?');
     if (!reason) return;
     try {
       await financeApi.cancelPayment(id, reason);
