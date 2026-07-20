@@ -124,11 +124,11 @@ export default function QuickCollectPage() {
   const cancelService = async (s) => {
     if (!s.invoice_id || s.paid <= 0) return;
     const reason = await askPrompt(`Annuler le paiement de "${svcLabel(s)}" ?\nMotif :`);
-    if (!reason) return;
+    if (!reason || !reason.trim()) return; // motif obligatoire (refusé sans lui)
     try {
       const { payments } = await financeApi.listPayments({ invoice_id: s.invoice_id });
       for (const p of (payments || [])) {
-        if (p.status !== 'cancelled') await financeApi.cancelPayment(p.id, reason);
+        if (p.status !== 'cancelled') await financeApi.cancelPayment(p.id, reason.trim());
       }
       await loadStatus(selectedStudent);
       loadStudents();

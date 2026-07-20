@@ -13,11 +13,14 @@ export default function PaymentsPage() {
   const { year } = useYear();
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ from: '', to: '', method: '', search: '' });
+  // status: 'all' → les paiements annulés restent dans l'historique (traçabilité :
+  // motif, qui a annulé, quand) ; 'confirmed' / 'cancelled' pour ne voir qu'eux.
+  const [filters, setFilters] = useState({ from: '', to: '', method: '', search: '', status: 'all' });
   const [view, setView] = useState('cards'); // 'cards' | 'table'
-  const isAdmin = ['admin', 'school_admin', 'super_admin'].includes(profile?.role);
+  // Tout le personnel financier peut annuler (le serveur applique la même règle).
+  const canCancel = ['admin', 'school_admin', 'super_admin', 'finance_manager'].includes(profile?.role);
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.from, filters.to, filters.method, year]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filters.from, filters.to, filters.method, filters.status, year]);
 
   const load = async () => {
     setLoading(true);
@@ -29,11 +32,12 @@ export default function PaymentsPage() {
   };
 
   const cancelPayment = async (id) => {
-    if (!isAdmin) return;
-    const reason = await askPrompt('Motif de l\'annulation ?');
-    if (!reason) return;
+    if (!canCancel) return;
+    // Motif obligatoire (refusé côté serveur sans motif) : c'est la trace de l'annulation.
+    const reason = await askPrompt("Motif de l'annulation de ce paiement ?");
+    if (!reason || !reason.trim()) return;
     try {
-      await financeApi.cancelPayment(id, reason);
+      await financeApi.cancelPayment(id, reason.trim());
       load();
     } catch (e) { alert('Erreur: ' + e.message); }
   };
@@ -105,8 +109,11 @@ export default function PaymentsPage() {
       })
     : payments;
 
-  const total = filteredBySearch.reduce((s, p) => s + Number(p.amount), 0);
-  const avg = filteredBySearch.length ? total / filteredBySearch.length : 0;
+  // Les annulés restent affichés (traçabilité) mais ne comptent dans aucun total.
+  const confirmed = filteredBySearch.filter(p => p.status !== 'cancelled');
+  const cancelled = filteredBySearch.filter(p => p.status === 'cancelled');
+  const total = confirmed.reduce((s, p) => s + Number(p.amount), 0);
+  const avg = confirmed.length ? total / confirmed.length : 0;
 
   const columns = [
     { key: 'receipt', header: 'N° Reçu', render: (p) => <span className="font-mono text-xs text-gray-700">{p.receipt_number}</span> },
@@ -126,14 +133,31 @@ export default function PaymentsPage() {
     { key: 'method', header: 'Mode', render: (p) => <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge> },
     { key: 'reference', header: 'Référence', render: (p) => <span className="text-gray-500 text-xs">{p.reference || '—'}</span> },
     { key: 'cashier', header: 'Caissier', render: (p) => <span className="text-gray-600 text-xs">{p.cashier ? `${p.cashier.first_name} ${p.cashier.last_name}` : '—'}</span> },
-    { key: 'amount', header: 'Montant', align: 'right', render: (p) => <Money value={p.amount} tone="green" /> },
+    { key: 'amount', header: 'Montant', align: 'right', render: (p) => (
+      p.status === 'cancelled'
+        ? <span className="text-gray-400 line-through tabular-nums">{formatMAD(p.amount)}</span>
+        : <Money value={p.amount} tone="green" />
+    ) },
+    // Trace de l'annulation : statut, motif, auteur et date, visibles dans l'historique.
+    { key: 'status', header: 'Statut', render: (p) => p.status === 'cancelled' ? (
+      <div>
+        <Badge tone="red">Annulé</Badge>
+        <div className="text-xs text-gray-500 mt-0.5 max-w-[220px]">
+          {p.cancellation_reason || 'Sans motif'}
+        </div>
+        <div className="text-[11px] text-gray-400">
+          {p.canceller ? `Par ${p.canceller.first_name} ${p.canceller.last_name}` : ''}
+          {p.cancelled_at ? ` · ${formatDate(p.cancelled_at)}` : ''}
+        </div>
+      </div>
+    ) : <Badge tone="green">Confirmé</Badge> },
     { key: 'actions', header: 'Actions', align: 'right', render: (p) => (
       <div className="flex justify-end gap-1">
         <button onClick={() => printReceipt(p)} className="p-1.5 hover:bg-blue-50 rounded" title="Imprimer reçu">
           <Printer className="w-4 h-4 text-blue-500" />
         </button>
-        {isAdmin && (
-          <button onClick={() => cancelPayment(p.id)} className="p-1.5 hover:bg-red-50 rounded" title="Annuler">
+        {canCancel && p.status !== 'cancelled' && (
+          <button onClick={() => cancelPayment(p.id)} className="p-1.5 hover:bg-red-50 rounded" title="Annuler ce paiement">
             <Ban className="w-4 h-4 text-red-500" />
           </button>
         )}
@@ -144,12 +168,12 @@ export default function PaymentsPage() {
   return (
     <div className="p-6 space-y-5">
       <PageHeader icon={CreditCard} title="Paiements" color="green"
-        subtitle={`${filteredBySearch.length} paiement(s) encaissé(s)`}
+        subtitle={`${confirmed.length} paiement(s) encaissé(s)${cancelled.length ? ` · ${cancelled.length} annulé(s)` : ''}`}
         onRefresh={load} loading={loading} />
 
       <KpiGrid cols={3}>
         <KpiCard label="Total encaissé" value={formatMAD(total)} tone="green" />
-        <KpiCard label="Nombre de reçus" value={filteredBySearch.length} />
+        <KpiCard label="Nombre de reçus" value={confirmed.length} />
         <KpiCard label="Paiement moyen" value={formatMAD(avg)} />
       </KpiGrid>
 
@@ -164,6 +188,12 @@ export default function PaymentsPage() {
           className="px-3 py-2 border border-gray-300 rounded-lg">
           <option value="">Tous modes</option>
           {Object.entries(METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}
+          className="px-3 py-2 border border-gray-300 rounded-lg" title="Inclure ou non les paiements annulés">
+          <option value="all">Encaissés + annulés</option>
+          <option value="confirmed">Encaissés seulement</option>
+          <option value="cancelled">Annulés seulement</option>
         </select>
         <input type="date" value={filters.from} onChange={e => setFilters({ ...filters, from: e.target.value })}
           className="px-3 py-2 border border-gray-300 rounded-lg" />
@@ -189,7 +219,7 @@ export default function PaymentsPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {filteredBySearch.map((p) => (
-            <ReceiptCard key={p.id} p={p} isAdmin={isAdmin} onPrint={printReceipt} onCancel={cancelPayment} />
+            <ReceiptCard key={p.id} p={p} canCancel={canCancel} onPrint={printReceipt} onCancel={cancelPayment} />
           ))}
         </div>
       )}
@@ -198,12 +228,14 @@ export default function PaymentsPage() {
 }
 
 // Carte reçu façon Koolskools : montant, date, N° reçu, mois couverts, mode, actions.
-function ReceiptCard({ p, isAdmin, onPrint, onCancel }) {
+// Un paiement annulé reste affiché — barré, avec son motif, son auteur et sa date.
+function ReceiptCard({ p, canCancel, onPrint, onCancel }) {
   const period = p.invoice?.period_label || p.reference || null;
+  const isCancelled = p.status === 'cancelled';
   return (
-    <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-2 hover:shadow-sm transition-shadow">
+    <div className={`bg-card border rounded-xl p-4 flex flex-col gap-2 hover:shadow-sm transition-shadow ${isCancelled ? 'border-red-200 bg-red-50/30' : 'border-border'}`}>
       <div className="flex items-start justify-between gap-2">
-        <span className="text-xl font-bold text-green-700 tabular-nums">{formatMAD(p.amount)}</span>
+        <span className={`text-xl font-bold tabular-nums ${isCancelled ? 'text-gray-400 line-through' : 'text-green-700'}`}>{formatMAD(p.amount)}</span>
         <div className="flex flex-col items-end gap-1">
           <Badge tone="blue">{METHOD_LABELS[p.method] || p.method}</Badge>
           <Badge tone={p.status === 'cancelled' ? 'red' : 'green'}>{p.status === 'cancelled' ? 'Annulé' : 'Confirmé'}</Badge>
@@ -218,12 +250,24 @@ function ReceiptCard({ p, isAdmin, onPrint, onCancel }) {
         {period && <div className="text-gray-600">{period}</div>}
         {p.cashier && <div className="text-gray-400">Encaissé par {p.cashier.first_name} {p.cashier.last_name}</div>}
       </div>
+
+      {/* Trace de l'annulation : motif, auteur, date */}
+      {isCancelled && (
+        <div className="text-xs bg-red-50 border border-red-100 rounded-lg p-2 space-y-0.5">
+          <p className="text-red-700 font-medium">Motif : {p.cancellation_reason || 'non précisé'}</p>
+          <p className="text-red-500">
+            {p.canceller ? `Annulé par ${p.canceller.first_name} ${p.canceller.last_name}` : 'Annulé'}
+            {p.cancelled_at ? ` le ${formatDate(p.cancelled_at)}` : ''}
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center gap-1.5 pt-1 mt-auto border-t border-border">
         <button onClick={() => onPrint(p)} className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100">
           <Printer className="w-3.5 h-3.5" /> Imprimer
         </button>
-        {isAdmin && (
-          <button onClick={() => onCancel(p.id)} className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-red-50 text-red-600 rounded-lg hover:bg-red-100" title="Annuler / avoir">
+        {canCancel && !isCancelled && (
+          <button onClick={() => onCancel(p.id)} className="inline-flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-red-50 text-red-600 rounded-lg hover:bg-red-100" title="Annuler ce paiement (motif obligatoire)">
             <Ban className="w-3.5 h-3.5" /> Annuler
           </button>
         )}

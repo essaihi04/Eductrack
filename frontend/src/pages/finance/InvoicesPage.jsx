@@ -70,13 +70,35 @@ export default function InvoicesPage() {
     }
   };
 
+  // Annulation d'une facture : motif OBLIGATOIRE (il est enregistré sur la
+  // facture et, en cascade, sur chaque paiement annulé → traçabilité complète
+  // dans l'historique des paiements).
   const cancelInvoice = async (id) => {
-    const reason = await askPrompt('Motif de l\'annulation ?');
-    if (!reason) return;
+    const reason = await askPrompt("Motif de l'annulation de cette facture ?");
+    if (!reason || !reason.trim()) return;
+    const motif = reason.trim();
     try {
-      await financeApi.cancelInvoice(id, reason);
+      await financeApi.cancelInvoice(id, motif);
       load();
-    } catch (e) { alert('Erreur: ' + e.message); }
+    } catch (e) {
+      // Facture déjà (partiellement) payée : le serveur exige d'annuler aussi
+      // les paiements. On le propose explicitement plutôt que d'échouer.
+      if (e.data?.requires_payment_cancellation) {
+        const n = e.data.payments_count || 0;
+        if (!confirm(
+          `Cette facture a ${n} paiement(s) encaissé(s).\n\n` +
+          `Annuler la facture annulera aussi ce(s) paiement(s) : ils resteront visibles ` +
+          `dans l'historique des paiements, marqués « annulé » avec votre motif.\n\nContinuer ?`
+        )) return;
+        try {
+          const res = await financeApi.cancelInvoice(id, motif, true);
+          alert(`Facture annulée · ${res.cancelled_payments || 0} paiement(s) annulé(s).`);
+          load();
+        } catch (e2) { alert('Erreur: ' + e2.message); }
+        return;
+      }
+      alert('Erreur: ' + e.message);
+    }
   };
 
   const viewDetail = async (id) => {
@@ -115,8 +137,10 @@ export default function InvoicesPage() {
         <button onClick={(e) => { e.stopPropagation(); viewDetail(i.id); }} className="p-1 hover:bg-gray-100 rounded" title="Voir">
           <Eye className="w-4 h-4 text-gray-500" />
         </button>
-        {i.status !== 'cancelled' && i.status !== 'paid' && (
-          <button onClick={(e) => { e.stopPropagation(); cancelInvoice(i.id); }} className="p-1 hover:bg-red-50 rounded" title="Annuler">
+        {/* Une facture payée reste annulable : ses paiements sont annulés avec
+            elle (après confirmation) et tracés dans l'historique. */}
+        {i.status !== 'cancelled' && (
+          <button onClick={(e) => { e.stopPropagation(); cancelInvoice(i.id); }} className="p-1 hover:bg-red-50 rounded" title="Annuler (motif obligatoire)">
             <Ban className="w-4 h-4 text-red-500" />
           </button>
         )}

@@ -2042,7 +2042,11 @@ router.post('/invoices/generate-monthly', async (req, res) => {
 router.put('/invoices/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
+    const { reason, cancel_payments } = req.body;
+    // Motif obligatoire : c'est lui qui rend l'annulation traçable.
+    if (!String(reason || '').trim()) {
+      return res.status(400).json({ error: "Motif d'annulation obligatoire" });
+    }
 
     // Périmètre école : on n'annule que ses propres factures.
     const cancelSchoolId = getSchoolId(req);
@@ -2051,16 +2055,34 @@ router.put('/invoices/:id/cancel', async (req, res) => {
     const { data: owned } = await ownQ.maybeSingle();
     if (!owned) return res.status(404).json({ error: 'Facture introuvable dans votre école' });
 
-    // Bloquer l'annulation d'une facture ayant des paiements confirmés
-    // (sinon l'argent encaissé resterait sans facture → écart de caisse).
+    // Facture avec des paiements confirmés : annuler la facture seule laisserait
+    // de l'argent encaissé sans facture (écart de caisse). Soit on annule aussi
+    // les paiements (cancel_payments), soit on refuse.
     const { data: pays } = await supabaseAdmin
       .from('payments')
       .select('id')
       .eq('invoice_id', id)
-      .eq('status', 'confirmed')
-      .limit(1);
+      .eq('status', 'confirmed');
     if (pays && pays.length > 0) {
-      return res.status(400).json({ error: 'Facture déjà payée : annulez d\'abord le(s) paiement(s) associé(s).' });
+      if (!cancel_payments) {
+        return res.status(400).json({
+          error: `Facture déjà payée : ${pays.length} paiement(s) encaissé(s) doivent être annulés avec elle.`,
+          payments_count: pays.length,
+          requires_payment_cancellation: true,
+        });
+      }
+      // Cascade : les paiements portent le même motif → traçabilité complète.
+      const { error: payErr } = await supabaseAdmin
+        .from('payments')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: req.user.id,
+          cancellation_reason: `${reason} (annulation de la facture)`,
+        })
+        .eq('invoice_id', id)
+        .eq('status', 'confirmed');
+      if (payErr) throw payErr;
     }
 
     const { error } = await supabaseAdmin
@@ -2074,7 +2096,7 @@ router.put('/invoices/:id/cancel', async (req, res) => {
       })
       .eq('id', id);
     if (error) throw error;
-    res.json({ success: true });
+    res.json({ success: true, cancelled_payments: cancel_payments ? (pays || []).length : 0 });
   } catch (error) {
     console.error('Erreur cancel invoice:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -2114,7 +2136,8 @@ router.get('/payments', async (req, res) => {
         student:profiles!payments_student_id_fkey(id, first_name, last_name, class_id, classes!fk_profiles_class(id, name)),
         school:schools(id, name, logo_url, address, phone),
         invoice:invoices(id, invoice_number, total, amount_paid, period_label, service_category),
-        cashier:profiles!payments_recorded_by_fkey(id, first_name, last_name)
+        cashier:profiles!payments_recorded_by_fkey(id, first_name, last_name),
+        canceller:profiles!payments_cancelled_by_fkey(id, first_name, last_name)
       `)
       .order('payment_date', { ascending: false })
       .limit(500);
@@ -2331,6 +2354,10 @@ router.put('/payments/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
+    // Motif obligatoire : c'est lui qui rend l'annulation traçable.
+    if (!String(reason || '').trim()) {
+      return res.status(400).json({ error: "Motif d'annulation obligatoire" });
+    }
 
     // Périmètre école : on n'annule que les paiements de sa propre école.
     const schoolId = getSchoolId(req);

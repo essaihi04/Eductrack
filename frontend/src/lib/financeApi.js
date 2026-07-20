@@ -30,7 +30,14 @@ async function request(path, { method = 'GET', body, query } = {}) {
   const text = await res.text();
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!res.ok) throw new Error(data.details || data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // Le corps de la réponse est attaché à l'erreur : certains appelants ont
+    // besoin des champs renvoyés avec le 400 (ex. requires_payment_cancellation).
+    const err = new Error(data.details || data.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -87,7 +94,10 @@ export const financeApi = {
   getInvoice: (id) => request(`/api/finance/invoices/${id}`),
   createInvoice: (data) => request('/api/finance/invoices', { method: 'POST', body: data }),
   generateMonthly: (data) => request('/api/finance/invoices/generate-monthly', { method: 'POST', body: data }),
-  cancelInvoice: (id, reason) => request(`/api/finance/invoices/${id}/cancel`, { method: 'PUT', body: { reason } }),
+  // cancelPayments: true annule aussi les paiements encaissés de la facture
+  // (obligatoire côté serveur si elle en a, sinon 400 avec requires_payment_cancellation)
+  cancelInvoice: (id, reason, cancelPayments = false) =>
+    request(`/api/finance/invoices/${id}/cancel`, { method: 'PUT', body: { reason, cancel_payments: cancelPayments } }),
   markOverdue: () => request('/api/finance/invoices/mark-overdue', { method: 'POST' }),
 
   // Payments

@@ -1478,9 +1478,9 @@ function HistoryTab({ student, academicYear, onChanged }) {
 
   const cancelGroup = async (g) => {
     const reason = await askPrompt(`Annuler cet encaissement (${g.lines.length} service(s)) ? Motif :`);
-    if (reason === null) return;
+    if (!reason || !reason.trim()) return; // motif obligatoire (refusé sans lui)
     try {
-      for (const l of g.lines) if (l.status !== 'cancelled') await financeApi.cancelPayment(l.id, reason);
+      for (const l of g.lines) if (l.status !== 'cancelled') await financeApi.cancelPayment(l.id, reason.trim());
       await load(); onChanged?.();
     } catch (e) { alert('Erreur: ' + e.message); }
   };
@@ -1493,9 +1493,9 @@ function HistoryTab({ student, academicYear, onChanged }) {
     } catch (e) { alert('Erreur impression: ' + e.message); }
   };
   const cancelLine = async (p) => {
-    const reason = await askPrompt('Motif de l\'annulation de ce service ?');
-    if (reason === null) return;
-    try { await financeApi.cancelPayment(p.id, reason); await load(); onChanged?.(); }
+    const reason = await askPrompt("Motif de l'annulation de ce service ?");
+    if (!reason || !reason.trim()) return; // motif obligatoire (refusé sans lui)
+    try { await financeApi.cancelPayment(p.id, reason.trim()); await load(); onChanged?.(); }
     catch (e) { alert('Erreur: ' + e.message); }
   };
 
@@ -1528,11 +1528,27 @@ function HistoryTab({ student, academicYear, onChanged }) {
     try { await financeApi.openInvoicePdf(inv.id); }
     catch (e) { alert('Erreur impression: ' + e.message); }
   };
+  // Motif obligatoire : reporté sur la facture et sur les paiements annulés
+  // en cascade, pour une trace complète dans l'historique des paiements.
   const cancelInvoice = async (inv) => {
-    const reason = await askPrompt('Motif de l\'annulation de la facture ?');
-    if (reason === null) return;
-    try { await financeApi.cancelInvoice(inv.id, reason); await load(); onChanged?.(); }
-    catch (e) { alert('Erreur: ' + e.message); }
+    const reason = await askPrompt("Motif de l'annulation de la facture ?");
+    if (!reason || !reason.trim()) return;
+    const motif = reason.trim();
+    try { await financeApi.cancelInvoice(inv.id, motif); await load(); onChanged?.(); }
+    catch (e) {
+      if (e.data?.requires_payment_cancellation) {
+        const n = e.data.payments_count || 0;
+        if (!confirm(
+          `Cette facture a ${n} paiement(s) encaissé(s).\n\n` +
+          `Ils seront annulés avec elle et resteront visibles dans l'historique, ` +
+          `marqués « annulé » avec votre motif.\n\nContinuer ?`
+        )) return;
+        try { await financeApi.cancelInvoice(inv.id, motif, true); await load(); onChanged?.(); }
+        catch (e2) { alert('Erreur: ' + e2.message); }
+        return;
+      }
+      alert('Erreur: ' + e.message);
+    }
   };
 
   if (loading) return <p className="text-gray-500 py-8 text-center">Chargement...</p>;
