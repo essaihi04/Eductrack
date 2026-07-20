@@ -18,7 +18,7 @@ import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
-import { archiveStudent } from '../utils/studentArchive.js';
+import { archiveStudent, restoreStudent } from '../utils/studentArchive.js';
 
 const router = Router();
 
@@ -174,6 +174,52 @@ router.post('/students', async (req, res) => {
   }
 });
 
+// GET /api/inscriptions/students/archived
+// Élèves archivés de l'école (vue « Archives » du module finance).
+// IMPORTANT : déclarée AVANT '/students/:id' sinon Express matcherait id='archived'.
+router.get('/students/archived', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, level, avatar_url, archived_at')
+      .eq('role', 'student')
+      .eq('school_id', schoolId)
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false });
+    // Colonne absente (migration non exécutée) → liste vide plutôt qu'une erreur.
+    if (error) return res.json({ students: [] });
+    res.json({ students: data || [] });
+  } catch (e) {
+    console.error('GET /inscriptions/students/archived:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
+// POST /api/inscriptions/students/:id/restore
+// Restaure un élève archivé : il réintègre les listes et son historique
+// financier annulé par l'archivage est réactivé (payé/statut recalculés).
+router.post('/students/:id/restore', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { id } = req.params;
+    const { data: student } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .eq('role', 'student')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    if (!student) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
+
+    const { classId } = await restoreStudent({ studentId: id, academicYear: req.query.academic_year || null });
+    res.json({ message: 'Élève restauré', restored: true, class_id: classId || null });
+  } catch (e) {
+    console.error('POST /inscriptions/students/:id/restore:', e);
+    res.status(500).json({ error: e.message || 'Erreur serveur' });
+  }
+});
+
 // GET /api/inscriptions/students/:id
 // Fiche complète d'un élève (profil + parents) pour éditer/imprimer la fiche
 // d'inscription côté finance — scopée à l'école du demandeur, mêmes champs que
@@ -291,7 +337,7 @@ router.delete('/students/:id', async (req, res) => {
       .maybeSingle();
     if (!student) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
 
-    await archiveStudent({ studentId: id, academicYear: req.query.academic_year || null });
+    await archiveStudent({ studentId: id, academicYear: req.query.academic_year || null, userId: req.user.id });
     res.json({ message: 'Élève archivé', archived: true });
   } catch (e) {
     console.error('DELETE /inscriptions/students/:id:', e);

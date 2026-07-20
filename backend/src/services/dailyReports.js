@@ -5,6 +5,7 @@ import cron from 'node-cron';
 import { sendText, getStatus } from './whatsapp/index.js';
 import { getEstablishmentConfig } from './establishmentHeader.js';
 import { routeNotification } from './notificationRouter.js';
+import { archivedStudentIdSet } from '../utils/studentArchive.js';
 
 // DeepSeek client (OpenAI-compatible API)
 const deepseek = new OpenAI({
@@ -581,7 +582,12 @@ async function processSchoolReports(settings, today, scopedClassIds = null) {
     } else if (scopedClassIds && scopedClassIds.length === 0) {
       return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
     }
-    const { data: students } = await studentsQuery;
+    const { data: allStudents } = await studentsQuery;
+    // Élèves archivés : plus de rapport quotidien à leurs familles.
+    const archivedIds = await archivedStudentIdSet(settings.school_id);
+    const students = archivedIds
+      ? (allStudents || []).filter(s => !archivedIds.has(s.id))
+      : (allStudents || []);
 
     console.log(`[DailyReports] 👥 Found ${students?.length || 0} students`);
     if (!students?.length) return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };

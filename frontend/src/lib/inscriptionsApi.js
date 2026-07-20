@@ -40,7 +40,10 @@ export const inscriptionsApi = {
   // Fiche complète d'un élève (profil + parents) — pour imprimer la fiche d'inscription.
   getStudent: (id) => request(`/api/inscriptions/students/${id}`),
   // Suppression d'un élève (bloquée côté serveur s'il a des paiements encaissés).
+  // « Supprimer » = archiver : l'élève est conservé et restaurable
   deleteStudent: (id) => request(`/api/inscriptions/students/${id}`, { method: 'DELETE' }),
+  listArchived: () => request('/api/inscriptions/students/archived'),
+  restoreStudent: (id) => request(`/api/inscriptions/students/${id}/restore`, { method: 'POST' }),
   // Photo de l'élève (multipart) — même comportement que la fiche admin.
   uploadPhoto: async (studentId, file) => {
     const token = await getToken();

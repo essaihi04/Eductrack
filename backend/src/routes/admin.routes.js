@@ -2794,7 +2794,7 @@ router.delete('/students/:id', async (req, res) => {
     const { data: student, error: checkErr } = await check.single();
     if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
 
-    await archiveStudent({ studentId: id, academicYear: req.query.academic_year || null });
+    await archiveStudent({ studentId: id, academicYear: req.query.academic_year || null, userId: req.user.id });
 
     res.json({ message: 'Élève archivé', archived: true });
   } catch (error) {

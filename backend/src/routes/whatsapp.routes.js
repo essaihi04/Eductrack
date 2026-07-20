@@ -13,6 +13,7 @@ import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendPushToUser } from '../services/webPush.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 
@@ -152,6 +153,9 @@ router.get('/recipients', async (req, res) => {
 
     // Filter students by class criteria
     let filteredStudents = students || [];
+    // Élèves archivés exclus des destinataires.
+    const archivedRecipIds = await archivedStudentIdSet(schoolId);
+    if (archivedRecipIds) filteredStudents = filteredStudents.filter(s => !archivedRecipIds.has(s.id));
 
     // Filtre de scope pour pedagogical_manager
     const scopedIds = await getScopedClassIds(req);
@@ -274,7 +278,10 @@ router.get('/recipients-list', async (req, res) => {
 
     // Année active fournie → seuls les élèves inscrits (RI/NI) cette année-là.
     const activeIds = await activeStudentIdSet(schoolId, req.query.academic_year);
-    const students = activeIds ? (allStudents || []).filter(s => activeIds.has(s.id)) : (allStudents || []);
+    let students = activeIds ? (allStudents || []).filter(s => activeIds.has(s.id)) : (allStudents || []);
+    // Les familles des élèves archivés ne doivent plus rien recevoir.
+    const archivedIds = await archivedStudentIdSet(schoolId);
+    if (archivedIds) students = students.filter(s => !archivedIds.has(s.id));
     if (students.length === 0) return res.json({ parents: [] });
 
     const studentIds = students.map(s => s.id);
@@ -396,6 +403,9 @@ router.post('/send', async (req, res) => {
     if (studentsError) throw studentsError;
 
     let filteredStudents = students || [];
+    // Élèves archivés exclus des envois.
+    const archivedSendIds = await archivedStudentIdSet(schoolId);
+    if (archivedSendIds) filteredStudents = filteredStudents.filter(s => !archivedSendIds.has(s.id));
 
     if (filter?.class_ids?.length > 0) {
       filteredStudents = filteredStudents.filter(s => filter.class_ids.includes(s.class_id));

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Users, Search, AlertCircle, CheckCircle2, XCircle, Plus, X, Save, Wallet,
   DollarSign, Layers, History, Pencil, Download, ArrowRightLeft, RotateCcw, RefreshCw,
-  Trash2, CheckSquare, Square,
+  Trash2, CheckSquare, Square, Archive, ArchiveRestore,
 } from 'lucide-react';
 import { financeApi, formatMAD, CATEGORY_LABELS, RECURRENCE_LABELS } from '../../lib/financeApi';
 import { enrollmentsApi } from '../../lib/enrollmentsApi';
@@ -52,11 +52,17 @@ export default function FinanceStudentsPage() {
   const [reinscribeOpen, setReinscribeOpen] = useState(false);
   const [undoing, setUndoing] = useState(false);
 
-  // Sélection multiple (cartes/lignes) → actions groupées : déplacer / supprimer
+  // Sélection multiple (cartes/lignes) → actions groupées : déplacer / archiver
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveClassId, setMoveClassId] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Archives : élèves « supprimés » (archivés), consultables et restaurables ici
+  const [archivesOpen, setArchivesOpen] = useState(false);
+  const [archived, setArchived] = useState([]);
+  const [archivesLoading, setArchivesLoading] = useState(false);
+  const [restoringId, setRestoringId] = useState(null);
 
   // Année précédente, dans le même format (slash ou tiret) que l'année active.
   const prevYear = useMemo(() => {
@@ -161,6 +167,33 @@ export default function FinanceStudentsPage() {
     setSelectedIds(new Set());
     reloadAll();
     if (failures.length) alert(`${ids.length - failures.length} archivé(s), ${failures.length} en erreur :\n\n${failures.join('\n')}`);
+  };
+
+  // Liste des élèves archivés (vue « Archives »)
+  const loadArchived = async () => {
+    setArchivesLoading(true);
+    try {
+      const data = await inscriptionsApi.listArchived();
+      setArchived(data.students || []);
+    } catch (e) {
+      console.error(e);
+      setArchived([]);
+    } finally { setArchivesLoading(false); }
+  };
+
+  const openArchives = () => { setArchivesOpen(true); loadArchived(); };
+
+  // Restaure un élève : il réintègre les listes et son historique financier
+  // annulé par l'archivage est réactivé (payé/statut des factures recalculés).
+  const restoreArchived = async (id) => {
+    setRestoringId(id);
+    try {
+      await inscriptionsApi.restoreStudent(id);
+      setArchived((prev) => prev.filter((s) => s.id !== id));
+      reloadAll();
+    } catch (e) {
+      alert(e.message || 'Erreur lors de la restauration');
+    } finally { setRestoringId(null); }
   };
 
   // Déplacement groupé vers une classe donnée (synchronise aussi l'inscription
@@ -320,6 +353,14 @@ export default function FinanceStudentsPage() {
               <div className="flex items-center gap-2">
                 <Button
                   variant="secondary"
+                  icon={Archive}
+                  onClick={openArchives}
+                  title="Élèves archivés — consultables et restaurables"
+                >
+                  Archives
+                </Button>
+                <Button
+                  variant="secondary"
                   icon={ArrowRightLeft}
                   onClick={() => setReinscribeOpen(true)}
                   title="Réinscrire des élèves de l'année précédente ou d'un établissement associé"
@@ -467,6 +508,60 @@ export default function FinanceStudentsPage() {
               <Button icon={bulkBusy ? RefreshCw : ArrowRightLeft} onClick={bulkMove} disabled={bulkBusy || !moveClassId}>
                 {bulkBusy ? 'Déplacement…' : 'Déplacer'}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Archives : élèves « supprimés » — conservés avec leur historique
+          financier (factures/paiements marqués annulés) et restaurables. */}
+      {archivesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setArchivesOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between p-5 border-b border-gray-200">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Archive className="w-4 h-4 text-gray-500" /> Élèves archivés
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Retirés des listes, leurs factures et paiements sont marqués « annulé ».
+                  Restaurer les réintègre et réactive leur historique financier.
+                </p>
+              </div>
+              <button onClick={() => setArchivesOpen(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {archivesLoading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-gray-500">
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Chargement…
+                </div>
+              ) : archived.length === 0 ? (
+                <p className="text-center text-gray-400 py-10">Aucun élève archivé.</p>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {archived.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-800 truncate">{s.first_name} {s.last_name}</p>
+                        <p className="text-xs text-gray-500">
+                          {s.level ? `${s.level} · ` : ''}
+                          Archivé le {s.archived_at ? new Date(s.archived_at).toLocaleDateString('fr-FR') : '—'}
+                        </p>
+                      </div>
+                      <Button
+                        color="green"
+                        icon={restoringId === s.id ? RefreshCw : ArchiveRestore}
+                        onClick={() => restoreArchived(s.id)}
+                        disabled={restoringId === s.id}
+                      >
+                        {restoringId === s.id ? 'Restauration…' : 'Restaurer'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

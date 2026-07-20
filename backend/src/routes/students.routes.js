@@ -286,7 +286,7 @@ router.delete('/:id', authorize('admin', 'school_admin'), async (req, res) => {
     const { data: student, error: checkErr } = await check.single();
     if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
 
-    await archiveStudent({ studentId: id });
+    await archiveStudent({ studentId: id, userId: req.user.id });
 
     res.json({ message: 'Élève archivé', archived: true });
   } catch (error) {

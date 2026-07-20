@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, requireFinanceAccess } from '../middleware/auth.js';
 import { generateInvoicePdfById, generateBatchReceiptPdfById, fetchBatchForReceipt } from '../services/whatsapp/chatbot/invoicePdf.js';
 import { applyTemplateToLevels, listEnrolledStudentsWithLevel, materializeCorePlanItems } from '../utils/feeTemplateAutoApply.js';
+import { archivedStudentIdSet } from '../utils/studentArchive.js';
 
 const router = express.Router();
 
@@ -2036,11 +2037,12 @@ router.post('/invoices/generate-monthly', async (req, res) => {
   }
 });
 
+// Accessible à tout le personnel financier (requireFinanceAccess sur le
+// routeur) : le caissier doit pouvoir annuler une facture erronée.
 router.put('/invoices/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
 
     // Périmètre école : on n'annule que ses propres factures.
     const cancelSchoolId = getSchoolId(req);
@@ -2323,11 +2325,12 @@ router.get('/payments/:id', async (req, res) => {
   }
 });
 
+// Accessible à tout le personnel financier : nécessaire aussi pour annuler
+// une facture partiellement payée (les paiements doivent être annulés d'abord).
 router.put('/payments/:id/cancel', async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body;
-    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut annuler' });
 
     // Périmètre école : on n'annule que les paiements de sa propre école.
     const schoolId = getSchoolId(req);
@@ -2988,6 +2991,9 @@ router.get('/students', async (req, res) => {
       const { data, error } = await query;
       if (error) throw error;
       students = data || [];
+      // Repli sans student_enrollments : les archivés doivent aussi disparaître.
+      const archivedIds = await archivedStudentIdSet(schoolId);
+      if (archivedIds) students = students.filter((s) => !archivedIds.has(s.id));
     }
 
     const studentIds = (students || []).map(s => s.id);

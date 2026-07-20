@@ -8,6 +8,7 @@ import { authenticate, authorize } from '../middleware/auth.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 import { sendText, sendImage, getStatus } from '../services/whatsapp/index.js';
 import { requiresApproval, createApprovalRequest } from '../services/approvals.js';
+import { archivedStudentIdSet } from '../utils/studentArchive.js';
 
 // Un prof crée-t-il un élément qui doit passer en validation ?
 const needsApproval = async (req, type) =>
@@ -65,13 +66,16 @@ async function getParentPhonesForStudents(studentIds) {
   return { parentIds, phones: [...new Set((contacts || []).map((c) => c.phone_e164).filter(Boolean))] };
 }
 
-/** Élèves d'une classe ou de toute l'école. */
+/** Élèves d'une classe ou de toute l'école (élèves archivés exclus). */
 async function getStudentIds(schoolId, classId) {
   let q = supabaseAdmin.from('profiles').select('id').eq('role', 'student');
   if (classId) q = q.eq('class_id', classId);
   else if (schoolId) q = q.eq('school_id', schoolId);
   const { data } = await q;
-  return (data || []).map((s) => s.id);
+  const archivedIds = await archivedStudentIdSet(schoolId);
+  return (data || [])
+    .map((s) => s.id)
+    .filter((id) => !archivedIds || !archivedIds.has(id));
 }
 
 /** Crée des notifications in-app pour une liste d'utilisateurs. */

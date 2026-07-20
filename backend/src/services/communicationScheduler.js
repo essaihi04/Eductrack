@@ -14,6 +14,7 @@ import cron from 'node-cron';
 import { supabaseAdmin } from '../config/supabase.js';
 import { whatsappOptedOut } from './notificationRouter.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendText, sendImage, sendDocument } from './whatsapp/index.js';
 import { sendPushToUser } from './webPush.js';
 
@@ -99,7 +100,10 @@ async function resolveTargetParents(schoolId, target) {
   // Seuls les élèves inscrits (RI/NI) dans l'année scolaire courante : les
   // familles des élèves non réinscrits ne reçoivent plus les communications.
   const activeIds = await activeStudentIdSet(schoolId, currentSchoolYear());
-  const scoped = activeIds ? (students || []).filter((s) => activeIds.has(s.id)) : (students || []);
+  let scoped = activeIds ? (students || []).filter((s) => activeIds.has(s.id)) : (students || []);
+  // Élèves archivés : leurs familles ne reçoivent plus les communications.
+  const archivedIds = await archivedStudentIdSet(schoolId);
+  if (archivedIds) scoped = scoped.filter((s) => !archivedIds.has(s.id));
   const studentIds = scoped.map((s) => s.id);
   if (!studentIds.length) return [];
 
