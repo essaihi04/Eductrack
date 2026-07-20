@@ -67,6 +67,9 @@ export const financeApi = {
   getStudentPlan: (studentId, academicYear) => request(`/api/finance/students/${studentId}/fee-plan`, { query: { academic_year: academicYear } }),
   saveStudentPlan: (studentId, data) => request(`/api/finance/students/${studentId}/fee-plan`, { method: 'POST', body: data }),
 
+  // Remise persistée (réduction du dû d'un mois×service, sans encaissement)
+  applyDiscount: (studentId, data) => request(`/api/finance/students/${studentId}/apply-discount`, { method: 'POST', body: data }),
+
   // Échéancier mensuel + encaissement par mois (factures auto-générées)
   getMonthlyStatus: (studentId, academicYear) => request(`/api/finance/students/${studentId}/monthly-status`, { query: { academic_year: academicYear } }),
   payMonths: (studentId, data) => request(`/api/finance/students/${studentId}/pay-months`, { method: 'POST', body: data }),

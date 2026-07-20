@@ -439,12 +439,21 @@ function CollectTab({ student, academicYear, onChanged }) {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
+  // Plan de frais complet (items personnalisés + modèle) : sert au catalogue
+  // d'ajout rapide des services avec leur montant prédéfini.
+  const [planData, setPlanData] = useState(null);
+
   const load = async () => {
     setLoading(true);
     setSel({});
     try { setData(await financeApi.getMonthlyServicesStatus(student.id, academicYear)); }
     catch (e) { console.error(e); setData(null); }
     finally { setLoading(false); }
+    try {
+      // Les plans sont stockés en année « tiret » (2026-2027).
+      const pd = await financeApi.getStudentPlan(student.id, String(academicYear).replace('/', '-'));
+      setPlanData(pd.plans?.[0] || null);
+    } catch (e) { console.error(e); }
   };
 
   const checkedItems = Object.values(sel).filter(s => s.checked);
@@ -475,73 +484,90 @@ function CollectTab({ student, academicYear, onChanged }) {
         const already = Object.values(prev).filter(s => s.checked).reduce((t, s) => t + (Number(s.amount) || 0), 0);
         amount = Math.min(svc.remaining, Math.max(0, poolNum - already));
       }
-      return { ...prev, [k]: { checked: true, amount: String(amount), month, category: svc.category, discount: 0, remise: null } };
+      return { ...prev, [k]: { checked: true, amount: String(amount), month, category: svc.category } };
     });
   };
   const setAmount = (month, category, value) =>
     setSel(prev => ({ ...prev, [keyOf(month, category)]: { ...prev[keyOf(month, category)], amount: value } }));
 
-  // Remise sur un frais d'un mois (DH ou %) : réduit le DÛ (le backend abaisse
-  // le total de la facture) — le frais est soldé après paiement du montant
-  // remisé. value 0 = retirer la remise. Sélectionne la ligne si besoin.
-  const applyRemise = (month, svc, type, value) => {
-    const k = keyOf(month, svc.category);
+  // Remise sur un frais d'un mois (DH ou %) : PERSISTÉE côté serveur — le total
+  // de la facture du couple mois×service est réduit immédiatement, SANS cocher
+  // la ligne pour encaissement (une remise n'est pas un paiement).
+  const applyRemise = async (month, svc, type, value) => {
     const val = Math.max(0, Number(value) || 0);
     const disc = type === 'percent'
       ? Math.min(svc.remaining, Math.round(svc.remaining * val) / 100)
       : Math.min(svc.remaining, val);
-    setSel(prev => ({
-      ...prev,
-      [k]: {
-        checked: true, month, category: svc.category,
-        amount: String(Math.max(0, Math.round((svc.remaining - disc) * 100) / 100)),
-        discount: disc > 0 ? disc : 0,
-        remise: disc > 0 ? { type, value: val } : null,
-      },
-    }));
+    if (!(disc > 0)) return;
+    try {
+      await financeApi.applyDiscount(student.id, {
+        academic_year: academicYear,
+        items: [{ month, category: svc.category, discount: disc }],
+      });
+      await load();
+      onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
   };
 
+  // Remise persistée d'un service (facturé) : plan (expected) − facturé (total).
+  const persistedRemise = (svc) =>
+    svc.invoice_id && Number(svc.expected) > Number(svc.total)
+      ? Math.round((Number(svc.expected) - Number(svc.total)) * 100) / 100
+      : 0;
+
   // ── « Appliquer aux autres mois » : sélecteur de mois cibles (façon
-  // Koolskools) — la sélection + remises du mois ouvert sont reproduites sur
-  // les mois COCHÉS (le % est recalculé sur le montant de chaque mois).
+  // Koolskools) — les REMISES du mois ouvert sont reproduites (en DH) sur les
+  // mois cochés, sans rien cocher pour encaissement.
   const [applyMonthsOpen, setApplyMonthsOpen] = useState(false);
   const [applyMonthsSel, setApplyMonthsSel] = useState(new Set());
+  const [applyingMonths, setApplyingMonths] = useState(false);
 
-  // Sélection courante du mois ouvert : catégories cochées + leur remise.
+  // Remises du mois ouvert : catégorie → montant de remise (DH).
   const currentPattern = () => {
     const fm = (data?.months || []).find(m => m.month === focusMonth);
     if (!fm) return [];
-    return monthPayables(fm)
-      .filter(s => sel[keyOf(fm.month, s.category)]?.checked)
-      .map(s => ({ category: s.category, remise: sel[keyOf(fm.month, s.category)]?.remise || null }));
+    return (fm.services || [])
+      .filter(s => !(s.status === 'excluded' || s.excluded) && persistedRemise(s) > 0)
+      .map(s => ({ category: s.category, discount: persistedRemise(s) }));
   };
   const openApplyMonths = () => {
     const pattern = currentPattern();
-    if (pattern.length === 0) { alert('Sélectionnez d\'abord des frais dans ce mois.'); return; }
+    if (pattern.length === 0) { alert('Appliquez d\'abord une remise (% Remise) sur un frais de ce mois.'); return; }
     const candidates = (data?.months || []).filter(m =>
       m.month !== focusMonth && monthPayables(m).some(s => pattern.some(p => p.category === s.category)));
-    if (candidates.length === 0) { alert('Aucun autre mois avec ces frais à payer.'); return; }
+    if (candidates.length === 0) { alert('Aucun autre mois avec ces frais à remiser.'); return; }
     setApplyMonthsSel(new Set(candidates.map(m => m.month)));
     setApplyMonthsOpen(true);
   };
-  const applyToMonths = () => {
+  const applyToMonths = async () => {
     const pattern = currentPattern();
+    const items = [];
     (data?.months || []).filter(m => applyMonthsSel.has(m.month)).forEach(m => {
       pattern.forEach(p => {
         const svc = monthPayables(m).find(x => x.category === p.category);
         if (!svc) return;
-        if (p.remise) applyRemise(m.month, svc, p.remise.type, p.remise.value);
-        else if (!sel[keyOf(m.month, svc.category)]?.checked) toggle(m.month, svc);
+        items.push({ month: m.month, category: p.category, discount: Math.min(p.discount, svc.remaining) });
       });
     });
-    setApplyMonthsOpen(false);
+    if (items.length === 0) { setApplyMonthsOpen(false); return; }
+    setApplyingMonths(true);
+    try {
+      const res = await financeApi.applyDiscount(student.id, { academic_year: academicYear, items });
+      alert(`Remise appliquée à ${res.applied} frais.`);
+      setApplyMonthsOpen(false);
+      await load();
+      onChanged?.();
+    } catch (e) { alert('Erreur: ' + e.message); }
+    finally { setApplyingMonths(false); }
   };
 
-  // Ajout DIRECT d'un service du plan (montant prédéfini) au mois ouvert.
+  // Ajout DIRECT d'un service du plan/modèle (montant prédéfini) au mois ouvert.
   const [quickAdding, setQuickAdding] = useState(null);
   const quickAddService = async (month, q) => {
     setQuickAdding(q.category);
-    try { await addServiceToMonth(month, q.category, '', q.name); }
+    // Montant transmis explicitement : un accessoire du modèle absent du plan
+    // n'a pas de montant calculable côté serveur pour ce mois.
+    try { await addServiceToMonth(month, q.category, q.amount != null ? q.amount : '', q.name); }
     finally { setQuickAdding(null); }
   };
 
@@ -570,8 +596,7 @@ function CollectTab({ student, academicYear, onChanged }) {
   const labelFor = (item) => {
     const mo = (data?.months || []).find(m => m.month === item.month);
     const svc = mo?.services.find(s => (s.category || 'bundle') === (item.category || 'bundle'));
-    const remise = Number(item.discount) > 0 ? ` · remise ${formatMAD(item.discount)}` : '';
-    return `${mo?.label || item.month} — ${serviceLabel(svc)}${remise}`;
+    return `${mo?.label || item.month} — ${serviceLabel(svc)}`;
   };
   const listItems = checkedItems.map(s => ({ label: labelFor(s), amount: s.amount, month: s.month, category: s.category }));
 
@@ -639,10 +664,7 @@ function CollectTab({ student, academicYear, onChanged }) {
     if (!confirm(`Encaisser ${checkedItems.length} ligne(s) — total ${formatMAD(allocated)} ?`)) return;
     setSaving(true);
     try {
-      const items = checkedItems.map(s => ({
-        month: s.month, category: s.category || null, amount: Number(s.amount) || undefined,
-        discount: Number(s.discount) > 0 ? Number(s.discount) : undefined,
-      }));
+      const items = checkedItems.map(s => ({ month: s.month, category: s.category || null, amount: Number(s.amount) || undefined }));
       const res = await financeApi.payServices(student.id, {
         academic_year: academicYear, items, payment_date: paymentDate, method, reference: reference || undefined,
         batch_id: crypto.randomUUID(),
@@ -719,21 +741,30 @@ function CollectTab({ student, academicYear, onChanged }) {
     const payables = monthPayables(focus);
     const allChecked = isMonthChecked(focus);
     const presentCats = new Set(focus.services.map(x => x.category).filter(Boolean));
-    // Services du PLAN absents de ce mois → cartes d'ajout direct au montant
-    // prédéfini du plan (repéré sur un autre mois où le service est facturé).
-    const planQuickAdd = serviceCatalog
-      .filter(([c]) => !presentCats.has(c))
-      .map(([c, name]) => {
-        let amount = null;
-        for (const mo of data.months) {
-          const found = (mo.services || []).find(x => x.category === c && !(x.status === 'excluded' || x.excluded));
-          if (found) { amount = found.total; break; }
-        }
-        return { category: c, name, amount };
-      });
-    // Tout autre frais (catégories hors plan) → petit formulaire.
+    // Catalogue d'ajout direct : items du PLAN de l'élève (personnalisés) PUIS
+    // accessoires du MODÈLE non repris dans le plan (transport, cantine… exclus
+    // par l'application « frais de base seuls ») — chacun avec son montant
+    // prédéfini. Repli : services déjà facturés d'autres mois.
+    const catalogMap = new Map();
+    if (planData) {
+      (planData.custom_items || []).filter(it => it.enabled !== false)
+        .forEach(it => { if (it.category && !catalogMap.has(it.category)) catalogMap.set(it.category, { category: it.category, name: it.name, amount: Number(it.amount) || 0 }); });
+      (planData.template?.fee_template_items || [])
+        .forEach(it => { if (it.category && !catalogMap.has(it.category)) catalogMap.set(it.category, { category: it.category, name: it.name, amount: Number(it.amount) || 0 }); });
+    }
+    serviceCatalog.forEach(([c, name]) => {
+      if (catalogMap.has(c)) return;
+      let amount = null;
+      for (const mo of data.months) {
+        const found = (mo.services || []).find(x => x.category === c && !(x.status === 'excluded' || x.excluded));
+        if (found) { amount = found.total; break; }
+      }
+      catalogMap.set(c, { category: c, name, amount });
+    });
+    const planQuickAdd = [...catalogMap.values()].filter(q => !presentCats.has(q.category));
+    // Tout autre frais (catégories hors plan/modèle) → petit formulaire.
     const otherCats = Object.entries(CATEGORY_LABELS)
-      .filter(([c]) => !presentCats.has(c) && !serviceCatalog.some(([cc]) => cc === c));
+      .filter(([c]) => !presentCats.has(c) && !catalogMap.has(c));
     const patternCats = new Set(currentPattern().map(p => p.category));
     const applyCandidates = (data.months || []).filter(m =>
       m.month !== focus.month && monthPayables(m).some(x => patternCats.has(x.category)));
@@ -787,7 +818,7 @@ function CollectTab({ student, academicYear, onChanged }) {
                 const excluded = svc.status === 'excluded' || svc.excluded;
                 const payable = !excluded && svc.remaining > 0;
                 const hasPaid = Number(svc.paid) > 0;
-                const discount = Number(entry?.discount) || 0;
+                const remiseDone = persistedRemise(svc);
                 const isRemiseOpen = remiseFor === k;
                 let cardCls = 'border-gray-200 bg-white hover:border-emerald-400 cursor-pointer';
                 if (excluded) cardCls = 'border-gray-200 bg-gray-50 opacity-70';
@@ -829,10 +860,10 @@ function CollectTab({ student, academicYear, onChanged }) {
                       <p className="text-sm font-bold text-emerald-600 mt-1.5">Payé ✓ <span className="font-normal text-xs text-gray-400">({formatMAD(svc.total)})</span></p>
                     ) : (
                       <>
-                        {discount > 0 ? (
+                        {remiseDone > 0 ? (
                           <p className="mt-1.5 leading-tight">
-                            <span className="text-xs line-through opacity-70">{formatMAD(svc.remaining)}</span>{' '}
-                            <span className="text-lg font-bold tabular-nums">{formatMAD(entry.amount)}</span>
+                            <span className="text-xs line-through opacity-70">{formatMAD(svc.expected)}</span>{' '}
+                            <span className="text-lg font-bold tabular-nums">{formatMAD(checked ? entry.amount : svc.remaining)}</span>
                           </p>
                         ) : (
                           <p className="text-lg font-bold tabular-nums mt-1.5">{formatMAD(checked ? entry.amount : svc.remaining)}</p>
@@ -860,11 +891,12 @@ function CollectTab({ student, academicYear, onChanged }) {
                           <button onClick={(e) => {
                               e.stopPropagation();
                               setRemiseFor(k);
-                              setRemiseType(entry?.remise?.type || 'amount');
-                              setRemiseVal(entry?.remise ? String(entry.remise.value) : '');
+                              setRemiseType('amount');
+                              setRemiseVal('');
                             }}
+                            title="Réduit le dû de ce frais (persisté) — n'encaisse rien"
                             className={`mt-2 px-2.5 py-1 text-xs font-medium rounded-full ${checked ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
-                            % Remise{discount > 0 ? ` (−${formatMAD(discount)})` : ''}
+                            % Remise{remiseDone > 0 ? ` (−${formatMAD(remiseDone)})` : ''}
                           </button>
                         )}
                       </>
@@ -936,8 +968,8 @@ function CollectTab({ student, academicYear, onChanged }) {
                 </button>
               </div>
               <p className="text-xs text-gray-500">
-                La sélection et les remises de <strong>{focus.label}</strong> seront reproduites sur les
-                mois cochés (un % est recalculé sur le montant de chaque mois).
+                Les remises de <strong>{focus.label}</strong> seront appliquées aux mois cochés
+                (réduction du dû, persistée — rien n'est encaissé).
               </p>
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox"
@@ -965,9 +997,9 @@ function CollectTab({ student, academicYear, onChanged }) {
                 <button onClick={() => setApplyMonthsOpen(false)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
                   Annuler
                 </button>
-                <button onClick={applyToMonths} disabled={applyMonthsSel.size === 0}
+                <button onClick={applyToMonths} disabled={applyMonthsSel.size === 0 || applyingMonths}
                   className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
-                  Valider ({applyMonthsSel.size})
+                  {applyingMonths ? 'Application…' : `Valider (${applyMonthsSel.size})`}
                 </button>
               </div>
             </div>

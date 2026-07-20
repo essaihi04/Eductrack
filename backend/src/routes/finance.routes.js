@@ -859,7 +859,18 @@ router.post('/students/:studentId/fee-plan', async (req, res) => {
       .select(`*, template:fee_templates(*, fee_template_items(*)), custom_items:student_fee_plan_items(*)`)
       .eq('id', planId)
       .single();
-    res.json({ success: true, plan: full });
+
+    // Répercuter les nouvelles remises (fratrie, bourse, remise exceptionnelle)
+    // sur les factures DÉJÀ émises et non soldées : sans cela, l'encaissement
+    // (qui repose sur le total de la facture existante) ignore le plan modifié.
+    let resync = { updated: 0 };
+    try {
+      resync = await resyncPlanInvoices(studentId, academic_year, schoolId);
+    } catch (e) {
+      console.error('Erreur resync factures après plan:', e.message);
+    }
+
+    res.json({ success: true, plan: full, invoices_resynced: resync.updated });
   } catch (error) {
     console.error('Erreur save student plan:', error);
     const httpStatus = Number.isInteger(error.httpStatus) ? error.httpStatus : 500;
@@ -1375,7 +1386,8 @@ router.post('/students/:studentId/services/cancel-payment', async (req, res) => 
 // Montant pris du plan si non fourni, sinon montant manuel (service hors plan).
 router.post('/students/:studentId/services/add', async (req, res) => {
   try {
-    if (!isAdminRole(req)) return res.status(403).json({ error: 'Seul un admin peut ajouter un service' });
+    // Accessible à tout le personnel financier (requireFinanceAccess sur le
+    // routeur) : l'encaissement au guichet ajoute des services (transport…).
     const { studentId } = req.params;
     const schoolId = getSchoolId(req);
     const { academic_year, month, category, amount, name, due_day } = req.body;
@@ -1432,6 +1444,91 @@ router.post('/students/:studentId/services/add', async (req, res) => {
     res.json({ success: true, invoice_id: inv.id });
   } catch (error) {
     console.error('Erreur add-service:', error);
+    res.status(500).json({ error: 'Erreur serveur', details: error.message });
+  }
+});
+
+// Appliquer une REMISE (réduction du dû) à des couples mois×service, SANS
+// encaissement : la facture du couple est créée si besoin puis son total est
+// réduit (remise tracée en colonne discount). Le paiement reste une opération
+// séparée — une remise ne vaut pas encaissement.
+// body: { academic_year, items: [{ month, category, discount }] }
+router.post('/students/:studentId/apply-discount', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const schoolId = getSchoolId(req);
+    const { academic_year, items } = req.body;
+    if (!academic_year) return res.status(400).json({ error: 'academic_year requis' });
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'items[] requis' });
+
+    const plan = await fetchStudentPlan(studentId, academic_year, schoolId);
+    if (!plan) return res.status(400).json({ error: 'Aucun plan de frais actif pour cet élève' });
+
+    let applied = 0;
+    const skipped = [];
+    const errors = [];
+    for (const raw of items) {
+      const month = Number(raw.month);
+      const category = raw.category || null;
+      const discount = Math.max(0, Number(raw.discount) || 0);
+      if (!month || !category || !(discount > 0)) { skipped.push({ month, category, reason: 'remise nulle' }); continue; }
+      try {
+        const periodLabel = periodLabelFor(academic_year, month);
+        let invQ = supabaseAdmin
+          .from('invoices')
+          .select('id, total, amount_paid, discount')
+          .eq('student_id', studentId)
+          .eq('period_label', periodLabel)
+          .eq('service_category', category)
+          .neq('status', 'cancelled');
+        if (schoolId) invQ = invQ.eq('school_id', schoolId);
+        const { data: existing } = await invQ.maybeSingle();
+
+        if (existing) {
+          const restant = Number(existing.total) - Number(existing.amount_paid || 0);
+          const reduc = Math.min(discount, Math.max(0, restant));
+          if (!(reduc > 0)) { skipped.push({ month, category, reason: 'déjà payé' }); continue; }
+          const { error: upErr } = await supabaseAdmin
+            .from('invoices')
+            .update({ total: Number(existing.total) - reduc, discount: Number(existing.discount || 0) + reduc })
+            .eq('id', existing.id);
+          if (upErr) throw upErr;
+          await recalcInvoicePaid(existing.id);
+          applied++;
+          continue;
+        }
+
+        // Pas encore facturé : on émet la facture du couple avec la remise.
+        const svc = computeMonthServices(plan, month).find(s => s.category === category);
+        if (!svc || !(svc.total > 0)) { skipped.push({ month, category, reason: 'aucun frais ce mois' }); continue; }
+        const reduc = Math.min(discount, svc.total);
+        const calYear = calendarYearFor(academic_year, month);
+        const invoiceNumber = await getNextCounter(schoolId, 'invoice');
+        const { data: inv, error: invErr } = await supabaseAdmin
+          .from('invoices')
+          .insert({
+            school_id: schoolId, invoice_number: invoiceNumber, student_id: studentId, plan_id: plan.id,
+            due_date: `${calYear}-${String(month).padStart(2, '0')}-05`,
+            period_label: periodLabel, service_category: category,
+            subtotal: svc.total, discount: reduc, total: svc.total - reduc,
+            status: 'issued', created_by: req.user.id,
+          })
+          .select('id')
+          .single();
+        if (invErr) throw invErr;
+        await supabaseAdmin.from('invoice_lines').insert([{
+          invoice_id: inv.id, description: svc.name, category, quantity: 1,
+          unit_price: svc.total, amount: svc.total, sort_order: 0,
+        }]);
+        applied++;
+      } catch (e) {
+        errors.push({ month, category, error: e.message });
+      }
+    }
+
+    res.json({ success: true, applied, skipped, errors: errors.slice(0, 10) });
+  } catch (error) {
+    console.error('Erreur apply-discount:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
   }
 });
@@ -3434,6 +3531,66 @@ function calendarYearFor(academicYear, month) {
 
 function periodLabelFor(academicYear, month) {
   return `${getMonthName(month)} ${calendarYearFor(academicYear, month)}`;
+}
+
+// Resynchronise les factures existantes (non annulées, non soldées) d'un élève
+// avec son plan : appelé après chaque modification du plan pour que les remises
+// (fratrie, bourse, remise exceptionnelle) s'appliquent aussi aux mois déjà
+// facturés — l'encaissement et l'échéancier lisent le total de la facture.
+// Sur une facture de service, la colonne discount porte la remise caisse
+// (le subtotal y est déjà net du plan) : elle est conservée et re-déduite.
+async function resyncPlanInvoices(studentId, academicYear, schoolId) {
+  const plan = await fetchStudentPlan(studentId, academicYear, schoolId);
+  if (!plan) return { updated: 0 };
+
+  const monthByLabel = {};
+  for (const m of getScheduleMonths(plan)) monthByLabel[periodLabelFor(academicYear, m)] = m;
+  const labels = Object.keys(monthByLabel);
+  if (labels.length === 0) return { updated: 0 };
+
+  let q = supabaseAdmin
+    .from('invoices')
+    .select('id, period_label, service_category, subtotal, discount, total, amount_paid, status')
+    .eq('student_id', studentId)
+    .neq('status', 'cancelled')
+    .in('period_label', labels);
+  if (schoolId) q = q.eq('school_id', schoolId);
+  const { data: invoices } = await q;
+
+  let updated = 0;
+  for (const inv of invoices || []) {
+    const month = monthByLabel[inv.period_label];
+    const paid = Number(inv.amount_paid || 0);
+    if (Number(inv.total) > 0 && paid >= Number(inv.total)) continue; // soldée : on ne touche pas
+
+    let patch = null;
+    if (!inv.service_category) {
+      const computed = computeMonthForPlan(plan, month);
+      if (!computed.lines.length) continue;
+      if (Number(inv.total) !== computed.total || Number(inv.discount || 0) !== computed.discount) {
+        patch = { subtotal: computed.subtotal, discount: computed.discount, total: computed.total };
+      }
+    } else {
+      const svc = computeMonthServices(plan, month).find(s => s.category === inv.service_category);
+      if (!svc) continue; // service hors plan (ajout manuel au guichet) : on ne touche pas
+      const caisseDiscount = Math.max(0, Number(inv.discount || 0));
+      const newTotal = Math.max(0, Math.round((svc.total - caisseDiscount) * 100) / 100);
+      if (Number(inv.total) !== newTotal || Number(inv.subtotal || 0) !== svc.total) {
+        patch = { subtotal: svc.total, total: newTotal };
+      }
+    }
+    if (!patch) continue;
+
+    const { error } = await supabaseAdmin
+      .from('invoices')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', inv.id);
+    if (!error) {
+      await recalcInvoicePaid(inv.id); // statut payé/partiel recalculé sur le nouveau total
+      updated++;
+    }
+  }
+  return { updated };
 }
 
 // Récupère le plan complet (modèle + items perso) d'un élève pour une année
