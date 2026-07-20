@@ -47,7 +47,11 @@ const firstYearNum = (y) => {
   return Number.isNaN(a) ? null : a;
 };
 
-export default function StudentFinanceWorkspace({ student, allStudents = [], academicYear, onClose, onChanged, onOpenPlan, initialTab = 'collect', headerActions = null }) {
+// refreshKey : incrémenté par le parent après toute modification qui change les
+// montants (remise, plan de frais, items…). Il entre dans la clé des onglets, ce
+// qui les remonte et recharge les données — sans ça il fallait fermer puis
+// rouvrir l'espace de l'élève pour voir la remise appliquée.
+export default function StudentFinanceWorkspace({ student, allStudents = [], academicYear, onClose, onChanged, onOpenPlan, initialTab = 'collect', headerActions = null, refreshKey = 0 }) {
   const [tab, setTab] = useState(initialTab);
 
   // Si l'utilisateur ouvre le même espace via un autre bouton (ex : Historique),
@@ -78,7 +82,8 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
       if (!cancelled) setYearDues(Object.fromEntries(entries));
     })();
     return () => { cancelled = true; };
-  }, [student.id, yearTabs]);
+    // refreshKey : les badges de reste dû par année suivent aussi les remises.
+  }, [student.id, yearTabs, refreshKey]);
 
   return (
     <div className="space-y-4">
@@ -144,9 +149,9 @@ export default function StudentFinanceWorkspace({ student, allStudents = [], aca
         </div>
       </div>
 
-      {tab === 'collect' && <CollectTab key={`${student.id}:${viewYear}`} student={student} academicYear={viewYear} onChanged={onChanged} />}
-      {tab === 'family' && <FamilyTab key={`${student.id}:${viewYear}`} student={student} allStudents={allStudents} academicYear={viewYear} onChanged={onChanged} />}
-      {tab === 'history' && <HistoryTab key={`${student.id}:${viewYear}`} student={student} academicYear={viewYear} onChanged={onChanged} />}
+      {tab === 'collect' && <CollectTab key={`${student.id}:${viewYear}:${refreshKey}`} student={student} academicYear={viewYear} onChanged={onChanged} />}
+      {tab === 'family' && <FamilyTab key={`${student.id}:${viewYear}:${refreshKey}`} student={student} allStudents={allStudents} academicYear={viewYear} onChanged={onChanged} />}
+      {tab === 'history' && <HistoryTab key={`${student.id}:${viewYear}:${refreshKey}`} student={student} academicYear={viewYear} onChanged={onChanged} />}
     </div>
   );
 }

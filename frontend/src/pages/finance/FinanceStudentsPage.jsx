@@ -58,6 +58,11 @@ export default function FinanceStudentsPage() {
   const [moveClassId, setMoveClassId] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // Incrémenté à chaque enregistrement du plan de frais (remises, montants,
+  // items…). Passé à l'espace finance ouvert pour qu'il se recharge aussitôt :
+  // sans ça il fallait le fermer et le rouvrir pour voir les nouveaux montants.
+  const [planVersion, setPlanVersion] = useState(0);
+
   // Archives : élèves « supprimés » (archivés), consultables et restaurables ici
   const [archivesOpen, setArchivesOpen] = useState(false);
   const [archived, setArchived] = useState([]);
@@ -343,6 +348,7 @@ export default function FinanceStudentsPage() {
           onChanged={load}
           onOpenPlan={() => setSelectedStudent(activeStudent)}
           headerActions={workspaceActions(activeStudent)}
+          refreshKey={planVersion}
         />
       ) : (
         <>
@@ -573,7 +579,13 @@ export default function FinanceStudentsPage() {
           templates={templates}
           defaultYear={toDashYear(year)}
           onClose={() => setSelectedStudent(null)}
-          onSaved={() => { setSelectedStudent(null); load(); }}
+          onSaved={() => {
+            setSelectedStudent(null);
+            load();
+            // Recharge aussi l'espace finance ouvert : les nouveaux montants
+            // (remises comprises) sont visibles sans le fermer/rouvrir.
+            setPlanVersion(v => v + 1);
+          }}
         />
       )}
 
