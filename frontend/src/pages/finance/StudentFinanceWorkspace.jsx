@@ -963,6 +963,29 @@ function CollectTab({ student, academicYear, onChanged }) {
                   );
                 })}
               </div>
+              {/* Aperçu : total remisé et nouveau dû, avant validation */}
+              {Number(remiseVal) > 0 && remiseMonths.size > 0 && (() => {
+                let totalRemise = 0;
+                let totalDu = 0;
+                modalCandidates.filter(m => remiseMonths.has(m.month)).forEach(m => {
+                  const svc = monthPayables(m).find(x => x.category === remiseModal.category);
+                  if (!svc) return;
+                  totalRemise += remiseAmountFor(svc, remiseType, remiseVal);
+                  totalDu += Number(svc.remaining);
+                });
+                return (
+                  <div className="flex items-center justify-between px-3 py-2 bg-emerald-50 border border-emerald-100 rounded-lg text-sm">
+                    <span className="text-gray-600">Remise totale</span>
+                    <span className="font-bold text-emerald-700 tabular-nums">
+                      −{formatMAD(totalRemise)}
+                      <span className="ml-2 font-normal text-xs text-gray-500">
+                        dû {formatMAD(totalDu)} → {formatMAD(Math.max(0, totalDu - totalRemise))}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
+
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button onClick={() => setRemiseModal(null)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
                   Annuler
