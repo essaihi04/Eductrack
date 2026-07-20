@@ -141,12 +141,13 @@ export default function FinanceStudentsPage() {
     );
   };
 
-  // Suppression groupée — le serveur refuse (409) les élèves avec paiements
-  // encaissés : on remonte ces refus sans bloquer les autres suppressions.
+  // « Suppression » groupée = ARCHIVAGE : les élèves sont retirés des listes
+  // (inscription NR, classe détachée) mais conservés et restaurables — leur
+  // historique financier reste intact.
   const bulkDelete = async () => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
-    if (!window.confirm(`Supprimer ${ids.length} élève(s) ? Cette action est définitive (compte, fiche, inscriptions). Les élèves ayant des paiements encaissés seront refusés.`)) return;
+    if (!window.confirm(`Archiver ${ids.length} élève(s) ? Ils seront retirés des listes mais conservés dans les archives (historique financier intact, restaurables depuis la page Élèves).`)) return;
     setBulkBusy(true);
     const failures = [];
     for (const id of ids) {
@@ -159,7 +160,7 @@ export default function FinanceStudentsPage() {
     setBulkBusy(false);
     setSelectedIds(new Set());
     reloadAll();
-    if (failures.length) alert(`${ids.length - failures.length} supprimé(s), ${failures.length} refusé(s) :\n\n${failures.join('\n')}`);
+    if (failures.length) alert(`${ids.length - failures.length} archivé(s), ${failures.length} en erreur :\n\n${failures.join('\n')}`);
   };
 
   // Déplacement groupé vers une classe donnée (synchronise aussi l'inscription
@@ -379,9 +380,9 @@ export default function FinanceStudentsPage() {
                     onClick={bulkDelete}
                     disabled={bulkBusy}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
-                    title="Supprimer les élèves sélectionnés"
+                    title="Archiver les élèves sélectionnés (conservés, restaurables)"
                   >
-                    {bulkBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Supprimer ({selectedIds.size})
+                    {bulkBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Archiver ({selectedIds.size})
                   </button>
                 </>
               )}

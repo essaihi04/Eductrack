@@ -18,6 +18,7 @@ import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
+import { archiveStudent } from '../utils/studentArchive.js';
 
 const router = Router();
 
@@ -274,9 +275,9 @@ router.put('/students/:id', async (req, res) => {
 });
 
 // DELETE /api/inscriptions/students/:id
-// Suppression d'un élève depuis le module finance — scopée à l'école, avec le
-// même garde-fou comptable que la suppression admin (pas de suppression si des
-// paiements sont encaissés : la cascade effacerait l'historique financier).
+// « Suppression » depuis le module finance = ARCHIVAGE : l'élève est retiré des
+// listes (inscription NR, classe détachée) mais tout son historique financier
+// est conservé — plus besoin du garde-fou sur les paiements encaissés.
 router.delete('/students/:id', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -290,29 +291,8 @@ router.delete('/students/:id', async (req, res) => {
       .maybeSingle();
     if (!student) return res.status(404).json({ error: 'Élève introuvable dans votre école' });
 
-    try {
-      const { count } = await supabaseAdmin
-        .from('payments')
-        .select('id', { count: 'exact', head: true })
-        .eq('student_id', id)
-        .eq('status', 'confirmed');
-      if ((count || 0) > 0) {
-        return res.status(409).json({
-          error: `Suppression impossible : ${count} paiement(s) encaissé(s) sur cet élève. ` +
-            `Supprimer effacerait son historique financier (recettes comprises). ` +
-            `Marquez-le plutôt « non réinscrit » pour le retirer des listes.`,
-        });
-      }
-    } catch (_) { /* module finance absent → pas de garde-fou */ }
-
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .delete()
-      .eq('id', id);
-    if (profileError) throw profileError;
-
-    await supabaseAdmin.auth.admin.deleteUser(id);
-    res.json({ message: 'Élève supprimé' });
+    await archiveStudent({ studentId: id, academicYear: req.query.academic_year || null });
+    res.json({ message: 'Élève archivé', archived: true });
   } catch (e) {
     console.error('DELETE /inscriptions/students/:id:', e);
     res.status(500).json({ error: e.message || 'Erreur serveur' });

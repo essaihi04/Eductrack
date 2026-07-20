@@ -463,10 +463,6 @@ function CollectTab({ student, academicYear, onChanged }) {
 
   // Mois OUVERT (page du mois) : cartes de frais + remises, façon cockpit.
   const [focusMonth, setFocusMonth] = useState(null);
-  // Mini-formulaire de remise ouvert sur une carte de frais (clé mois:service).
-  const [remiseFor, setRemiseFor] = useState(null);
-  const [remiseVal, setRemiseVal] = useState('');
-  const [remiseType, setRemiseType] = useState('amount'); // 'amount' (DH) | 'percent'
   // Ajout d'un frais dans le mois ouvert.
   const [addOpen, setAddOpen] = useState(false);
   const [addCat, setAddCat] = useState('');
@@ -490,75 +486,66 @@ function CollectTab({ student, academicYear, onChanged }) {
   const setAmount = (month, category, value) =>
     setSel(prev => ({ ...prev, [keyOf(month, category)]: { ...prev[keyOf(month, category)], amount: value } }));
 
-  // Remise sur un frais d'un mois (DH ou %) : PERSISTÉE côté serveur — le total
-  // de la facture du couple mois×service est réduit immédiatement, SANS cocher
-  // la ligne pour encaissement (une remise n'est pas un paiement).
-  const applyRemise = async (month, svc, type, value) => {
-    const val = Math.max(0, Number(value) || 0);
-    const disc = type === 'percent'
-      ? Math.min(svc.remaining, Math.round(svc.remaining * val) / 100)
-      : Math.min(svc.remaining, val);
-    if (!(disc > 0)) return;
-    try {
-      await financeApi.applyDiscount(student.id, {
-        academic_year: academicYear,
-        items: [{ month, category: svc.category, discount: disc }],
-      });
-      await load();
-      onChanged?.();
-    } catch (e) { alert('Erreur: ' + e.message); }
-  };
-
   // Remise persistée d'un service (facturé) : plan (expected) − facturé (total).
   const persistedRemise = (svc) =>
     svc.invoice_id && Number(svc.expected) > Number(svc.total)
       ? Math.round((Number(svc.expected) - Number(svc.total)) * 100) / 100
       : 0;
 
-  // ── « Appliquer aux autres mois » : sélecteur de mois cibles (façon
-  // Koolskools) — les REMISES du mois ouvert sont reproduites (en DH) sur les
-  // mois cochés, sans rien cocher pour encaissement.
-  const [applyMonthsOpen, setApplyMonthsOpen] = useState(false);
-  const [applyMonthsSel, setApplyMonthsSel] = useState(new Set());
-  const [applyingMonths, setApplyingMonths] = useState(false);
+  // ── Remise (DH ou %) sur UN frais, appliquée à PLUSIEURS mois ──────────────
+  // Un clic sur « % Remise » ouvre le sélecteur : par défaut le mois ouvert et
+  // TOUS les mois suivants où ce frais reste dû (les mois déjà passés/soldés
+  // restent décochables/cochables à la main). La remise est persistée (réduit
+  // le dû) — elle n'encaisse rien.
+  const [remiseModal, setRemiseModal] = useState(null); // { category, name }
+  const [remiseVal, setRemiseVal] = useState('');
+  const [remiseType, setRemiseType] = useState('amount'); // 'amount' (DH) | 'percent'
+  const [remiseMonths, setRemiseMonths] = useState(new Set());
+  const [applyingRemise, setApplyingRemise] = useState(false);
 
-  // Remises du mois ouvert : catégorie → montant de remise (DH).
-  const currentPattern = () => {
-    const fm = (data?.months || []).find(m => m.month === focusMonth);
-    if (!fm) return [];
-    return (fm.services || [])
-      .filter(s => !(s.status === 'excluded' || s.excluded) && persistedRemise(s) > 0)
-      .map(s => ({ category: s.category, discount: persistedRemise(s) }));
+  // Mois où CE frais est encore dû (candidats à la remise), dans l'ordre de
+  // l'année scolaire.
+  const remiseCandidates = (category) =>
+    (data?.months || []).filter(m => monthPayables(m).some(s => s.category === category));
+
+  const openRemise = (svc) => {
+    const cands = remiseCandidates(svc.category);
+    const startIdx = (data?.months || []).findIndex(m => m.month === focusMonth);
+    // Défaut : à partir du mois ouvert, tous les mois restants encore dus.
+    const fromHere = cands.filter(m => (data?.months || []).findIndex(x => x.month === m.month) >= startIdx);
+    setRemiseModal({ category: svc.category, name: serviceLabel(svc) });
+    setRemiseType('amount');
+    setRemiseVal('');
+    setRemiseMonths(new Set((fromHere.length ? fromHere : cands).map(m => m.month)));
   };
-  const openApplyMonths = () => {
-    const pattern = currentPattern();
-    if (pattern.length === 0) { alert('Appliquez d\'abord une remise (% Remise) sur un frais de ce mois.'); return; }
-    const candidates = (data?.months || []).filter(m =>
-      m.month !== focusMonth && monthPayables(m).some(s => pattern.some(p => p.category === s.category)));
-    if (candidates.length === 0) { alert('Aucun autre mois avec ces frais à remiser.'); return; }
-    setApplyMonthsSel(new Set(candidates.map(m => m.month)));
-    setApplyMonthsOpen(true);
+
+  // Montant de la remise pour un mois donné (le % est recalculé sur son dû).
+  const remiseAmountFor = (svc, type, value) => {
+    const val = Math.max(0, Number(value) || 0);
+    return type === 'percent'
+      ? Math.min(svc.remaining, Math.round(svc.remaining * val) / 100)
+      : Math.min(svc.remaining, val);
   };
-  const applyToMonths = async () => {
-    const pattern = currentPattern();
+
+  const submitRemise = async () => {
+    if (!remiseModal) return;
     const items = [];
-    (data?.months || []).filter(m => applyMonthsSel.has(m.month)).forEach(m => {
-      pattern.forEach(p => {
-        const svc = monthPayables(m).find(x => x.category === p.category);
-        if (!svc) return;
-        items.push({ month: m.month, category: p.category, discount: Math.min(p.discount, svc.remaining) });
-      });
+    (data?.months || []).filter(m => remiseMonths.has(m.month)).forEach(m => {
+      const svc = monthPayables(m).find(x => x.category === remiseModal.category);
+      if (!svc) return;
+      const disc = remiseAmountFor(svc, remiseType, remiseVal);
+      if (disc > 0) items.push({ month: m.month, category: remiseModal.category, discount: disc });
     });
-    if (items.length === 0) { setApplyMonthsOpen(false); return; }
-    setApplyingMonths(true);
+    if (items.length === 0) { alert('Saisissez une remise et sélectionnez au moins un mois.'); return; }
+    setApplyingRemise(true);
     try {
       const res = await financeApi.applyDiscount(student.id, { academic_year: academicYear, items });
-      alert(`Remise appliquée à ${res.applied} frais.`);
-      setApplyMonthsOpen(false);
+      alert(`Remise appliquée à ${res.applied} frais (${remiseModal.name}).`);
+      setRemiseModal(null);
       await load();
       onChanged?.();
     } catch (e) { alert('Erreur: ' + e.message); }
-    finally { setApplyingMonths(false); }
+    finally { setApplyingRemise(false); }
   };
 
   // Ajout DIRECT d'un service du plan/modèle (montant prédéfini) au mois ouvert.
@@ -765,9 +752,7 @@ function CollectTab({ student, academicYear, onChanged }) {
     // Tout autre frais (catégories hors plan/modèle) → petit formulaire.
     const otherCats = Object.entries(CATEGORY_LABELS)
       .filter(([c]) => !presentCats.has(c) && !catalogMap.has(c));
-    const patternCats = new Set(currentPattern().map(p => p.category));
-    const applyCandidates = (data.months || []).filter(m =>
-      m.month !== focus.month && monthPayables(m).some(x => patternCats.has(x.category)));
+    const modalCandidates = remiseModal ? remiseCandidates(remiseModal.category) : [];
 
     return (
       <div className="space-y-3">
@@ -802,11 +787,6 @@ function CollectTab({ student, academicYear, onChanged }) {
                     {allChecked ? 'Tout décocher' : '⚡ Tout sélectionner'}
                   </button>
                 )}
-                <button onClick={openApplyMonths}
-                  title="Choisissez les mois sur lesquels reproduire la sélection et les remises de ce mois"
-                  className="text-xs px-2.5 py-1 rounded-lg bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-medium">
-                  Appliquer à d'autres mois…
-                </button>
               </div>
             </div>
 
@@ -819,7 +799,6 @@ function CollectTab({ student, academicYear, onChanged }) {
                 const payable = !excluded && svc.remaining > 0;
                 const hasPaid = Number(svc.paid) > 0;
                 const remiseDone = persistedRemise(svc);
-                const isRemiseOpen = remiseFor === k;
                 let cardCls = 'border-gray-200 bg-white hover:border-emerald-400 cursor-pointer';
                 if (excluded) cardCls = 'border-gray-200 bg-gray-50 opacity-70';
                 else if (!payable) cardCls = 'border-emerald-200 bg-emerald-50';
@@ -870,35 +849,14 @@ function CollectTab({ student, academicYear, onChanged }) {
                         )}
                         {hasPaid && <p className="text-[10px] opacity-80">déjà payé {formatMAD(svc.paid)}</p>}
 
-                        {isRemiseOpen ? (
-                          <div className="mt-2 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <input type="number" min="0" step="0.01" autoFocus value={remiseVal}
-                              onChange={e => setRemiseVal(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); } }}
-                              className="w-16 px-1.5 py-1 text-xs text-gray-800 border border-gray-300 rounded" placeholder="0" />
-                            <select value={remiseType} onChange={e => setRemiseType(e.target.value)}
-                              className="px-1 py-1 text-xs text-gray-800 border border-gray-300 rounded bg-white">
-                              <option value="amount">DH</option>
-                              <option value="percent">%</option>
-                            </select>
-                            <button onClick={() => { applyRemise(focus.month, svc, remiseType, remiseVal); setRemiseFor(null); }}
-                              className="px-2 py-1 text-xs bg-emerald-700 text-white rounded hover:bg-emerald-800">OK</button>
-                            <button onClick={() => setRemiseFor(null)} className="p-1 rounded hover:bg-black/10">
-                              <X className={`w-3.5 h-3.5 ${checked ? 'text-white' : 'text-gray-500'}`} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button onClick={(e) => {
-                              e.stopPropagation();
-                              setRemiseFor(k);
-                              setRemiseType('amount');
-                              setRemiseVal('');
-                            }}
-                            title="Réduit le dû de ce frais (persisté) — n'encaisse rien"
-                            className={`mt-2 px-2.5 py-1 text-xs font-medium rounded-full ${checked ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
-                            % Remise{remiseDone > 0 ? ` (−${formatMAD(remiseDone)})` : ''}
-                          </button>
-                        )}
+                        <button onClick={(e) => {
+                            e.stopPropagation();
+                            openRemise(svc);
+                          }}
+                          title="Réduit le dû de ce frais sur les mois choisis — n'encaisse rien"
+                          className={`mt-2 px-2.5 py-1 text-xs font-medium rounded-full ${checked ? 'bg-white text-emerald-700 hover:bg-emerald-50' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
+                          % Remise{remiseDone > 0 ? ` (−${formatMAD(remiseDone)})` : ''}
+                        </button>
                       </>
                     )}
                   </div>
@@ -957,49 +915,61 @@ function CollectTab({ student, academicYear, onChanged }) {
           <div className="lg:sticky lg:top-3">{paymentPanel}</div>
         </div>
 
-        {/* Sélecteur des mois cibles (façon Koolskools) */}
-        {applyMonthsOpen && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setApplyMonthsOpen(false)}>
+        {/* Remise d'un service sur un ou plusieurs mois */}
+        {remiseModal && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setRemiseModal(null)}>
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-4 space-y-3" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
-                <h3 className="font-bold text-gray-800">Appliquer aux mois…</h3>
-                <button onClick={() => setApplyMonthsOpen(false)} className="p-1 rounded hover:bg-gray-100">
+                <div>
+                  <h3 className="font-bold text-gray-800">Appliquer une remise</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">{remiseModal.name}</p>
+                </div>
+                <button onClick={() => setRemiseModal(null)} className="p-1 rounded hover:bg-gray-100">
                   <X className="w-4 h-4 text-gray-500" />
                 </button>
               </div>
-              <p className="text-xs text-gray-500">
-                Les remises de <strong>{focus.label}</strong> seront appliquées aux mois cochés
-                (réduction du dû, persistée — rien n'est encaissé).
-              </p>
+              <div className="flex items-center gap-2">
+                <input type="number" min="0" step="0.01" autoFocus value={remiseVal}
+                  onChange={e => setRemiseVal(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') submitRemise(); }}
+                  className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg" placeholder="Montant de la remise" />
+                <select value={remiseType} onChange={e => setRemiseType(e.target.value)}
+                  className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white">
+                  <option value="amount">DH</option>
+                  <option value="percent">%</option>
+                </select>
+              </div>
+              <p className="text-xs text-gray-500">La remise réduit le dû sans enregistrer d'encaissement.</p>
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox"
-                  checked={applyCandidates.length > 0 && applyCandidates.every(m => applyMonthsSel.has(m.month))}
-                  onChange={e => setApplyMonthsSel(e.target.checked ? new Set(applyCandidates.map(m => m.month)) : new Set())}
+                  checked={modalCandidates.length > 0 && modalCandidates.every(m => remiseMonths.has(m.month))}
+                  onChange={e => setRemiseMonths(e.target.checked ? new Set(modalCandidates.map(m => m.month)) : new Set())}
                   className="w-4 h-4 accent-emerald-600" />
                 Tous les mois
               </label>
               <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto">
-                {applyCandidates.map(m => {
-                  const on = applyMonthsSel.has(m.month);
+                {modalCandidates.map(m => {
+                  const on = remiseMonths.has(m.month);
+                  const svc = monthPayables(m).find(x => x.category === remiseModal.category);
                   return (
                     <button key={m.month} type="button"
-                      onClick={() => setApplyMonthsSel(prev => { const n = new Set(prev); if (on) n.delete(m.month); else n.add(m.month); return n; })}
+                      onClick={() => setRemiseMonths(prev => { const n = new Set(prev); if (on) n.delete(m.month); else n.add(m.month); return n; })}
                       className={`rounded-xl px-2 py-2.5 text-center border-2 text-sm font-semibold transition-colors ${on ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-gray-200 bg-white text-gray-700 hover:border-emerald-300'}`}>
                       {m.label}
                       <span className={`block text-[10px] font-normal ${on ? 'opacity-80' : 'text-gray-400'}`}>
-                        reste {formatMAD(m.remaining)}
+                        reste {formatMAD(svc?.remaining || 0)}
                       </span>
                     </button>
                   );
                 })}
               </div>
               <div className="flex items-center justify-end gap-2 pt-1">
-                <button onClick={() => setApplyMonthsOpen(false)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+                <button onClick={() => setRemiseModal(null)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
                   Annuler
                 </button>
-                <button onClick={applyToMonths} disabled={applyMonthsSel.size === 0 || applyingMonths}
+                <button onClick={submitRemise} disabled={remiseMonths.size === 0 || applyingRemise || !(Number(remiseVal) > 0)}
                   className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium">
-                  {applyingMonths ? 'Application…' : `Valider (${applyMonthsSel.size})`}
+                  {applyingRemise ? 'Application…' : `Valider (${remiseMonths.size})`}
                 </button>
               </div>
             </div>

@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
+import { archiveStudent } from '../utils/studentArchive.js';
 
 const router = express.Router();
 
@@ -267,28 +268,30 @@ router.put('/:id', authorize('admin', 'school_admin'), async (req, res) => {
   }
 });
 
-// Supprimer un élève (Admin)
+// « Supprimer » un élève (Admin) = ARCHIVER : profil et historique conservés,
+// élève retiré des listes (classe détachée, inscription NR), restaurable.
 router.delete('/:id', authorize('admin', 'school_admin'), async (req, res) => {
   try {
     const { id } = req.params;
 
-    // SÉCURITÉ : un admin ne supprime que les élèves de sa propre école
-    let query = supabase
+    // SÉCURITÉ : un admin n'archive que les élèves de sa propre école
+    let check = supabase
       .from('profiles')
-      .delete()
+      .select('id')
       .eq('id', id)
       .eq('role', 'student');
     if (req.user.role !== 'super_admin') {
-      query = query.eq('school_id', req.user.school_id);
+      check = check.eq('school_id', req.user.school_id);
     }
-    const { error } = await query;
+    const { data: student, error: checkErr } = await check.single();
+    if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
 
-    if (error) throw error;
+    await archiveStudent({ studentId: id });
 
-    res.json({ message: 'Élève supprimé avec succès' });
+    res.json({ message: 'Élève archivé', archived: true });
   } catch (error) {
     console.error('Erreur:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 

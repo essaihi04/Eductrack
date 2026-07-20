@@ -9,6 +9,7 @@ import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE, BU
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
 import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
+import { archiveStudent, restoreStudent } from '../utils/studentArchive.js';
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
 import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
@@ -431,24 +432,41 @@ router.get('/students/:studentId/parent', async (req, res) => {
 // Récupérer tous les élèves
 router.get('/students', async (req, res) => {
   try {
-    let query = supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('role', 'student')
-      // Ordre verrouillé sur la position du fichier Excel (import_order), groupé par
-      // classe. import_order est re-synchronisé à chaque (ré)import → place stable même
-      // après 1000 mises à jour. created_at sert de repli pour les élèves sans position.
-      .order('class_id', { ascending: true })
-      .order('import_order', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: true });
-    query = applySchoolFilter(query, req);
+    // ?archived=1 → uniquement les élèves archivés (vue « Archives »).
+    // Sinon les archivés sont exclus des listes. includeArchived=false en repli
+    // si la colonne archived_at n'existe pas encore (migration non exécutée).
+    const wantArchived = req.query.archived === '1';
+    const buildQuery = (withArchiveFilter) => {
+      let query = supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('role', 'student')
+        // Ordre verrouillé sur la position du fichier Excel (import_order), groupé par
+        // classe. import_order est re-synchronisé à chaque (ré)import → place stable même
+        // après 1000 mises à jour. created_at sert de repli pour les élèves sans position.
+        .order('class_id', { ascending: true })
+        .order('import_order', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+      if (withArchiveFilter) {
+        query = wantArchived
+          ? query.not('archived_at', 'is', null)
+          : query.is('archived_at', null);
+      }
+      return applySchoolFilter(query, req);
+    };
     // Filtre de scope pour pedagogical_manager
     const scopedStuIds = await getScopedClassIds(req);
-    if (scopedStuIds !== null) {
-      if (scopedStuIds.length === 0) return res.json([]);
-      query = query.in('class_id', scopedStuIds);
+    if (scopedStuIds !== null && scopedStuIds.length === 0) return res.json([]);
+    let query = buildQuery(true);
+    if (scopedStuIds !== null) query = query.in('class_id', scopedStuIds);
+    let { data, error } = await query;
+    if (error && error.code === '42703') {
+      // Colonne archived_at absente → liste sans le filtre (comportement d'avant).
+      if (wantArchived) return res.json([]);
+      let retry = buildQuery(false);
+      if (scopedStuIds !== null) retry = retry.in('class_id', scopedStuIds);
+      ({ data, error } = await retry);
     }
-    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -2759,12 +2777,14 @@ router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (re
   }
 });
 
-// Supprimer un élève
+// « Supprimer » un élève = ARCHIVER : rien n'est détruit (profil, compte,
+// paiements, notes conservés). L'élève est retiré des listes (classe détachée,
+// inscription NR) et reste restaurable depuis les archives.
 router.delete('/students/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Périmètre école : on ne supprime que ses propres élèves (comme le PUT).
+    // Périmètre école : on n'archive que ses propres élèves (comme le PUT).
     let check = supabaseAdmin
       .from('profiles')
       .select('id')
@@ -2774,39 +2794,36 @@ router.delete('/students/:id', async (req, res) => {
     const { data: student, error: checkErr } = await check.single();
     if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
 
-    // Garde-fou comptable : la suppression CASCADE efface factures ET paiements.
-    // Un élève avec des encaissements confirmés ne se supprime pas — le retirer
-    // des listes se fait via la réinscription (statut « non réinscrit »).
-    try {
-      const { count } = await supabaseAdmin
-        .from('payments')
-        .select('id', { count: 'exact', head: true })
-        .eq('student_id', id)
-        .eq('status', 'confirmed');
-      if ((count || 0) > 0) {
-        return res.status(409).json({
-          error: `Suppression impossible : ${count} paiement(s) encaissé(s) sur cet élève. ` +
-            `Supprimer effacerait son historique financier (recettes comprises). ` +
-            `Marquez-le plutôt « non réinscrit » pour le retirer des listes.`,
-        });
-      }
-    } catch (_) { /* module finance absent → pas de garde-fou */ }
+    await archiveStudent({ studentId: id, academicYear: req.query.academic_year || null });
 
-    // Supprimer le profil (cascade supprimera les données liées)
-    const { error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .delete()
-      .eq('id', id);
-
-    if (profileError) throw profileError;
-
-    // Supprimer l'utilisateur Auth
-    await supabaseAdmin.auth.admin.deleteUser(id);
-
-    res.json({ message: 'Élève supprimé' });
+    res.json({ message: 'Élève archivé', archived: true });
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('Erreur archivage élève:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// Restaurer un élève archivé (retour dans les listes, classe/inscription
+// récupérées quand c'est possible).
+router.post('/students/:id/restore', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    let check = supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('id', id)
+      .eq('role', 'student');
+    check = applySchoolFilter(check, req);
+    const { data: student, error: checkErr } = await check.single();
+    if (checkErr || !student) return res.status(404).json({ error: 'Élève introuvable' });
+
+    const { classId } = await restoreStudent({ studentId: id, academicYear: req.query.academic_year || null });
+
+    res.json({ message: 'Élève restauré', restored: true, class_id: classId || null });
+  } catch (error) {
+    console.error('Erreur restauration élève:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 

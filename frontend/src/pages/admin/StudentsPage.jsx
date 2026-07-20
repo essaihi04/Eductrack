@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { printHtmlDocument } from '../../lib/download';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw, GraduationCap } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw, GraduationCap, Archive, ArchiveRestore } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -107,6 +107,11 @@ const StudentsPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const photoInputRef = useRef(null);
   const [showSendCredentialsModal, setShowSendCredentialsModal] = useState(false);
+  // Archives : les élèves « supprimés » sont archivés (pas détruits) et restaurables ici
+  const [showArchives, setShowArchives] = useState(false);
+  const [archivedStudents, setArchivedStudents] = useState([]);
+  const [archivesLoading, setArchivesLoading] = useState(false);
+  const [restoringId, setRestoringId] = useState(null);
   const [sendCredentialsFilter, setSendCredentialsFilter] = useState('all');
   const [sendCredentialsFiliere, setSendCredentialsFiliere] = useState('');
   const [sendCredentialsClass, setSendCredentialsClass] = useState('');
@@ -170,7 +175,7 @@ const StudentsPage = () => {
       return;
     }
 
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer ${selectedStudents.size} élève(s) ?`)) {
+    if (!confirm(`Archiver ${selectedStudents.size} élève(s) ? Ils seront retirés des listes mais conservés dans les archives (restaurables).`)) {
       return;
     }
 
@@ -203,10 +208,10 @@ const StudentsPage = () => {
       await fetchData();
       setSelectedStudents(new Set());
 
-      alert(`${successCount} élève(s) supprimé(s) avec succès${errorCount > 0 ? `. ${errorCount} erreur(s)` : ''}`);
+      alert(`${successCount} élève(s) archivé(s)${errorCount > 0 ? `. ${errorCount} erreur(s)` : ''}`);
     } catch (error) {
-      console.error('Erreur suppression en masse:', error);
-      alert('Erreur lors de la suppression');
+      console.error('Erreur archivage en masse:', error);
+      alert("Erreur lors de l'archivage");
     }
   };
 
@@ -885,6 +890,7 @@ const StudentsPage = () => {
   };
 
   const deleteStudent = async (id) => {
+    if (!window.confirm('Archiver cet élève ? Il sera retiré des listes mais conservé dans les archives (restaurable).')) return;
     try {
       const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = session?.access_token;
@@ -896,9 +902,55 @@ const StudentsPage = () => {
 
       if (res.ok) {
         setStudents(students.filter(s => s.id !== id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Erreur lors de l'archivage");
       }
     } catch (error) {
-      console.error('Error deleting student:', error);
+      console.error('Error archiving student:', error);
+    }
+  };
+
+  // Charge la liste des élèves archivés (vue « Archives »)
+  const loadArchives = async () => {
+    setArchivesLoading(true);
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const res = await fetch(`${apiUrl}/api/admin/students?archived=1`, {
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
+      const data = await res.json();
+      setArchivedStudents(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Erreur chargement archives:', error);
+      setArchivedStudents([]);
+    } finally {
+      setArchivesLoading(false);
+    }
+  };
+
+  const openArchives = () => { setShowArchives(true); loadArchives(); };
+
+  // Restaure un élève archivé : il réintègre les listes (et sa classe si possible)
+  const restoreStudent = async (id) => {
+    setRestoringId(id);
+    try {
+      const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+      const res = await fetch(`${apiUrl}/api/admin/students/${id}/restore`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Erreur lors de la restauration');
+      }
+      setArchivedStudents(prev => prev.filter(s => s.id !== id));
+      await fetchData();
+      await refreshActiveIds();
+    } catch (error) {
+      alert(error.message || 'Erreur lors de la restauration');
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -1215,6 +1267,60 @@ L'administration de ${schoolName}`;
 
   return (
     <div className="p-3 md:p-6 space-y-3 md:space-y-4">
+      {/* Archives : élèves « supprimés » (archivés), consultables et restaurables */}
+      {showArchives && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowArchives(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <Archive className="w-5 h-5 text-gray-500" /> Élèves archivés
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Retirés des listes mais conservés (paiements, notes, historique). Restaurer les remet dans leur classe.
+                </p>
+              </div>
+              <button onClick={() => setShowArchives(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {archivesLoading ? (
+                <div className="flex items-center justify-center py-10 text-gray-500 gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Chargement…
+                </div>
+              ) : archivedStudents.length === 0 ? (
+                <p className="text-center text-gray-500 py-10">Aucun élève archivé.</p>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {archivedStudents.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-800 truncate">{s.first_name} {s.last_name}</p>
+                        <p className="text-xs text-gray-500">
+                          {s.level ? `${s.level} · ` : ''}
+                          Archivé le {s.archived_at ? new Date(s.archived_at).toLocaleDateString('fr-FR') : '—'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => restoreStudent(s.id)}
+                        disabled={restoringId === s.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 shrink-0"
+                      >
+                        {restoringId === s.id
+                          ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          : <ArchiveRestore className="w-3.5 h-3.5" />}
+                        Restaurer
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal pour envoyer les identifiants via WhatsApp */}
       {showSendCredentialsModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowSendCredentialsModal(false)}>
@@ -1426,10 +1532,11 @@ L'administration de ${schoolName}`;
                   </button>
                   <button
                     onClick={deleteSelectedStudents}
+                    title="Archiver les élèves sélectionnés (conservés, restaurables)"
                     className="flex items-center gap-1 px-2 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-700"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Suppr. ({selectedStudents.size})
+                    <Archive className="w-3.5 h-3.5" />
+                    Archiver ({selectedStudents.size})
                   </button>
                 </>
               )}
@@ -1458,6 +1565,14 @@ L'administration de ${schoolName}`;
                   >
                     <ArrowRightLeft className="w-3.5 h-3.5" />
                     Réinscription{reinscriptionCandidates.length ? ` (${reinscriptionCandidates.length})` : ''}
+                  </button>
+                  <button
+                    onClick={openArchives}
+                    title="Élèves archivés (supprimés des listes) — consultables et restaurables"
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                  >
+                    <Archive className="w-3.5 h-3.5" />
+                    Archives
                   </button>
                   <button
                     onClick={() => { resetForm(); setShowForm(true); }}
@@ -1996,9 +2111,10 @@ L'administration de ${schoolName}`;
                 {isAdmin && (
                   <button
                     onClick={() => { deleteStudent(activeStudent.id); setActiveStudent(null); }}
+                    title="L'élève est archivé (conservé, restaurable), pas détruit"
                     className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
                   >
-                    <Trash2 className="w-4 h-4" /> Supprimer
+                    <Archive className="w-4 h-4" /> Archiver
                   </button>
                 )}
               </div>
