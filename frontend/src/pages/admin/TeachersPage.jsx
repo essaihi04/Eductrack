@@ -3,6 +3,7 @@ import { Plus, Trash2, ChevronDown, ChevronUp, RefreshCw, Copy, Eye, EyeOff, Che
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Avatar, StatusPill, toneFor, TeacherCard, DetailDrawer } from '../../components/directory/ui';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import * as XLSX from 'xlsx';
 
 const BLANK_HR = {
@@ -157,6 +158,7 @@ function HRFields({ hr, onChange }) {
 
 const TeachersPage = () => {
   const { profile } = useAuth();
+  const { year } = useYear();
   const [teachers, setTeachers] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -511,16 +513,31 @@ const TeachersPage = () => {
 
   const downloadTemplate = () => {
     const workbook = XLSX.utils.book_new();
+    // Mêmes colonnes que l'export « Liste des professeurs » de Koolskools :
+    // un fichier exporté de là-bas s'importe alors sans retouche.
     const data = [
-      ['Prénom', 'Nom', 'Téléphone', 'Matière'],
-      ['Ahmed', 'Bennani', '0612345678', 'Mathématiques'],
-      ['Fatima', 'El Amrani', '0623456789', 'Physique-Chimie'],
-      ['Youssef', 'Tazi', '0634567890', 'Français']
+      ['Code professeur', 'Nom', 'Prénom', 'Téléphone', 'E-mail', 'Niveau', 'Matière', 'Statut', 'Classe'],
+      ['0001', 'Bennani', 'Ahmed', '+212 612-345678', 'a.bennani@gmail.com', '1APIC', 'Mathématiques', 'Permanent', '1APIC - 1, 1APIC - 2'],
+      ['0002', 'El Amrani', 'Fatima', '0623456789', '', 'TC', 'Physique-Chimie', 'Permanent', 'TC - 1'],
+      ['0003', 'Tazi', 'Youssef', '0634567890', '', '2BACSPF', 'Français', 'Vacataire', '2BACSPF - 1']
     ];
     const worksheet = XLSX.utils.aoa_to_sheet(data);
-    worksheet['!cols'] = [{ wch: 20 }, { wch: 20 }, { wch: 15 }, { wch: 25 }];
+    worksheet['!cols'] = [{ wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 28 }, { wch: 22 }, { wch: 28 }, { wch: 14 }, { wch: 34 }];
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Professeurs');
     XLSX.writeFile(workbook, 'modele_import_professeurs.xlsx');
+  };
+
+  // Les exports Koolskools commencent par plusieurs lignes vides + un titre :
+  // on cherche la vraie ligne d'en-tête au lieu de supposer la première.
+  const findHeaderRow = (rows) => {
+    const limit = Math.min(rows.length, 30);
+    for (let i = 0; i < limit; i++) {
+      const cells = (rows[i] || []).map(c => (c ?? '').toString().toLowerCase().trim());
+      const hasName = cells.some(c => c === 'nom' || c.includes('nom '));
+      const hasOther = cells.some(c => c.includes('prénom') || c.includes('prenom') || c.includes('matière') || c.includes('matiere'));
+      if (hasName && hasOther) return i;
+    }
+    return 0;
   };
 
   const handleExcelImport = async (e) => {
@@ -543,28 +560,44 @@ const TeachersPage = () => {
         return;
       }
 
-      // Détecter les colonnes
-      const header = rows[0].map(h => (h || '').toString().toLowerCase().trim());
+      // Détecter la ligne d'en-tête puis les colonnes
+      const headerRow = findHeaderRow(rows);
+      const header = (rows[headerRow] || []).map(h => (h ?? '').toString().toLowerCase().trim());
       let firstNameCol = header.findIndex(h => h.includes('prénom') || h.includes('prenom') || h === 'first name');
-      let lastNameCol = header.findIndex(h => (h.includes('nom') && !h.includes('prénom') && !h.includes('prenom')) || h === 'last name');
+      // « Nom » exact d'abord : « Nombre d'enfants » contient aussi « nom »
+      let lastNameCol = header.findIndex(h => h === 'nom' || h === 'last name');
+      if (lastNameCol === -1) {
+        lastNameCol = header.findIndex(h => h.includes('nom') && !h.includes('prénom') && !h.includes('prenom') && !h.includes('professeur') && !h.includes('nombre'));
+      }
       let phoneCol = header.findIndex(h => h.includes('téléphone') || h.includes('telephone') || h.includes('phone') || h.includes('tel'));
       let subjectCol = header.findIndex(h => h.includes('matière') || h.includes('matiere') || h.includes('subject'));
+      const emailCol = header.findIndex(h => h.includes('mail'));
+      const classCol = header.findIndex(h => h.includes('classe') || h.includes('class'));
 
       if (firstNameCol === -1) firstNameCol = 0;
       if (lastNameCol === -1) lastNameCol = 1;
       if (phoneCol === -1) phoneCol = 2;
       if (subjectCol === -1) subjectCol = 3;
 
+      const cell = (row, idx) => (idx >= 0 ? (row[idx] ?? '').toString().trim() : '');
+
       const teachersToImport = [];
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const firstName = (row[firstNameCol] || '').toString().trim();
-        const lastName = (row[lastNameCol] || '').toString().trim();
-        const phone = (row[phoneCol] || '').toString().trim();
-        const subjectName = (row[subjectCol] || '').toString().trim();
+      for (let i = headerRow + 1; i < rows.length; i++) {
+        const row = rows[i] || [];
+        const firstName = cell(row, firstNameCol);
+        const lastName = cell(row, lastNameCol);
+        const phone = cell(row, phoneCol);
+        // La matière peut contenir des virgules (« Droit, Economie et… ») :
+        // on garde le libellé entier, ce n'est jamais une liste.
+        const subjectName = cell(row, subjectCol);
+        const email = cell(row, emailCol);
+        const classNames = cell(row, classCol)
+          .split(',')
+          .map(c => c.trim())
+          .filter(Boolean);
 
         if (firstName && lastName) {
-          teachersToImport.push({ firstName, lastName, phone, subjectName });
+          teachersToImport.push({ firstName, lastName, phone, subjectName, email, classNames });
         }
       }
 
@@ -583,7 +616,7 @@ const TeachersPage = () => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ teachers: teachersToImport })
+        body: JSON.stringify({ teachers: teachersToImport, academicYear: year })
       });
 
       const result = await res.json();
@@ -836,11 +869,12 @@ const TeachersPage = () => {
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <h4 className="font-medium text-blue-900 mb-2">Instructions</h4>
               <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-                <li>Téléchargez le modèle Excel ci-dessous</li>
-                <li>Remplissez les colonnes : <strong>Prénom</strong>, <strong>Nom</strong>, <strong>Téléphone</strong>, <strong>Matière</strong></li>
-                <li>Le téléphone est optionnel (format: 0612345678)</li>
-                <li>La matière doit correspondre exactement au nom d'une matière existante</li>
-                <li>L'email et le mot de passe seront générés automatiquement</li>
+                <li>Chargez directement l'export <strong>« Liste des professeurs »</strong> de Koolskools, ou téléchargez le modèle ci-dessous</li>
+                <li>Colonnes lues : <strong>Nom</strong>, <strong>Prénom</strong>, <strong>Téléphone</strong>, <strong>E-mail</strong>, <strong>Matière</strong>, <strong>Classe</strong> (les autres colonnes sont ignorées)</li>
+                <li>Les lignes vides et le titre en haut du fichier sont ignorés automatiquement</li>
+                <li>La matière est créée si elle n'existe pas encore dans l'école</li>
+                <li>Les classes de la colonne <strong>Classe</strong> (« TC - 1, TC - 2 ») rattachent le prof aux classes de l'année <strong>{year}</strong> ; celles qui n'existent pas sont signalées</li>
+                <li>L'e-mail du fichier sert d'identifiant s'il est valide, sinon il est généré ; le mot de passe est toujours généré</li>
               </ol>
               {subjects.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-blue-200">
@@ -893,6 +927,7 @@ const TeachersPage = () => {
                             <th className="text-left px-4 py-2">Email</th>
                             <th className="text-left px-4 py-2">Mot de passe</th>
                             <th className="text-left px-4 py-2">Matière</th>
+                            <th className="text-left px-4 py-2">Classes</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -902,6 +937,12 @@ const TeachersPage = () => {
                               <td className="px-4 py-2 font-mono text-xs">{t.email}</td>
                               <td className="px-4 py-2 font-mono text-xs">{t.password}</td>
                               <td className="px-4 py-2">{t.assignedSubject || '—'}</td>
+                              <td className="px-4 py-2 text-xs">
+                                {(t.assignedClasses || []).length > 0 ? t.assignedClasses.join(', ') : '—'}
+                                {(t.unknownClasses || []).length > 0 && (
+                                  <span className="block text-amber-700">Introuvables : {t.unknownClasses.join(', ')}</span>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

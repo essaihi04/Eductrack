@@ -38,7 +38,7 @@ export const activeStudentIdSet = async (schoolId, academicYear) => {
 
 // Deux chaînes désignent-elles la même année scolaire, quel que soit le format
 // (slash/tiret) ? Compare les chiffres seuls ("2026/2027" == "2026-2027").
-const sameSchoolYear = (a, b) => {
+export const sameSchoolYear = (a, b) => {
   const na = String(a || '').replace(/\D/g, '');
   const nb = String(b || '').replace(/\D/g, '');
   return !!na && na === nb;

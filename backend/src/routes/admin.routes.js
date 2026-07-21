@@ -7,7 +7,7 @@ import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE, BUCKET_PUBLIC, normalizeLogoToPng } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
-import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear } from '../utils/enrollmentScope.js';
+import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear, sameSchoolYear } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
 import { archiveStudent, restoreStudent } from '../utils/studentArchive.js';
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
@@ -4541,9 +4541,15 @@ router.put('/teachers/:id', async (req, res) => {
 });
 
 // Importer des professeurs en masse (depuis Excel)
+// Clé de rapprochement d'un nom de classe : « TC - 1 », « TC 1 » et « TC-1 »
+// désignent la même classe (Koolskools exporte avec des tirets espacés).
+const classNameKey = (raw) => String(raw || '')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]/g, '');
+
 router.post('/teachers/import', async (req, res) => {
   try {
-    const { teachers } = req.body;
+    const { teachers, academicYear } = req.body;
 
     if (!Array.isArray(teachers) || teachers.length === 0) {
       return res.status(400).json({ error: 'Données invalides : tableau de professeurs requis' });
@@ -4576,6 +4582,31 @@ router.post('/teachers/import', async (req, res) => {
       subjectMap.set(s.name.toLowerCase().trim(), s.id);
     });
 
+    // Classes de l'école (pour rattacher les profs aux classes du fichier).
+    // Une classe peut exister en double sur plusieurs années : on privilégie
+    // celle de l'année demandée, sinon la première trouvée.
+    const yearWanted = academicYear || currentSchoolYear();
+    const { data: allClasses } = await supabaseAdmin
+      .from('classes')
+      .select('id, name, academic_year')
+      .eq('school_id', schoolId);
+
+    const classMap = new Map();
+    (allClasses || []).forEach(c => {
+      const key = classNameKey(c.name);
+      if (!key) return;
+      const current = classMap.get(key);
+      if (!current || (!sameSchoolYear(current.academic_year, yearWanted) && sameSchoolYear(c.academic_year, yearWanted))) {
+        classMap.set(key, c);
+      }
+    });
+
+    // Emails déjà utilisés : on ne veut pas écraser un compte existant
+    const { data: existingProfiles } = await supabaseAdmin
+      .from('profiles')
+      .select('email');
+    const takenEmails = new Set((existingProfiles || []).map(p => (p.email || '').toLowerCase()));
+
     const createdTeachers = [];
     const errors = [];
     const sanitize = (str) => {
@@ -4583,23 +4614,36 @@ router.post('/teachers/import', async (req, res) => {
     };
 
     for (const teacher of teachers) {
-      const { firstName, lastName, phone, subjectName } = teacher;
+      const { firstName, lastName, subjectName, classNames } = teacher;
+      const phone = normalizePhoneToE164(teacher.phone) || teacher.phone || null;
 
       if (!firstName || !lastName) {
         errors.push({ name: `${firstName || ''} ${lastName || ''}`, reason: 'Prénom et nom obligatoires' });
         continue;
       }
 
-      // Générer email avec fallback pour noms arabes
-      const firstPart = sanitize(firstName);
-      const lastPart = sanitize(lastName);
+      // Email du fichier s'il est valide et libre (Koolskools exporte l'adresse
+      // réelle du prof) ; sinon adresse générée sur le domaine de l'école.
+      const fileEmail = String(teacher.email || '').trim().toLowerCase();
       let email;
-      if (!firstPart && !lastPart) {
-        const timestamp = Date.now().toString().slice(-6);
-        email = `prof${timestamp}@${schoolDomain}`;
+      if (/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(fileEmail) && !takenEmails.has(fileEmail)) {
+        email = fileEmail;
       } else {
-        email = `${firstPart}${lastPart}@${schoolDomain}`;
+        // Générer email avec fallback pour noms arabes
+        const firstPart = sanitize(firstName);
+        const lastPart = sanitize(lastName);
+        const base = (firstPart || lastPart)
+          ? `${firstPart}${lastPart}`
+          : `prof${Date.now().toString().slice(-6)}`;
+        email = `${base}@${schoolDomain}`;
+        // Homonymes dans le même fichier / déjà en base → suffixe numérique
+        let n = 2;
+        while (takenEmails.has(email)) {
+          email = `${base}${n}@${schoolDomain}`;
+          n += 1;
+        }
       }
+      takenEmails.add(email);
 
       const year = new Date().getFullYear();
       const cleanFirstName = firstName
@@ -4645,10 +4689,25 @@ router.post('/teachers/import', async (req, res) => {
           continue;
         }
 
-        // Assigner la matière si trouvée
+        // Assigner la matière — créée à la volée si l'école ne l'a pas encore
+        // (les libellés Koolskools ne correspondent pas toujours au référentiel)
         let assignedSubject = null;
         if (subjectName) {
-          const subjectId = subjectMap.get(subjectName.toLowerCase().trim());
+          const key = subjectName.toLowerCase().trim();
+          let subjectId = subjectMap.get(key);
+          if (!subjectId) {
+            const code = (subjectName.normalize('NFD').replace(/[^a-zA-Z]/g, '').slice(0, 6).toUpperCase() || 'MAT')
+              + '_' + Math.random().toString(36).slice(2, 6);
+            const { data: newSubject } = await supabaseAdmin
+              .from('subjects')
+              .insert({ school_id: schoolId, name: subjectName.trim(), code })
+              .select('id, name')
+              .single();
+            if (newSubject) {
+              subjectId = newSubject.id;
+              subjectMap.set(key, subjectId);
+            }
+          }
           if (subjectId) {
             await supabaseAdmin
               .from('teacher_subjects')
@@ -4661,11 +4720,31 @@ router.post('/teachers/import', async (req, res) => {
           }
         }
 
+        // Rattacher aux classes du fichier (colonne « Classe » de Koolskools).
+        // Les classes inconnues sont signalées, jamais créées : leur niveau et
+        // leur filière ne sont pas déductibles du seul nom.
+        const assignedClasses = [];
+        const unknownClasses = [];
+        for (const rawClass of (Array.isArray(classNames) ? classNames : [])) {
+          const cls = classMap.get(classNameKey(rawClass));
+          if (!cls) {
+            if (String(rawClass || '').trim()) unknownClasses.push(String(rawClass).trim());
+            continue;
+          }
+          const { error: linkError } = await supabaseAdmin
+            .from('class_teachers')
+            .upsert({ class_id: cls.id, teacher_id: authData.user.id }, { onConflict: 'class_id,teacher_id' });
+          if (linkError) unknownClasses.push(`${cls.name} (${linkError.message})`);
+          else assignedClasses.push(cls.name);
+        }
+
         createdTeachers.push({
           ...profile,
           email,
           password,
-          assignedSubject
+          assignedSubject,
+          assignedClasses,
+          unknownClasses
         });
       } catch (err) {
         errors.push({ name: `${firstName} ${lastName}`, reason: err.message });
