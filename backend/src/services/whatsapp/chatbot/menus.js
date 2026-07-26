@@ -57,6 +57,7 @@ export const SCHOOL_LIFE_MENU = {
     { id: '2', emoji: '📸', label: 'Cahier de vie (photos)',         action: A.getClassroomFeed },
     { id: '3', emoji: '🔍', label: 'Objets perdus',                  action: A.getLostItems },
     { id: '4', emoji: '🗳️', label: 'Sondages en cours',             action: A.getActivePolls },
+    { id: '5', emoji: '🎒', label: 'Fournitures scolaires (PDF)',    action: 'goto:supplies' },
     { id: '0', emoji: '🔙', label: 'Retour au menu principal',       action: 'goto:main' },
   ],
 };

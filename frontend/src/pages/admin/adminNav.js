@@ -111,6 +111,7 @@ export const ADMIN_DOMAINS = [
         label: 'Automatisation & canaux',
         items: [
           { label: 'Rapports IA', path: '/communication/reports', icon: Bot, roles: ALL_ADMIN },
+          { label: 'Documents chatbot', path: '/communication/documents', icon: BookOpen, roles: ALL_ADMIN },
           { label: 'Connexion WhatsApp', path: '/communication/connection', icon: Smartphone, roles: ALL_ADMIN },
         ],
       },

@@ -5,6 +5,7 @@ import { useYear } from '../../contexts/YearContext';
 import { sameYear } from '../../lib/schoolYear';
 import { saveBlob } from '../../lib/download';
 import EngagementDashboard from './communication/EngagementDashboard';
+import ChatbotDocsPage from './communication/ChatbotDocsPage';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
@@ -1543,6 +1544,7 @@ const WhatsAppPage = () => {
     { key: 'inbox', label: 'Messages', icon: Inbox, desc: 'Boîte de réception' },
     { key: 'dashboard', label: 'Dashboard parents', icon: BarChart3, desc: 'Qui lit, qui répond' },
     { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
+    { key: 'documents', label: 'Documents chatbot', icon: BookOpen, desc: 'Fournitures & docs généraux' },
     { key: 'planning', label: 'Planifier', icon: Calendar, desc: 'Communications planifiées' },
     { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
   ];
@@ -2291,6 +2293,11 @@ const WhatsAppPage = () => {
       {/* ===================== TAB: DASHBOARD PARENTS ===================== */}
       {activeTab === 'dashboard' && (
         <EngagementDashboard apiUrl={apiUrl} getAuthToken={getAuthToken} />
+      )}
+
+      {/* ===================== TAB: DOCUMENTS CHATBOT ===================== */}
+      {activeTab === 'documents' && (
+        <ChatbotDocsPage apiUrl={apiUrl} getAuthToken={getAuthToken} academicYear={year} />
       )}
 
       {/* ===================== TAB: INBOX ===================== */}

@@ -10,6 +10,7 @@ import OpenAI from 'openai';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import * as A from './answers.js';
 import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/schoolCalendar.js';
+import { getKnowledgeSnippets } from './knowledge.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -506,11 +507,16 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
     const wantsTimetable = !wantsBulletin && isTimetableQuery(messageText);
     const wantsFinance = !wantsBulletin && !wantsTimetable && isFinanceQuery(messageText);
     const isArabic = isArabicText(messageText);
-    const studentContext = await buildStudentContext(student, parentInfo, {
-      includeFinance: wantsFinance,
-      includeBulletins: wantsBulletin,
-      includeTimetable: wantsTimetable,
-    });
+    const [studentContext, knowledge] = await Promise.all([
+      buildStudentContext(student, parentInfo, {
+        includeFinance: wantsFinance,
+        includeBulletins: wantsBulletin,
+        includeTimetable: wantsTimetable,
+      }),
+      // Documents généraux importés par l'école (règlement, calendrier…) :
+      // seuls les extraits qui matchent la question sont injectés.
+      getKnowledgeSnippets(parentInfo.school_id, messageText).catch(() => []),
+    ]);
 
     // Directive de langue forte, en plus du système — DeepSeek mélange souvent
     // les langues si on ne le martèle pas explicitement avant la question.
@@ -547,6 +553,15 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
         `→ Ne mentionne PAS les données de l'autre semestre, sauf si le parent compare explicitement.`
       : 'Aucun semestre spécifique demandé. Utilise les statistiques globales (attendance_stats.total) ou indique "année en cours".';
 
+    // Extraits des documents de l'école, injectés seulement s'ils matchent.
+    const knowledgeMessages = knowledge.length > 0
+      ? [{
+        role: 'system',
+        content: `DOCUMENTS OFFICIELS DE L'ÉCOLE (extraits) — si la question porte dessus, réponds à partir de ces extraits et n'invente rien :\n${
+          knowledge.map((k) => `[${k.title}]\n${k.excerpt}`).join('\n---\n')}`,
+      }]
+      : [];
+
     const completion = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       messages: [
@@ -554,6 +569,7 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
         { role: 'system', content: langDirective },
         { role: 'system', content: topicDirective },
         { role: 'system', content: semesterDirective },
+        ...knowledgeMessages,
         {
           role: 'system',
           // JSON compact : l'indentation multipliait les tokens du prompt

@@ -47,6 +47,8 @@ import { simulateRead } from '../antiBan.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
 import { generatePreview } from '../../dailyReports.js';
+import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
+import { handlePublicMessage } from './publicChatbot.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -811,6 +813,10 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       }
       return sendText(schoolId, phone, locationInstructions(`${student.first_name} ${student.last_name}`) + current, { urgent: true });
     }
+    if (target === 'supplies') {
+      // Liste des fournitures : PDF régénéré pour le seul niveau de l'enfant.
+      return handleSuppliesRequest({ schoolId, phone, student, text: '', fromMenu: true });
+    }
     if (target === 'photo') {
       // Active le mode "photo attendue" : la prochaine image reçue sera
       // importée directement comme photo de profil de l'enfant sélectionné.
@@ -1088,6 +1094,21 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       });
       return;
     }
+
+    // 1.ter Chatbot « visiteur » (si l'école l'a activé) : le numéro inconnu
+    // obtient UNIQUEMENT les informations générales des documents importés
+    // (fournitures par niveau, règlement…), jamais de données d'élève.
+    const publicHandled = await handlePublicMessage({
+      schoolId,
+      phone,
+      text,
+      providerMessageId: id,
+    });
+    if (publicHandled) {
+      console.log(`[chatbot] ← visiteur ${phone} (school=${schoolId})`);
+      return;
+    }
+
     console.log('[chatbot] Numéro non autorisé:', phone);
     return; // Silence total pour les inconnus (anti-bruit)
   }
@@ -1176,6 +1197,32 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     }
     // Plusieurs enfants sans sélection → on continue le flux normal (le menu de
     // sélection d'enfant sera affiché ; le parent pourra redemander ensuite).
+  }
+
+  // 3.0.bis Demande de fournitures scolaires en texte libre (FR / arabe /
+  // darija). Le parent ne reçoit JAMAIS le document complet de l'école : on
+  // régénère un PDF pour le seul niveau concerné (cité dans le message, sinon
+  // celui de l'enfant, sinon on lui fait choisir).
+  if (isSuppliesQuery(text)) {
+    const st = State.getState(schoolId, phone);
+    let suppliesStudent = st?.studentId ? await getStudentById(st.studentId) : null;
+    if (!suppliesStudent) {
+      const children = await getParentChildren(parentInfo.parent_id);
+      if (children.length === 1) suppliesStudent = await getStudentById(children[0].id);
+    }
+    await handleSuppliesRequest({
+      schoolId: parentInfo.school_id,
+      stateSchoolId: schoolId,
+      phone,
+      student: suppliesStudent,
+      text,
+    });
+    await supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .update({ category: 'general', ai_response_sent: true })
+      .eq('id', incomingMsg?.id);
+    await markProcessed(incomingMsg?.id);
+    return;
   }
 
   // 3.bis Commandes spéciales (toujours prioritaires)
@@ -1407,6 +1454,20 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     // Étape inconnue → réinitialise proprement
     State.setMenu(schoolId, phone, 'account');
     await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`, { urgent: true });
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+
+  // Mode SUPPLIES : le parent choisit le niveau des fournitures (numéro ou nom).
+  // Placé avant le bloc « pas d'enfant sélectionné » : la liste ne dépend que du
+  // niveau, pas de l'enfant.
+  if (state?.state === 'SUPPLIES') {
+    await handleSuppliesLevelReply({
+      schoolId: parentInfo.school_id,
+      stateSchoolId: schoolId,
+      phone,
+      text,
+    });
     await markProcessed(incomingMsg?.id);
     return;
   }
