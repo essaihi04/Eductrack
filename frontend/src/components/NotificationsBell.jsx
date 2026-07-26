@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bell, X, Check, BookOpen, Award, AlertCircle, FileText, ClipboardCheck } from 'lucide-react';
+import { Bell, X, Check, BookOpen, Award, AlertCircle, FileText, ClipboardCheck, CalendarClock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 const NotificationsBell = () => {
@@ -161,6 +161,8 @@ const NotificationsBell = () => {
         return <ClipboardCheck className="w-5 h-5 text-indigo-600" />;
       case 'document':
         return <FileText className="w-5 h-5 text-indigo-600" />;
+      case 'appointment':
+        return <CalendarClock className="w-5 h-5 text-violet-600" />;
       case 'message':
         return <Bell className="w-5 h-5 text-purple-600" />;
       case 'system':

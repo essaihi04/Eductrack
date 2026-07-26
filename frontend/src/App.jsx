@@ -96,6 +96,9 @@ import AppreciationsPage from './pages/teacher/AppreciationsPage';
 import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
 import ParentFinancePage from './pages/parent/ParentFinancePage';
 import ParentSignalementsPage from './pages/parent/ParentSignalementsPage';
+import ParentAppointmentsPage from './pages/parent/ParentAppointmentsPage';
+import TeacherAppointmentsPage from './pages/teacher/TeacherAppointmentsPage';
+import AppointmentsPage from './pages/admin/AppointmentsPage';
 import ApprovalsPage from './pages/ApprovalsPage';
 import StudentBulletins from './pages/student/StudentBulletins';
 import ParascolairePage from './pages/school-life/ParascolairePage';
@@ -259,6 +262,8 @@ function App() {
             <Route path="parent/bulletins" element={<ParentBulletinsPage />} />
             <Route path="parent/finance" element={<ParentFinancePage />} />
             <Route path="parent/signalements" element={<ParentSignalementsPage />} />
+            <Route path="parent/appointments" element={<ParentAppointmentsPage />} />
+            <Route path="appointments" element={<AppointmentsPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />
@@ -278,6 +283,7 @@ function App() {
             <Route path="teacher/calendrier-classe" element={<CalendrierClasse />} />
             <Route path="teacher/documents" element={<DocumentsPage />} />
             <Route path="teacher/appreciations" element={<AppreciationsPage />} />
+            <Route path="teacher/appointments" element={<TeacherAppointmentsPage />} />
             <Route path="teacher/cahier-de-texte" element={<CahierDeTexte />} />
             <Route path="student/timetable" element={<StudentTimetable />} />
             <Route path="student/documents" element={<StudentDocuments />} />

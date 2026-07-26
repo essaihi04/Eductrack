@@ -3,7 +3,7 @@ import {
   Users2, FileText, ClipboardList, Calendar, ShieldCheck, BarChart3,
   Wallet, Bus, MapPin, Sparkles, Image as ImageIcon, Search, BarChart2,
   AlertTriangle, Settings, UserCog, MessageSquare, UserCheck, Bot, UserX,
-  Send, Inbox, Smartphone, Building2,
+  Send, Inbox, Smartphone, Building2, CalendarClock,
 } from 'lucide-react';
 
 // Source de navigation admin unique — utilisée par la Sidebar (domaines de
@@ -104,6 +104,7 @@ export const ADMIN_DOMAINS = [
         items: [
           { label: 'Dashboard parents', path: '/communication/dashboard', icon: BarChart3, roles: ALL_ADMIN },
           { label: 'Boîte de réception', path: '/communication/inbox', icon: Inbox, roles: ALL_ADMIN },
+          { label: 'Rendez-vous parents', path: '/appointments', icon: CalendarClock, roles: ALL_ADMIN },
         ],
       },
       {

@@ -32,6 +32,7 @@ export const MAIN_MENU = {
     { id: '5', emoji: '🆔', label: 'Code Massar de mon enfant', action: A.getMassarCode },
     { id: '6', emoji: '👨‍👩‍👧', label: 'Changer d\'enfant', action: 'goto:child' },
     { id: '7', emoji: '⚙️', label: 'Configuration du compte', action: 'goto:account' },
+    { id: '8', emoji: '📅', label: 'Demander un rendez-vous', action: 'goto:appointment' },
   ],
 };
 

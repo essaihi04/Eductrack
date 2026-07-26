@@ -51,6 +51,14 @@ import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from
 import { tryOfficialDocument } from './documents.js';
 import { handlePublicMessage } from './publicChatbot.js';
 import { handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu } from './showcase.js';
+import {
+  isAppointmentQuery,
+  startAppointmentFlow,
+  handleAppointmentReply,
+  handleTeacherAppointmentMessage,
+  getTeacherByPhone,
+  looksLikeSlotReply,
+} from './appointments.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -887,6 +895,10 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       // Liste des fournitures : PDF régénéré pour le seul niveau de l'enfant.
       return handleSuppliesRequest({ schoolId, phone, student, text: '', fromMenu: true });
     }
+    if (target === 'appointment') {
+      // Demande de rendez-vous : administration ou professeur de la classe.
+      return startAppointmentFlow({ schoolId, parentInfo, phone, studentId: student.id });
+    }
     if (target === 'photo') {
       // Active le mode "photo attendue" : la prochaine image reçue sera
       // importée directement comme photo de profil de l'enfant sélectionné.
@@ -1152,6 +1164,19 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       console.log('[chatbot] Numéro non autorisé (média ignoré):', phone);
       return;
     }
+    // 1.bis.0 Un PROFESSEUR qui répond à une demande de rendez-vous.
+    // Son numéro n'est pas celui d'un parent : on l'identifie dans `profiles`
+    // et on lit le créneau qu'il propose (FR / arabe / darija).
+    try {
+      const teacherHandled = await handleTeacherAppointmentMessage({ schoolId, phone, text });
+      if (teacherHandled) {
+        console.log(`[chatbot] ← professeur ${phone} (rendez-vous)`);
+        return;
+      }
+    } catch (e) {
+      console.error('[chatbot] rendez-vous professeur:', e.message);
+    }
+
     const receptionist = await getReceptionistByPhone(phone, schoolId);
     if (receptionist) {
       console.log(`[chatbot] ← réceptionniste ${phone} (school=${receptionist.school_id})`);
@@ -1364,6 +1389,52 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     await sendText(parentInfo.school_id, phone, `✅ Vos notifications WhatsApp sont réactivées. Tapez *menu* pour commencer.`, { urgent: true });
     await markProcessed(incomingMsg?.id);
     return;
+  }
+
+  // 3.quater Cas particulier : le numéro appartient à la fois à un parent ET à
+  // un professeur de l'école. Si ce professeur a une demande de rendez-vous en
+  // attente, sa réponse (créneau ou refus) est traitée en priorité — sauf s'il
+  // est en train de faire une saisie guidée côté parent.
+  {
+    const st = State.getState(schoolId, phone);
+    const inParentFlow = st && ['PHOTO', 'REPORT', 'CHILD', 'APPT', 'POLL', 'SUPPLIES'].includes(st.state);
+    const worthChecking = st?.state === 'APPT_TEACHER' || looksLikeSlotReply(text);
+    if (!inParentFlow && worthChecking) {
+      try {
+        const teacherProfile = await getTeacherByPhone(phone, parentInfo.school_id);
+        if (teacherProfile) {
+          const handled = await handleTeacherAppointmentMessage({
+            schoolId, phone, text, teacher: teacherProfile,
+          });
+          if (handled) {
+            await markProcessed(incomingMsg?.id);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('[chatbot] rendez-vous professeur (parent+prof):', e.message);
+      }
+    }
+  }
+
+  // 3.quinquies Demande de rendez-vous en texte libre (« je veux un rendez-vous »,
+  // « بغيت موعد »…) → démarre le flux guidé, sans passer par le menu.
+  if (isAppointmentQuery(text)) {
+    const st = State.getState(schoolId, phone);
+    if (st?.state !== 'APPT') {
+      await startAppointmentFlow({
+        schoolId,
+        parentInfo,
+        phone,
+        studentId: st?.studentId || null,
+      });
+      await supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .update({ category: 'general', ai_response_sent: true })
+        .eq('id', incomingMsg?.id);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
   }
 
   // 3.ter Réponse à une notification d'absence → « vue » + justification IA.
@@ -1579,6 +1650,19 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     });
     await markProcessed(incomingMsg?.id);
     return;
+  }
+
+  // Mode APPT : saisie guidée d'une demande de rendez-vous (enfant → cible →
+  // objet → créneau souhaité). Placé avant le bloc « pas d'enfant sélectionné »
+  // car la première étape du flux peut justement être le choix de l'enfant.
+  if (state?.state === 'APPT') {
+    const handled = await handleAppointmentReply({
+      schoolId, parentInfo, phone, text, state,
+    });
+    if (handled) {
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
   }
 
   // Pas d'état (1re interaction, expiré, ou redémarrage serveur) → essayer
