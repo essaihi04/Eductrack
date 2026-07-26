@@ -254,6 +254,20 @@ async function getParentByPhone(phone, schoolId = null) {
 
   if (!profile) return null;
 
+  // Un profil parent SANS aucun élève rattaché n'est pas un parent joignable :
+  // c'est soit un profil orphelin laissé par une suppression, soit un parent
+  // dissocié de tous ses enfants. Le numéro doit alors être traité comme
+  // INCONNU (silence, ou chatbot visiteur si l'école l'a activé) plutôt que de
+  // révéler qu'il est enregistré à l'école.
+  const { count: linkCount } = await supabaseAdmin
+    .from('parent_students')
+    .select('student_id', { count: 'exact', head: true })
+    .eq('parent_id', profile.id);
+  if (!linkCount) {
+    console.log(`[chatbot] parent ${profile.id} sans élève rattaché → numéro traité comme inconnu`);
+    return null;
+  }
+
   return {
     parent_id: profile.id,
     parent_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
@@ -1577,6 +1591,11 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   if (!student) {
     State.resetState(schoolId, phone);
     const children = await getParentChildren(parentInfo.parent_id);
+    if (children.length === 0) {
+      // Plus aucun enfant : on ne répond rien (le numéro n'est plus légitime).
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
     await sendChildSelectionMenu(parentInfo.school_id, phone, children, parentInfo);
     await markProcessed(incomingMsg?.id);
     return;

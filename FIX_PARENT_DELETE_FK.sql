@@ -75,3 +75,37 @@ LEFT JOIN public.parent_students ps ON ps.parent_id = p.id
 WHERE p.role = 'parent'
   AND ps.parent_id IS NULL
 ORDER BY p.created_at DESC;
+
+-- ----------------------------------------------------------------------------
+-- Nettoyage (OPTIONNEL) : supprime les profils parents sans aucun élève.
+--
+-- ⚠️ RELISEZ D'ABORD la liste ci-dessus : un parent tout juste créé et pas
+-- encore rattaché à son enfant y figure aussi, et serait supprimé. Retirez du
+-- résultat ceux à conserver, ou ciblez précisément par id avec la variante
+-- commentée en fin de bloc.
+--
+-- Le code chatbot n'a PAS besoin de ce nettoyage : un parent sans élève est
+-- désormais traité comme un numéro inconnu (aucune réponse). Ce bloc ne sert
+-- qu'à faire le ménage dans la liste des parents de l'application.
+--
+-- Décommentez pour exécuter :
+-- ----------------------------------------------------------------------------
+-- WITH orphans AS (
+--   SELECT p.id
+--   FROM public.profiles p
+--   LEFT JOIN public.parent_students ps ON ps.parent_id = p.id
+--   WHERE p.role = 'parent' AND ps.parent_id IS NULL
+-- )
+-- DELETE FROM public.profiles
+-- WHERE id IN (SELECT id FROM orphans)
+-- RETURNING id, first_name, last_name, phone;
+
+-- Variante ciblée, à préférer si la liste contient des parents à garder :
+-- DELETE FROM public.profiles
+-- WHERE role = 'parent'
+--   AND id IN ('collez-ici-les-uuid', 'un-par-un')
+-- RETURNING id, first_name, last_name, phone;
+--
+-- NB : les comptes de connexion (auth.users) correspondants ne sont pas
+-- supprimés par ces requêtes. Passer par le bouton Supprimer de la page Parents
+-- s'en charge, en plus des contacts et des liens.
