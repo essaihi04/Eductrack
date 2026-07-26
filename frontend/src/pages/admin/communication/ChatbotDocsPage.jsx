@@ -4,6 +4,7 @@ import {
   CheckCircle2, Loader2, ChevronDown, ChevronRight, ToggleLeft, ToggleRight, Info, Users,
 } from 'lucide-react';
 import { openBlob } from '../../../lib/download';
+import { defaultYear, nextYearStr } from '../../../lib/schoolYear';
 
 /**
  * Base de connaissances du chatbot WhatsApp.
@@ -34,6 +35,17 @@ const STATUS_BADGE = {
   error: { cls: 'bg-red-50 text-red-600 border-red-200', icon: AlertTriangle, label: 'Erreur' },
 };
 
+/**
+ * Année scolaire à proposer pour une liste de fournitures : de mars à août,
+ * la liste concerne la rentrée à venir (l'année active se termine), sinon
+ * l'année en cours.
+ */
+const suppliesYear = (activeYear) => {
+  const month = new Date().getMonth() + 1;
+  if (month >= 3 && month <= 8) return nextYearStr(activeYear || defaultYear()) || '';
+  return activeYear || defaultYear();
+};
+
 const itemCount = (section) =>
   (section?.content?.groups || []).reduce((sum, g) => sum + (g.items?.length || 0), 0);
 
@@ -51,7 +63,9 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('fournitures');
-  const [year, setYear] = useState(academicYear || '');
+  // Une liste de fournitures se prépare pour la rentrée SUIVANTE : de mars à
+  // août on propose donc l'année d'après, pas l'année active de l'application.
+  const [year, setYear] = useState(() => suppliesYear(academicYear));
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -85,7 +99,7 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
   }, [apiUrl, authHeaders]);
 
   useEffect(() => { fetchDocuments(); fetchSettings(); }, [fetchDocuments, fetchSettings]);
-  useEffect(() => { if (academicYear && !year) setYear(academicYear); }, [academicYear, year]);
+  useEffect(() => { if (academicYear && !year) setYear(suppliesYear(academicYear)); }, [academicYear, year]);
 
   const handleTogglePublicBot = async () => {
     setSavingPublicBot(true);
@@ -195,6 +209,36 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
         body: JSON.stringify({ is_active: !doc.is_active }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Modification impossible');
+      await fetchDocuments();
+    } catch (e) {
+      setMessage({ type: 'error', text: e.message });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /**
+   * Corrige l'année scolaire d'un document déjà importé : c'est elle qui est
+   * imprimée sur le PDF envoyé aux parents, et le formulaire d'import a pu
+   * proposer l'année active alors que la liste vise la rentrée suivante.
+   */
+  const handleYearChange = async (doc, value) => {
+    const next = value.trim();
+    if (next === (doc.academic_year || '')) return;
+    setBusyId(doc.id);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/chatbot-docs/${doc.id}`, {
+        method: 'PATCH',
+        headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ academic_year: next }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Modification impossible');
+      setMessage({
+        type: 'success',
+        text: next
+          ? `Année scolaire du document mise à jour : ${next}.`
+          : 'Année scolaire effacée : le PDF affichera la prochaine rentrée.',
+      });
       await fetchDocuments();
     } catch (e) {
       setMessage({ type: 'error', text: e.message });
@@ -411,11 +455,23 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {categoryLabel(doc.category)}
-                          {doc.academic_year ? ` • ${doc.academic_year}` : ''}
-                          {` • ${doc.sections_count} niveau${doc.sections_count > 1 ? 'x' : ''}`}
-                        </p>
+                        <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span>{categoryLabel(doc.category)}</span>
+                          <span>•</span>
+                          <label className="inline-flex items-center gap-1">
+                            <span className="sr-only">Année scolaire</span>
+                            <input
+                              defaultValue={doc.academic_year || ''}
+                              onBlur={(e) => handleYearChange(doc, e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                              placeholder="2026-2027"
+                              title="Année scolaire imprimée sur le PDF envoyé aux parents"
+                              className="w-24 px-1.5 py-0.5 rounded border border-transparent hover:border-gray-300 focus:border-indigo-400 focus:bg-white text-xs text-gray-700 bg-transparent"
+                            />
+                          </label>
+                          <span>•</span>
+                          <span>{`${doc.sections_count} niveau${doc.sections_count > 1 ? 'x' : ''}`}</span>
+                        </div>
                         {doc.error_message && (
                           <p className="text-xs text-red-600 mt-1">{doc.error_message}</p>
                         )}

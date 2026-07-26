@@ -181,6 +181,25 @@ export async function extractPdfText(buffer) {
   }
 }
 
+/**
+ * Repère l'année scolaire écrite dans le document (« 2026-2027 », « 2026/2027 »,
+ * « 2026 - 2027 »). Le document lui-même est la source la plus fiable : une
+ * liste de fournitures est publiée pour la rentrée à venir, alors que le
+ * formulaire d'import propose l'année active de l'application.
+ *
+ * @returns {string|null} année normalisée « YYYY-YYYY »
+ */
+export function detectAcademicYear(text) {
+  const t = String(text || '').slice(0, 4000);
+  const matches = [...t.matchAll(/(20\d{2})\s*[-–—/]\s*(20\d{2})/g)];
+  for (const m of matches) {
+    const a = parseInt(m[1], 10);
+    const b = parseInt(m[2], 10);
+    if (b === a + 1) return `${a}-${b}`;
+  }
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Découpage par niveau
 // ─────────────────────────────────────────────────────────────────────────
@@ -387,12 +406,32 @@ export async function analyzeDocument({ documentId, schoolId, buffer = null }) {
     .insert(sections.map((s) => ({ ...s, document_id: documentId, school_id: schoolId })));
   if (insertError) throw insertError;
 
-  await supabaseAdmin
-    .from('chatbot_documents')
-    .update({ status: 'ready', error_message: null, source_text: text, updated_at: new Date().toISOString() })
-    .eq('id', documentId);
+  const update = {
+    status: 'ready',
+    error_message: null,
+    source_text: text,
+    updated_at: new Date().toISOString(),
+  };
 
-  return { sections: sections.length, status: 'ready' };
+  // Année scolaire écrite dans le document : elle fait foi si l'admin n'en a pas
+  // saisi (le formulaire propose l'année active, alors qu'une liste de
+  // fournitures vise la rentrée suivante).
+  const detectedYear = detectAcademicYear(text);
+  const { data: current } = await supabaseAdmin
+    .from('chatbot_documents')
+    .select('academic_year')
+    .eq('id', documentId)
+    .maybeSingle();
+  if (detectedYear && !current?.academic_year) update.academic_year = detectedYear;
+
+  await supabaseAdmin.from('chatbot_documents').update(update).eq('id', documentId);
+
+  return {
+    sections: sections.length,
+    status: 'ready',
+    academic_year: update.academic_year || current?.academic_year || null,
+    detected_academic_year: detectedYear,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────

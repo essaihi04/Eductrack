@@ -38,13 +38,23 @@ export function isSuppliesQuery(text) {
   return SUPPLIES_KEYWORDS_RE.test(String(text || ''));
 }
 
-/** Année scolaire à afficher : celle du document, sinon celle en cours. */
+/**
+ * Année scolaire affichée sur le PDF : celle saisie sur le document, sinon
+ * déduite de la date.
+ *
+ * ⚠️ Une liste de fournitures se prépare pour la RENTRÉE À VENIR : de mars à
+ * août, l'année pertinente est celle qui commence en septembre, pas l'année
+ * scolaire qui s'achève. De septembre à février, c'est l'année en cours.
+ */
 function resolveAcademicYear(section) {
   const fromDoc = section?.document?.academic_year;
   if (fromDoc) return fromDoc;
   const now = new Date();
   const y = now.getFullYear();
-  return now.getMonth() + 1 >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+  const month = now.getMonth() + 1;
+  if (month >= 9) return `${y}-${y + 1}`;      // année qui vient de commencer
+  if (month <= 2) return `${y - 1}-${y}`;      // deuxième moitié de l'année en cours
+  return `${y}-${y + 1}`;                      // mars → août : prochaine rentrée
 }
 
 /** Niveau de l'élève : classes.level en priorité, sinon le nom de la classe. */

@@ -38,6 +38,20 @@ async function loadOwnedDocument(documentId, schoolId) {
 
 // ==================== RÉGLAGES (déclarés avant /:id) ====================
 
+/**
+ * Message d'avertissement quand l'année écrite dans le PDF ne correspond pas à
+ * celle enregistrée sur le document — c'est elle qui sera imprimée sur le PDF
+ * envoyé aux parents.
+ */
+const yearMismatchWarning = (result, saved) => {
+  const detected = result?.detected_academic_year;
+  if (!detected || !saved) return null;
+  const digits = (v) => String(v).replace(/\D/g, '');
+  if (digits(detected) === digits(saved)) return null;
+  return `Le document mentionne l'année ${detected} alors que ${saved} est enregistrée : `
+    + `c'est ${saved} qui sera imprimée sur le PDF envoyé aux parents. Corrigez l'année si besoin.`;
+};
+
 // GET /settings — état du chatbot « visiteur » (réponses aux numéros inconnus)
 router.get('/settings', async (req, res) => {
   try {
@@ -271,9 +285,14 @@ router.post('/', pdfUpload.single('file'), async (req, res) => {
       .order('sort_order', { ascending: true });
 
     res.status(201).json({
-      document: { ...document, status: result.status, error_message: result.error || null },
+      document: {
+        ...document,
+        status: result.status,
+        error_message: result.error || null,
+        academic_year: result.academic_year ?? document.academic_year,
+      },
       sections: sections || [],
-      warning: result.error || null,
+      warning: result.error || yearMismatchWarning(result, document.academic_year),
     });
   } catch (e) {
     console.error('POST chatbot doc:', e);
@@ -301,7 +320,11 @@ router.post('/:id/reanalyze', async (req, res) => {
       .eq('document_id', document.id)
       .order('sort_order', { ascending: true });
 
-    res.json({ status: result.status, warning: result.error || null, sections: sections || [] });
+    res.json({
+      status: result.status,
+      warning: result.error || yearMismatchWarning(result, document.academic_year),
+      sections: sections || [],
+    });
   } catch (e) {
     console.error('POST chatbot doc reanalyze:', e);
     res.status(500).json({ error: 'Erreur serveur', details: e.message });
