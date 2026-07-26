@@ -11,6 +11,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import * as A from './answers.js';
 import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/schoolCalendar.js';
 import { getKnowledgeSnippets } from './knowledge.js';
+import { buildShowcaseContext } from './showcase.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -507,7 +508,7 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
     const wantsTimetable = !wantsBulletin && isTimetableQuery(messageText);
     const wantsFinance = !wantsBulletin && !wantsTimetable && isFinanceQuery(messageText);
     const isArabic = isArabicText(messageText);
-    const [studentContext, knowledge] = await Promise.all([
+    const [studentContext, knowledge, showcase] = await Promise.all([
       buildStudentContext(student, parentInfo, {
         includeFinance: wantsFinance,
         includeBulletins: wantsBulletin,
@@ -516,6 +517,9 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
       // Documents généraux importés par l'école (règlement, calendrier…) :
       // seuls les extraits qui matchent la question sont injectés.
       getKnowledgeSnippets(parentInfo.school_id, messageText).catch(() => []),
+      // Fiche vitrine de l'ecole (taux de reussite, filieres, equipements,
+      // contacts) : permet de repondre aux questions sur l'etablissement.
+      buildShowcaseContext(parentInfo.school_id).catch(() => null),
     ]);
 
     // Directive de langue forte, en plus du système — DeepSeek mélange souvent
@@ -554,13 +558,22 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
       : 'Aucun semestre spécifique demandé. Utilise les statistiques globales (attendance_stats.total) ou indique "année en cours".';
 
     // Extraits des documents de l'école, injectés seulement s'ils matchent.
-    const knowledgeMessages = knowledge.length > 0
-      ? [{
+    const knowledgeMessages = [];
+    if (knowledge.length > 0) {
+      knowledgeMessages.push({
         role: 'system',
         content: `DOCUMENTS OFFICIELS DE L'ÉCOLE (extraits) — si la question porte dessus, réponds à partir de ces extraits et n'invente rien :\n${
           knowledge.map((k) => `[${k.title}]\n${k.excerpt}`).join('\n---\n')}`,
-      }]
-      : [];
+      });
+    }
+    if (showcase) {
+      knowledgeMessages.push({
+        role: 'system',
+        content: `FICHE DE L'ÉCOLE (publiée par l'établissement) — sert aux questions sur `
+          + `l'établissement : taux de réussite, filières, cantine, sport, équipements, activités, `
+          + `trophées, contacts. N'invente rien en dehors de ces données :\n${showcase}`,
+      });
+    }
 
     const completion = await deepseek.chat.completions.create({
       model: 'deepseek-chat',

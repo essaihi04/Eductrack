@@ -49,6 +49,7 @@ import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js'
 import { generatePreview } from '../../dailyReports.js';
 import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
 import { handlePublicMessage } from './publicChatbot.js';
+import { handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu } from './showcase.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -138,6 +139,30 @@ async function sendBulletinPdfs(schoolId, phone, student, semester = null) {
   } catch (e) {
     console.error('[chatbot] sendBulletinPdfs error:', e.message);
     return 0;
+  }
+}
+
+/**
+ * Tente de répondre depuis la vitrine de l'école (cantine, sport, équipements,
+ * taux de réussite, réseaux sociaux…) AVANT de solliciter l'IA. Placé sur les
+ * seuls chemins « question libre » : les options de menu gardent la priorité,
+ * donc « Activités parascolaires » continue de renvoyer les inscriptions de
+ * l'élève et non la galerie photos.
+ *
+ * @returns {Promise<boolean>} true si la vitrine a répondu
+ */
+async function tryShowcaseAnswer({ schoolId, phone, parentInfo, text }) {
+  try {
+    return await handleShowcaseQuestion({
+      schoolId: parentInfo.school_id,
+      stateSchoolId: schoolId,
+      phone,
+      schoolName: parentInfo.school_name,
+      text,
+    });
+  } catch (e) {
+    console.error('[chatbot] vitrine école:', e.message);
+    return false;
   }
 }
 
@@ -851,6 +876,12 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       }
       return sendText(schoolId, phone, locationInstructions(`${student.first_name} ${student.last_name}`) + current, { urgent: true });
     }
+    if (target === 'school') {
+      // Vitrine de l'école : présentation, puis menu des rubriques illustrées.
+      return sendShowcaseMenu({
+        schoolId, phone, schoolName: parentInfo.school_name, stateSchoolId: schoolId,
+      });
+    }
     if (target === 'supplies') {
       // Liste des fournitures : PDF régénéré pour le seul niveau de l'enfant.
       return handleSuppliesRequest({ schoolId, phone, student, text: '', fromMenu: true });
@@ -1496,6 +1527,26 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     return;
   }
 
+  // Mode SCHOOL : le parent choisit une rubrique de la vitrine de l'école.
+  if (state?.state === 'SCHOOL') {
+    const handled = await handleShowcaseReply({
+      schoolId: parentInfo.school_id,
+      stateSchoolId: schoolId,
+      phone,
+      schoolName: parentInfo.school_name,
+      text,
+    });
+    if (handled) {
+      State.setMenu(schoolId, phone, 'schoollife');
+      setTimeout(() => {
+        sendText(parentInfo.school_id, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+      }, 1500);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+    // Choix non reconnu → on laisse le flux normal (question libre / menu).
+  }
+
   // Mode SUPPLIES : le parent choisit le niveau des fournitures (numéro ou nom).
   // Placé avant le bloc « pas d'enfant sélectionné » : la liste ne dépend que du
   // niveau, pas de l'enfant.
@@ -1539,6 +1590,10 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
           if (isFullWeekTimetableQuery(text)) {
             await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
             await sendTimetablePdf(parentInfo.school_id, phone, student);
+            await markProcessed(incomingMsg?.id);
+            return;
+          }
+          if (await tryShowcaseAnswer({ schoolId, phone, parentInfo, text })) {
             await markProcessed(incomingMsg?.id);
             return;
           }
@@ -1680,6 +1735,10 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       await markProcessed(incomingMsg?.id);
       return;
     }
+    if (await tryShowcaseAnswer({ schoolId, phone, parentInfo, text })) {
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
     const reply = await answerWithAI({ messageText: text, student, parentInfo });
     await sendText(parentInfo.school_id, phone, reply, { urgent: true });
     if (isBulletinQuery(text)) {
@@ -1766,6 +1825,10 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       if (isFullWeekTimetableQuery(text)) {
         await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
         await sendTimetablePdf(parentInfo.school_id, phone, student);
+        await markProcessed(incomingMsg?.id);
+        return;
+      }
+      if (await tryShowcaseAnswer({ schoolId, phone, parentInfo, text })) {
         await markProcessed(incomingMsg?.id);
         return;
       }

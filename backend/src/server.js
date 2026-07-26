@@ -21,6 +21,7 @@ import documentsRoutes from './routes/documents.routes.js';
 import superadminRoutes from './routes/superadmin.routes.js';
 import whatsappRoutes from './routes/whatsapp.routes.js';
 import chatbotDocsRoutes from './routes/chatbotDocs.routes.js';
+import schoolShowcaseRoutes from './routes/schoolShowcase.routes.js';
 import cloudWebhookRoutes from './routes/cloudWebhook.routes.js';
 import legalRoutes from './routes/legal.routes.js';
 import communicationsRoutes from './routes/communications.routes.js';
@@ -94,6 +95,7 @@ app.use('/api/auth', authRoutes);
 // (sinon le middleware authorize('admin') du routeur admin bloque les autres rôles)
 app.use('/api/admin/whatsapp', whatsappRoutes);
 app.use('/api/admin/chatbot-docs', chatbotDocsRoutes);
+app.use('/api/admin/school-showcase', schoolShowcaseRoutes);
 app.use('/api/admin/communications', communicationsRoutes);
 app.use('/api/admin/finance-managers', financeManagersRoutes);
 app.use('/api/admin/pedagogical-managers', pedagogicalManagersRoutes);

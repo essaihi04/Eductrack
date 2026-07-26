@@ -21,6 +21,9 @@ import * as State from './state.js';
 import { detectSpecialCommand } from './ai.js';
 import { getKnowledgeSnippets } from './knowledge.js';
 import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
+import {
+  handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu, buildShowcaseContext,
+} from './showcase.js';
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -92,9 +95,9 @@ function isArabicText(text) {
 const PUBLIC_SYSTEM_PROMPT = `Tu es l'assistant WhatsApp PUBLIC d'une école marocaine. Tu réponds à des personnes dont le numéro n'est PAS rattaché à un élève (parents non enregistrés, futurs parents, visiteurs).
 
 RÈGLES ABSOLUES :
-1. Tu réponds UNIQUEMENT à partir des EXTRAITS DE DOCUMENTS OFFICIELS fournis en contexte. Tu n'inventes rien.
+1. Tu réponds UNIQUEMENT à partir du contexte fourni : la FICHE DE L'ÉCOLE (informations publiées par l'établissement) et les EXTRAITS DE DOCUMENTS OFFICIELS. Tu n'inventes rien.
 2. Tu n'as AUCUNE donnée d'élève. Si on te demande des notes, absences, paiements, factures, identifiants, l'emploi du temps d'un élève ou toute information nominative : refuse poliment et explique que ces informations sont réservées aux parents dont le numéro est enregistré, en invitant à contacter l'administration de l'école.
-3. Si la réponse n'est pas dans les extraits, dis simplement que tu n'as pas cette information et invite à contacter l'école. N'invente jamais un horaire, un tarif ou une date.
+3. Si la réponse n'est pas dans le contexte, dis simplement que tu n'as pas cette information et invite à contacter l'école. N'invente jamais un horaire, un tarif, un taux de réussite ou une date.
 4. LANGUE : réponds dans la MÊME langue/écriture que la question (arabe → 100% arabe ; français → français ; darija latine → darija latine). Ne mélange jamais.
 5. Réponse COURTE (8 lignes maximum), claire, avec des emojis pertinents.
 6. Ne termine pas par « Tapez menu » : le système ajoute lui-même ce rappel.`;
@@ -111,8 +114,13 @@ function noAnswerMessage(text, schoolName) {
  * @returns {Promise<string>}
  */
 export async function answerFromKnowledge({ schoolId, schoolName, question }) {
-  const snippets = await getKnowledgeSnippets(schoolId, question, { maxDocs: 3 });
-  if (snippets.length === 0 || !process.env.DEEPSEEK_API_KEY) {
+  const [snippets, showcase] = await Promise.all([
+    getKnowledgeSnippets(schoolId, question, { maxDocs: 3 }),
+    // Fiche publiée par l'école : presentation, taux de reussite, atouts,
+    // filieres, equipements, contacts (rubriques publiques uniquement).
+    buildShowcaseContext(schoolId, { publicOnly: true }).catch(() => null),
+  ]);
+  if ((snippets.length === 0 && !showcase) || !process.env.DEEPSEEK_API_KEY) {
     return noAnswerMessage(question, schoolName);
   }
 
@@ -125,8 +133,13 @@ export async function answerFromKnowledge({ schoolId, schoolName, question }) {
         { role: 'system', content: PUBLIC_SYSTEM_PROMPT },
         {
           role: 'system',
-          content: `ÉCOLE : ${schoolName}\n\nEXTRAITS DES DOCUMENTS OFFICIELS :\n${
-            snippets.map((s) => `[${s.title}]\n${s.excerpt}`).join('\n---\n')}`,
+          content: [
+            `ÉCOLE : ${schoolName}`,
+            showcase ? `FICHE DE L'ÉCOLE (informations publiées par l'établissement) :\n${showcase}` : null,
+            snippets.length
+              ? `EXTRAITS DES DOCUMENTS OFFICIELS :\n${snippets.map((sn) => `[${sn.title}]\n${sn.excerpt}`).join('\n---\n')}`
+              : null,
+          ].filter(Boolean).join('\n\n'),
         },
         { role: 'user', content: question },
       ],
@@ -149,7 +162,8 @@ function welcomeMessage(schoolName) {
     'Je suis l\'assistant WhatsApp de l\'école. Je peux vous renseigner sur les *informations générales* :',
     '',
     '*1.* 🎒 Fournitures scolaires _(PDF par niveau)_',
-    '*2.* ℹ️ Autres informations _(inscription, horaires, règlement…)_',
+    '*2.* 🏫 Découvrir l\'école _(photos, filières, résultats)_',
+    '*3.* ℹ️ Autres informations _(inscription, horaires, règlement…)_',
     '',
     '_Répondez avec un numéro, ou posez directement votre question._',
     '',
@@ -218,6 +232,16 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
   const trimmed = String(text || '').trim();
   const state = State.getState(schoolId, phone);
 
+  // Choix d'une rubrique de la vitrine
+  if (state?.state === 'SCHOOL') {
+    const handled = await handleShowcaseReply({ schoolId, phone, schoolName, text: trimmed });
+    if (handled) {
+      await sendText(schoolId, phone, footerFor(trimmed), { urgent: true });
+      await markProcessed(incomingId);
+      return true;
+    }
+  }
+
   // Choix du niveau après une demande de fournitures
   if (state?.state === 'SUPPLIES') {
     await handleSuppliesLevelReply({ schoolId, phone, student: null, text: trimmed });
@@ -242,8 +266,25 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
     return true;
   }
 
-  // Option 2 : invitation à poser la question
+  // Option 2 : vitrine de l'école (photos, filières, résultats, contacts)
   if (trimmed === '2') {
+    await sendShowcaseMenu({ schoolId, phone, schoolName, publicOnly: true });
+    await markProcessed(incomingId);
+    return true;
+  }
+
+  // Question ciblée sur l'école (cantine, sport, taux de réussite, Facebook…)
+  const showcaseHandled = await handleShowcaseQuestion({
+    schoolId, phone, schoolName, text: trimmed, publicOnly: true,
+  }).catch((e) => { console.error('[chatbot/public] vitrine:', e.message); return false; });
+  if (showcaseHandled) {
+    setTimeout(() => { sendText(schoolId, phone, footerFor(trimmed), { urgent: true }); }, 1500);
+    await markProcessed(incomingId);
+    return true;
+  }
+
+  // Option 3 : invitation à poser la question
+  if (trimmed === '3') {
     State.setState(schoolId, phone, { state: 'PUBLIC' });
     await sendText(
       schoolId,

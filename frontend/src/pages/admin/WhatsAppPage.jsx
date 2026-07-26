@@ -6,13 +6,14 @@ import { sameYear } from '../../lib/schoolYear';
 import { saveBlob } from '../../lib/download';
 import EngagementDashboard from './communication/EngagementDashboard';
 import ChatbotDocsPage from './communication/ChatbotDocsPage';
+import SchoolShowcasePage from './communication/SchoolShowcasePage';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
   Smartphone, Wifi, WifiOff, QrCode, Info, Plus, Trash2,
   Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowLeft,
   Bot, Settings, Play, History, Sparkles, ToggleLeft, ToggleRight, Globe,
-  Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen
+  Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
@@ -1545,6 +1546,7 @@ const WhatsAppPage = () => {
     { key: 'dashboard', label: 'Dashboard parents', icon: BarChart3, desc: 'Qui lit, qui répond' },
     { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
     { key: 'documents', label: 'Documents chatbot', icon: BookOpen, desc: 'Fournitures & docs généraux' },
+    { key: 'ecole', label: 'Vitrine école', icon: Building2, desc: 'Infos générales & photos' },
     { key: 'planning', label: 'Planifier', icon: Calendar, desc: 'Communications planifiées' },
     { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
   ];
@@ -2293,6 +2295,11 @@ const WhatsAppPage = () => {
       {/* ===================== TAB: DASHBOARD PARENTS ===================== */}
       {activeTab === 'dashboard' && (
         <EngagementDashboard apiUrl={apiUrl} getAuthToken={getAuthToken} />
+      )}
+
+      {/* ===================== TAB: VITRINE ÉCOLE ===================== */}
+      {activeTab === 'ecole' && (
+        <SchoolShowcasePage apiUrl={apiUrl} getAuthToken={getAuthToken} />
       )}
 
       {/* ===================== TAB: DOCUMENTS CHATBOT ===================== */}
