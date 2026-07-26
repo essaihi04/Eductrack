@@ -62,17 +62,19 @@ const LEVEL_ALIASES = {
   PS:   ['ps', 'petite section', 'قسم صغير'],
   MS:   ['ms', 'moyenne section', 'قسم متوسط'],
   GS:   ['gs', 'grande section', 'قسم كبير'],
-  '1AP': ['1ap', '1 ap', '1ere annee primaire', 'premiere annee primaire', '1ere primaire', 'cp',
+  // Le primaire s'écrit aussi « AEP » (année d'enseignement primaire) selon les
+  // écoles : les deux notations doivent tomber sur le même code.
+  '1AP': ['1ap', '1 ap', '1aep', '1 aep', '1ere annee primaire', 'premiere annee primaire', '1ere primaire', 'cp',
     'الاولى ابتدائي', 'السنة الاولى ابتدائي', 'الاول ابتدائي', 'المستوى الاول ابتدائي'],
-  '2AP': ['2ap', '2 ap', '2eme annee primaire', 'deuxieme annee primaire', '2eme primaire', 'ce1',
+  '2AP': ['2ap', '2 ap', '2aep', '2 aep', '2eme annee primaire', 'deuxieme annee primaire', '2eme primaire', 'ce1',
     'الثانية ابتدائي', 'السنة الثانية ابتدائي', 'المستوى الثاني ابتدائي'],
-  '3AP': ['3ap', '3 ap', '3eme annee primaire', 'troisieme annee primaire', '3eme primaire', 'ce2',
+  '3AP': ['3ap', '3 ap', '3aep', '3 aep', '3eme annee primaire', 'troisieme annee primaire', '3eme primaire', 'ce2',
     'الثالثة ابتدائي', 'السنة الثالثة ابتدائي', 'المستوى الثالث ابتدائي'],
-  '4AP': ['4ap', '4 ap', '4eme annee primaire', 'quatrieme annee primaire', '4eme primaire', 'cm1',
+  '4AP': ['4ap', '4 ap', '4aep', '4 aep', '4eme annee primaire', 'quatrieme annee primaire', '4eme primaire', 'cm1',
     'الرابعة ابتدائي', 'السنة الرابعة ابتدائي', 'المستوى الرابع ابتدائي'],
-  '5AP': ['5ap', '5 ap', '5eme annee primaire', 'cinquieme annee primaire', '5eme primaire', 'cm2',
+  '5AP': ['5ap', '5 ap', '5aep', '5 aep', '5eme annee primaire', 'cinquieme annee primaire', '5eme primaire', 'cm2',
     'الخامسة ابتدائي', 'السنة الخامسة ابتدائي', 'المستوى الخامس ابتدائي'],
-  '6AP': ['6ap', '6 ap', '6eme annee primaire', 'sixieme annee primaire', '6eme primaire',
+  '6AP': ['6ap', '6 ap', '6aep', '6 aep', '6eme annee primaire', 'sixieme annee primaire', '6eme primaire',
     'السادسة ابتدائي', 'السنة السادسة ابتدائي', 'المستوى السادس ابتدائي'],
   '1AC': ['1ac', '1 ac', '1ere annee college', 'premiere annee college', '1ere college',
     'الاولى اعدادي', 'السنة الاولى اعدادي', 'الاولى ثانوي اعدادي'],
@@ -248,6 +250,9 @@ async function structureWithLLM(text) {
     const completion = await deepseek.chat.completions.create({
       model: 'deepseek-chat',
       temperature: 0,
+      // Un document couvrant une dizaine de niveaux dépasse la sortie par défaut
+      // (4096 jetons) : le JSON serait tronqué donc illisible → repli heuristique.
+      max_tokens: 8000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: STRUCTURE_PROMPT },
@@ -357,6 +362,11 @@ function sanitizeSection(section, index) {
  * Analyse un document : extraction texte → découpage par niveau → écriture des
  * sections. Les anciennes sections du document sont remplacées.
  *
+ * Le découpage par niveau ne concerne QUE les fournitures : ce sont les seules
+ * à être régénérées en PDF pour un niveau précis. Un règlement intérieur, un
+ * calendrier ou un dossier d'inscription est envoyé au parent tel quel (voir
+ * documents.js) ; on se contente d'en extraire le texte pour les réponses IA.
+ *
  * @param {object} p
  * @param {string} p.documentId
  * @param {string} p.schoolId
@@ -364,17 +374,14 @@ function sanitizeSection(section, index) {
  * @returns {Promise<{sections: number, status: string, error?: string}>}
  */
 export async function analyzeDocument({ documentId, schoolId, buffer = null }) {
-  let text = '';
-  if (buffer) {
-    text = await extractPdfText(buffer);
-  } else {
-    const { data } = await supabaseAdmin
-      .from('chatbot_documents')
-      .select('source_text')
-      .eq('id', documentId)
-      .maybeSingle();
-    text = data?.source_text || '';
-  }
+  const { data: document } = await supabaseAdmin
+    .from('chatbot_documents')
+    .select('category, academic_year, source_text')
+    .eq('id', documentId)
+    .maybeSingle();
+
+  const splitByLevel = (document?.category || 'fournitures') === 'fournitures';
+  const text = buffer ? await extractPdfText(buffer) : (document?.source_text || '');
 
   if (!text || text.replace(/\s/g, '').length < 40) {
     const error = "Aucun texte lisible dans ce PDF (document scanné ?). Importez un PDF contenant du texte sélectionnable.";
@@ -383,6 +390,27 @@ export async function analyzeDocument({ documentId, schoolId, buffer = null }) {
       .update({ status: 'error', error_message: error, source_text: text || null, updated_at: new Date().toISOString() })
       .eq('id', documentId);
     return { sections: 0, status: 'error', error };
+  }
+
+  // Document diffusé tel quel : pas de découpage, pas d'appel au LLM.
+  if (!splitByLevel) {
+    await supabaseAdmin.from('chatbot_document_sections').delete().eq('document_id', documentId);
+    const detected = detectAcademicYear(text);
+    const update = {
+      status: 'ready',
+      error_message: null,
+      source_text: text,
+      updated_at: new Date().toISOString(),
+    };
+    if (detected && !document?.academic_year) update.academic_year = detected;
+    await supabaseAdmin.from('chatbot_documents').update(update).eq('id', documentId);
+    return {
+      sections: 0,
+      status: 'ready',
+      as_is: true,
+      academic_year: update.academic_year || document?.academic_year || null,
+      detected_academic_year: detected,
+    };
   }
 
   const structured = await structureWithLLM(text);
@@ -417,19 +445,14 @@ export async function analyzeDocument({ documentId, schoolId, buffer = null }) {
   // saisi (le formulaire propose l'année active, alors qu'une liste de
   // fournitures vise la rentrée suivante).
   const detectedYear = detectAcademicYear(text);
-  const { data: current } = await supabaseAdmin
-    .from('chatbot_documents')
-    .select('academic_year')
-    .eq('id', documentId)
-    .maybeSingle();
-  if (detectedYear && !current?.academic_year) update.academic_year = detectedYear;
+  if (detectedYear && !document?.academic_year) update.academic_year = detectedYear;
 
   await supabaseAdmin.from('chatbot_documents').update(update).eq('id', documentId);
 
   return {
     sections: sections.length,
     status: 'ready',
-    academic_year: update.academic_year || current?.academic_year || null,
+    academic_year: update.academic_year || document?.academic_year || null,
     detected_academic_year: detectedYear,
   };
 }

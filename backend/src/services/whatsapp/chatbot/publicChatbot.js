@@ -21,6 +21,7 @@ import * as State from './state.js';
 import { detectSpecialCommand } from './ai.js';
 import { getKnowledgeSnippets } from './knowledge.js';
 import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
+import { tryOfficialDocument } from './documents.js';
 import {
   handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu, buildShowcaseContext,
 } from './showcase.js';
@@ -269,6 +270,15 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
   // Option 2 : vitrine de l'école (photos, filières, résultats, contacts)
   if (trimmed === '2') {
     await sendShowcaseMenu({ schoolId, phone, schoolName, publicOnly: true });
+    await markProcessed(incomingId);
+    return true;
+  }
+
+  // Demande d'un document officiel (règlement, calendrier, dossier
+  // d'inscription…) : on envoie le PDF de l'école TEL QUEL, sans le reformater.
+  const docSent = await tryOfficialDocument({ schoolId, phone, text: trimmed, schoolName })
+    .catch((e) => { console.error('[chatbot/public] document officiel:', e.message); return false; });
+  if (docSent) {
     await markProcessed(incomingId);
     return true;
   }

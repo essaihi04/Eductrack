@@ -48,6 +48,7 @@ import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
 import { generatePreview } from '../../dailyReports.js';
 import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
+import { tryOfficialDocument } from './documents.js';
 import { handlePublicMessage } from './publicChatbot.js';
 import { handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu } from './showcase.js';
 
@@ -1286,6 +1287,25 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       student: suppliesStudent,
       text,
     });
+    await supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .update({ category: 'general', ai_response_sent: true })
+      .eq('id', incomingMsg?.id);
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+
+  // 3.0.ter Demande d'un document officiel (règlement intérieur, calendrier,
+  // dossier d'inscription…). Contrairement aux fournitures, ces documents ne
+  // sont PAS régénérés : le parent reçoit le PDF de l'école tel qu'il a été
+  // publié, dans sa mise en page d'origine.
+  const officialDocSent = await tryOfficialDocument({
+    schoolId: parentInfo.school_id,
+    phone,
+    text,
+    schoolName: parentInfo.school_name,
+  }).catch((e) => { console.error('[chatbot] document officiel:', e.message); return false; });
+  if (officialDocSent) {
     await supabaseAdmin
       .from('whatsapp_incoming_messages')
       .update({ category: 'general', ai_response_sent: true })

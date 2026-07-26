@@ -368,26 +368,48 @@ export function buildSuppliesPdfBuffer({ school = {}, logoBuffer = null, section
         const noteW = contentW - 48;
         const noteHeights = notes.map((n) => mixedParagraphHeight(doc, n, { width: noteW, size: 9.5 }) + 6);
         const titleH = mixedParagraphHeight(doc, L.notes, { width: contentW - 40, size: 11 });
-        const boxH = titleH + 16 + noteHeights.reduce((a, b) => a + b, 0);
-        ensureSpace(boxH + 10);
-
-        card(doc, PAGE_MARGIN, y, contentW, boxH, { fill: SAFRAN_SOFT, radius: 8 });
-        doc.rect(rtl ? contentRight - 4 : PAGE_MARGIN, y, 4, boxH).fill(SAFRAN);
-        doc.fillColor('#92400E');
-        drawMixedParagraph(doc, L.notes, {
-          x: PAGE_MARGIN + 20, y: y + 9, width: contentW - 40, size: 11, align, rtl,
-        });
-
-        let ny = y + titleH + 14;
         const bulletX = rtl ? contentRight - 24 : PAGE_MARGIN + 24;
         const noteX = rtl ? PAGE_MARGIN + 14 : PAGE_MARGIN + 34;
-        notes.forEach((n, i) => {
-          doc.circle(bulletX, ny + 5, 2).fill('#B45309');
-          doc.fillColor('#7C2D12');
-          drawMixedParagraph(doc, n, { x: noteX, y: ny, width: noteW, size: 9.5, align, rtl: dirOf(n) });
-          ny += noteHeights[i];
-        });
-        y += boxH + 14;
+
+        // L'encadré se pagine : dessiné d'un bloc, une longue série de consignes
+        // débordait de la page et passait par-dessus le pied de page.
+        let i = 0;
+        let firstBox = true;
+        while (i < notes.length) {
+          const headH = firstBox ? titleH + 14 : 10;
+          if (y + headH + noteHeights[i] + 12 > bottomLimit) newPage();
+
+          // Consignes tenant dans la page (au moins une, même trop haute :
+          // sinon la boucle ne se terminerait jamais).
+          const slice = [];
+          let boxH = headH + 8;
+          while (i < notes.length && (slice.length === 0 || y + boxH + noteHeights[i] + 8 <= bottomLimit)) {
+            boxH += noteHeights[i];
+            slice.push(notes[i]);
+            i += 1;
+          }
+          boxH += 8;
+
+          card(doc, PAGE_MARGIN, y, contentW, boxH, { fill: SAFRAN_SOFT, radius: 8 });
+          doc.rect(rtl ? contentRight - 4 : PAGE_MARGIN, y, 4, boxH).fill(SAFRAN);
+          if (firstBox) {
+            doc.fillColor('#92400E');
+            drawMixedParagraph(doc, L.notes, {
+              x: PAGE_MARGIN + 20, y: y + 9, width: contentW - 40, size: 11, align, rtl,
+            });
+          }
+
+          let ny = y + headH + 4;
+          slice.forEach((n) => {
+            doc.circle(bulletX, ny + 5, 2).fill('#B45309');
+            doc.fillColor('#7C2D12');
+            drawMixedParagraph(doc, n, { x: noteX, y: ny, width: noteW, size: 9.5, align, rtl: dirOf(n) });
+            ny += mixedParagraphHeight(doc, n, { width: noteW, size: 9.5 }) + 6;
+          });
+
+          y += boxH + 14;
+          firstBox = false;
+        }
       }
 
       // ───── Mention de génération ─────

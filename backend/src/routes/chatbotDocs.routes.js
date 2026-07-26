@@ -109,6 +109,16 @@ router.get('/sections/:id/pdf', async (req, res) => {
       return res.status(404).json({ error: 'Section introuvable' });
     }
 
+    // Seules les fournitures sont régénérées par niveau. Pour tout autre
+    // document (règlement, calendrier…), le parent reçoit le fichier d'origine :
+    // l'aperçu doit donc montrer ce fichier-là, pas une reconstitution.
+    if (section.document?.category && section.document.category !== 'fournitures') {
+      return res.status(409).json({
+        error: 'Ce document est envoyé tel quel : ouvrez le fichier importé.',
+        as_is: true,
+      });
+    }
+
     const { buffer, fileName } = await generateSectionPdf({
       schoolId,
       section,

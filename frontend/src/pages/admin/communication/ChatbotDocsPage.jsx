@@ -17,15 +17,20 @@ import { defaultYear, nextYearStr } from '../../../lib/schoolYear';
  * API : /api/admin/chatbot-docs
  */
 
+// Seules les fournitures sont régénérées par niveau ; tous les autres documents
+// sont envoyés au parent TELS QUELS (fichier d'origine) et alimentent l'IA.
 const CATEGORIES = [
-  { value: 'fournitures', label: '🎒 Fournitures scolaires', hint: 'Découpé par niveau, envoyé en PDF au parent' },
-  { value: 'reglement', label: '📋 Règlement intérieur', hint: 'Utilisé par l\'IA pour répondre aux questions' },
-  { value: 'calendrier', label: '📅 Calendrier scolaire', hint: 'Utilisé par l\'IA pour répondre aux questions' },
-  { value: 'inscription', label: '📝 Inscription / réinscription', hint: 'Utilisé par l\'IA pour répondre aux questions' },
-  { value: 'cantine', label: '🍽️ Cantine', hint: 'Utilisé par l\'IA pour répondre aux questions' },
-  { value: 'transport', label: '🚌 Transport scolaire', hint: 'Utilisé par l\'IA pour répondre aux questions' },
-  { value: 'autre', label: '📄 Autre document', hint: 'Utilisé par l\'IA pour répondre aux questions' },
+  { value: 'fournitures', label: '🎒 Fournitures scolaires', hint: 'Découpé par niveau, PDF régénéré pour le niveau demandé' },
+  { value: 'reglement', label: '📋 Règlement intérieur', hint: 'Envoyé tel quel + utilisé par l\'IA' },
+  { value: 'calendrier', label: '📅 Calendrier scolaire', hint: 'Envoyé tel quel + utilisé par l\'IA' },
+  { value: 'inscription', label: '📝 Inscription / réinscription', hint: 'Envoyé tel quel + utilisé par l\'IA' },
+  { value: 'cantine', label: '🍽️ Cantine', hint: 'Envoyé tel quel + utilisé par l\'IA' },
+  { value: 'transport', label: '🚌 Transport scolaire', hint: 'Envoyé tel quel + utilisé par l\'IA' },
+  { value: 'autre', label: '📄 Autre document', hint: 'Envoyé tel quel + utilisé par l\'IA' },
 ];
+
+/** Le document est-il redécoupé par niveau (fournitures) ou diffusé tel quel ? */
+const isAsIs = (doc) => doc?.category !== 'fournitures';
 
 const categoryLabel = (value) => CATEGORIES.find((c) => c.value === value)?.label || value;
 
@@ -286,10 +291,14 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
           <div className="text-sm text-indigo-900 space-y-1">
             <p className="font-semibold">Documents du chatbot WhatsApp</p>
             <p className="text-indigo-800">
-              Importez un PDF (ex. la liste des fournitures de tous les niveaux). Il est découpé
-              automatiquement <strong>par niveau</strong>. Quand un parent demande les fournitures, le
-              chatbot lui envoie un PDF régénéré aux couleurs de l'école, contenant
-              <strong> uniquement le niveau demandé</strong> — jamais le document complet.
+              <strong>Fournitures :</strong> le PDF importé (tous les niveaux) est découpé
+              automatiquement par niveau. Le parent reçoit un PDF régénéré aux couleurs de l'école
+              contenant <strong>uniquement le niveau demandé</strong> — jamais le document complet.
+            </p>
+            <p className="text-indigo-800">
+              <strong>Tous les autres documents</strong> (règlement intérieur, calendrier,
+              inscription…) sont envoyés <strong>tels quels</strong>, dans leur mise en page
+              d'origine, et leur texte sert à l'IA pour répondre aux questions.
             </p>
           </div>
         </div>
@@ -470,7 +479,9 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
                             />
                           </label>
                           <span>•</span>
-                          <span>{`${doc.sections_count} niveau${doc.sections_count > 1 ? 'x' : ''}`}</span>
+                          {isAsIs(doc)
+                            ? <span className="text-gray-600">Envoyé tel quel</span>
+                            : <span>{`${doc.sections_count} niveau${doc.sections_count > 1 ? 'x' : ''}`}</span>}
                         </div>
                         {doc.error_message && (
                           <p className="text-xs text-red-600 mt-1">{doc.error_message}</p>
@@ -516,8 +527,30 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
                       </div>
                     </div>
 
-                    {/* Niveaux détectés */}
-                    {isOpen && (
+                    {/* Document diffusé tel quel : rien à découper, on montre le fichier */}
+                    {isOpen && isAsIs(doc) && (
+                      <div className="mt-3 ml-11">
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 flex items-center justify-between gap-3">
+                          <p className="text-xs text-gray-600">
+                            Le parent reçoit <strong>ce fichier tel quel</strong>, dans sa mise en page d'origine.
+                            Son texte sert aussi à l'IA pour répondre aux questions.
+                          </p>
+                          {doc.file_url && (
+                            <a
+                              href={doc.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 flex-shrink-0"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Ouvrir le document
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Niveaux détectés (fournitures uniquement) */}
+                    {isOpen && !isAsIs(doc) && (
                       <div className="mt-3 ml-11 space-y-2">
                         {(sections[doc.id] || []).length === 0 ? (
                           <p className="text-xs text-gray-400">Aucun niveau détecté dans ce document.</p>
