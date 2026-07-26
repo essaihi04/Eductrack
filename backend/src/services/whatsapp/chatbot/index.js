@@ -282,6 +282,30 @@ async function getParentChildren(parentId) {
     }));
 }
 
+/**
+ * Charge un élève UNIQUEMENT s'il est encore rattaché à ce parent.
+ *
+ * ⚠️ Sécurité : l'état conversationnel garde `studentId` en mémoire pendant
+ * 30 min (rafraîchi à chaque message). Sans cette vérification, un parent
+ * dissocié — ou supprimé alors que son profil survit — continuerait à recevoir
+ * les notes, absences, factures et identifiants de l'élève. La source de
+ * vérité est donc la table parent_students, relue à chaque message.
+ */
+async function getLinkedStudent(parentId, studentId) {
+  if (!parentId || !studentId) return null;
+  const { data: link } = await supabaseAdmin
+    .from('parent_students')
+    .select('student_id')
+    .eq('parent_id', parentId)
+    .eq('student_id', studentId)
+    .maybeSingle();
+  if (!link) {
+    console.warn(`[chatbot] élève ${studentId} n'est plus rattaché au parent ${parentId} — accès refusé`);
+    return null;
+  }
+  return getStudentById(studentId);
+}
+
 async function getStudentById(studentId) {
   const { data: s } = await supabaseAdmin
     .from('profiles')
@@ -1154,7 +1178,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     let credStudent = null;
     if (credReq.target !== 'parent') {
       const st = State.getState(schoolId, phone);
-      if (st?.studentId) credStudent = await getStudentById(st.studentId);
+      if (st?.studentId) credStudent = await getLinkedStudent(parentInfo.parent_id, st.studentId);
       if (!credStudent) {
         const children = await getParentChildren(parentInfo.parent_id);
         if (children.length === 1) credStudent = await getStudentById(children[0].id);
@@ -1181,7 +1205,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // sélection, on laisse le flux normal demander de choisir l'enfant d'abord.
   if (isMassarQuery(text)) {
     const st = State.getState(schoolId, phone);
-    let massarStudent = st?.studentId ? await getStudentById(st.studentId) : null;
+    let massarStudent = st?.studentId ? await getLinkedStudent(parentInfo.parent_id, st.studentId) : null;
     if (!massarStudent) {
       const children = await getParentChildren(parentInfo.parent_id);
       if (children.length === 1) massarStudent = await getStudentById(children[0].id);
@@ -1205,7 +1229,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // celui de l'enfant, sinon on lui fait choisir).
   if (isSuppliesQuery(text)) {
     const st = State.getState(schoolId, phone);
-    let suppliesStudent = st?.studentId ? await getStudentById(st.studentId) : null;
+    let suppliesStudent = st?.studentId ? await getLinkedStudent(parentInfo.parent_id, st.studentId) : null;
     if (!suppliesStudent) {
       const children = await getParentChildren(parentInfo.parent_id);
       if (children.length === 1) suppliesStudent = await getStudentById(children[0].id);
@@ -1229,7 +1253,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   const cmd = detectSpecialCommand(text);
   if (cmd === 'menu' || cmd === 'help') {
     const state = State.getState(schoolId, phone);
-    let student = state?.studentId ? await getStudentById(state.studentId) : null;
+    let student = state?.studentId ? await getLinkedStudent(parentInfo.parent_id, state.studentId) : null;
     if (!student) {
       const children = await getParentChildren(parentInfo.parent_id);
       await sendChildSelectionMenu(parentInfo.school_id, phone, children, parentInfo);
@@ -1546,10 +1570,14 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     return;
   }
 
-  const student = await getStudentById(state.studentId);
+  // L'élève mémorisé doit TOUJOURS être revalidé : s'il a été dissocié de ce
+  // parent (ou supprimé) entre deux messages, on repart de la liste réelle de
+  // ses enfants au lieu de continuer à livrer ses données.
+  const student = await getLinkedStudent(parentInfo.parent_id, state.studentId);
   if (!student) {
     State.resetState(schoolId, phone);
-    await sendText(parentInfo.school_id, phone, `Erreur : élève introuvable. Tapez *menu* pour recommencer.`, { urgent: true });
+    const children = await getParentChildren(parentInfo.parent_id);
+    await sendChildSelectionMenu(parentInfo.school_id, phone, children, parentInfo);
     await markProcessed(incomingMsg?.id);
     return;
   }

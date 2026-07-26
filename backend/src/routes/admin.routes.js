@@ -749,20 +749,51 @@ router.patch('/parents/:parentId', async (req, res) => {
 router.delete('/parents/:parentId', async (req, res) => {
   try {
     const { parentId } = req.params;
+    const schoolId = getSchoolId(req);
 
-    // Delete contacts and links (cascade should handle it, but be explicit)
-    await Promise.all([
-      supabaseAdmin.from('parent_contacts').delete().eq('parent_id', parentId),
-      supabaseAdmin.from('parent_students').delete().eq('parent_id', parentId)
-    ]);
+    // Scope école : un admin ne supprime que les parents de son établissement.
+    let parentQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, school_id')
+      .eq('id', parentId)
+      .eq('role', 'parent');
+    if (schoolId) parentQuery = parentQuery.eq('school_id', schoolId);
+    const { data: parent } = await parentQuery.maybeSingle();
+    if (!parent) return res.status(404).json({ error: 'Parent introuvable' });
 
-    // Delete profile
-    const { error: profileError } = await supabaseAdmin
+    // Les tables de messagerie référencent le parent SANS `ON DELETE` : on
+    // détache l'historique d'abord. Sinon la suppression du profil échoue —
+    // et comme les liens élèves étaient supprimés en premier, l'élève se
+    // retrouvait sans parent tandis que le parent, toujours présent avec son
+    // numéro, continuait à être reconnu par le chatbot WhatsApp.
+    for (const table of ['whatsapp_message_recipients', 'whatsapp_incoming_messages']) {
+      const { error } = await supabaseAdmin
+        .from(table)
+        .update({ parent_id: null })
+        .eq('parent_id', parentId);
+      if (error) console.warn(`[DELETE parent] détachement ${table}:`, error.message);
+    }
+
+    // Le profil est supprimé EN PREMIER : parent_contacts et parent_students
+    // suivent en cascade. En cas d'échec, rien n'a été perdu.
+    const { data: deleted, error: profileError } = await supabaseAdmin
       .from('profiles')
       .delete()
       .eq('id', parentId)
-      .eq('role', 'parent');
+      .eq('role', 'parent')
+      .select('id');
     if (profileError) throw profileError;
+    if (!deleted || deleted.length === 0) {
+      return res.status(409).json({
+        error: "Le parent n'a pas pu être supprimé : des données y sont encore rattachées. Aucune association n'a été modifiée.",
+      });
+    }
+
+    // Filet de sécurité si la cascade n'existe pas sur ce schéma.
+    await Promise.all([
+      supabaseAdmin.from('parent_contacts').delete().eq('parent_id', parentId),
+      supabaseAdmin.from('parent_students').delete().eq('parent_id', parentId),
+    ]);
 
     // Delete auth user
     try {
