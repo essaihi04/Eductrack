@@ -46,8 +46,6 @@ import appointmentsRoutes from './routes/appointments.routes.js';
 import approvalRoutes from './routes/approval.routes.js';
 import enrollmentsRoutes from './routes/enrollments.routes.js';
 import inscriptionsRoutes from './routes/inscriptions.routes.js';
-import { startDailyReportScheduler } from './services/dailyReports.js';
-import { startParentReportScheduler } from './services/parentReportScheduler.js';
 import { startInvoiceScheduler } from './services/invoiceScheduler.js';
 import { bootstrapAllSessions } from './services/whatsapp/index.js';
 import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
@@ -151,8 +149,6 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  startDailyReportScheduler();
-  startParentReportScheduler();
   startCommunicationScheduler();
   startInvoiceScheduler();
 

@@ -12,7 +12,7 @@ import {
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
   Smartphone, Wifi, WifiOff, QrCode, Info, Plus, Trash2,
   Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowLeft,
-  Bot, Settings, Play, History, Sparkles, ToggleLeft, ToggleRight, Globe,
+  Bot, Sparkles,
   Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2
 } from 'lucide-react';
 import QRCode from 'qrcode';
@@ -210,9 +210,6 @@ const WhatsAppPage = () => {
   const [commRecipientCount, setCommRecipientCount] = useState(null);
 
   // ===================== TAB: REPORTS IA =====================
-  const [reportSettings, setReportSettings] = useState(null);
-  const [reportSettingsLoading, setReportSettingsLoading] = useState(false);
-  const [reportSaving, setReportSaving] = useState(false);
   const [reportStudents, setReportStudents] = useState([]);
   const [reportSelectedStudent, setReportSelectedStudent] = useState('');
   const [reportPreview, setReportPreview] = useState(null);
@@ -249,16 +246,6 @@ const WhatsAppPage = () => {
   }, [reportStudents, reportClassFilter, reportStudentSearch]);
   const [reportSending, setReportSending] = useState(false);
   const [reportPeriodData, setReportPeriodData] = useState(null);
-  const [reportTriggering, setReportTriggering] = useState(false);
-  const [reportHistory, setReportHistory] = useState([]);
-  const [reportHistoryTotal, setReportHistoryTotal] = useState(0);
-  const [reportHistoryPage, setReportHistoryPage] = useState(1);
-  const [reportHistoryLoading, setReportHistoryLoading] = useState(false);
-  const [reportHistoryDate, setReportHistoryDate] = useState('');
-  const [reportSubView, setReportSubView] = useState('settings');
-  const [reportViewDetail, setReportViewDetail] = useState(null);
-  const [reportRetrying, setReportRetrying] = useState(null);
-  const [reportRetryingAll, setReportRetryingAll] = useState(false);
 
   // ===================== SHARED EFFECTS =====================
   useEffect(() => {
@@ -1256,30 +1243,6 @@ const WhatsAppPage = () => {
   const inboxTotalMessages = conversations.reduce((s, c) => s + c.messageCount, 0);
 
   // ===================== REPORTS IA LOGIC =====================
-  const fetchReportSettings = useCallback(async () => {
-    setReportSettingsLoading(true);
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/settings`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      setReportSettings(data.settings || {
-        enabled: false, send_time: '18:00', language: 'both',
-        include_recommendations: true, include_chapter_info: true,
-        include_homework_status: true, include_behavior: true, include_grades: false
-      });
-    } catch (error) {
-      console.error('Erreur settings:', error);
-      setReportSettings({
-        enabled: false, send_time: '18:00', language: 'both',
-        include_recommendations: true, include_chapter_info: true,
-        include_homework_status: true, include_behavior: true, include_grades: false
-      });
-    }
-    finally { setReportSettingsLoading(false); }
-  }, [apiUrl]);
-
   const fetchReportStudents = useCallback(async () => {
     try {
       const token = await getAuthToken();
@@ -1291,60 +1254,11 @@ const WhatsAppPage = () => {
     } catch (error) { console.error('Erreur students:', error); setReportStudents([]); }
   }, [apiUrl]);
 
-  const fetchReportHistory = useCallback(async (page = 1) => {
-    setReportHistoryLoading(true);
-    try {
-      const token = await getAuthToken();
-      const params = new URLSearchParams({ page, limit: 20 });
-      if (reportHistoryDate) params.append('date', reportHistoryDate);
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/history?${params}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      setReportHistory(Array.isArray(data.reports) ? data.reports : []);
-      setReportHistoryTotal(data.total || 0);
-    } catch (error) { console.error('Erreur history:', error); setReportHistory([]); }
-    finally { setReportHistoryLoading(false); }
-  }, [apiUrl, reportHistoryDate]);
-
   useEffect(() => {
     if (activeTab === 'reports') {
-      fetchReportSettings();
       fetchReportStudents();
-      if (reportSubView === 'history') fetchReportHistory(reportHistoryPage);
     }
-  }, [activeTab, reportSubView, reportHistoryPage, fetchReportSettings, fetchReportStudents, fetchReportHistory]);
-
-  const saveReportSettings = async (newSettings) => {
-    setReportSaving(true);
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/settings`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings)
-      });
-      const data = await res.json();
-      if (data.success) setReportSettings(data.settings);
-      else alert(data.error || 'Erreur sauvegarde');
-    } catch (error) { console.error('Erreur save:', error); alert('Erreur de connexion'); }
-    finally { setReportSaving(false); }
-  };
-
-  const triggerReports = async () => {
-    setReportTriggering(true);
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/trigger`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) alert('Génération des rapports lancée ! Les messages seront envoyés progressivement.');
-      else alert(data.error || 'Erreur');
-    } catch (error) { console.error('Erreur trigger:', error); alert('Erreur de connexion'); }
-    finally { setReportTriggering(false); }
-  };
+  }, [activeTab, fetchReportStudents]);
 
   const getReportDates = () => {
     const today = new Date();
@@ -1444,47 +1358,6 @@ const WhatsAppPage = () => {
   };
 
 
-  const retryReport = async (reportId) => {
-    setReportRetrying(reportId);
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/retry`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reportId })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('Message renvoyé avec succès !');
-        fetchReportHistory(reportHistoryPage);
-      } else alert(data.error || 'Erreur lors du renvoi');
-    } catch (error) { console.error('Erreur retry:', error); alert('Erreur de connexion'); }
-    finally { setReportRetrying(null); }
-  };
-
-  const retryAllFailed = async () => {
-    if (!confirm('Renvoyer tous les messages échoués ?')) return;
-    setReportRetryingAll(true);
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/retry-all-failed`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert(`Renvoi terminé ! ${data.sent} envoyé(s), ${data.failed} échoué(s) sur ${data.total} total.`);
-        fetchReportHistory(reportHistoryPage);
-      } else alert(data.error || 'Erreur');
-    } catch (error) { console.error('Erreur retry-all:', error); alert('Erreur de connexion'); }
-    finally { setReportRetryingAll(false); }
-  };
-
-  const updateSetting = (key, value) => {
-    const updated = { ...reportSettings, [key]: value };
-    setReportSettings(updated);
-  };
-
   // ===================== FONCTIONS MÉDIAS PROFESSEURS =====================
   const handleTeacherFileSelect = (e) => {
     const file = e.target.files[0];
@@ -1544,7 +1417,7 @@ const WhatsAppPage = () => {
     { key: 'teachers', label: 'Professeurs', icon: Users, desc: 'Envoyer aux profs' },
     { key: 'inbox', label: 'Messages', icon: Inbox, desc: 'Boîte de réception' },
     { key: 'dashboard', label: 'Dashboard parents', icon: BarChart3, desc: 'Qui lit, qui répond' },
-    { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapports quotidiens' },
+    { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapport complet à la demande' },
     { key: 'documents', label: 'Documents chatbot', icon: BookOpen, desc: 'Fournitures & docs généraux' },
     { key: 'ecole', label: 'Vitrine école', icon: Building2, desc: 'Infos générales & photos' },
     { key: 'planning', label: 'Planifier', icon: Calendar, desc: 'Communications planifiées' },
@@ -2619,149 +2492,8 @@ const WhatsAppPage = () => {
       {activeTab === 'reports' && (
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-4xl mx-auto space-y-6">
-            {/* Sub-navigation */}
-            <div className="flex gap-2">
-              {[
-                { key: 'settings', label: 'Configuration', icon: Settings },
-                { key: 'preview', label: 'Aperçu', icon: Sparkles },
-                { key: 'history', label: 'Historique', icon: History }
-              ].map(sv => (
-                <button key={sv.key} onClick={() => setReportSubView(sv.key)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    reportSubView === sv.key ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}>
-                  <sv.icon className="w-4 h-4" />{sv.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Settings sub-view */}
-            {reportSubView === 'settings' && (
-              <div className="space-y-4">
-                {reportSettingsLoading ? (
-                  <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div></div>
-                ) : reportSettings && (
-                  <>
-                    {/* Enable/Disable */}
-                    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
-                            <Bot className="w-5 h-5 text-green-600" />
-                            Rapports quotidiens IA
-                          </h3>
-                          <p className="text-sm text-gray-500 mt-1">Envoi automatique de rapports journaliers aux parents via WhatsApp, générés par intelligence artificielle.</p>
-                        </div>
-                        <button onClick={() => updateSetting('enabled', !reportSettings.enabled)}
-                          className={`flex-shrink-0 w-12 h-7 rounded-full transition-colors relative ${reportSettings.enabled ? 'bg-green-500' : 'bg-gray-300'}`}>
-                          <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${reportSettings.enabled ? 'translate-x-5' : 'translate-x-0.5'}`}></div>
-                        </button>
-                      </div>
-                      {reportSettings.enabled && (
-                        <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
-                          <p className="text-sm text-green-800 flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4" />
-                            Les rapports seront envoyés automatiquement chaque jour à l'heure configurée.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Schedule */}
-                    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                      <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-gray-500" />
-                        Heure d'envoi
-                      </h3>
-                      <div className="flex items-center gap-3">
-                        <input type="time" value={reportSettings.send_time || '18:00'}
-                          min="07:00" max="22:59"
-                          onChange={(e) => updateSetting('send_time', e.target.value)}
-                          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500" />
-                        <span className="text-sm text-gray-500">(Fuseau horaire: Africa/Casablanca)</span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-2">
-                        ⚠️ Créneau autorisé&nbsp;: <strong>07:00 → 22:59</strong>. L'anti-ban WhatsApp bloque tout envoi en dehors de cette plage.
-                      </p>
-                    </div>
-
-                    {/* Language */}
-                    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                      <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                        <Globe className="w-4 h-4 text-gray-500" />
-                        Langue du rapport
-                      </h3>
-                      <div className="flex gap-2">
-                        {[
-                          { key: 'fr', label: '🇫🇷 Français' },
-                          { key: 'ar', label: '🇲🇦 العربية' },
-                          { key: 'both', label: '🇫🇷🇲🇦 Les deux' }
-                        ].map(lang => (
-                          <button key={lang.key} onClick={() => updateSetting('language', lang.key)}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                              reportSettings.language === lang.key ? 'bg-green-100 border-green-300 text-green-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}>
-                            {lang.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Content options */}
-                    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-                      <h3 className="text-sm font-semibold text-gray-800 mb-3">Contenu du rapport</h3>
-                      <div className="space-y-3">
-                        {[
-                          { key: 'include_chapter_info', label: 'Chapitres et sujets étudiés', desc: 'Inclure les matières et thèmes abordés dans la journée' },
-                          { key: 'include_behavior', label: 'Comportement et discipline', desc: 'Participation, attitude, utilisation du téléphone, etc.' },
-                          { key: 'include_homework_status', label: 'Statut des devoirs', desc: 'Devoirs faits ou non, cahier présent, etc.' },
-                          { key: 'include_recommendations', label: 'Recommandations pédagogiques', desc: 'Conseils IA personnalisés pour aider l\'élève' },
-                          { key: 'include_grades', label: 'Notes et évaluations', desc: 'Inclure les notes des contrôles et mini-évaluations' }
-                        ].map(opt => (
-                          <div key={opt.key} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                            <div>
-                              <p className="text-sm font-medium text-gray-700">{opt.label}</p>
-                              <p className="text-xs text-gray-500">{opt.desc}</p>
-                            </div>
-                            <button onClick={() => updateSetting(opt.key, !reportSettings[opt.key])}
-                              className={`flex-shrink-0 w-10 h-6 rounded-full transition-colors relative ${reportSettings[opt.key] ? 'bg-green-500' : 'bg-gray-300'}`}>
-                              <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${reportSettings[opt.key] ? 'translate-x-4' : 'translate-x-0.5'}`}></div>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Save + Trigger */}
-                    <div className="flex items-center gap-3">
-                      <button onClick={() => saveReportSettings(reportSettings)} disabled={reportSaving}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">
-                        {reportSaving ? <><RefreshCw className="w-4 h-4 animate-spin" /> Sauvegarde...</> : <><CheckCircle className="w-4 h-4" /> Sauvegarder</>}
-                      </button>
-                      <button onClick={triggerReports} disabled={reportTriggering}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
-                        {reportTriggering ? <><RefreshCw className="w-4 h-4 animate-spin" /> Envoi...</> : <><Play className="w-4 h-4" /> Envoyer maintenant</>}
-                      </button>
-                    </div>
-
-                    {/* Info box */}
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 space-y-2">
-                      <h4 className="text-sm font-semibold text-blue-900 flex items-center gap-2"><Info className="w-4 h-4" /> Comment ça marche ?</h4>
-                      <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-                        <li>Les professeurs saisissent le suivi quotidien des élèves (présence, participation, discipline, etc.)</li>
-                        <li>À l'heure configurée, le système collecte toutes les données de la journée pour chaque élève</li>
-                        <li>L'intelligence artificielle analyse les données et génère un rapport bienveillant et structuré</li>
-                        <li>Le rapport est envoyé automatiquement aux parents via WhatsApp en français et/ou arabe</li>
-                        <li>Le ton est toujours neutre, encourageant et professionnel — jamais accusateur</li>
-                      </ol>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Preview sub-view */}
-            {reportSubView === 'preview' && (
+            {/* Rapport complet à la demande */}
+            {(
               <div className="space-y-4">
                 {/* Filters card */}
                 <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm space-y-4">
@@ -3105,141 +2837,6 @@ const WhatsAppPage = () => {
               </div>
             )}
 
-            {/* History sub-view */}
-            {reportSubView === 'history' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-gray-800 flex items-center gap-2">
-                    <History className="w-5 h-5 text-gray-500" />
-                    Historique des rapports
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    {reportHistory.some(r => r.status === 'failed') && (
-                      <button onClick={retryAllFailed} disabled={reportRetryingAll}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 text-xs font-medium">
-                        {reportRetryingAll ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Renvoi en cours...</> : <><Send className="w-3.5 h-3.5" /> Renvoyer tous les échoués</>}
-                      </button>
-                    )}
-                    <input type="date" value={reportHistoryDate} onChange={(e) => { setReportHistoryDate(e.target.value); setReportHistoryPage(1); }}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500" />
-                    <button onClick={() => fetchReportHistory(reportHistoryPage)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg">
-                      <RefreshCw className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {reportHistoryLoading ? (
-                  <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div></div>
-                ) : reportHistory.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400">
-                    <History className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">Aucun rapport trouvé</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th className="text-left px-4 py-2.5 font-medium text-gray-600">Élève</th>
-                            <th className="text-left px-4 py-2.5 font-medium text-gray-600">Date</th>
-                            <th className="text-left px-4 py-2.5 font-medium text-gray-600">Téléphone</th>
-                            <th className="text-left px-4 py-2.5 font-medium text-gray-600">Statut</th>
-                            <th className="text-right px-4 py-2.5 font-medium text-gray-600">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                          {reportHistory.map(r => (
-                            <tr key={r.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-2.5 font-medium text-gray-800">{r.studentName}</td>
-                              <td className="px-4 py-2.5 text-gray-600">{new Date(r.report_date).toLocaleDateString('fr-FR')}</td>
-                              <td className="px-4 py-2.5 text-gray-600">{r.phone_e164 || '—'}</td>
-                              <td className="px-4 py-2.5">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  r.status === 'sent' ? 'bg-green-100 text-green-700' :
-                                  r.status === 'failed' ? 'bg-red-100 text-red-700' :
-                                  r.status === 'generated' ? 'bg-blue-100 text-blue-700' :
-                                  'bg-gray-100 text-gray-600'
-                                }`}>
-                                  {r.status === 'sent' ? <><CheckCircle className="w-3 h-3" /> Envoyé</> :
-                                   r.status === 'failed' ? <><XCircle className="w-3 h-3" /> Échoué</> :
-                                   r.status === 'generated' ? 'Généré' : 'En attente'}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5 text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  {r.status === 'failed' && (
-                                    <button onClick={() => retryReport(r.id)} disabled={reportRetrying === r.id}
-                                      className="flex items-center gap-1 text-orange-600 hover:text-orange-700 text-xs font-medium disabled:opacity-50">
-                                      {reportRetrying === r.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Renvoyer
-                                    </button>
-                                  )}
-                                  <button onClick={() => setReportViewDetail(r)} className="text-green-600 hover:text-green-700 text-xs font-medium">
-                                    <Eye className="w-4 h-4 inline" /> Voir
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Pagination */}
-                    {reportHistoryTotal > 20 && (
-                      <div className="flex items-center justify-between text-sm text-gray-500">
-                        <span>{reportHistoryTotal} rapport(s) au total</span>
-                        <div className="flex gap-2">
-                          <button onClick={() => setReportHistoryPage(p => Math.max(1, p - 1))} disabled={reportHistoryPage <= 1}
-                            className="px-3 py-1 border rounded-lg hover:bg-gray-50 disabled:opacity-50">Précédent</button>
-                          <span className="px-3 py-1">Page {reportHistoryPage}</span>
-                          <button onClick={() => setReportHistoryPage(p => p + 1)} disabled={reportHistory.length < 20}
-                            className="px-3 py-1 border rounded-lg hover:bg-gray-50 disabled:opacity-50">Suivant</button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* Detail modal */}
-                {reportViewDetail && (
-                  <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setReportViewDetail(null)}>
-                    <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                      <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between bg-green-50">
-                        <div className="flex items-center gap-2">
-                          <Bot className="w-5 h-5 text-green-600" />
-                          <span className="font-semibold text-green-800">Rapport — {reportViewDetail.studentName}</span>
-                        </div>
-                        <button onClick={() => setReportViewDetail(null)} className="p-1 hover:bg-green-100 rounded-full">
-                          <X className="w-5 h-5 text-gray-500" />
-                        </button>
-                      </div>
-                      <div className="p-5 space-y-4">
-                        <div className="flex items-center gap-4 text-xs text-gray-500">
-                          <span>Date: {new Date(reportViewDetail.report_date).toLocaleDateString('fr-FR')}</span>
-                          <span>Tél: {reportViewDetail.phone_e164 || '—'}</span>
-                          <span className={`font-medium ${reportViewDetail.status === 'sent' ? 'text-green-600' : 'text-red-600'}`}>
-                            {reportViewDetail.status === 'sent' ? '✓ Envoyé' : '✗ ' + (reportViewDetail.error_message || 'Échoué')}
-                          </span>
-                        </div>
-                        {reportViewDetail.report_content_fr && (
-                          <div>
-                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">🇫🇷 Français</h4>
-                            <div className="p-4 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap leading-relaxed">{reportViewDetail.report_content_fr}</div>
-                          </div>
-                        )}
-                        {reportViewDetail.report_content_ar && (
-                          <div>
-                            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">🇲🇦 العربية</h4>
-                            <div className="p-4 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap leading-relaxed" dir="rtl">{reportViewDetail.report_content_ar}</div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
       )}

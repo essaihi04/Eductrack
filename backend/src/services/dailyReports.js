@@ -1,23 +1,14 @@
+// Génération de rapports de suivi IA à la demande (aperçus admin, rapport
+// instantané via le chatbot). L'envoi automatique planifié a été supprimé.
 import { supabaseAdmin } from '../config/supabase.js';
-import { selectInChunksSafe } from '../utils/chunkedQueries.js';
 import OpenAI from 'openai';
-import cron from 'node-cron';
-import { sendText, getStatus } from './whatsapp/index.js';
 import { getEstablishmentConfig } from './establishmentHeader.js';
-import { routeNotification } from './notificationRouter.js';
-import { archivedStudentIdSet } from '../utils/studentArchive.js';
 
 // DeepSeek client (OpenAI-compatible API)
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
   apiKey: process.env.DEEPSEEK_API_KEY || ''
 });
-
-// Vérifie qu'une session Baileys est connectée pour cette école
-const isSessionReady = (schoolId) => {
-  if (!schoolId) return false;
-  return getStatus(schoolId).connected;
-};
 
 // ==================== COLLECT DAILY DATA ====================
 
@@ -494,303 +485,6 @@ Continuez ainsi ! 💪`;
     console.error('DeepSeek AI error:', error.message);
     return null;
   }
-}
-
-// ==================== SEND REPORT VIA WHATSAPP ====================
-
-// L'anti-ban (délai humain, quota, presence) est intégré dans sendText.
-// Le retry est conservé pour les erreurs réseau ponctuelles.
-export async function sendReportWhatsApp(schoolId, phone, reportText, retries = 2) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const result = await sendText(schoolId, phone, reportText);
-      if (result.success) return { success: true, attempt, msgId: result.data?.msgId };
-      // Si la raison est anti-ban (quota / horaires), inutile de retry
-      if (result.reason === 'daily_quota_exceeded' || result.reason === 'out_of_hours' || result.reason === 'paused') {
-        return { success: false, attempt, error: result.message };
-      }
-      if (attempt < retries) {
-        await new Promise(r => setTimeout(r, 3000 * attempt));
-      }
-    } catch (error) {
-      console.error(`[WhatsApp] Attempt ${attempt}/${retries} error:`, error.message);
-      if (attempt < retries) {
-        await new Promise(r => setTimeout(r, 3000 * attempt));
-      }
-    }
-  }
-  return { success: false, attempt: retries };
-}
-
-// ==================== QUEUE SYSTEM ====================
-// Note : l'anti-ban applique déjà un délai humain entre 2 envois sur la même
-// session. La queue garde un comportement séquentiel (concurrency = 1) pour
-// rester prévisible.
-
-class MessageQueue {
-  constructor(concurrency = 1) {
-    this.concurrency = concurrency;
-    this.queue = [];
-    this.processing = 0;
-  }
-
-  async add(task) {
-    return new Promise((resolve) => {
-      this.queue.push({ task, resolve });
-      this.process();
-    });
-  }
-
-  async process() {
-    if (this.processing >= this.concurrency || this.queue.length === 0) return;
-    this.processing++;
-    const { task, resolve } = this.queue.shift();
-    try {
-      const result = await task();
-      resolve(result);
-    } catch (error) {
-      resolve({ success: false, error: error.message });
-    }
-    this.processing--;
-    this.process();
-  }
-}
-
-// ==================== PROCESS SINGLE SCHOOL (PARALLEL-SAFE) ====================
-
-async function processSchoolReports(settings, today, scopedClassIds = null) {
-  console.log(`[DailyReports] 🏫 Processing school ${settings.school_id}${scopedClassIds ? ` (scoped to ${scopedClassIds.length} classes)` : ''}...`);
-  
-  const queue = new MessageQueue(1);
-  let processed = 0, sent = 0, failed = 0;
-
-  try {
-    // Vérifie session Baileys connectée
-    if (!isSessionReady(settings.school_id)) {
-      console.error(`[DailyReports] ❌ No connected WhatsApp session for school ${settings.school_id}`);
-      return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
-    }
-
-    // Get all students in this school (optionally restricted to scoped classes)
-    let studentsQuery = supabaseAdmin
-      .from('profiles')
-      .select('id, first_name, last_name, class_id')
-      .eq('role', 'student')
-      .eq('school_id', settings.school_id);
-    if (scopedClassIds && scopedClassIds.length > 0) {
-      studentsQuery = studentsQuery.in('class_id', scopedClassIds);
-    } else if (scopedClassIds && scopedClassIds.length === 0) {
-      return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
-    }
-    const { data: allStudents } = await studentsQuery;
-    // Élèves archivés : plus de rapport quotidien à leurs familles.
-    const archivedIds = await archivedStudentIdSet(settings.school_id);
-    const students = archivedIds
-      ? (allStudents || []).filter(s => !archivedIds.has(s.id))
-      : (allStudents || []);
-
-    console.log(`[DailyReports] 👥 Found ${students?.length || 0} students`);
-    if (!students?.length) return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
-
-    // Get parent links — par LOTS : une école de 400+ élèves dépasse la limite
-    // d'URL d'un seul .in() (échec silencieux → aucun rapport envoyé).
-    const studentIds = students.map(s => s.id);
-    const parentLinks = await selectInChunksSafe(studentIds, (part) => supabaseAdmin
-      .from('parent_students')
-      .select('parent_id, student_id')
-      .in('student_id', part));
-
-    console.log(`[DailyReports] 👨‍👩‍👧 Found ${parentLinks?.length || 0} parent-student links`);
-    if (!parentLinks?.length) return { processed: 0, sent: 0, failed: 0, schoolId: settings.school_id };
-
-    const parentIds = [...new Set(parentLinks.map(l => l.parent_id))];
-
-    // ─── Exclure les parents qui ont défini des préférences personnelles ─────
-    // Ceux-ci sont gérés par le scheduler parent dédié (parentReportScheduler.js).
-    const explicitPrefs = await selectInChunksSafe(parentIds, (part) => supabaseAdmin
-      .from('parent_report_preferences')
-      .select('parent_id')
-      .in('parent_id', part));
-    const parentsWithExplicitPrefs = new Set((explicitPrefs || []).map(p => p.parent_id));
-    if (parentsWithExplicitPrefs.size > 0) {
-      console.log(`[DailyReports] ⏭️  ${parentsWithExplicitPrefs.size} parent(s) avec préférences personnelles → ignorés ici (gérés par parentReportScheduler)`);
-    }
-
-    // Get parent WhatsApp contacts (par lots, même raison)
-    const contacts = await selectInChunksSafe(parentIds, (part) => supabaseAdmin
-      .from('parent_contacts')
-      .select('parent_id, phone_e164, is_primary')
-      .in('parent_id', part)
-      .eq('channel', 'whatsapp')
-      .order('is_primary', { ascending: false }));
-
-    console.log(`[DailyReports] 📱 Found ${contacts?.length || 0} WhatsApp contacts`);
-
-    // Build maps
-    const parentPhoneMap = {};
-    (contacts || []).forEach(c => {
-      if (!parentPhoneMap[c.parent_id]) parentPhoneMap[c.parent_id] = c.phone_e164;
-    });
-
-    const studentParentMap = {};
-    parentLinks.forEach(l => {
-      if (!studentParentMap[l.student_id]) studentParentMap[l.student_id] = [];
-      studentParentMap[l.student_id].push(l.parent_id);
-    });
-
-    // Track statistics
-    let skippedNoParents = 0, skippedAlreadySent = 0, skippedNoSessions = 0;
-
-    // Create all tasks upfront
-    const tasks = [];
-    
-    for (const student of students) {
-      const parents = studentParentMap[student.id] || [];
-      if (parents.length === 0) {
-        skippedNoParents++;
-        continue;
-      }
-
-      // Check if already sent
-      const { data: existing } = await supabaseAdmin
-        .from('daily_reports')
-        .select('id')
-        .eq('student_id', student.id)
-        .eq('report_date', today)
-        .limit(1);
-
-      if (existing?.length > 0) {
-        skippedAlreadySent++;
-        continue;
-      }
-
-      // Collect data
-      const studentData = await collectStudentDailyData(student.id, today, settings.school_id);
-      if (!studentData || studentData.sessions.length === 0) {
-        skippedNoSessions++;
-        continue;
-      }
-
-      processed++;
-
-      // Generate report
-      const report = await generateReport(studentData, settings.language, settings);
-      if (!report) {
-        failed++;
-        continue;
-      }
-
-      // Build message
-      let finalMessage = '';
-      if (report.fr) finalMessage += report.fr;
-      if (report.fr && report.ar) finalMessage += '\n\n━━━━━━━━━━━━━━━\n\n';
-      if (report.ar) finalMessage += report.ar;
-
-      // Create tasks for each parent (queued)
-      for (const parentId of parents) {
-        // Skip parents who have explicit preferences (handled by parentReportScheduler)
-        if (parentsWithExplicitPrefs.has(parentId)) continue;
-        const phone = parentPhoneMap[parentId];
-        if (!phone) continue;
-
-        tasks.push(
-          queue.add(async () => {
-            // Routage : push gratuit si le parent a l'app, sinon WhatsApp
-            // (sauf opt-out). Réduit le coût des envois proactifs.
-            const routed = await routeNotification({
-              parentId,
-              schoolId: settings.school_id,
-              phone,
-              push: {
-                title: `📊 Suivi de ${student.first_name}`,
-                body: 'Nouveau rapport quotidien disponible. Touchez pour l\'ouvrir.',
-                url: '/parent',
-                tag: `report-${student.id}-${today}`,
-              },
-              whatsappText: finalMessage,
-            });
-
-            const waFailed = routed.channel.startsWith('whatsapp') && !routed.success;
-            if (waFailed) {
-              console.warn(`[DailyReports] ❌ Échec WhatsApp à ${phone} (school=${settings.school_id})`);
-            }
-
-            // Log to database
-            await supabaseAdmin.from('daily_reports').insert({
-              school_id: settings.school_id,
-              student_id: student.id,
-              parent_id: parentId,
-              phone_e164: phone,
-              report_date: today,
-              report_content_fr: report.fr || null,
-              report_content_ar: report.ar || null,
-              tracking_data: studentData,
-              channel: routed.channel,
-              status: waFailed ? 'failed' : 'sent',
-              error_message: waFailed ? 'WhatsApp échoué' : null,
-              sent_at: routed.success ? new Date().toISOString() : null
-            });
-
-            return routed;
-          })
-        );
-      }
-    }
-
-    // Execute all tasks in parallel (with queue rate limiting)
-    console.log(`[DailyReports] 🚀 Sending ${tasks.length} messages via queue...`);
-    const results = await Promise.all(tasks);
-    
-    // Count results
-    sent = results.filter(r => r.success).length;
-    failed = results.filter(r => !r.success).length;
-
-    console.log(`[DailyReports] ✅ School ${settings.school_id} done: ${sent} sent, ${failed} failed`);
-    console.log(`[DailyReports] 📊 Skipped: ${skippedNoParents} (no parents), ${skippedAlreadySent} (already sent), ${skippedNoSessions} (no sessions)`);
-    
-    return { processed, sent, failed, schoolId: settings.school_id };
-    
-  } catch (error) {
-    console.error(`[DailyReports] ❌ Error processing school ${settings.school_id}:`, error.message);
-    return { processed, sent, failed, schoolId: settings.school_id, error: error.message };
-  }
-}
-
-// ==================== MAIN: PROCESS DAILY REPORTS (PARALLEL BY SCHOOL) ====================
-
-export async function processDailyReports(schoolId = null, scopedClassIds = null) {
-  const today = new Date().toISOString().split('T')[0];
-  console.log(`[DailyReports] 📅 Processing reports for ${today}...`);
-
-  // Get enabled settings
-  let settingsQuery = supabaseAdmin
-    .from('daily_report_settings')
-    .select('*')
-    .eq('enabled', true);
-
-  if (schoolId) settingsQuery = settingsQuery.eq('school_id', schoolId);
-
-  const { data: allSettings, error: settingsError } = await settingsQuery;
-  if (settingsError || !allSettings?.length) {
-    console.log('[DailyReports] No enabled settings found.');
-    return { processed: 0, sent: 0, failed: 0 };
-  }
-
-  console.log(`[DailyReports] 🏫 Processing ${allSettings.length} school(s) in PARALLEL...`);
-
-  // Process all schools in parallel
-  const schoolResults = await Promise.all(
-    allSettings.map(settings => processSchoolReports(settings, today, scopedClassIds))
-  );
-
-  // Aggregate results
-  const totalProcessed = schoolResults.reduce((sum, r) => sum + r.processed, 0);
-  const totalSent = schoolResults.reduce((sum, r) => sum + r.sent, 0);
-  const totalFailed = schoolResults.reduce((sum, r) => sum + r.failed, 0);
-
-  console.log(`[DailyReports] 🎉 ALL SCHOOLS DONE: Processed=${totalProcessed}, Sent=${totalSent}, Failed=${totalFailed}`);
-  
-  return { processed: totalProcessed, sent: totalSent, failed: totalFailed, schools: schoolResults };
 }
 
 // ==================== COMPREHENSIVE PERIOD REPORT ====================
@@ -1349,13 +1043,7 @@ FORMAT LINGUISTIQUE : ${langInstr}`;
 }
 
 export async function generateComprehensivePreview(studentId, schoolId, startDate, endDate) {
-  const { data: settings } = await supabaseAdmin
-    .from('daily_report_settings')
-    .select('*')
-    .eq('school_id', schoolId)
-    .maybeSingle();
-
-  const language = settings?.language || 'both';
+  const language = 'both';
 
   const periodData = await collectStudentPeriodData(studentId, startDate, endDate, schoolId);
   if (!periodData || periodData.sessions.length === 0) {
@@ -1385,13 +1073,7 @@ export async function generateComprehensivePreview(studentId, schoolId, startDat
 export async function generatePreview(studentId, schoolId) {
   const today = new Date().toISOString().split('T')[0];
 
-  const { data: settings } = await supabaseAdmin
-    .from('daily_report_settings')
-    .select('*')
-    .eq('school_id', schoolId)
-    .single();
-
-  const effectiveSettings = settings || {
+  const effectiveSettings = {
     language: 'both',
     include_recommendations: true,
     include_chapter_info: true,
@@ -1409,56 +1091,4 @@ export async function generatePreview(studentId, schoolId) {
   if (!report) return { error: 'Erreur lors de la génération du rapport IA.' };
 
   return { success: true, report, studentData };
-}
-
-// ==================== CRON SCHEDULER ====================
-
-let cronJob = null;
-
-export function startDailyReportScheduler() {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    console.log('[DailyReports] DEEPSEEK_API_KEY not set, scheduler disabled.');
-    return;
-  }
-
-  // Run every minute, check if any school's send_time matches current time
-  cronJob = cron.schedule('* * * * *', async () => {
-    try {
-      const now = new Date();
-      const currentTime = now.toLocaleTimeString('en-GB', { 
-        hour: '2-digit', minute: '2-digit', hour12: false, 
-        timeZone: 'Africa/Casablanca' 
-      }); // Format: HH:MM
-
-      console.log(`[DailyReports] Checking at ${currentTime}`);
-
-      // Get all enabled settings and check manually (to handle both HH:MM and HH:MM:SS formats)
-      const { data: allSettings } = await supabaseAdmin
-        .from('daily_report_settings')
-        .select('school_id, send_time')
-        .eq('enabled', true);
-
-      if (allSettings?.length > 0) {
-        for (const setting of allSettings) {
-          // Normalize send_time to HH:MM format (remove seconds if present)
-          const sendTime = setting.send_time?.substring(0, 5); // Get first 5 chars (HH:MM)
-          
-          if (sendTime === currentTime) {
-            console.log(`[DailyReports] ✅ Triggered for school ${setting.school_id} at ${currentTime}`);
-            processDailyReports(setting.school_id).catch(err => {
-              console.error('[DailyReports] Scheduler error:', err.message);
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[DailyReports] Cron error:', err.message);
-    }
-  });
-
-  console.log('[DailyReports] Scheduler started (checks every minute).');
-}
-
-export function stopDailyReportScheduler() {
-  if (cronJob) { cronJob.stop(); cronJob = null; }
 }

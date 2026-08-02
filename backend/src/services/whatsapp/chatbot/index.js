@@ -635,96 +635,6 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Rapports IA (préférences de notifications WhatsApp) — assistant pas à pas
-// ─────────────────────────────────────────────────────────────────────────
-
-// L'app stocke weekly_day au format 0=Dimanche … 6=Samedi.
-const WEEKDAY_LABELS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-// Saisie utilisateur 1..7 (Lun→Dim) → valeur app (0=Dim … 6=Sam)
-const REPORT_DAY_INPUT = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 0 };
-
-const YES_RE = /^(1|oui|yes|ok|نعم|اه|أجل|واخا|wakha)[\s!.]*$/i;
-const NO_RE = /^(2|non|no|لا|ماشي)[\s!.]*$/i;
-
-/** Charge les préférences du parent + l'heure par défaut de l'école. */
-async function getReportPreferences(parentInfo) {
-  const { data } = await supabaseAdmin
-    .from('parent_report_preferences')
-    .select('*')
-    .eq('parent_id', parentInfo.parent_id)
-    .maybeSingle();
-
-  let defaultTime = '18:00';
-  try {
-    const { data: ss } = await supabaseAdmin
-      .from('daily_report_settings')
-      .select('send_time')
-      .eq('school_id', parentInfo.school_id)
-      .maybeSingle();
-    if (ss?.send_time) defaultTime = String(ss.send_time).substring(0, 5);
-  } catch (_) { /* fallback 18:00 */ }
-
-  return { prefs: data || null, defaultTime };
-}
-
-/** Upsert des préférences. @returns {Promise<boolean>} */
-async function saveReportPreferences(parentId, draft) {
-  const payload = {
-    parent_id: parentId,
-    enabled: draft.enabled,
-    frequency: draft.frequency,
-    weekly_day: draft.frequency === 'weekly' ? draft.weekly_day : null,
-    preferred_time: String(draft.preferred_time).substring(0, 5),
-  };
-  const { error } = await supabaseAdmin
-    .from('parent_report_preferences')
-    .upsert(payload, { onConflict: 'parent_id' });
-  if (error) {
-    console.error('[chatbot] saveReportPreferences error:', error.message);
-    return false;
-  }
-  return true;
-}
-
-/** Résumé lisible de la config actuelle. */
-function reportStatusText(prefs, defaultTime) {
-  if (!prefs) return `_Configuration actuelle : paramètres de l'école (quotidien à ${defaultTime})._`;
-  if (!prefs.enabled) return `_Configuration actuelle : 🔕 rapports désactivés._`;
-  const t = String(prefs.preferred_time || defaultTime).substring(0, 5);
-  if (prefs.frequency === 'weekly') {
-    return `_Configuration actuelle : 📅 hebdomadaire le ${WEEKDAY_LABELS[prefs.weekly_day] || '—'} à ${t}._`;
-  }
-  return `_Configuration actuelle : 📅 quotidien à ${t}._`;
-}
-
-/**
- * Parse une heure saisie librement : "18:00", "18h30", "18h", "18", "8:5".
- * Valide le créneau anti-ban WhatsApp (07:00 → 22:59).
- * @returns {string|null} "HH:MM" normalisé ou null si invalide.
- */
-function parseReportTime(raw) {
-  const t = normalizeDigits(String(raw || '').trim()).replace(/\s/g, '');
-  const m = t.match(/^(\d{1,2})(?:[:hH](\d{1,2})?)?$/);
-  if (!m) return null;
-  const hh = parseInt(m[1], 10);
-  const mm = m[2] != null ? parseInt(m[2], 10) : 0;
-  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh > 23 || mm > 59) return null;
-  const minutes = hh * 60 + mm;
-  if (minutes < 7 * 60 || minutes > 22 * 60 + 59) return null;
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-}
-
-const REPORT_FREQUENCY_PROMPT =
-  `*📊 Fréquence des rapports*\n\nÀ quelle fréquence souhaitez-vous les recevoir ?\n\n*1.* 📆 Quotidien _(chaque jour avec séance)_\n*2.* 🗓️ Hebdomadaire _(un résumé par semaine)_\n\n_Répondez 1 ou 2._`;
-
-const REPORT_WEEKDAY_PROMPT =
-  `*🗓️ Jour de réception*\n\nQuel jour voulez-vous recevoir le résumé hebdomadaire ?\n\n*1.* Lundi\n*2.* Mardi\n*3.* Mercredi\n*4.* Jeudi\n*5.* Vendredi\n*6.* Samedi\n*7.* Dimanche\n\n_Répondez avec le numéro du jour (1 à 7)._`;
-
-function reportTimePrompt(defaultTime) {
-  return `*⏰ Heure de réception*\n\nÀ quelle heure souhaitez-vous recevoir le rapport ?\n\n_Exemple : 18:00 — créneau autorisé entre *07:00* et *22:59* (heure du Maroc)._\n_Tapez *ok* pour garder ${defaultTime}._`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────
 // Helpers : conversion chiffres arabes-indic + matching enfant
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -904,28 +814,6 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       // importée directement comme photo de profil de l'enfant sélectionné.
       State.setState(schoolId, phone, { awaitingPhoto: true });
       return sendText(schoolId, phone, photoInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
-    }
-    if (target === 'reports') {
-      // Démarre l'assistant de configuration des rapports IA WhatsApp.
-      const { prefs, defaultTime } = await getReportPreferences(parentInfo);
-      State.setState(schoolId, phone, {
-        state: 'REPORT',
-        reportStep: 'enabled',
-        reportDefaultTime: defaultTime,
-        reportDraft: {
-          enabled: prefs?.enabled ?? true,
-          frequency: prefs?.frequency || 'daily',
-          weekly_day: prefs?.weekly_day ?? 1,
-          preferred_time: String(prefs?.preferred_time || defaultTime).substring(0, 5),
-        },
-      });
-      const status = reportStatusText(prefs, defaultTime);
-      return sendText(
-        schoolId,
-        phone,
-        `*📊 Rapports IA WhatsApp*\n━━━━━━━━━━━━━━━━━━━\n${status}\n\nSouhaitez-vous *recevoir* les rapports de suivi de votre enfant ?\n\n*1.* ✅ Oui\n*2.* 🔕 Non (désactiver)\n\n_Répondez 1 ou 2. Tapez *menu* pour annuler._`,
-        { urgent: true }
-      );
     }
     if (target === 'credentials') {
       // Propose : parent uniquement ou parent + enfant
@@ -1397,7 +1285,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // est en train de faire une saisie guidée côté parent.
   {
     const st = State.getState(schoolId, phone);
-    const inParentFlow = st && ['PHOTO', 'REPORT', 'CHILD', 'APPT', 'POLL', 'SUPPLIES'].includes(st.state);
+    const inParentFlow = st && ['PHOTO', 'CHILD', 'APPT', 'POLL', 'SUPPLIES'].includes(st.state);
     const worthChecking = st?.state === 'APPT_TEACHER' || looksLikeSlotReply(text);
     if (!inParentFlow && worthChecking) {
       try {
@@ -1443,7 +1331,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // numéro de menu. Sinon le flux chatbot normal continue.
   {
     const st = State.getState(schoolId, phone);
-    const inDataFlow = st && ['PHOTO', 'REPORT', 'CHILD'].includes(st.state);
+    const inDataFlow = st && ['PHOTO', 'CHILD'].includes(st.state);
     const trimmed = String(text || '').trim();
     const isMenuNumber = /^\d{1,2}$/.test(normalizeDigits(trimmed));
     if (!inDataFlow && !isMenuNumber && trimmed.length >= 3) {
@@ -1513,107 +1401,6 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       `🤔 Réponse non reconnue. Répondez *oui* pour confirmer, *non* pour annuler, ou le *prénom / numéro* de l'enfant.`,
       { urgent: true }
     );
-    await markProcessed(incomingMsg?.id);
-    return;
-  }
-
-  // Mode REPORT : assistant de configuration des rapports IA WhatsApp.
-  // (Ne dépend que de parentInfo — placé avant le bloc "pas d'enfant".)
-  if (state?.state === 'REPORT') {
-    const draft = { ...(state.reportDraft || {}) };
-    const defaultTime = state.reportDefaultTime || '18:00';
-    const input = normalizeDigits(String(text || '').trim());
-
-    // Étape 1 : activer / désactiver
-    if (state.reportStep === 'enabled') {
-      if (YES_RE.test(input)) {
-        draft.enabled = true;
-        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'frequency' });
-        await sendText(parentInfo.school_id, phone, REPORT_FREQUENCY_PROMPT, { urgent: true });
-      } else if (NO_RE.test(input)) {
-        draft.enabled = false;
-        const ok = await saveReportPreferences(parentInfo.parent_id, draft);
-        State.setMenu(schoolId, phone, 'account');
-        await sendText(
-          parentInfo.school_id,
-          phone,
-          ok ? `🔕 *Rapports IA désactivés.*\n\nVous ne recevrez plus de rapports automatiques. Réactivez quand vous voulez via *Configuration du compte*.\n\n_Tapez *menu* pour revenir._`
-             : `⚠️ Erreur lors de l'enregistrement. Réessayez plus tard.`,
-          { urgent: true }
-        );
-      } else {
-        await sendText(parentInfo.school_id, phone, `🤔 Répondez *1* (Oui) ou *2* (Non).`, { urgent: true });
-      }
-      await markProcessed(incomingMsg?.id);
-      return;
-    }
-
-    // Étape 2 : fréquence
-    if (state.reportStep === 'frequency') {
-      if (/^(1|quotidien|jour|daily|يومي)/i.test(input)) {
-        draft.frequency = 'daily';
-        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'time' });
-        await sendText(parentInfo.school_id, phone, reportTimePrompt(draft.preferred_time || defaultTime), { urgent: true });
-      } else if (/^(2|hebdo|semaine|weekly|أسبوعي)/i.test(input)) {
-        draft.frequency = 'weekly';
-        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'weekday' });
-        await sendText(parentInfo.school_id, phone, REPORT_WEEKDAY_PROMPT, { urgent: true });
-      } else {
-        await sendText(parentInfo.school_id, phone, `🤔 Répondez *1* (Quotidien) ou *2* (Hebdomadaire).`, { urgent: true });
-      }
-      await markProcessed(incomingMsg?.id);
-      return;
-    }
-
-    // Étape 3 : jour (hebdomadaire uniquement)
-    if (state.reportStep === 'weekday') {
-      const n = parseInt(input, 10);
-      if (Number.isFinite(n) && REPORT_DAY_INPUT[n] !== undefined) {
-        draft.weekly_day = REPORT_DAY_INPUT[n];
-        State.setState(schoolId, phone, { reportDraft: draft, reportStep: 'time' });
-        await sendText(parentInfo.school_id, phone, reportTimePrompt(draft.preferred_time || defaultTime), { urgent: true });
-      } else {
-        await sendText(parentInfo.school_id, phone, `🤔 Indiquez le numéro du jour, de *1* (Lundi) à *7* (Dimanche).`, { urgent: true });
-      }
-      await markProcessed(incomingMsg?.id);
-      return;
-    }
-
-    // Étape 4 : heure → validation + enregistrement final
-    if (state.reportStep === 'time') {
-      let time = draft.preferred_time || defaultTime;
-      if (!/^(ok|oui|garder|défaut|defaut)$/i.test(input)) {
-        const parsed = parseReportTime(input);
-        if (!parsed) {
-          await sendText(parentInfo.school_id, phone, `🤔 Heure invalide. Donnez une heure entre *07:00* et *22:59* (ex : 18:00), ou tapez *ok* pour garder ${time}.`, { urgent: true });
-          await markProcessed(incomingMsg?.id);
-          return;
-        }
-        time = parsed;
-      }
-      draft.preferred_time = time;
-      const ok = await saveReportPreferences(parentInfo.parent_id, draft);
-      State.setMenu(schoolId, phone, 'account');
-      if (!ok) {
-        await sendText(parentInfo.school_id, phone, `⚠️ Erreur lors de l'enregistrement. Réessayez plus tard.`, { urgent: true });
-      } else {
-        const recap = draft.frequency === 'weekly'
-          ? `📅 Hebdomadaire, le *${WEEKDAY_LABELS[draft.weekly_day]}* à *${time}*`
-          : `📅 Quotidien à *${time}*`;
-        await sendText(
-          parentInfo.school_id,
-          phone,
-          `✅ *Rapports IA configurés !*\n\n${recap}\n\n_Vous recevrez les rapports de suivi sur ce numéro WhatsApp._\n_Tapez *menu* pour d'autres options._`,
-          { urgent: true }
-        );
-      }
-      await markProcessed(incomingMsg?.id);
-      return;
-    }
-
-    // Étape inconnue → réinitialise proprement
-    State.setMenu(schoolId, phone, 'account');
-    await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`, { urgent: true });
     await markProcessed(incomingMsg?.id);
     return;
   }

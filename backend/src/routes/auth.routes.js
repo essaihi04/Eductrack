@@ -174,7 +174,10 @@ router.get('/me', async (req, res) => {
       profile = newProfile;
     } else if (profileError) {
       console.error(`[Auth /me] Erreur récupération profil pour ${user.email}:`, profileError);
-      return res.status(404).json({ error: 'Profil introuvable' });
+      // Panne passagère côté base (ex: PGRST003 « pool de connexions saturé »,
+      // timeout 504) : renvoyer 503 pour que le front réessaie automatiquement,
+      // au lieu d'un 404 qui le fait abandonner alors que le profil existe.
+      return res.status(503).json({ error: 'Base de données momentanément indisponible', details: profileError.code || profileError.message });
     }
 
     // Enrichir le profil avec les infos de l'école (nom + logo)
