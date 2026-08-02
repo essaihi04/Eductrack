@@ -12,6 +12,7 @@ import { Avatar } from '../../components/directory/ui';
 import StudentNotesModal from '../../components/StudentNotesModal';
 import SeatingPlanModal from '../../components/students/SeatingPlanModal';
 import SmartAssignModal from '../../components/students/SmartAssignModal';
+import StudentDossierModal from '../../components/students/StudentDossierModal';
 import { supabase } from '../../lib/supabase';
 import { useYear } from '../../contexts/YearContext';
 import { sameYear, toDashYear } from '../../lib/schoolYear';
@@ -413,6 +414,7 @@ export default function ClassAssignmentPage() {
   const [notesStudent, setNotesStudent] = useState(null); // fiche 360° (StudentNotesModal)
   const [seatingCls, setSeatingCls] = useState(null);     // plan de classe (SeatingPlanModal)
   const [smartAssign, setSmartAssign] = useState(false);  // répartition intelligente (SmartAssignModal)
+  const [dossierStudent, setDossierStudent] = useState(null); // dossier 360° crèche→bac
   const [refreshKey, setRefreshKey] = useState(0);        // force le rechargement des élèves
   const bannerTimer = useRef(null);
   const hoverTimer = useRef(null);
@@ -813,7 +815,13 @@ export default function ClassAssignmentPage() {
           classLabel={levelClasses.find((c) => c.id === notesStudent.class_id)?.name || ''}
           activeYear={toDashYear(year)}
           onClose={() => setNotesStudent(null)}
+          onOpenDossier={(s) => { setNotesStudent(null); setDossierStudent(s); }}
         />
+      )}
+
+      {/* Dossier élève 360° (crèche → bac) */}
+      {dossierStudent && (
+        <StudentDossierModal student={dossierStudent} onClose={() => setDossierStudent(null)} />
       )}
 
       {/* Plan de classe (tables, rangées, placement des élèves) */}

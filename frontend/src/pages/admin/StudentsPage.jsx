@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { printHtmlDocument } from '../../lib/download';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw, GraduationCap, Archive, ArchiveRestore } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw, GraduationCap, Archive, ArchiveRestore, FolderOpen } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -16,6 +16,7 @@ import { enrollmentsApi } from '../../lib/enrollmentsApi';
 import { nextLevel, allLevelOptions, baseLevel } from '../../lib/levelProgression';
 import { toSlashYear, toDashYear, sameYear } from '../../lib/schoolYear';
 import StudentNotesModal from '../../components/StudentNotesModal';
+import StudentDossierModal from '../../components/students/StudentDossierModal';
 import ReinscriptionFlow from '../../components/students/ReinscriptionFlow';
 import MoroccanCityInput from '../../components/ui/MoroccanCityInput';
 
@@ -54,6 +55,7 @@ const StudentsPage = () => {
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [activeStudent, setActiveStudent] = useState(null); // fiche ouverte dans le drawer
   const [notesStudent, setNotesStudent] = useState(null); // fenêtre « Notes d'élève »
+  const [dossierStudent, setDossierStudent] = useState(null); // dossier 360° crèche→bac
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState({
     className: '',
@@ -1949,6 +1951,7 @@ L'administration de ${schoolName}`;
                                 onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
                                 actions={isCandidate ? [] : [
                                   { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => setNotesStudent(student) },
+                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => setDossierStudent(student) },
                                 ]}
                               />
                             </div>
@@ -1977,6 +1980,7 @@ L'administration de ${schoolName}`;
                               onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
                               actions={isCandidate ? [] : [
                                 { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => setNotesStudent(student) },
+                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => setDossierStudent(student) },
                               ]}
                             />
                           </div>
@@ -2147,7 +2151,13 @@ L'administration de ${schoolName}`;
           classLabel={classes.find((c) => c.id === notesStudent.class_id)?.name || ''}
           activeYear={toDashYear(year)}
           onClose={() => setNotesStudent(null)}
+          onOpenDossier={(s) => { setNotesStudent(null); setDossierStudent(s); }}
         />
+      )}
+
+      {/* Dossier élève 360° (crèche → bac) */}
+      {dossierStudent && (
+        <StudentDossierModal student={dossierStudent} onClose={() => setDossierStudent(null)} />
       )}
 
       {/* Modale d'ajout de parents */}

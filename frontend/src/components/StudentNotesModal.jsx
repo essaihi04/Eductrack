@@ -3,7 +3,7 @@ import {
   X, Printer, MessageCircle, Bell, RefreshCw, Award, Users,
   TrendingUp, TrendingDown, CalendarOff, Clock3, GraduationCap, Minus,
   Activity, Hand, Eye, Smile, Smartphone, Moon, BookOpen, NotebookPen,
-  ClipboardCheck, MessageSquareText,
+  ClipboardCheck, MessageSquareText, FolderOpen,
 } from 'lucide-react';
 import { Avatar } from './directory/ui';
 import { openBlob } from '../lib/download';
@@ -84,7 +84,7 @@ const rateClass = (v) => (v == null ? 'text-gray-400' : v >= 80 ? 'text-green-70
 // Couleur d'un compteur d'incidents (0 = bien)
 const incidentClass = (n) => ((n || 0) > 0 ? 'text-red-600' : 'text-green-700');
 
-export default function StudentNotesModal({ student, classLabel, activeYear, onClose }) {
+export default function StudentNotesModal({ student, classLabel, activeYear, onClose, onOpenDossier }) {
   const [year, setYear] = useState(activeYear);
   const [semester, setSemester] = useState(() => {
     // Sept→janvier = S1, février→août = S2
@@ -235,9 +235,21 @@ export default function StudentNotesModal({ student, classLabel, activeYear, onC
                 </p>
               </div>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-lg transition-colors shrink-0" aria-label="Fermer">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {onOpenDossier && (
+                <button
+                  onClick={() => onOpenDossier(student)}
+                  title="Dossier complet : parcours depuis la crèche, courbes, diagnostics, observations, rapport IA"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                    bg-white/15 hover:bg-white/25 transition-colors"
+                >
+                  <FolderOpen className="w-4 h-4" /> Dossier complet
+                </button>
+              )}
+              <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-lg transition-colors" aria-label="Fermer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Filtres année / semestre */}
