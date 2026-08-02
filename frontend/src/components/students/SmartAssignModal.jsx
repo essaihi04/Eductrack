@@ -58,6 +58,41 @@ const STRATEGIES = {
   },
 };
 
+// Contraintes cochables, appliquées PAR-DESSUS la stratégie choisie : la
+// stratégie fixe la logique pédagogique, les contraintes affinent le résultat
+// (mixité, effectifs, dispersion des profils, stabilité).
+const CONSTRAINTS = {
+  mixite: {
+    label: 'Mixité équilibrée',
+    hint: 'Autant de filles que de garçons dans chaque classe (même proportion qu\'au niveau).',
+  },
+  effectifs: {
+    label: 'Effectifs égaux',
+    hint: 'Le même nombre d\'élèves dans chaque classe, à une unité près.',
+  },
+  difficulte: {
+    label: 'Répartir les élèves en difficulté',
+    hint: 'Les moyennes < 10 sont dispersées au lieu d\'être concentrées dans une classe.',
+  },
+  excellence: {
+    label: 'Répartir les très bons élèves',
+    hint: 'Les moyennes ≥ 14 sont réparties pour tirer chaque classe vers le haut.',
+  },
+  absences: {
+    label: 'Répartir les absentéistes',
+    hint: 'Les élèves souvent absents ne s\'accumulent pas dans la même classe.',
+  },
+  stabilite: {
+    label: 'Limiter les déplacements',
+    hint: 'Garde un maximum d\'élèves dans leur classe actuelle (moins de perturbation).',
+  },
+};
+
+// Contraintes incohérentes avec une stratégie (grisées, non appliquées).
+const INCOMPATIBLE = { homogene: ['difficulte', 'excellence'] };
+
+const HIGH_ABSENCES = 5; // seuil « souvent absent » sur 90 jours
+
 // Note de référence d'un élève : moyenne de contrôles, sinon performance
 // de séance convertie /20, sinon 10 (neutre, milieu de classement).
 const scoreOf = (s) => s.avg ?? (s.performance != null ? s.performance / 5 : null);
@@ -140,6 +175,158 @@ function buildProposal(strategy, subject, analytics) {
   return null;
 }
 
+// Coût d'une répartition au regard des contraintes actives : plus il est bas,
+// mieux les contraintes sont respectées. Chaque contrainte mesure l'écart à la
+// répartition idéale (une part égale par classe).
+function constraintCost(assign, analytics, active) {
+  const classIds = analytics.classes.map((c) => c.id);
+  const K = classIds.length;
+  const stats = {};
+  classIds.forEach((c) => { stats[c] = { n: 0, girls: 0, weak: 0, strong: 0, abs: 0, stayed: 0 }; });
+  const totals = { n: 0, girls: 0, weak: 0, strong: 0, abs: 0, stayed: 0 };
+
+  analytics.students.forEach((s) => {
+    const st = stats[assign[s.id]];
+    if (!st) return;
+    st.n++; totals.n++;
+    if (String(s.gender || '').toUpperCase() === 'F') { st.girls++; totals.girls++; }
+    const sc = scoreOf(s);
+    if (sc != null && sc < 10) { st.weak++; totals.weak++; }
+    if (sc != null && sc >= 14) { st.strong++; totals.strong++; }
+    if ((s.absences || 0) >= HIGH_ABSENCES) { st.abs++; totals.abs++; }
+    if (assign[s.id] === s.class_id) { st.stayed++; totals.stayed++; }
+  });
+
+  let cost = 0;
+  const spread = (key, weight) => {
+    const target = totals[key] / K;
+    classIds.forEach((c) => { cost += weight * Math.abs(stats[c][key] - target); });
+  };
+  if (active.has('effectifs')) spread('n', 1);
+  if (active.has('mixite')) spread('girls', 1.5);
+  if (active.has('difficulte')) spread('weak', 1.2);
+  if (active.has('excellence')) spread('strong', 1);
+  if (active.has('absences')) spread('abs', 1);
+  if (active.has('stabilite')) cost += 0.4 * (totals.n - totals.stayed);
+  return cost;
+}
+
+// Affine une proposition par échanges deux à deux : on n'échange que des
+// élèves de niveau proche (bande de rang) pour ne pas casser l'intention
+// pédagogique de la stratégie, et seulement si le coût baisse.
+// Le coût est mis à jour de façon incrémentale (seules les 2 classes touchées
+// changent) : indispensable pour rester instantané au-delà de 150 élèves.
+function refineProposal(base, analytics, active, strategy, subject) {
+  if (!base || active.size === 0) return base;
+  const students = analytics.students;
+  const classIds = analytics.classes.map((c) => c.id);
+  const K = classIds.length;
+  if (students.length < 2 || K < 2) return base;
+
+  const WEIGHTS = {
+    n: active.has('effectifs') ? 1 : 0,
+    girls: active.has('mixite') ? 1.5 : 0,
+    weak: active.has('difficulte') ? 1.2 : 0,
+    strong: active.has('excellence') ? 1 : 0,
+    abs: active.has('absences') ? 1 : 0,
+  };
+  const KEYS = Object.keys(WEIGHTS).filter((k) => WEIGHTS[k] > 0);
+  const stayWeight = active.has('stabilite') ? 0.4 : 0;
+  if (KEYS.length === 0 && stayWeight === 0) return base;
+
+  // Caractéristiques comptables de chaque élève (1 ou 0 par critère).
+  const feat = {};
+  students.forEach((s) => {
+    const sc = scoreOf(s);
+    feat[s.id] = {
+      n: 1,
+      girls: String(s.gender || '').toUpperCase() === 'F' ? 1 : 0,
+      weak: sc != null && sc < 10 ? 1 : 0,
+      strong: sc != null && sc >= 14 ? 1 : 0,
+      abs: (s.absences || 0) >= HIGH_ABSENCES ? 1 : 0,
+    };
+  });
+
+  const val = strategy === 'matiere'
+    ? (s) => s.bySubject?.[subject] ?? scoreOf(s) ?? 10
+    : (s) => scoreOf(s) ?? 10;
+  const ranked = [...students].sort((a, b) => val(b) - val(a));
+  const rank = {};
+  ranked.forEach((s, i) => { rank[s.id] = i; });
+
+  // Bande d'échange = écart de rang maximal toléré entre deux élèves échangés.
+  // En classes mélangées l'ordre importe peu (bande libre) ; en classes
+  // homogènes / pôles elle vaut la moitié d'un groupe : assez large pour
+  // corriger la mixité de part et d'autre d'une frontière, assez serrée pour
+  // qu'un excellent élève ne se retrouve jamais dans la classe des plus faibles.
+  const groupSize = Math.ceil(students.length / K);
+  const band = (strategy === 'homogene' || strategy === 'poles')
+    ? Math.max(6, Math.ceil(groupSize / 2))
+    : students.length;
+
+  const assign = { ...base };
+  const home = {};
+  students.forEach((s) => { home[s.id] = s.class_id; });
+
+  const stats = {};
+  const totals = {};
+  classIds.forEach((c) => { stats[c] = {}; KEYS.forEach((k) => { stats[c][k] = 0; }); });
+  KEYS.forEach((k) => { totals[k] = 0; });
+  let stayed = 0;
+  students.forEach((s) => {
+    const st = stats[assign[s.id]];
+    if (!st) return;
+    KEYS.forEach((k) => { st[k] += feat[s.id][k]; totals[k] += feat[s.id][k]; });
+    if (assign[s.id] === home[s.id]) stayed++;
+  });
+  const target = {};
+  KEYS.forEach((k) => { target[k] = totals[k] / K; });
+
+  const classCost = (c) => {
+    let v = 0;
+    for (const k of KEYS) v += WEIGHTS[k] * Math.abs(stats[c][k] - target[k]);
+    return v;
+  };
+
+  const ids = students.filter((s) => stats[assign[s.id]]).map((s) => s.id);
+  for (let pass = 0; pass < 6; pass++) {
+    let improved = false;
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = ids[i], b = ids[j];
+        const ca = assign[a], cb = assign[b];
+        if (ca === cb) continue;
+        if (Math.abs(rank[a] - rank[b]) > band) continue;
+
+        const before = classCost(ca) + classCost(cb) + stayWeight * (ids.length - stayed);
+        for (const k of KEYS) {
+          stats[ca][k] += feat[b][k] - feat[a][k];
+          stats[cb][k] += feat[a][k] - feat[b][k];
+        }
+        let nextStayed = stayed;
+        if (ca === home[a]) nextStayed--;
+        if (cb === home[a]) nextStayed++;
+        if (cb === home[b]) nextStayed--;
+        if (ca === home[b]) nextStayed++;
+        const after = classCost(ca) + classCost(cb) + stayWeight * (ids.length - nextStayed);
+
+        if (after < before - 1e-9) {
+          assign[a] = cb; assign[b] = ca;
+          stayed = nextStayed;
+          improved = true;
+        } else {
+          for (const k of KEYS) {
+            stats[ca][k] -= feat[b][k] - feat[a][k];
+            stats[cb][k] -= feat[a][k] - feat[b][k];
+          }
+        }
+      }
+    }
+    if (!improved) break;
+  }
+  return assign;
+}
+
 const fmt1 = (n) => (n == null ? '—' : Number(n).toFixed(1));
 
 export default function SmartAssignModal({ level, year, onClose, onApplied }) {
@@ -148,6 +335,8 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
   const [error, setError] = useState('');
   const [strategy, setStrategy] = useState(null);
   const [subject, setSubject] = useState('');
+  // Contraintes cochées : mixité + effectifs égaux par défaut (attendu courant).
+  const [constraints, setConstraints] = useState(() => new Set(['mixite', 'effectifs']));
   const [ai, setAi] = useState(null);         // { analyse, recommandations, vigilance }
   const [aiState, setAiState] = useState('idle'); // idle | loading | done | error
   const [aiError, setAiError] = useState('');
@@ -178,22 +367,57 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
     return () => { alive = false; };
   }, [level, year]);
 
-  const proposal = useMemo(
-    () => (analytics && strategy ? buildProposal(strategy, subject, analytics) : null),
-    [analytics, strategy, subject],
-  );
+  // Contraintes réellement appliquées (les incompatibles avec la stratégie sont ignorées).
+  const activeConstraints = useMemo(() => {
+    const blocked = INCOMPATIBLE[strategy] || [];
+    return new Set([...constraints].filter((c) => !blocked.includes(c)));
+  }, [constraints, strategy]);
+
+  const proposal = useMemo(() => {
+    if (!analytics || !strategy) return null;
+    const base = buildProposal(strategy, subject, analytics);
+    return refineProposal(base, analytics, activeConstraints, strategy, subject);
+  }, [analytics, strategy, subject, activeConstraints]);
+
+  // État réel de chaque contrainte sur la proposition finale : une contrainte
+  // peut rester imparfaite quand la stratégie l'en empêche (ex. mixité en
+  // classes homogènes) — on l'affiche au lieu de laisser croire qu'elle est
+  // appliquée.
+  const constraintStatus = useMemo(() => {
+    if (!analytics || !proposal) return null;
+    const out = {};
+    const tolerance = analytics.classes.length * 0.75;
+    activeConstraints.forEach((key) => {
+      const cost = constraintCost(proposal, analytics, new Set([key]));
+      out[key] = cost <= tolerance ? 'ok' : 'partial';
+    });
+    return out;
+  }, [analytics, proposal, activeConstraints]);
+
+  const toggleConstraint = useCallback((key) => {
+    setConstraints((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+    setConfirming(false);
+  }, []);
 
   // Aperçu avant/après par classe : effectif, moyenne, filles, mouvements.
   const preview = useMemo(() => {
     if (!analytics) return null;
-    const mk = () => { const m = {}; analytics.classes.forEach((c) => { m[c.id] = { count: 0, sum: 0, n: 0, girls: 0 }; }); return m; };
+    const mk = () => { const m = {}; analytics.classes.forEach((c) => { m[c.id] = { count: 0, sum: 0, n: 0, girls: 0, weak: 0 }; }); return m; };
+    const tally = (bucket, s) => {
+      bucket.count++;
+      if (s.avg != null) { bucket.sum += s.avg; bucket.n++; }
+      if (String(s.gender || '').toUpperCase() === 'F') bucket.girls++;
+      const sc = scoreOf(s);
+      if (sc != null && sc < 10) bucket.weak++;
+    };
     const before = mk();
     analytics.students.forEach((s) => {
       const b = before[s.class_id];
-      if (!b) return;
-      b.count++;
-      if (s.avg != null) { b.sum += s.avg; b.n++; }
-      if (String(s.gender || '').toUpperCase() === 'F') b.girls++;
+      if (b) tally(b, s);
     });
     if (!proposal) return { before, after: null, moves: 0, byClass: null };
     const after = mk();
@@ -204,9 +428,7 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
       const target = proposal[s.id] ?? s.class_id;
       const a = after[target];
       if (!a) return;
-      a.count++;
-      if (s.avg != null) { a.sum += s.avg; a.n++; }
-      if (String(s.gender || '').toUpperCase() === 'F') a.girls++;
+      tally(a, s);
       const moved = target !== s.class_id;
       if (moved) moves++;
       byClass[target].push({ ...s, moved });
@@ -242,6 +464,11 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
         (s) => s.toLowerCase().includes(String(rec.matiere).toLowerCase())
       );
       if (found) setSubject(found);
+    }
+    // L'IA propose aussi les contraintes à cocher pour cette recommandation.
+    if (Array.isArray(rec.options)) {
+      const valid = rec.options.filter((o) => CONSTRAINTS[o]);
+      if (valid.length) setConstraints(new Set(valid));
     }
   }, [analytics]);
 
@@ -360,6 +587,15 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
                             {r.matiere ? ` · ${r.matiere}` : ''}
                           </p>
                           <p className="text-[11px] text-indigo-900/80 mt-1">{r.raison}</p>
+                          {Array.isArray(r.options) && r.options.filter((o) => CONSTRAINTS[o]).length > 0 && (
+                            <p className="mt-1.5 flex flex-wrap gap-1">
+                              {r.options.filter((o) => CONSTRAINTS[o]).map((o) => (
+                                <span key={o} className="inline-flex items-center gap-0.5 text-[10px] bg-indigo-100 text-indigo-700 rounded-full px-1.5 py-0.5">
+                                  <Check className="w-2.5 h-2.5" /> {CONSTRAINTS[o].label}
+                                </span>
+                              ))}
+                            </p>
+                          )}
                         </button>
                       ))}
                     </div>
@@ -420,6 +656,64 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
               </div>
             </div>
 
+            {/* Contraintes à cocher */}
+            <div>
+              <p className="text-sm font-semibold mb-1">Contraintes à respecter</p>
+              <p className="text-[11px] text-muted-foreground mb-2">
+                Appliquées par-dessus la stratégie : les élèves sont échangés entre classes, à niveau comparable,
+                tant que cela améliore le respect de vos critères.
+              </p>
+              <div className="grid sm:grid-cols-2 gap-1.5">
+                {Object.entries(CONSTRAINTS).map(([key, c]) => {
+                  const blocked = (INCOMPATIBLE[strategy] || []).includes(key);
+                  const checked = constraints.has(key);
+                  return (
+                    <label
+                      key={key}
+                      title={blocked ? 'Incompatible avec les classes homogènes' : c.hint}
+                      className={[
+                        'flex items-start gap-2 rounded-xl border p-2.5 transition-colors',
+                        blocked
+                          ? 'border-border bg-muted/40 opacity-50 cursor-not-allowed'
+                          : checked
+                            ? 'border-indigo-400 bg-indigo-50 cursor-pointer'
+                            : 'border-border bg-card hover:border-indigo-300 cursor-pointer',
+                      ].join(' ')}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked && !blocked}
+                        disabled={blocked}
+                        onChange={() => toggleConstraint(key)}
+                        className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
+                      />
+                      <span className="min-w-0">
+                        <span className="text-xs font-medium flex items-center gap-1.5 flex-wrap">
+                          {c.label}
+                          {!blocked && checked && constraintStatus?.[key] === 'ok' && (
+                            <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
+                              respectée
+                            </span>
+                          )}
+                          {!blocked && checked && constraintStatus?.[key] === 'partial' && (
+                            <span
+                              className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5"
+                              title="La stratégie choisie limite cette contrainte : l'équilibre parfait exigerait de déplacer des élèves hors de leur groupe de niveau."
+                            >
+                              partiellement — limitée par la stratégie
+                            </span>
+                          )}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground block">
+                          {blocked ? 'Incompatible avec les classes homogènes' : c.hint}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Aperçu avant / après */}
             {proposal && preview?.after && (
               <div>
@@ -434,6 +728,7 @@ export default function SmartAssignModal({ level, year, onClose, onApplied }) {
                         <th className="px-2 py-2 font-medium">Effectif</th>
                         <th className="px-2 py-2 font-medium">Moyenne</th>
                         <th className="px-2 py-2 font-medium">Filles</th>
+                        <th className="px-2 py-2 font-medium" title="Élèves sous la moyenne">&lt; 10</th>
                         <th className="px-2 py-2 font-medium"></th>
                       </tr>
                     </thead>
@@ -540,6 +835,10 @@ function FragmentRow({ cls, b, a, avgB, avgA, open, onToggle, students }) {
         </td>
         <td className="px-2 py-2 text-center">
           {b.girls} <ArrowRight className="w-3 h-3 inline text-muted-foreground" /> <span className="font-semibold">{a.girls}</span>
+          <span className="text-muted-foreground"> / {a.count - a.girls}</span>
+        </td>
+        <td className="px-2 py-2 text-center">
+          {b.weak} <ArrowRight className="w-3 h-3 inline text-muted-foreground" /> <span className="font-semibold">{a.weak}</span>
         </td>
         <td className="px-2 py-2 text-center text-muted-foreground">
           {students.filter((s) => s.moved).length} arrivée{students.filter((s) => s.moved).length > 1 ? 's' : ''}
@@ -547,7 +846,7 @@ function FragmentRow({ cls, b, a, avgB, avgA, open, onToggle, students }) {
       </tr>
       {open && (
         <tr className="border-b border-border/60 bg-muted/20">
-          <td colSpan={5} className="px-3 py-2">
+          <td colSpan={6} className="px-3 py-2">
             <div className="flex flex-wrap gap-1.5">
               {students.map((s) => (
                 <span

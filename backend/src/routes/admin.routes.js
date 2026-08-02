@@ -4042,11 +4042,20 @@ Analyse le niveau et recommande des stratégies de répartition en classes parmi
 - "homogene" : classes par niveau (les meilleurs ensemble, les faibles ensemble pour un soutien ciblé)
 - "matiere" : équilibrer une matière précise (mélanger forts/faibles de cette matière pour combler les écarts) — précise alors "matiere" avec le nom EXACT d'une matière des données
 - "poles" : regrouper par matière dominante (pôles d'excellence)
+
+Chaque stratégie peut être affinée par des CONTRAINTES à cocher, codes EXACTS :
+- "mixite" : même proportion de filles et de garçons dans chaque classe
+- "effectifs" : effectifs égaux entre les classes
+- "difficulte" : répartir équitablement les élèves en difficulté (moyenne < 10) au lieu de les concentrer
+- "excellence" : répartir équitablement les très bons élèves (moyenne >= 14)
+- "absences" : répartir les élèves souvent absents entre les classes
+- "stabilite" : limiter les déplacements, garder un maximum d'élèves dans leur classe actuelle
+
 Réponds UNIQUEMENT en JSON :
 {"analyse":"synthèse du niveau en 4 à 7 phrases (écarts, matières en difficulté, absentéisme, hétérogénéité entre classes actuelles)",
-"recommandations":[{"strategie":"code","titre":"titre court","raison":"pourquoi cette stratégie pour CE niveau, chiffres à l'appui","matiere":"nom exact si strategie=matiere, sinon omets"}],
+"recommandations":[{"strategie":"code","titre":"titre court","raison":"pourquoi cette stratégie ET ces contraintes pour CE niveau, chiffres à l'appui","matiere":"nom exact si strategie=matiere, sinon omets","options":["codes de contraintes à cocher"]}],
 "vigilance":[{"eleve":"Prénom Nom","conseil":"point d'attention concret"}]}
-2 à 3 recommandations classées de la plus pertinente à la moins pertinente. 3 à 6 élèves en vigilance (grande difficulté, forte chute, absentéisme).`,
+2 à 3 recommandations classées de la plus pertinente à la moins pertinente, chacune avec 1 à 4 contraintes cohérentes avec la stratégie (attention : "difficulte" et "excellence" contredisent la stratégie "homogene", ne les propose pas avec elle). 3 à 6 élèves en vigilance (grande difficulté, forte chute, absentéisme).`,
         },
         {
           role: 'user',
