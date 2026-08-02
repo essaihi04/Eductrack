@@ -3649,6 +3649,123 @@ router.get('/classes/:classId/students-stats', async (req, res) => {
   }
 });
 
+// Aperçu « survol » des élèves d'une classe (page Répartition) : dernière note
+// et courbe de progression (contrôles de la classe), moyenne générale de
+// l'année précédente (bulletins) et note de l'examen régional pour les 2BAC
+// (passé en 1BAC). Une seule requête par classe → le survol est instantané.
+// Réponse : { [studentId]: { last_note, curve, prev_year_avg, prev_year_label, regional_avg } }
+router.get('/classes/:classId/students-hover', async (req, res) => {
+  try {
+    const { classId } = req.params;
+    let clsQ = supabaseAdmin.from('classes').select('id, level, academic_year').eq('id', classId);
+    clsQ = applySchoolFilter(clsQ, req);
+    const { data: cls, error: clsErr } = await clsQ.maybeSingle();
+    if (clsErr || !cls) return res.status(404).json({ error: 'Classe introuvable' });
+
+    let stuQ = supabaseAdmin.from('profiles').select('id').eq('role', 'student').eq('class_id', classId);
+    stuQ = applySchoolFilter(stuQ, req);
+    const { data: students, error: stuErr } = await stuQ;
+    if (stuErr) throw stuErr;
+    const ids = (students || []).map((s) => s.id);
+
+    const out = {};
+    ids.forEach((id) => {
+      out[id] = { last_note: null, curve: [], prev_year_avg: null, prev_year_label: null, regional_avg: null };
+    });
+    if (ids.length === 0) return res.json(out);
+
+    // 1) Notes des contrôles de la classe → courbe (12 derniers) + dernière note.
+    //    Chaque bloc est tolérant : table absente = aperçu partiel, pas d'erreur.
+    try {
+      const { data: notes, error } = await supabaseAdmin
+        .from('control_notes')
+        .select('student_id, note, control:controls_plan!inner(class_id, date, name, subject:subjects(name))')
+        .eq('control.class_id', classId);
+      if (!error) {
+        const byStudent = {};
+        for (const n of (notes || [])) {
+          if (n.note == null || !out[n.student_id]) continue;
+          const arr = byStudent[n.student_id] || (byStudent[n.student_id] = []);
+          arr.push({
+            date: n.control?.date || null,
+            note: Number(n.note),
+            subject: n.control?.subject?.name || n.control?.name || null,
+          });
+        }
+        for (const [sid, arr] of Object.entries(byStudent)) {
+          arr.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+          const curve = arr.slice(-12);
+          out[sid].curve = curve;
+          out[sid].last_note = curve[curve.length - 1] || null;
+        }
+      }
+    } catch { /* contrôles indisponibles → aperçu partiel */ }
+
+    // 2) Moyenne générale de l'année précédente (bulletins) + moyenne régionale
+    //    officielle en repli (bulletins.regional_average, calculée par le module examens).
+    const y1 = parseInt((String(cls.academic_year || '').match(/\d{4}/) || [])[0], 10);
+    const prevLabel = Number.isNaN(y1) ? null : `${y1 - 1}/${y1}`;
+    if (prevLabel) {
+      try {
+        const rows = await selectByIdsInChunks(
+          (part) => supabaseAdmin
+            .from('bulletins')
+            .select('student_id, general_average, regional_average')
+            .in('student_id', part)
+            .in('academic_year', yearVariants(prevLabel)),
+          ids
+        );
+        const agg = {};
+        for (const b of rows || []) {
+          const a = agg[b.student_id] || (agg[b.student_id] = { sum: 0, n: 0, regional: null });
+          if (b.general_average != null) { a.sum += Number(b.general_average); a.n++; }
+          if (b.regional_average != null) a.regional = Number(b.regional_average);
+        }
+        for (const [sid, a] of Object.entries(agg)) {
+          if (!out[sid]) continue;
+          if (a.n) {
+            out[sid].prev_year_avg = Math.round((a.sum / a.n) * 100) / 100;
+            out[sid].prev_year_label = prevLabel;
+          }
+          if (a.regional != null) out[sid].regional_avg = a.regional;
+        }
+      } catch { /* bulletins indisponibles */ }
+    }
+
+    // 3) 2BAC : notes réelles de l'examen régional (moyenne simple, prioritaire
+    //    sur le repli bulletin — la pondération officielle vit dans le module examens).
+    if (String(cls.level || '').toUpperCase() === '2BAC') {
+      try {
+        const rows = await selectByIdsInChunks(
+          (part) => supabaseAdmin
+            .from('exam_notes')
+            .select('student_id, note, academic_year')
+            .in('student_id', part)
+            .eq('exam_type', 'regional')
+            .eq('scenario', 'real')
+            .not('note', 'is', null),
+          ids
+        );
+        const agg = {};
+        for (const r of rows || []) {
+          // Si plusieurs années (redoublement), on ne garde que la plus récente.
+          const a = agg[r.student_id] || (agg[r.student_id] = { year: r.academic_year, sum: 0, n: 0 });
+          if (String(r.academic_year) > String(a.year)) { a.year = r.academic_year; a.sum = 0; a.n = 0; }
+          if (String(r.academic_year) === String(a.year)) { a.sum += Number(r.note); a.n++; }
+        }
+        for (const [sid, a] of Object.entries(agg)) {
+          if (out[sid] && a.n) out[sid].regional_avg = Math.round((a.sum / a.n) * 100) / 100;
+        }
+      } catch { /* exam_notes indisponibles */ }
+    }
+
+    res.json(out);
+  } catch (error) {
+    console.error('Erreur GET class students-hover:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // Créer une classe
 router.post('/classes', async (req, res) => {
   try {

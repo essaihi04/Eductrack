@@ -6,11 +6,13 @@ import {
 import { AnimatePresence, motion as Motion } from 'framer-motion';
 import {
   Users, Search, Undo2, CheckCircle2, AlertTriangle, Shuffle, X, Loader2,
+  Plus, CalendarOff, Award, TrendingUp, TrendingDown, Minus,
 } from 'lucide-react';
 import { Avatar } from '../../components/directory/ui';
+import StudentNotesModal from '../../components/StudentNotesModal';
 import { supabase } from '../../lib/supabase';
 import { useYear } from '../../contexts/YearContext';
-import { sameYear } from '../../lib/schoolYear';
+import { sameYear, toDashYear } from '../../lib/schoolYear';
 
 // ── Répartition des classes ──────────────────────────────────────────────────
 // Onglet « Répartition » : déplacer des élèves d'une classe à l'autre au sein
@@ -40,9 +42,37 @@ const FILIERE_LABELS = {
   sciences_humaines: 'Sciences Humaines',
 };
 
+// Filières proposables à la création rapide d'une classe, selon le niveau.
+const LEVEL_FILIERES = {
+  TC: ['tc_sciences', 'tc_lettres', 'tc_tech'],
+  '1BAC': ['sciences_exp', 'sciences_math', 'sciences_eco', 'ste', 'stm', 'lettres'],
+  '2BAC': ['svt', 'pc', 'sciences_math_a', 'sciences_math_b', 'eco', 'sciences_gestion', 'ste', 'stm', 'lettres', 'sciences_humaines'],
+};
+
 const levelRank = (lvl) => {
   const i = LEVEL_ORDER.indexOf(String(lvl || '').toUpperCase());
   return i === -1 ? 999 : i;
+};
+const schoolTypeForLevel = (lvl) => {
+  const L = String(lvl || '').toUpperCase();
+  if (['TPS', 'PS', 'MS', 'GS'].includes(L)) return 'maternelle';
+  if (L.endsWith('AP')) return 'primaire';
+  if (L.endsWith('AC')) return 'college';
+  return 'lycee';
+};
+// Couleur d'une note /20 (mêmes seuils que la fiche élève).
+const noteColor = (n) => {
+  if (n == null) return 'text-gray-400';
+  if (n >= 14) return 'text-emerald-600';
+  if (n >= 12) return 'text-blue-600';
+  if (n >= 10) return 'text-amber-600';
+  return 'text-red-600';
+};
+const fmtNote = (n) => (n == null ? '—' : `${Number(n).toFixed(2).replace(/\.?0+$/, '')}/20`);
+const fmtDate = (d) => {
+  if (!d) return '';
+  const dt = new Date(d);
+  return Number.isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 };
 const resolveAsset = (u) => (!u ? null : (u.startsWith('http') ? u : `${API_URL}${u.startsWith('/') ? '' : '/'}${u}`));
 const fullName = (s) => `${s.first_name || ''} ${s.last_name || ''}`.trim();
@@ -64,8 +94,103 @@ async function api(path, options = {}) {
   return data;
 }
 
+// ── Mini-courbe de progression (notes de contrôles dans l'ordre chronologique) ──
+function Sparkline({ points }) {
+  if (!points || points.length < 2) {
+    return <p className="text-[11px] text-muted-foreground italic">Pas encore assez de notes pour tracer la courbe.</p>;
+  }
+  const w = 224, h = 44, pad = 5;
+  const xs = points.map((_, i) => pad + (i * (w - 2 * pad)) / (points.length - 1));
+  const ys = points.map((p) => h - pad - (Math.max(0, Math.min(20, p.note)) / 20) * (h - 2 * pad));
+  const poly = xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+  const lastUp = points[points.length - 1].note >= points[0].note;
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-11" aria-hidden="true">
+      {/* Ligne repère 10/20 (seuil de la moyenne) */}
+      <line x1={pad} x2={w - pad} y1={h - pad - (10 / 20) * (h - 2 * pad)} y2={h - pad - (10 / 20) * (h - 2 * pad)}
+        stroke="currentColor" className="text-gray-300" strokeDasharray="3 3" strokeWidth="1" />
+      <polyline points={poly} fill="none" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"
+        stroke="currentColor" className={lastUp ? 'text-emerald-500' : 'text-red-400'} />
+      {xs.map((x, i) => (
+        <circle key={i} cx={x} cy={ys[i]} r={i === xs.length - 1 ? 3 : 1.8}
+          fill="currentColor" className={lastUp ? 'text-emerald-600' : 'text-red-500'} />
+      ))}
+    </svg>
+  );
+}
+
+// ── Carte de survol : aperçu rapide de la performance d'un élève ─────────────
+function HoverCard({ hovered, stats, extra }) {
+  const { student, style } = hovered;
+  const perf = stats?.performance;
+  const perfColor = perf == null ? 'text-gray-400'
+    : perf >= 60 ? 'text-emerald-600' : perf >= 40 ? 'text-amber-600' : 'text-red-600';
+  const TrendIcon = stats?.trendDir === 'up' ? TrendingUp : stats?.trendDir === 'down' ? TrendingDown : Minus;
+  const trendColor = stats?.trendDir === 'up' ? 'text-emerald-600' : stats?.trendDir === 'down' ? 'text-red-500' : 'text-gray-400';
+  return (
+    <div style={style} className="fixed z-40 w-64 pointer-events-none">
+      <div className="rounded-xl border border-border bg-card shadow-xl p-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <Avatar name={fullName(student)} src={resolveAsset(student.avatar_url)} gender={student.gender} size="md" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold truncate">{fullName(student)}</p>
+            <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+              <span className={perfColor}>
+                {perf == null ? 'Performance —' : `Performance ${perf}%`}
+              </span>
+              <TrendIcon className={`w-3.5 h-3.5 ${trendColor}`} />
+              {stats?.absences != null && (
+                <span className="inline-flex items-center gap-0.5">
+                  <CalendarOff className="w-3 h-3" /> {stats.absences} abs.
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+          <div className="rounded-lg bg-muted/60 px-2 py-1.5">
+            <p className="text-muted-foreground">Dernière note</p>
+            <p className={`font-semibold text-sm ${noteColor(extra?.last_note?.note)}`}>
+              {fmtNote(extra?.last_note?.note)}
+            </p>
+            {extra?.last_note && (
+              <p className="text-muted-foreground truncate">
+                {extra.last_note.subject || ''} {extra.last_note.date ? `· ${fmtDate(extra.last_note.date)}` : ''}
+              </p>
+            )}
+          </div>
+          <div className="rounded-lg bg-muted/60 px-2 py-1.5">
+            <p className="text-muted-foreground truncate">
+              Moyenne {extra?.prev_year_label || 'année préc.'}
+            </p>
+            <p className={`font-semibold text-sm ${noteColor(extra?.prev_year_avg)}`}>
+              {fmtNote(extra?.prev_year_avg)}
+            </p>
+          </div>
+        </div>
+        {extra?.regional_avg != null && (
+          <div className="flex items-center gap-1.5 text-[11px] rounded-lg bg-indigo-50 border border-indigo-100 px-2 py-1.5">
+            <Award className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <span className="text-indigo-700">Examen régional</span>
+            <span className={`ml-auto font-semibold text-sm ${noteColor(extra.regional_avg)}`}>
+              {fmtNote(extra.regional_avg)}
+            </span>
+          </div>
+        )}
+        <div>
+          <p className="text-[11px] text-muted-foreground mb-0.5">Progression (contrôles de l'année)</p>
+          <Sparkline points={extra?.curve} />
+        </div>
+        <p className="text-[10px] text-muted-foreground text-center border-t border-border pt-1.5">
+          Double-clic : fiche complète (notes, appréciations, assiduité)
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Élève déplaçable (photo si présente, sinon avatar genré/initiales) ───────
-function StudentChip({ student, selected, dimmed, highlighted, onToggle }) {
+function StudentChip({ student, selected, dimmed, highlighted, onToggle, onOpen, onHoverStart, onHoverEnd }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: student.id,
     data: { student },
@@ -76,7 +201,9 @@ function StudentChip({ student, selected, dimmed, highlighted, onToggle }) {
       {...listeners}
       {...attributes}
       onClick={() => onToggle(student.id)}
-      title={fullName(student)}
+      onDoubleClick={() => onOpen(student)}
+      onMouseEnter={(e) => onHoverStart(student, e.currentTarget)}
+      onMouseLeave={onHoverEnd}
       className={[
         'flex items-center gap-1.5 px-1.5 py-1 rounded-lg border text-xs select-none',
         'cursor-grab active:cursor-grabbing touch-manipulation transition-colors',
@@ -165,6 +292,99 @@ function ClassRoom({ cls, students, maxCount, loading, children }) {
   );
 }
 
+// ── Carte « + Nouvelle classe » : création rapide dans le niveau affiché ─────
+// La classe créée apparaît aussitôt dans la grille → on y glisse les élèves.
+function CreateClassCard({ level, year, onCreated, onError }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [filiere, setFiliere] = useState('');
+  const [busy, setBusy] = useState(false);
+  const filieres = LEVEL_FILIERES[String(level || '').toUpperCase()] || [];
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    try {
+      const created = await api('/api/admin/classes', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: trimmed,
+          level,
+          academicYear: year,
+          school_type: schoolTypeForLevel(level),
+          filiere: filiere || null,
+        }),
+      });
+      onCreated(created);
+      setName(''); setFiliere(''); setOpen(false);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="rounded-2xl border-2 border-dashed border-border hover:border-indigo-400 hover:bg-indigo-50/40
+          text-muted-foreground hover:text-indigo-600 transition-colors flex flex-col items-center justify-center
+          gap-1.5 min-h-[140px] p-3"
+      >
+        <Plus className="w-6 h-6" />
+        <span className="text-sm font-medium">Nouvelle classe {level}</span>
+        <span className="text-[11px]">Créez la classe puis glissez-y les élèves</span>
+      </button>
+    );
+  }
+  return (
+    <form onSubmit={submit} className="rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/40 p-3 flex flex-col gap-2">
+      <p className="text-sm font-semibold text-indigo-700 flex items-center gap-1.5">
+        <Plus className="w-4 h-4" /> Nouvelle classe — {level} · {year}
+      </p>
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={`Nom de la classe (ex. ${level} — D)`}
+        className="px-2.5 py-1.5 text-sm rounded-lg border border-border bg-card focus:outline-none focus:ring-2 focus:ring-indigo-300"
+      />
+      {filieres.length > 0 && (
+        <select
+          value={filiere}
+          onChange={(e) => setFiliere(e.target.value)}
+          className="px-2.5 py-1.5 text-sm rounded-lg border border-border bg-card focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        >
+          <option value="">Filière (optionnel)</option>
+          {filieres.map((f) => (
+            <option key={f} value={f}>{FILIERE_LABELS[f] || f}</option>
+          ))}
+        </select>
+      )}
+      <div className="flex gap-2 mt-auto">
+        <button
+          type="submit"
+          disabled={!name.trim() || busy}
+          className="flex-1 px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white
+            hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+        >
+          {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Créer
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); setName(''); setFiliere(''); }}
+          className="px-3 py-1.5 text-sm rounded-lg border border-border bg-card hover:bg-muted"
+        >
+          Annuler
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function ClassAssignmentPage() {
   const { year } = useYear();
   const [classes, setClasses] = useState([]);
@@ -176,7 +396,12 @@ export default function ClassAssignmentPage() {
   const [search, setSearch] = useState('');
   const [dragged, setDragged] = useState(null); // { student, count }
   const [banner, setBanner] = useState(null);   // { type, text, undo? }
+  const [statsByClass, setStatsByClass] = useState({});   // suivi séance : perf %, absences, tendance
+  const [hoverByClass, setHoverByClass] = useState({});   // notes : dernière note, courbe, année préc., régional
+  const [hovered, setHovered] = useState(null);           // { student, style } — carte de survol
+  const [notesStudent, setNotesStudent] = useState(null); // fiche 360° (StudentNotesModal)
   const bannerTimer = useRef(null);
+  const hoverTimer = useRef(null);
   // Après un glisser-déposer, le navigateur émet quand même un « click » sur la
   // puce d'origine → sans ce garde-fou, chaque drag (dé)sélectionnait l'élève.
   const suppressClick = useRef(false);
@@ -214,7 +439,7 @@ export default function ClassAssignmentPage() {
     if (ms) bannerTimer.current = setTimeout(() => setBanner(null), ms);
   }, []);
 
-  useEffect(() => () => clearTimeout(bannerTimer.current), []);
+  useEffect(() => () => { clearTimeout(bannerTimer.current); clearTimeout(hoverTimer.current); }, []);
 
   // Charger les classes (avec effectifs) au montage / changement d'année.
   useEffect(() => {
@@ -245,6 +470,7 @@ export default function ClassAssignmentPage() {
     (async () => {
       setLoadingStudents(true);
       setSelected(new Set());
+      setHovered(null);
       try {
         const ids = visibleClasses.filter((c) => c.level === level).map((c) => c.id);
         const lists = await Promise.all(ids.map((id) => api(`/api/admin/classes/${id}/students`)));
@@ -252,6 +478,17 @@ export default function ClassAssignmentPage() {
         const map = {};
         ids.forEach((id, i) => { map[id] = lists[i] || []; });
         setStudentsByClass(map);
+        // En arrière-plan (non bloquant) : stats de suivi + aperçu notes pour
+        // alimenter la carte de survol. Chaque classe arrive dès qu'elle est prête.
+        ids.forEach(async (id) => {
+          const [stats, hover] = await Promise.all([
+            api(`/api/admin/classes/${id}/students-stats`).catch(() => ({})),
+            api(`/api/admin/classes/${id}/students-hover`).catch(() => ({})),
+          ]);
+          if (!alive) return;
+          setStatsByClass((prev) => ({ ...prev, [id]: stats }));
+          setHoverByClass((prev) => ({ ...prev, [id]: hover }));
+        });
       } catch (e) {
         if (alive) showBanner({ type: 'error', text: `Chargement des élèves impossible : ${e.message}` }, 0);
       } finally {
@@ -332,13 +569,39 @@ export default function ClassAssignmentPage() {
     });
   }, []);
 
+  // Carte de survol : apparaît après 350ms, positionnée sous la puce (ou
+  // au-dessus s'il n'y a pas la place), masquée pendant un glisser.
+  const hoverStart = useCallback((student, el) => {
+    clearTimeout(hoverTimer.current);
+    const rect = el.getBoundingClientRect();
+    hoverTimer.current = setTimeout(() => {
+      const width = 256;
+      const left = Math.max(8, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 8));
+      const style = rect.bottom + 340 < window.innerHeight
+        ? { left, top: rect.bottom + 8 }
+        : { left, bottom: window.innerHeight - rect.top + 8 };
+      setHovered({ student, style });
+    }, 350);
+  }, []);
+
+  const hoverEnd = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    setHovered(null);
+  }, []);
+
+  const openStudent = useCallback((student) => {
+    hoverEnd();
+    setNotesStudent({ ...student, class_id: classOf(student.id) });
+  }, [classOf, hoverEnd]);
+
   const handleDragStart = useCallback((event) => {
     const student = event.active.data.current?.student;
     if (!student) return;
     suppressClick.current = true;
+    hoverEnd();
     const count = selected.has(student.id) ? selected.size : 1;
     setDragged({ student, count });
-  }, [selected]);
+  }, [selected, hoverEnd]);
 
   const releaseClickGuard = useCallback(() => {
     // Le « click » résiduel arrive juste après dragend → on relâche au tick suivant.
@@ -372,7 +635,7 @@ export default function ClassAssignmentPage() {
           <div>
             <h1 className="text-lg font-semibold leading-tight">Répartition des classes</h1>
             <p className="text-xs text-muted-foreground">
-              Glissez un élève d'une classe à l'autre — cliquez pour en sélectionner plusieurs.
+              Glissez pour déplacer · clic = sélection multiple · survol = aperçu · double-clic = fiche complète.
             </p>
           </div>
         </div>
@@ -466,11 +729,23 @@ export default function ClassAssignmentPage() {
                       highlighted={!!q && matches(s)}
                       dimmed={!!q && !matches(s)}
                       onToggle={guardedToggle}
+                      onOpen={openStudent}
+                      onHoverStart={hoverStart}
+                      onHoverEnd={hoverEnd}
                     />
                   </Motion.div>
                 ))}
               </ClassRoom>
             ))}
+            <CreateClassCard
+              level={level}
+              year={year}
+              onCreated={(created) => {
+                setClasses((prev) => [...prev, created]);
+                showBanner({ type: 'success', text: `Classe ${created.name} créée — glissez-y des élèves` });
+              }}
+              onError={(msg) => showBanner({ type: 'error', text: `Création impossible : ${msg}` }, 0)}
+            />
           </div>
 
           {/* Carte fantôme qui suit le curseur */}
@@ -493,6 +768,26 @@ export default function ClassAssignmentPage() {
             )}
           </DragOverlay>
         </DndContext>
+      )}
+
+      {/* Carte de survol : aperçu performance / notes de l'élève */}
+      {hovered && !dragged && (
+        <HoverCard
+          hovered={hovered}
+          stats={statsByClass[classOf(hovered.student.id)]?.[hovered.student.id]}
+          extra={hoverByClass[classOf(hovered.student.id)]?.[hovered.student.id]}
+        />
+      )}
+
+      {/* Fiche 360° (double-clic) : notes par matière, appréciations des profs,
+          rang, assiduité, impression PDF, envoi aux parents */}
+      {notesStudent && (
+        <StudentNotesModal
+          student={notesStudent}
+          classLabel={levelClasses.find((c) => c.id === notesStudent.class_id)?.name || ''}
+          activeYear={toDashYear(year)}
+          onClose={() => setNotesStudent(null)}
+        />
       )}
 
       {/* Bandeau résultat / annulation */}
