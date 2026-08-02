@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion as Motion } from 'framer-motion';
 import {
   X, Loader2, Sparkles, Scale, Layers, BookOpen, Target, AlertTriangle,
-  ArrowRight, Bot, ChevronDown, Wand2,
+  ArrowRight, Bot, ChevronDown, Wand2, Check,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
