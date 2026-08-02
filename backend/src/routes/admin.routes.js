@@ -3878,6 +3878,200 @@ router.put('/classes/:classId/seating', async (req, res) => {
   }
 });
 
+// ==================== RÉPARTITION INTELLIGENTE (par niveau) ====================
+// Analytique consolidée de TOUS les élèves d'un niveau (moyennes générales et
+// par matière via les contrôles, performance/absences via le suivi de séance)
+// + analyse IA (DeepSeek) qui recommande des stratégies de classement.
+
+// Client DeepSeek paresseux (même clé que le chatbot / relevés bancaires).
+let _deepseekClient = null;
+const getDeepseek = async () => {
+  if (!process.env.DEEPSEEK_API_KEY) return null;
+  if (!_deepseekClient) {
+    const { default: OpenAI } = await import('openai');
+    _deepseekClient = new OpenAI({ baseURL: 'https://api.deepseek.com', apiKey: process.env.DEEPSEEK_API_KEY });
+  }
+  return _deepseekClient;
+};
+
+// Métriques réelles de tous les élèves des classes d'un niveau (année active).
+const computeLevelAnalytics = async (req, level, academicYear) => {
+  let clsQ = supabaseAdmin.from('classes').select('id, name, academic_year').eq('level', level);
+  clsQ = applySchoolFilter(clsQ, req);
+  const { data: allCls, error: clsErr } = await clsQ;
+  if (clsErr) throw clsErr;
+  let classes = (allCls || []).filter(
+    (c) => !academicYear || !c.academic_year || sameSchoolYear(c.academic_year, academicYear)
+  );
+  const scoped = await getScopedClassIds(req);
+  if (scoped !== null) classes = classes.filter((c) => scoped.includes(c.id));
+  classes.sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr'));
+  const classIds = classes.map((c) => c.id);
+  if (classIds.length === 0) return { classes: [], subjects: [], students: [] };
+
+  let stuQ = supabaseAdmin.from('profiles')
+    .select('id, first_name, last_name, gender, class_id, avatar_url')
+    .eq('role', 'student')
+    .in('class_id', classIds);
+  stuQ = applySchoolFilter(stuQ, req);
+  const { data: students, error: stuErr } = await stuQ;
+  if (stuErr) throw stuErr;
+
+  const metrics = {};
+  (students || []).forEach((s) => {
+    metrics[s.id] = { sum: 0, n: 0, bySubject: {}, absences: 0, evalSum: 0, evalN: 0 };
+  });
+
+  // Notes de contrôles de toutes les classes du niveau (tolérant : table absente = métriques partielles).
+  try {
+    const { data: notes } = await supabaseAdmin
+      .from('control_notes')
+      .select('student_id, note, control:controls_plan!inner(class_id, subject:subjects(name))')
+      .in('control.class_id', classIds);
+    for (const n of (notes || [])) {
+      const m = metrics[n.student_id];
+      if (!m || n.note == null) continue;
+      const v = Number(n.note);
+      m.sum += v; m.n++;
+      const subj = n.control?.subject?.name;
+      if (subj) {
+        const b = m.bySubject[subj] || (m.bySubject[subj] = { sum: 0, n: 0 });
+        b.sum += v; b.n++;
+      }
+    }
+  } catch { /* contrôles indisponibles */ }
+
+  // Suivi de séance des 90 derniers jours : absences + mini-évaluations (paginé).
+  try {
+    const end = new Date();
+    const start = new Date(end.getTime() - 90 * 86400000);
+    const iso = (d) => d.toISOString().split('T')[0];
+    const rows = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error } = await supabaseAdmin
+        .from('session_tracking')
+        .select('student_id, presence, mini_eval, sessions!inner(class_id, date)')
+        .in('sessions.class_id', classIds)
+        .gte('sessions.date', iso(start))
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      if (page && page.length) rows.push(...page);
+      if (!page || page.length < PAGE) break;
+    }
+    for (const r of rows) {
+      const m = metrics[r.student_id];
+      if (!m) continue;
+      if (r.presence === 'absent') m.absences++;
+      const ev = parseFloat(r.mini_eval);
+      if (!Number.isNaN(ev)) { m.evalSum += ev; m.evalN++; }
+    }
+  } catch { /* suivi indisponible */ }
+
+  const subjects = new Set();
+  const out = (students || []).map((s) => {
+    const m = metrics[s.id];
+    const bySubject = {};
+    for (const [k, b] of Object.entries(m.bySubject)) {
+      bySubject[k] = Math.round((b.sum / b.n) * 100) / 100;
+      subjects.add(k);
+    }
+    return {
+      id: s.id,
+      first_name: s.first_name,
+      last_name: s.last_name,
+      gender: s.gender,
+      class_id: s.class_id,
+      avatar_url: s.avatar_url,
+      avg: m.n ? Math.round((m.sum / m.n) * 100) / 100 : null,
+      bySubject,
+      performance: m.evalN ? Math.round((m.evalSum / m.evalN) * 5) : null, // mini_eval /20 → %
+      absences: m.absences,
+    };
+  });
+  return {
+    classes: classes.map((c) => ({ id: c.id, name: c.name })),
+    subjects: [...subjects].sort((a, b) => a.localeCompare(b, 'fr')),
+    students: out,
+  };
+};
+
+// GET /levels/assignment-analytics?level=2AC&academicYear=2026/2027
+router.get('/levels/assignment-analytics', async (req, res) => {
+  try {
+    const { level, academicYear } = req.query;
+    if (!level) return res.status(400).json({ error: 'level requis' });
+    res.json(await computeLevelAnalytics(req, level, academicYear));
+  } catch (error) {
+    console.error('Erreur GET assignment-analytics:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /levels/ai-suggest — { level, academicYear }
+// L'IA reçoit les métriques RÉELLES calculées côté serveur (jamais celles du
+// client) et renvoie une analyse + des stratégies recommandées en JSON.
+router.post('/levels/ai-suggest', async (req, res) => {
+  try {
+    const { level, academicYear } = req.body;
+    if (!level) return res.status(400).json({ error: 'level requis' });
+    const deepseek = await getDeepseek();
+    if (!deepseek) return res.status(400).json({ error: 'Analyse IA indisponible : DEEPSEEK_API_KEY non configurée' });
+
+    const data = await computeLevelAnalytics(req, level, academicYear);
+    if (data.classes.length < 2) return res.status(400).json({ error: 'Il faut au moins 2 classes dans ce niveau' });
+    if (data.students.length === 0) return res.status(400).json({ error: 'Aucun élève dans ce niveau' });
+
+    const lines = data.students.map((s) => {
+      const subj = Object.entries(s.bySubject).map(([k, v]) => `${k}=${v}`).join(',');
+      const cls = data.classes.find((c) => c.id === s.class_id)?.name || '?';
+      return `${s.first_name} ${s.last_name} | moy=${s.avg ?? '—'} | ${subj || 'aucune note'} | perf=${s.performance ?? '—'}% | abs=${s.absences} | classe=${cls}`;
+    });
+
+    const completion = await deepseek.chat.completions.create({
+      model: 'deepseek-chat',
+      temperature: 0.3,
+      max_tokens: 1600,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `Tu es conseiller pédagogique dans une école marocaine. On te donne les données réelles des élèves d'un niveau (moyennes de contrôles /20, moyennes par matière, performance en classe %, absences sur 90 jours, classe actuelle).
+Analyse le niveau et recommande des stratégies de répartition en classes parmi EXACTEMENT ces codes :
+- "heterogene" : classes équilibrées (forts et faibles mélangés)
+- "homogene" : classes par niveau (les meilleurs ensemble, les faibles ensemble pour un soutien ciblé)
+- "matiere" : équilibrer une matière précise (mélanger forts/faibles de cette matière pour combler les écarts) — précise alors "matiere" avec le nom EXACT d'une matière des données
+- "poles" : regrouper par matière dominante (pôles d'excellence)
+Réponds UNIQUEMENT en JSON :
+{"analyse":"synthèse du niveau en 4 à 7 phrases (écarts, matières en difficulté, absentéisme, hétérogénéité entre classes actuelles)",
+"recommandations":[{"strategie":"code","titre":"titre court","raison":"pourquoi cette stratégie pour CE niveau, chiffres à l'appui","matiere":"nom exact si strategie=matiere, sinon omets"}],
+"vigilance":[{"eleve":"Prénom Nom","conseil":"point d'attention concret"}]}
+2 à 3 recommandations classées de la plus pertinente à la moins pertinente. 3 à 6 élèves en vigilance (grande difficulté, forte chute, absentéisme).`,
+        },
+        {
+          role: 'user',
+          content: `Niveau ${level} — ${data.classes.length} classes (${data.classes.map((c) => c.name).join(', ')}), ${data.students.length} élèves :\n${lines.join('\n')}`,
+        },
+      ],
+    });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(completion.choices?.[0]?.message?.content || '{}');
+    } catch {
+      return res.status(502).json({ error: "Réponse IA illisible, réessayez" });
+    }
+    res.json({
+      analyse: String(parsed.analyse || ''),
+      recommandations: Array.isArray(parsed.recommandations) ? parsed.recommandations.slice(0, 4) : [],
+      vigilance: Array.isArray(parsed.vigilance) ? parsed.vigilance.slice(0, 8) : [],
+    });
+  } catch (error) {
+    console.error('Erreur POST ai-suggest:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // Créer une classe
 router.post('/classes', async (req, res) => {
   try {

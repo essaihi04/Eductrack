@@ -6,11 +6,12 @@ import {
 import { AnimatePresence, motion as Motion } from 'framer-motion';
 import {
   Users, Search, Undo2, CheckCircle2, AlertTriangle, Shuffle, X, Loader2,
-  Plus, CalendarOff, Award, TrendingUp, TrendingDown, Minus, Maximize2,
+  Plus, CalendarOff, Award, TrendingUp, TrendingDown, Minus, Maximize2, Wand2,
 } from 'lucide-react';
 import { Avatar } from '../../components/directory/ui';
 import StudentNotesModal from '../../components/StudentNotesModal';
 import SeatingPlanModal from '../../components/students/SeatingPlanModal';
+import SmartAssignModal from '../../components/students/SmartAssignModal';
 import { supabase } from '../../lib/supabase';
 import { useYear } from '../../contexts/YearContext';
 import { sameYear, toDashYear } from '../../lib/schoolYear';
@@ -411,6 +412,8 @@ export default function ClassAssignmentPage() {
   const [hovered, setHovered] = useState(null);           // { student, style } — carte de survol
   const [notesStudent, setNotesStudent] = useState(null); // fiche 360° (StudentNotesModal)
   const [seatingCls, setSeatingCls] = useState(null);     // plan de classe (SeatingPlanModal)
+  const [smartAssign, setSmartAssign] = useState(false);  // répartition intelligente (SmartAssignModal)
+  const [refreshKey, setRefreshKey] = useState(0);        // force le rechargement des élèves
   const bannerTimer = useRef(null);
   const hoverTimer = useRef(null);
   // Après un glisser-déposer, le navigateur émet quand même un « click » sur la
@@ -507,7 +510,7 @@ export default function ClassAssignmentPage() {
       }
     })();
     return () => { alive = false; };
-  }, [level, visibleClasses, showBanner]);
+  }, [level, visibleClasses, showBanner, refreshKey]);
 
   const classOf = useCallback((studentId) => {
     for (const [cid, list] of Object.entries(studentsByClass)) {
@@ -650,7 +653,17 @@ export default function ClassAssignmentPage() {
             </p>
           </div>
         </div>
-        <div className="ml-auto relative">
+        <div className="ml-auto flex items-center gap-2">
+          {level && levelClasses.length >= 2 && (
+            <button
+              onClick={() => setSmartAssign(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg
+                bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              <Wand2 className="w-4 h-4" /> Répartition IA
+            </button>
+          )}
+          <div className="relative">
           <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
@@ -667,6 +680,7 @@ export default function ClassAssignmentPage() {
               <X className="w-4 h-4" />
             </button>
           )}
+          </div>
         </div>
       </div>
 
@@ -808,6 +822,19 @@ export default function ClassAssignmentPage() {
           cls={seatingCls}
           students={studentsByClass[seatingCls.id] || []}
           onClose={() => setSeatingCls(null)}
+        />
+      )}
+
+      {/* Répartition intelligente (stratégies + analyse IA) */}
+      {smartAssign && level && (
+        <SmartAssignModal
+          level={level}
+          year={year}
+          onClose={() => setSmartAssign(false)}
+          onApplied={(moves) => {
+            setRefreshKey((k) => k + 1);
+            showBanner({ type: 'success', text: `Répartition appliquée — ${moves} élève${moves > 1 ? 's' : ''} déplacé${moves > 1 ? 's' : ''}` });
+          }}
         />
       )}
 
