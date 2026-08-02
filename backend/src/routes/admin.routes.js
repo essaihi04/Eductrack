@@ -3766,6 +3766,118 @@ router.get('/classes/:classId/students-hover', async (req, res) => {
   }
 });
 
+// ==================== PLAN DE CLASSE (placement des élèves) ====================
+// Une ligne par classe dans class_seating_plans (ADD_CLASS_SEATING.sql) :
+// configuration de la salle + affectations { "rangée-table-siège": student_id }.
+// Défaut : tables de 2 élèves, 4 rangées, 4 tables par rangée.
+
+const SEATING_DEFAULTS = { seats_per_table: 2, rows: 4, tables_per_row: 4, assignments: {} };
+
+// Vérifie que la classe est dans le périmètre (école + classes assignées du
+// responsable pédagogique). Renvoie la classe ou null (réponse déjà envoyée).
+const seatingClassInScope = async (req, res) => {
+  const { classId } = req.params;
+  let clsQ = supabaseAdmin.from('classes').select('id, school_id').eq('id', classId);
+  clsQ = applySchoolFilter(clsQ, req);
+  const { data: cls, error } = await clsQ.maybeSingle();
+  if (error || !cls) { res.status(404).json({ error: 'Classe introuvable' }); return null; }
+  const scoped = await getScopedClassIds(req);
+  if (scoped !== null && !scoped.includes(classId)) {
+    res.status(403).json({ error: 'Classe hors de votre périmètre' });
+    return null;
+  }
+  return cls;
+};
+
+router.get('/classes/:classId/seating', async (req, res) => {
+  try {
+    const cls = await seatingClassInScope(req, res);
+    if (!cls) return;
+    const { data, error } = await supabaseAdmin
+      .from('class_seating_plans')
+      .select('seats_per_table, row_count, tables_per_row, assignments')
+      .eq('class_id', req.params.classId)
+      .maybeSingle();
+    if (error) {
+      // Table absente (migration non exécutée) → défauts, sans persistance.
+      if (error.code === '42P01') return res.json({ ...SEATING_DEFAULTS, missing_table: true });
+      throw error;
+    }
+    if (!data) return res.json(SEATING_DEFAULTS);
+    res.json({
+      seats_per_table: data.seats_per_table,
+      rows: data.row_count,
+      tables_per_row: data.tables_per_row,
+      assignments: data.assignments || {},
+    });
+  } catch (error) {
+    console.error('Erreur GET class seating:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Body : { seats_per_table, rows, tables_per_row, assignments }
+router.put('/classes/:classId/seating', async (req, res) => {
+  try {
+    const cls = await seatingClassInScope(req, res);
+    if (!cls) return;
+    const { classId } = req.params;
+
+    const clampInt = (v, min, max, dflt) => {
+      const n = parseInt(v, 10);
+      return Number.isNaN(n) ? dflt : Math.max(min, Math.min(max, n));
+    };
+    const seatsPerTable = clampInt(req.body.seats_per_table, 1, 6, 2);
+    const rowCount = clampInt(req.body.rows, 1, 10, 4);
+    const tablesPerRow = clampInt(req.body.tables_per_row, 1, 8, 4);
+
+    // Nettoyage des affectations : clés "r-t-s" dans les bornes, valeurs =
+    // élèves DE la classe (périmètre école), un seul siège par élève.
+    let stuQ = supabaseAdmin.from('profiles').select('id')
+      .eq('role', 'student').eq('class_id', classId);
+    stuQ = applySchoolFilter(stuQ, req);
+    const { data: students, error: stuErr } = await stuQ;
+    if (stuErr) throw stuErr;
+    const validIds = new Set((students || []).map((s) => s.id));
+
+    const raw = (req.body.assignments && typeof req.body.assignments === 'object') ? req.body.assignments : {};
+    const assignments = {};
+    const seated = new Set();
+    for (const [key, sid] of Object.entries(raw)) {
+      const m = String(key).match(/^(\d+)-(\d+)-(\d+)$/);
+      if (!m) continue;
+      const [r, t, s] = [+m[1], +m[2], +m[3]];
+      if (r >= rowCount || t >= tablesPerRow || s >= seatsPerTable) continue;
+      if (!validIds.has(sid) || seated.has(sid)) continue;
+      assignments[key] = sid;
+      seated.add(sid);
+    }
+
+    const { error } = await supabaseAdmin
+      .from('class_seating_plans')
+      .upsert({
+        class_id: classId,
+        school_id: cls.school_id || getSchoolId(req),
+        seats_per_table: seatsPerTable,
+        row_count: rowCount,
+        tables_per_row: tablesPerRow,
+        assignments,
+        updated_by: req.user?.id || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'class_id' });
+    if (error) {
+      if (error.code === '42P01') {
+        return res.status(400).json({ error: 'Table manquante — exécutez ADD_CLASS_SEATING.sql dans Supabase' });
+      }
+      throw error;
+    }
+    res.json({ success: true, seats_per_table: seatsPerTable, rows: rowCount, tables_per_row: tablesPerRow, assignments });
+  } catch (error) {
+    console.error('Erreur PUT class seating:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // Créer une classe
 router.post('/classes', async (req, res) => {
   try {

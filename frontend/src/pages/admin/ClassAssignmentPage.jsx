@@ -6,10 +6,11 @@ import {
 import { AnimatePresence, motion as Motion } from 'framer-motion';
 import {
   Users, Search, Undo2, CheckCircle2, AlertTriangle, Shuffle, X, Loader2,
-  Plus, CalendarOff, Award, TrendingUp, TrendingDown, Minus,
+  Plus, CalendarOff, Award, TrendingUp, TrendingDown, Minus, Maximize2,
 } from 'lucide-react';
 import { Avatar } from '../../components/directory/ui';
 import StudentNotesModal from '../../components/StudentNotesModal';
+import SeatingPlanModal from '../../components/students/SeatingPlanModal';
 import { supabase } from '../../lib/supabase';
 import { useYear } from '../../contexts/YearContext';
 import { sameYear, toDashYear } from '../../lib/schoolYear';
@@ -229,7 +230,7 @@ function StudentChip({ student, selected, dimmed, highlighted, onToggle, onOpen,
 }
 
 // ── Carte « salle de classe » (zone de dépôt) ────────────────────────────────
-function ClassRoom({ cls, students, maxCount, loading, children }) {
+function ClassRoom({ cls, students, maxCount, loading, onOpenSeating, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: cls.id });
   const count = students?.length ?? cls.student_count ?? 0;
   const pct = Math.min(100, Math.round((count / Math.max(maxCount, 1)) * 100));
@@ -255,6 +256,15 @@ function ClassRoom({ cls, students, maxCount, loading, children }) {
           <Users className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
           {count} élève{count > 1 ? 's' : ''}
         </span>
+        <button
+          onClick={() => onOpenSeating(cls)}
+          disabled={loading}
+          title="Plan de classe (tables et placement)"
+          className="p-1 -mr-1 rounded-md text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50
+            shrink-0 self-center disabled:opacity-40"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
       </div>
       <div className="h-1 rounded-full bg-muted overflow-hidden">
         <div
@@ -400,6 +410,7 @@ export default function ClassAssignmentPage() {
   const [hoverByClass, setHoverByClass] = useState({});   // notes : dernière note, courbe, année préc., régional
   const [hovered, setHovered] = useState(null);           // { student, style } — carte de survol
   const [notesStudent, setNotesStudent] = useState(null); // fiche 360° (StudentNotesModal)
+  const [seatingCls, setSeatingCls] = useState(null);     // plan de classe (SeatingPlanModal)
   const bannerTimer = useRef(null);
   const hoverTimer = useRef(null);
   // Après un glisser-déposer, le navigateur émet quand même un « click » sur la
@@ -720,6 +731,7 @@ export default function ClassAssignmentPage() {
                 students={studentsByClass[cls.id]}
                 maxCount={maxCount}
                 loading={loadingStudents && !studentsByClass[cls.id]}
+                onOpenSeating={setSeatingCls}
               >
                 {(studentsByClass[cls.id] || []).map((s) => (
                   <Motion.div key={s.id} layout transition={{ type: 'spring', stiffness: 500, damping: 35 }}>
@@ -787,6 +799,15 @@ export default function ClassAssignmentPage() {
           classLabel={levelClasses.find((c) => c.id === notesStudent.class_id)?.name || ''}
           activeYear={toDashYear(year)}
           onClose={() => setNotesStudent(null)}
+        />
+      )}
+
+      {/* Plan de classe (tables, rangées, placement des élèves) */}
+      {seatingCls && (
+        <SeatingPlanModal
+          cls={seatingCls}
+          students={studentsByClass[seatingCls.id] || []}
+          onClose={() => setSeatingCls(null)}
         />
       )}
 
