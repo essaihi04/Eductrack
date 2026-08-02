@@ -3,7 +3,7 @@ import {
   Users2, FileText, ClipboardList, Calendar, ShieldCheck, BarChart3,
   Wallet, Bus, MapPin, Sparkles, Image as ImageIcon, Search, BarChart2,
   AlertTriangle, Settings, UserCog, MessageSquare, UserCheck, Bot, UserX,
-  Send, Inbox, Smartphone, Building2, CalendarClock,
+  Send, Inbox, Smartphone, Building2, CalendarClock, Shuffle,
 } from 'lucide-react';
 
 // Source de navigation admin unique — utilisée par la Sidebar (domaines de
@@ -41,6 +41,7 @@ export const ADMIN_DOMAINS = [
           { label: 'Suivi des profs', path: '/teacher-tracking', icon: TrendingUp, roles: ALL_ADMIN },
           { label: 'Élèves absents', path: '/absences', icon: UserX, roles: ALL_ADMIN },
           { label: 'Classes', path: '/classes', icon: GraduationCap, roles: ALL_ADMIN },
+          { label: 'Répartition', path: '/admin/class-assignment', icon: Shuffle, roles: ALL_ADMIN },
           { label: 'Réinscription', path: '/admin/reinscription', icon: UserCheck, roles: NON_MANAGER },
           { label: 'Matières', path: '/subjects', icon: BookOpen, roles: ALL_ADMIN },
           { label: 'Parents', path: '/parents', icon: Users2, roles: ALL_ADMIN },

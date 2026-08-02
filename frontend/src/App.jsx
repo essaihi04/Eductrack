@@ -13,6 +13,7 @@ import DashboardLayout from './components/Layout/DashboardLayout';
 import StudentsPage from './pages/admin/StudentsPage';
 import TeachersPage from './pages/admin/TeachersPage';
 import ClassesPage from './pages/admin/ClassesPage';
+import ClassAssignmentPage from './pages/admin/ClassAssignmentPage';
 import SubjectsPage from './pages/admin/SubjectsPage';
 import ParentsPage from './pages/admin/ParentsPage';
 import StatsPage from './pages/admin/StatsPage';
@@ -195,6 +196,7 @@ function App() {
             <Route path="students" element={<StudentsPage />} />
             <Route path="teachers" element={<TeachersPage />} />
             <Route path="classes" element={<ClassesPage />} />
+            <Route path="admin/class-assignment" element={<ClassAssignmentPage />} />
             <Route path="classes/:classId/timetable" element={<TimetablePage />} />
             <Route path="subjects" element={<SubjectsPage />} />
             <Route path="parents" element={<ParentsPage />} />

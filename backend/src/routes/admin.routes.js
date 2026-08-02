@@ -2655,6 +2655,16 @@ router.put('/students/bulk-move', async (req, res) => {
       if (clsErr || !cls) return res.status(404).json({ error: 'Classe cible introuvable' });
     }
 
+    // Périmètre du responsable pédagogique : la classe cible ET les élèves
+    // déplacés doivent rester dans ses classes assignées.
+    const scopedMoveIds = await getScopedClassIds(req);
+    if (scopedMoveIds !== null) {
+      if (scopedMoveIds.length === 0) return res.status(403).json({ error: 'Aucune classe dans votre périmètre' });
+      if (classId && !scopedMoveIds.includes(classId)) {
+        return res.status(403).json({ error: 'Classe cible hors de votre périmètre' });
+      }
+    }
+
     // On ne déplace que les élèves du périmètre école du demandeur.
     // Par LOTS : « Tout sélectionner » peut envoyer des centaines d'ids, un
     // seul .in() dépasserait la limite d'URL (échec de la requête).
@@ -2665,6 +2675,7 @@ router.put('/students/bulk-move', async (req, res) => {
           .select('id')
           .eq('role', 'student')
           .in('id', part);
+        if (scopedMoveIds !== null) scope = scope.in('class_id', scopedMoveIds);
         return applySchoolFilter(scope, req);
       },
       studentIds
