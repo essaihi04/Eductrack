@@ -9207,16 +9207,27 @@ const loadRecapData = async (cls, sem) => {
   if (error) throw error;
   controls = (controls || []).filter(c => c.subject_id && controlSemester(c) === sem);
 
-  // Notes de tous ces contrôles
+  // Notes de tous ces contrôles. Deux pièges cumulés ici : la longueur d'URL
+  // (lots d'ids) ET le plafond de 1000 lignes par réponse PostgREST — une
+  // classe de 40 élèves × 80 contrôles dépasse largement → pagination.
   let notes = [];
   if (controls.length) {
-    const { data } = await supabaseAdmin
-      .from('control_notes')
-      .select('control_id, student_id, note')
-      .in('control_id', controls.map(c => c.id));
-    notes = (data || []).filter(n => n.note !== null && n.note !== '');
+    for (const part of chunkArray(controls.map(c => c.id), 60)) {
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabaseAdmin
+          .from('control_notes')
+          .select('control_id, student_id, note')
+          .in('control_id', part)
+          .range(from, from + 999);
+        if (error) throw error;
+        notes.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+    }
+    notes = notes.filter(n => n.note !== null && n.note !== '');
   }
-  const notedControls = new Set(notes.map(n => n.control_id));
+  const noteCount = {};
+  notes.forEach(n => { noteCount[n.control_id] = (noteCount[n.control_id] || 0) + 1; });
 
   // Noms des matières
   const subjectIds = [...new Set(controls.map(c => c.subject_id))];
@@ -9244,10 +9255,12 @@ const loadRecapData = async (cls, sem) => {
   }
   const coefOf = (subjectName) => Number(coefByName[subjectName]?.coefficient) || 1;
 
-  // Regroupement par rang de contrôle
+  // Regroupement par rang de contrôle. On garde TOUS les contrôles existants,
+  // avec le nombre de notes de chacun : c'est l'appelant qui décide de masquer
+  // ou non les matières encore vides (le récap doit rester consultable même
+  // quand la saisie est en cours).
   const groups = new Map();
   for (const c of controls) {
-    if (!notedControls.has(c.id)) continue; // matière sans ce contrôle (ou colonne vide)
     const key = recapGroupKey(c);
     if (!groups.has(key)) groups.set(key, { key, label: c.name, date_min: c.date, columns: [] });
     const g = groups.get(key);
@@ -9260,16 +9273,26 @@ const loadRecapData = async (cls, sem) => {
       coefficient: coefOf(subjectName),
       date: c.date,
       published: !!c.published,
+      note_count: noteCount[c.id] || 0,
     });
   }
 
   const list = [...groups.values()]
-    .map(g => ({
-      ...g,
-      columns: g.columns.sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name), 'fr')),
-      notes: notes.filter(n => g.columns.some(col => col.control_id === n.control_id)),
-    }))
-    .sort((a, b) => (recapKeyRank(a.key) - recapKeyRank(b.key))
+    .map(g => {
+      const columns = g.columns.sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name), 'fr'));
+      const ids = new Set(columns.map(col => col.control_id));
+      return {
+        ...g,
+        columns,
+        note_count: columns.reduce((t, col) => t + col.note_count, 0),
+        notes: notes.filter(n => ids.has(n.control_id)),
+      };
+    })
+    // Les contrôles réellement notés d'abord (les colonnes officielles créées
+    // automatiquement mais jamais remplies passent en fin de liste), puis
+    // l'ordre du cadre officiel (fard 1, 2, 3, activités), puis la date.
+    .sort((a, b) => ((a.note_count > 0 ? 0 : 1) - (b.note_count > 0 ? 0 : 1))
+      || (recapKeyRank(a.key) - recapKeyRank(b.key))
       || String(a.date_min || '').localeCompare(String(b.date_min || '')));
 
   return { students: students || [], groups: list };
@@ -9298,10 +9321,11 @@ router.get('/notes/recap', async (req, res) => {
   }
 });
 
-// GET /notes/recap-pdf?class_id&semester&key=s1_f1 — PDF du récap d'un contrôle
+// GET /notes/recap-pdf?class_id&semester&key=s1_f1&empty=1 — PDF du récap
+// `empty=1` garde aussi les matières dont la note n'est pas encore saisie.
 router.get('/notes/recap-pdf', async (req, res) => {
   try {
-    const { class_id, semester, key } = req.query;
+    const { class_id, semester, key, empty } = req.query;
     if (!class_id || !key) return res.status(400).json({ error: 'class_id et key requis' });
     const check = await assertClassInScope(req, class_id);
     if (check.error) return res.status(check.error).json({ error: check.message });
@@ -9309,7 +9333,11 @@ router.get('/notes/recap-pdf', async (req, res) => {
 
     const { students, groups } = await loadRecapData(check.cls, sem);
     const group = groups.find(g => g.key === key);
-    if (!group) return res.status(404).json({ error: 'Aucune note pour ce contrôle dans cette classe' });
+    if (!group) return res.status(404).json({ error: 'Ce contrôle n\'existe pas dans cette classe pour ce semestre' });
+    // Par défaut, une matière sans aucune note n'a pas de colonne (une matière
+    // qui s'arrête au contrôle 2 ne doit pas figurer dans le récap du 3).
+    const noted = group.columns.filter(c => c.note_count > 0);
+    const columns = (empty === '1' || noted.length === 0) ? group.columns : noted;
 
     let school = null;
     if (check.cls.school_id) {
@@ -9330,7 +9358,7 @@ router.get('/notes/recap-pdf', async (req, res) => {
       controlLabel: group.label,
       controlDate: group.date_min || null,
       students,
-      columns: group.columns,
+      columns,
       notes: group.notes,
     });
 
