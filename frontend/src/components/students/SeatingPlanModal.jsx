@@ -5,10 +5,12 @@ import {
 } from '@dnd-kit/core';
 import { motion as Motion } from 'framer-motion';
 import {
-  X, Loader2, Wand2, Eraser, Check, UploadCloud, AlertTriangle, Armchair, Users,
+  X, Loader2, Wand2, Eraser, Check, UploadCloud, AlertTriangle, Armchair, Users, Printer,
 } from 'lucide-react';
 import { Avatar } from '../directory/ui';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
+import { printSeatingPlan } from '../../lib/printSeatingPlan';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Plan de classe — vue 2D « de dessus » d'une salle : tableau + bureau du prof
@@ -177,7 +179,9 @@ function PoolStudent({ student, dimmed }) {
 }
 
 export default function SeatingPlanModal({ cls, students, onClose }) {
+  const { school } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [printing, setPrinting] = useState(false);
   const [config, setConfig] = useState({ seatsPerTable: 2, rows: 4, tablesPerRow: 4 });
   const [assignments, setAssignments] = useState({});
   const [missingTable, setMissingTable] = useState(false);
@@ -295,6 +299,20 @@ export default function SeatingPlanModal({ cls, students, onClose }) {
   }, [students, config]);
 
   const clearAll = useCallback(() => setAssignments({}), []);
+
+  // Impression : plan de la salle avec la photo de chaque élève à sa place.
+  // Les photos sont chargées/converties avant d'ouvrir la fenêtre d'impression.
+  const printPlan = useCallback(async () => {
+    setPrinting(true);
+    try {
+      await printSeatingPlan({ cls, config, assignments, students, school, resolveSrc: resolveAsset });
+    } catch (e) {
+      setSaveState('error');
+      setSaveError(`Impression impossible : ${e.message}`);
+    } finally {
+      setPrinting(false);
+    }
+  }, [cls, config, assignments, students, school]);
 
   const handleDragStart = useCallback((event) => {
     setDragged(event.active.data.current || null);
@@ -420,6 +438,18 @@ export default function SeatingPlanModal({ cls, students, onClose }) {
                 bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
             >
               <Wand2 className="w-3.5 h-3.5" /> Placement auto
+            </button>
+            <button
+              onClick={printPlan}
+              disabled={loading || printing || placedIds.size === 0}
+              title="Imprimer le plan avec les photos des élèves à leur place"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border
+                bg-card hover:bg-muted disabled:opacity-40"
+            >
+              {printing
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Printer className="w-3.5 h-3.5" />}
+              {printing ? 'Préparation…' : 'Imprimer'}
             </button>
             <button
               onClick={clearAll}

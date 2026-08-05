@@ -7,6 +7,7 @@ import { AnimatePresence, motion as Motion } from 'framer-motion';
 import {
   Users, Search, Undo2, CheckCircle2, AlertTriangle, Shuffle, X, Loader2,
   Plus, CalendarOff, Award, TrendingUp, TrendingDown, Minus, Maximize2, Wand2,
+  Printer,
 } from 'lucide-react';
 import { Avatar } from '../../components/directory/ui';
 import StudentNotesModal from '../../components/StudentNotesModal';
@@ -14,7 +15,9 @@ import SeatingPlanModal from '../../components/students/SeatingPlanModal';
 import SmartAssignModal from '../../components/students/SmartAssignModal';
 import StudentDossierModal from '../../components/students/StudentDossierModal';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
+import { printClassSheets } from '../../lib/printSeatingPlan';
 import { sameYear, toDashYear } from '../../lib/schoolYear';
 
 // ── Répartition des classes ──────────────────────────────────────────────────
@@ -232,7 +235,7 @@ function StudentChip({ student, selected, dimmed, highlighted, onToggle, onOpen,
 }
 
 // ── Carte « salle de classe » (zone de dépôt) ────────────────────────────────
-function ClassRoom({ cls, students, maxCount, loading, onOpenSeating, children }) {
+function ClassRoom({ cls, students, maxCount, loading, onOpenSeating, onPrint, printing, children }) {
   const { setNodeRef, isOver } = useDroppable({ id: cls.id });
   const count = students?.length ?? cls.student_count ?? 0;
   const pct = Math.min(100, Math.round((count / Math.max(maxCount, 1)) * 100));
@@ -258,6 +261,15 @@ function ClassRoom({ cls, students, maxCount, loading, onOpenSeating, children }
           <Users className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
           {count} élève{count > 1 ? 's' : ''}
         </span>
+        <button
+          onClick={() => onPrint(cls)}
+          disabled={loading || printing || count === 0}
+          title="Imprimer la classe avec les photos des élèves (à leur place si un plan existe)"
+          className="p-1 rounded-md text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50
+            shrink-0 self-center disabled:opacity-40"
+        >
+          {printing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+        </button>
         <button
           onClick={() => onOpenSeating(cls)}
           disabled={loading}
@@ -397,8 +409,108 @@ function CreateClassCard({ level, year, onCreated, onError }) {
   );
 }
 
+// ── Choix des classes à imprimer (sélection multiple) ───────────────────────
+// Une page par classe dans un seul document : plan de placement avec photos si
+// la classe en a un, sinon trombinoscope (grille photo + nom).
+function PrintPickerModal({ classes, countOf, level, busy, onPrint, onClose }) {
+  const printable = classes.filter((c) => countOf(c) > 0);
+  const [picked, setPicked] = useState(() => new Set(printable.map((c) => c.id)));
+  const toggle = (id) => setPicked((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allPicked = printable.length > 0 && picked.size === printable.length;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <Motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        className="bg-card rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden"
+      >
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+          <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+            <Printer className="w-5 h-5" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-semibold leading-tight">Imprimer les classes — {level}</h2>
+            <p className="text-xs text-muted-foreground">Une page par classe, photos des élèves à leur place.</p>
+          </div>
+          <button onClick={onClose} className="ml-auto p-1.5 rounded-lg text-muted-foreground hover:bg-muted" aria-label="Fermer">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-3 space-y-1.5">
+          {printable.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              Aucune classe avec des élèves à imprimer pour ce niveau.
+            </p>
+          )}
+          {printable.length > 0 && (
+            <button
+              onClick={() => setPicked(allPicked ? new Set() : new Set(printable.map((c) => c.id)))}
+              className="text-xs text-indigo-600 hover:underline mb-1"
+            >
+              {allPicked ? 'Tout désélectionner' : 'Tout sélectionner'}
+            </button>
+          )}
+          {printable.map((c) => (
+            <label
+              key={c.id}
+              className={[
+                'flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer text-sm transition-colors',
+                picked.has(c.id) ? 'border-indigo-300 bg-indigo-50/60' : 'border-border hover:bg-muted',
+              ].join(' ')}
+            >
+              <input
+                type="checkbox"
+                checked={picked.has(c.id)}
+                onChange={() => toggle(c.id)}
+                className="w-4 h-4 accent-indigo-600"
+              />
+              <span className="font-medium truncate">{c.name}</span>
+              {c.filiere && (
+                <span className="text-[11px] text-muted-foreground truncate">
+                  {FILIERE_LABELS[c.filiere] || c.filiere}
+                </span>
+              )}
+              <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                {countOf(c)} élève{countOf(c) > 1 ? 's' : ''}
+              </span>
+            </label>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 px-4 py-3 border-t border-border">
+          <span className="text-xs text-muted-foreground">
+            {picked.size} classe{picked.size > 1 ? 's' : ''} sélectionnée{picked.size > 1 ? 's' : ''}
+          </span>
+          <button
+            onClick={onClose}
+            className="ml-auto px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-muted"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={() => onPrint(printable.filter((c) => picked.has(c.id)))}
+            disabled={picked.size === 0 || busy}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700
+              disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+            {busy ? 'Préparation…' : 'Imprimer'}
+          </button>
+        </div>
+      </Motion.div>
+    </div>
+  );
+}
+
 export default function ClassAssignmentPage() {
   const { year } = useYear();
+  const { school } = useAuth();
   const [classes, setClasses] = useState([]);
   const [loadingClasses, setLoadingClasses] = useState(true);
   const [level, setLevel] = useState(null);
@@ -414,6 +526,8 @@ export default function ClassAssignmentPage() {
   const [notesStudent, setNotesStudent] = useState(null); // fiche 360° (StudentNotesModal)
   const [seatingCls, setSeatingCls] = useState(null);     // plan de classe (SeatingPlanModal)
   const [smartAssign, setSmartAssign] = useState(false);  // répartition intelligente (SmartAssignModal)
+  const [printPicker, setPrintPicker] = useState(false);  // choix des classes à imprimer
+  const [printingIds, setPrintingIds] = useState(() => new Set()); // impressions en cours
   const [dossierStudent, setDossierStudent] = useState(null); // dossier 360° crèche→bac
   const [refreshKey, setRefreshKey] = useState(0);        // force le rechargement des élèves
   const bannerTimer = useRef(null);
@@ -638,6 +752,37 @@ export default function ClassAssignmentPage() {
     toggleSelect(id);
   }, [toggleSelect]);
 
+  // Impression d'une ou plusieurs classes : on récupère le plan de placement de
+  // chacune (s'il existe) puis on génère un document, une page par classe.
+  const printClasses = useCallback(async (list) => {
+    if (!list.length) return;
+    setPrintingIds(new Set(list.map((c) => c.id)));
+    try {
+      const sheets = await Promise.all(list.map(async (cls) => {
+        const students = studentsByClass[cls.id]
+          || await api(`/api/admin/classes/${cls.id}/students`).catch(() => []);
+        let config = null;
+        let assignments = null;
+        try {
+          const d = await api(`/api/admin/classes/${cls.id}/seating`);
+          if (d && !d.missing_table && d.assignments && Object.keys(d.assignments).length) {
+            config = { rows: d.rows || 4, tablesPerRow: d.tables_per_row || 4, seatsPerTable: d.seats_per_table || 2 };
+            assignments = d.assignments;
+          }
+        } catch {
+          // Pas de plan enregistré (ou migration absente) → trombinoscope.
+        }
+        return { cls, config, assignments, students };
+      }));
+      const ok = await printClassSheets({ sheets, school, resolveSrc: resolveAsset, label: level });
+      if (ok) setPrintPicker(false);
+    } catch (e) {
+      showBanner({ type: 'error', text: `Impression impossible : ${e.message}` }, 0);
+    } finally {
+      setPrintingIds(new Set());
+    }
+  }, [studentsByClass, school, level, showBanner]);
+
   const q = search.trim().toLowerCase();
   const matches = useCallback((s) => !q || fullName(s).toLowerCase().includes(q), [q]);
 
@@ -656,6 +801,16 @@ export default function ClassAssignmentPage() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {level && levelClasses.length > 0 && (
+            <button
+              onClick={() => setPrintPicker(true)}
+              title="Imprimer une ou plusieurs classes avec les photos des élèves"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg
+                border border-border bg-card hover:bg-muted"
+            >
+              <Printer className="w-4 h-4" /> Imprimer
+            </button>
+          )}
           {level && levelClasses.length >= 2 && (
             <button
               onClick={() => setSmartAssign(true)}
@@ -748,6 +903,8 @@ export default function ClassAssignmentPage() {
                 maxCount={maxCount}
                 loading={loadingStudents && !studentsByClass[cls.id]}
                 onOpenSeating={setSeatingCls}
+                onPrint={(c) => printClasses([c])}
+                printing={printingIds.has(cls.id)}
               >
                 {(studentsByClass[cls.id] || []).map((s) => (
                   <Motion.div key={s.id} layout transition={{ type: 'spring', stiffness: 500, damping: 35 }}>
@@ -830,6 +987,18 @@ export default function ClassAssignmentPage() {
           cls={seatingCls}
           students={studentsByClass[seatingCls.id] || []}
           onClose={() => setSeatingCls(null)}
+        />
+      )}
+
+      {/* Choix des classes à imprimer (sélection multiple) */}
+      {printPicker && level && (
+        <PrintPickerModal
+          classes={levelClasses}
+          level={level}
+          countOf={(c) => (studentsByClass[c.id]?.length ?? c.student_count ?? 0)}
+          busy={printingIds.size > 0}
+          onPrint={printClasses}
+          onClose={() => setPrintPicker(false)}
         />
       )}
 
