@@ -3,7 +3,7 @@ import {
   Users2, FileText, ClipboardList, Calendar, ShieldCheck, BarChart3,
   Wallet, Bus, MapPin, Sparkles, Image as ImageIcon, Search, BarChart2,
   AlertTriangle, Settings, UserCog, MessageSquare, UserCheck, Bot, UserX,
-  Send, Inbox, Smartphone, Building2, CalendarClock, Shuffle,
+  Send, Inbox, Smartphone, Building2, CalendarClock, Shuffle, ListChecks,
 } from 'lucide-react';
 
 // Source de navigation admin unique — utilisée par la Sidebar (domaines de
@@ -64,6 +64,7 @@ export const ADMIN_DOMAINS = [
         label: 'Évaluation',
         items: [
           { label: 'Saisie des notes', path: '/admin/notes-saisie', icon: ClipboardList, roles: ALL_ADMIN },
+          { label: 'Récap par contrôle', path: '/admin/notes-recap', icon: ListChecks, roles: ALL_ADMIN },
           { label: 'Bulletins', path: '/admin/bulletins', icon: FileText, roles: ALL_ADMIN },
           { label: 'Coefficients', path: '/admin/coefficients', icon: BookOpen, roles: ALL_ADMIN },
           { label: "Notes d'examens", path: '/admin/exam-notes', icon: GraduationCap, roles: ALL_ADMIN },

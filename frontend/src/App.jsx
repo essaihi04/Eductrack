@@ -93,6 +93,7 @@ import BulletinsPage from './pages/admin/BulletinsPage';
 import ExamNotesPage from './pages/admin/ExamNotesPage';
 import ClassNotesPage from './pages/admin/ClassNotesPage';
 import NotesSaisiePage from './pages/admin/NotesSaisiePage';
+import NotesRecapPage from './pages/admin/NotesRecapPage';
 import AppreciationsPage from './pages/teacher/AppreciationsPage';
 import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
 import ParentFinancePage from './pages/parent/ParentFinancePage';
@@ -244,6 +245,7 @@ function App() {
             <Route path="admin/exam-notes" element={<ExamNotesPage />} />
             <Route path="admin/class-notes" element={<ClassNotesPage />} />
             <Route path="admin/notes-saisie" element={<NotesSaisiePage />} />
+            <Route path="admin/notes-recap" element={<NotesRecapPage />} />
             <Route path="transport" element={<TransportDashboard />} />
             <Route path="transport/buses" element={<BusesPage />} />
             <Route path="transport/buses/:id" element={<BusDetailPage />} />

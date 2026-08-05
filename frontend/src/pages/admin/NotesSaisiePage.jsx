@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ClipboardList, RefreshCw, Save, Plus, Trash2, X, Check, Eye, EyeOff,
   AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
-import NotesRecapModal from '../../components/notes/NotesRecapModal';
 import { saveBlob } from '../../lib/download';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -33,6 +33,7 @@ const badgeFor = (c) => {
 };
 
 export default function NotesSaisiePage() {
+  const navigate = useNavigate();
   const [classes, setClasses] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [classId, setClassId] = useState('');
@@ -50,7 +51,6 @@ export default function NotesSaisiePage() {
   const [info, setInfo] = useState('');
 
   const [addOpen, setAddOpen] = useState(false);
-  const [recapOpen, setRecapOpen] = useState(false); // récap d'un contrôle, toutes matières
   const [pdfBusy, setPdfBusy] = useState(''); // 'blank' | 'filled' pendant le téléchargement
   // kind : simile (examen blanc) | custom (contrôle supplémentaire libre)
   const [newControl, setNewControl] = useState({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
@@ -194,13 +194,14 @@ export default function NotesSaisiePage() {
     finally { setPdfBusy(''); }
   };
 
-  // Récap d'un contrôle pour toutes les matières : lit les notes ENREGISTRÉES
-  // côté serveur → on prévient si la grille a des saisies en attente.
+  // Récap d'un contrôle pour toutes les matières : onglet dédié, qui lit les
+  // notes ENREGISTRÉES côté serveur → on prévient si la grille a des saisies
+  // en attente. La classe et le semestre affichés sont repris dans l'URL.
   const openRecap = () => {
     if (dirty && !window.confirm(
       'Des notes ne sont pas enregistrées : elles ne figureront pas dans le récap. Continuer quand même ?',
     )) return;
-    setRecapOpen(true);
+    navigate(`/admin/notes-recap?class=${classId}&semester=${semester}`);
   };
 
   // Les contrôles officiels (3 fards + activités) sont créés automatiquement
@@ -283,7 +284,7 @@ export default function NotesSaisiePage() {
           {classId && semester && (
             <button
               onClick={openRecap}
-              title="Récap d'un contrôle pour toutes les matières de la classe (impression / PDF)"
+              title="Ouvrir le récap : un contrôle, toutes les matières (impression / PDF)"
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent"
             >
               <ClipboardList className="w-4 h-4" /> Récap par contrôle
@@ -599,16 +600,6 @@ export default function NotesSaisiePage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Récap d'un contrôle pour toutes les matières (aperçu + impression + PDF) */}
-      {recapOpen && classId && semester && (
-        <NotesRecapModal
-          classId={classId}
-          className={classes.find(c => c.id === classId)?.name || 'Classe'}
-          semester={semester}
-          onClose={() => setRecapOpen(false)}
-        />
       )}
     </div>
   );
