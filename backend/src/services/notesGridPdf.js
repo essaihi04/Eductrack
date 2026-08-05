@@ -11,56 +11,8 @@
  */
 
 import PDFDocument from 'pdfkit';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { drawSchoolLogo } from './schoolLogo.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// ──── Police arabe (même fichier que bulletins/factures) ────────────────────
-const ARABIC_FONT_PATH = path.join(__dirname, 'whatsapp', 'chatbot', 'fonts', 'NotoNaskhArabic-Regular.ttf');
-const ARABIC_FONT_NAME = 'ArabicFont';
-const ARABIC_RE = /[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/;
-const ARABIC_FEATURES = ['rtla', 'rclt'];
-
-// Découpe un texte en segments alternés latin / arabe (NotoNaskhArabic n'a
-// PAS de glyphes latins : un texte mixte rendu d'un bloc affiche des carrés).
-function scriptRuns(text) {
-  const t = String(text == null ? '' : text);
-  const runs = [];
-  for (const ch of t) {
-    const isAr = ARABIC_RE.test(ch);
-    const last = runs[runs.length - 1];
-    // Les séparateurs (espaces, ·, chiffres…) suivent le segment en cours.
-    if (last && (isAr === last.ar || /[\s0-9.,:/()\-]/.test(ch))) last.t += ch;
-    else runs.push({ t: ch, ar: isAr });
-  }
-  return runs;
-}
-
-/**
- * Rend un texte mixte latin+arabe sur UNE ligne : chaque segment avec la bonne
- * police (latin = police `latinFont`, arabe = NotoNaskh + shaping RTL).
- * Supporte align left/center/right dans la largeur donnée (pas de retour ligne).
- */
-function mixedLine(doc, text, x, y, { width, align = 'left', fontSize = 8, latinFont = 'Helvetica', color = null } = {}) {
-  const runs = scriptRuns(text);
-  if (!runs.length) return;
-  const widths = runs.map(r => {
-    doc.font(r.ar ? ARABIC_FONT_NAME : latinFont).fontSize(fontSize);
-    return doc.widthOfString(r.t, r.ar ? { features: ARABIC_FEATURES } : {});
-  });
-  const total = widths.reduce((a, b) => a + b, 0);
-  let cx = x;
-  if (width && align === 'center') cx = x + Math.max(0, (width - total) / 2);
-  else if (width && align === 'right') cx = x + Math.max(0, width - total);
-  runs.forEach((r, i) => {
-    doc.font(r.ar ? ARABIC_FONT_NAME : latinFont).fontSize(fontSize);
-    if (color) doc.fillColor(color);
-    doc.text(r.t, cx, y, { lineBreak: false, ...(r.ar ? { features: ARABIC_FEATURES } : {}) });
-    cx += widths[i];
-  });
-}
+import { mixedLine, registerArabicFont } from './pdfText.js';
 
 // ──── Charte ────────────────────────────────────────────────────────────────
 const C = {
@@ -109,7 +61,7 @@ export function generateNotesGridPdf({
     try {
       const chunks = [];
       const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margin: MARGIN, bufferPages: true });
-      try { doc.registerFont(ARABIC_FONT_NAME, ARABIC_FONT_PATH); } catch (_) {}
+      registerArabicFont(doc);
       doc.on('data', c => chunks.push(c));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);

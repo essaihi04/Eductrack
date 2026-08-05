@@ -14,6 +14,7 @@ import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
 import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
 import { generateNotesGridPdf } from '../services/notesGridPdf.js';
+import { generateNotesRecapPdf } from '../services/notesRecapPdf.js';
 
 const router = express.Router();
 
@@ -9153,6 +9154,193 @@ router.get('/notes/grid-pdf', async (req, res) => {
     res.send(pdfBuffer);
   } catch (e) {
     console.error('[Admin] notes grid pdf error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════
+//  RÉCAP PAR CONTRÔLE — un contrôle (ex. « Contrôle 1 ») pour TOUTES les
+//  matières d'une classe : lignes = élèves, colonnes = matières.
+//
+//  Les contrôles sont regroupés par RANG : official_key (s1_f1, s1_f2,
+//  s1_f3, s1_act) quand la migration ADD_CONTROLS_OFFICIELS.sql est passée,
+//  sinon repli sur le nom du contrôle.
+//  Une matière n'est une colonne QUE si elle a ce contrôle ET au moins une
+//  note saisie — une matière qui s'arrête au contrôle 2 n'apparaît donc pas
+//  dans le récap du contrôle 3.
+// ════════════════════════════════════════════════════════════════════════
+
+const recapGroupKey = (c) => c.official_key || `name:${String(c.name || '').trim().toLowerCase()}`;
+// Rang d'affichage d'un groupe officiel : fard 1, 2, 3 puis activités.
+const recapKeyRank = (key) => {
+  const m = /^s[12]_(f(\d)|act)$/.exec(key || '');
+  if (!m) return 99;
+  return m[1] === 'act' ? 90 : Number(m[2]);
+};
+
+// Charge tout ce qu'il faut pour les récaps d'une classe × semestre.
+const loadRecapData = async (cls, sem) => {
+  const { data: students } = await supabaseAdmin
+    .from('profiles')
+    .select('id, first_name, last_name, massar_code, import_order')
+    .eq('class_id', cls.id)
+    .eq('role', 'student')
+    .order('import_order', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+
+  // Contrôles de la classe, toutes matières (mêmes replis de colonnes que la grille)
+  let { data: controls, error } = await supabaseAdmin
+    .from('controls_plan')
+    .select('id, name, date, status, subject_id, semester, official_key, published')
+    .eq('class_id', cls.id)
+    .neq('status', 'cancelled')
+    .order('date', { ascending: true });
+  if (error && /semester|official_key|published/i.test(error.message || '')) {
+    ({ data: controls, error } = await supabaseAdmin
+      .from('controls_plan')
+      .select('id, name, date, status, subject_id')
+      .eq('class_id', cls.id)
+      .neq('status', 'cancelled')
+      .order('date', { ascending: true }));
+    controls = (controls || []).map(c => ({ ...c, published: c.status === 'completed' }));
+  }
+  if (error) throw error;
+  controls = (controls || []).filter(c => c.subject_id && controlSemester(c) === sem);
+
+  // Notes de tous ces contrôles
+  let notes = [];
+  if (controls.length) {
+    const { data } = await supabaseAdmin
+      .from('control_notes')
+      .select('control_id, student_id, note')
+      .in('control_id', controls.map(c => c.id));
+    notes = (data || []).filter(n => n.note !== null && n.note !== '');
+  }
+  const notedControls = new Set(notes.map(n => n.control_id));
+
+  // Noms des matières
+  const subjectIds = [...new Set(controls.map(c => c.subject_id))];
+  const nameBySubject = {};
+  if (subjectIds.length) {
+    const { data: subs } = await supabaseAdmin.from('subjects').select('id, name').in('id', subjectIds);
+    (subs || []).forEach(s => { nameBySubject[s.id] = s.name; });
+  }
+
+  // Coefficients de l'établissement pour ce niveau (par NOM de matière, comme
+  // les bulletins). Absents → moyenne simple.
+  const coefByName = {};
+  if (cls.level) {
+    let q = supabaseAdmin
+      .from('subject_coefficients')
+      .select('subject_name, coefficient, school_id, filiere')
+      .eq('level', cls.level);
+    if (cls.school_id) q = q.or(`school_id.eq.${cls.school_id},school_id.is.null`);
+    const { data: coefs } = await q;
+    (coefs || []).forEach(c => {
+      // Un coefficient propre à l'école prime sur le coefficient global.
+      const prev = coefByName[c.subject_name];
+      if (!prev || (c.school_id && !prev.school_id)) coefByName[c.subject_name] = c;
+    });
+  }
+  const coefOf = (subjectName) => Number(coefByName[subjectName]?.coefficient) || 1;
+
+  // Regroupement par rang de contrôle
+  const groups = new Map();
+  for (const c of controls) {
+    if (!notedControls.has(c.id)) continue; // matière sans ce contrôle (ou colonne vide)
+    const key = recapGroupKey(c);
+    if (!groups.has(key)) groups.set(key, { key, label: c.name, date_min: c.date, columns: [] });
+    const g = groups.get(key);
+    if (c.date && (!g.date_min || String(c.date) < String(g.date_min))) g.date_min = c.date;
+    const subjectName = nameBySubject[c.subject_id] || '—';
+    g.columns.push({
+      control_id: c.id,
+      subject_id: c.subject_id,
+      subject_name: subjectName,
+      coefficient: coefOf(subjectName),
+      date: c.date,
+      published: !!c.published,
+    });
+  }
+
+  const list = [...groups.values()]
+    .map(g => ({
+      ...g,
+      columns: g.columns.sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name), 'fr')),
+      notes: notes.filter(n => g.columns.some(col => col.control_id === n.control_id)),
+    }))
+    .sort((a, b) => (recapKeyRank(a.key) - recapKeyRank(b.key))
+      || String(a.date_min || '').localeCompare(String(b.date_min || '')));
+
+  return { students: students || [], groups: list };
+};
+
+// GET /notes/recap?class_id&semester — récaps disponibles + données d'affichage
+router.get('/notes/recap', async (req, res) => {
+  try {
+    const { class_id, semester } = req.query;
+    if (!class_id) return res.status(400).json({ error: 'class_id requis' });
+    const check = await assertClassInScope(req, class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+    const sem = Number(semester) === 2 ? 2 : 1;
+
+    const { students, groups } = await loadRecapData(check.cls, sem);
+    res.json({
+      class: check.cls,
+      semester: sem,
+      academic_year: check.cls.academic_year || currentSchoolYear(),
+      students,
+      groups,
+    });
+  } catch (e) {
+    console.error('[Admin] notes recap error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /notes/recap-pdf?class_id&semester&key=s1_f1 — PDF du récap d'un contrôle
+router.get('/notes/recap-pdf', async (req, res) => {
+  try {
+    const { class_id, semester, key } = req.query;
+    if (!class_id || !key) return res.status(400).json({ error: 'class_id et key requis' });
+    const check = await assertClassInScope(req, class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+    const sem = Number(semester) === 2 ? 2 : 1;
+
+    const { students, groups } = await loadRecapData(check.cls, sem);
+    const group = groups.find(g => g.key === key);
+    if (!group) return res.status(404).json({ error: 'Aucune note pour ce contrôle dans cette classe' });
+
+    let school = null;
+    if (check.cls.school_id) {
+      const { data } = await supabaseAdmin
+        .from('schools').select('name, address, phone, logo_url').eq('id', check.cls.school_id).maybeSingle();
+      school = data || null;
+    }
+    const logoBuffer = await fetchSchoolLogoBuffer(school?.logo_url);
+
+    const pdfBuffer = await generateNotesRecapPdf({
+      schoolName: school?.name || '',
+      logoBuffer,
+      className: check.cls.name || '',
+      level: check.cls.level || '',
+      filiere: check.cls.filiere || '',
+      semester: sem,
+      academicYear: check.cls.academic_year || currentSchoolYear(),
+      controlLabel: group.label,
+      controlDate: group.date_min || null,
+      students,
+      columns: group.columns,
+      notes: group.notes,
+    });
+
+    const safe = (s) => String(s || '').replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const fname = `recap_${safe(check.cls.name)}_${safe(key)}_S${sem}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fname}"`);
+    res.send(pdfBuffer);
+  } catch (e) {
+    console.error('[Admin] notes recap pdf error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

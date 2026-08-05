@@ -4,6 +4,7 @@ import {
   AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
+import NotesRecapModal from '../../components/notes/NotesRecapModal';
 import { saveBlob } from '../../lib/download';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -49,6 +50,7 @@ export default function NotesSaisiePage() {
   const [info, setInfo] = useState('');
 
   const [addOpen, setAddOpen] = useState(false);
+  const [recapOpen, setRecapOpen] = useState(false); // récap d'un contrôle, toutes matières
   const [pdfBusy, setPdfBusy] = useState(''); // 'blank' | 'filled' pendant le téléchargement
   // kind : simile (examen blanc) | custom (contrôle supplémentaire libre)
   const [newControl, setNewControl] = useState({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
@@ -192,6 +194,15 @@ export default function NotesSaisiePage() {
     finally { setPdfBusy(''); }
   };
 
+  // Récap d'un contrôle pour toutes les matières : lit les notes ENREGISTRÉES
+  // côté serveur → on prévient si la grille a des saisies en attente.
+  const openRecap = () => {
+    if (dirty && !window.confirm(
+      'Des notes ne sont pas enregistrées : elles ne figureront pas dans le récap. Continuer quand même ?',
+    )) return;
+    setRecapOpen(true);
+  };
+
   // Les contrôles officiels (3 fards + activités) sont créés automatiquement
   // par le backend à l'ouverture de la grille — la modale ne sert qu'aux
   // ajouts supplémentaires : Similé (examen blanc) ou contrôle personnalisé.
@@ -268,8 +279,18 @@ export default function NotesSaisiePage() {
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <ClipboardList className="w-6 h-6 text-primary" /> Saisie des notes
         </h1>
-        {grid && (
-          <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {classId && semester && (
+            <button
+              onClick={openRecap}
+              title="Récap d'un contrôle pour toutes les matières de la classe (impression / PDF)"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium border border-border rounded-lg hover:bg-accent"
+            >
+              <ClipboardList className="w-4 h-4" /> Récap par contrôle
+            </button>
+          )}
+          {grid && (
+            <>
             <button
               onClick={() => downloadPdf('blank')}
               disabled={!!pdfBusy}
@@ -302,8 +323,9 @@ export default function NotesSaisiePage() {
               {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               {saving ? 'Enregistrement…' : 'Enregistrer'}
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Sélecteurs classe + matière */}
@@ -577,6 +599,16 @@ export default function NotesSaisiePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Récap d'un contrôle pour toutes les matières (aperçu + impression + PDF) */}
+      {recapOpen && classId && semester && (
+        <NotesRecapModal
+          classId={classId}
+          className={classes.find(c => c.id === classId)?.name || 'Classe'}
+          semester={semester}
+          onClose={() => setRecapOpen(false)}
+        />
       )}
     </div>
   );
