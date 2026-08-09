@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Bell, X, Check, BookOpen, Award, AlertCircle, FileText, ClipboardCheck, CalendarClock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useI18n } from '../i18n';
 
 const NotificationsBell = () => {
+  const { t, lang, dir } = useI18n();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
@@ -180,11 +182,11 @@ const NotificationsBell = () => {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'À l\'instant';
-    if (diffMins < 60) return `Il y a ${diffMins} min`;
-    if (diffHours < 24) return `Il y a ${diffHours} h`;
-    if (diffDays < 7) return `Il y a ${diffDays} j`;
-    return date.toLocaleDateString('fr-FR');
+    if (diffMins < 1) return t('notif.justNow');
+    if (diffMins < 60) return t('notif.minutesAgo', { n: diffMins });
+    if (diffHours < 24) return t('notif.hoursAgo', { n: diffHours });
+    if (diffDays < 7) return t('notif.daysAgo', { n: diffDays });
+    return date.toLocaleDateString(lang === 'ar' ? 'ar-MA' : 'fr-FR');
   };
 
   return (
@@ -195,7 +197,7 @@ const NotificationsBell = () => {
       >
         <Bell className="w-6 h-6 text-gray-700" />
         {unreadCount > 0 && (
-          <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+          <span className={`absolute top-0 ${dir === 'rtl' ? 'left-0' : 'right-0'} w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center`}>
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -207,15 +209,15 @@ const NotificationsBell = () => {
             className="fixed inset-0 z-40"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 top-12 w-80 bg-white rounded-lg shadow-xl border z-50 max-h-96 overflow-hidden flex flex-col">
+          <div className={`absolute ${dir === 'rtl' ? 'left-0' : 'right-0'} top-12 w-80 bg-white rounded-lg shadow-xl border z-50 max-h-96 overflow-hidden flex flex-col`}>
             <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">Notifications</h3>
+              <h3 className="font-semibold">{t('notif.title')}</h3>
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
                   className="text-sm text-blue-600 hover:text-blue-700"
                 >
-                  Tout marquer comme lu
+                  {t('notif.markAllRead')}
                 </button>
               )}
             </div>
@@ -224,7 +226,7 @@ const NotificationsBell = () => {
               {notifications.length === 0 ? (
                 <div className="p-8 text-center text-gray-500">
                   <Bell className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-                  <p>Aucune notification</p>
+                  <p>{t('notif.empty')}</p>
                 </div>
               ) : (
                 notifications.map((notification) => (
@@ -257,7 +259,7 @@ const NotificationsBell = () => {
                             >
                               <img
                                 src={notification.data.media_url}
-                                alt={notification.data.file_name || 'Image'}
+                                alt={notification.data.file_name || t('common.image')}
                                 className="max-h-40 w-auto rounded-lg border border-gray-200 object-contain"
                                 onError={(e) => { e.target.style.display = 'none'; }}
                               />
@@ -271,7 +273,7 @@ const NotificationsBell = () => {
                               className="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-blue-700 hover:bg-blue-100 max-w-full"
                             >
                               <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                              <span className="truncate">{notification.data.file_name || 'Pièce jointe'}</span>
+                              <span className="truncate">{notification.data.file_name || t('common.attachment')}</span>
                             </a>
                           )
                         )}

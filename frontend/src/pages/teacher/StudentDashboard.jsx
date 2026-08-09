@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ArrowLeft, TrendingUp, AlertCircle, Star, Activity, GraduationCap } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
 import StudentNotesModal from '../../components/StudentNotesModal';
@@ -10,6 +11,8 @@ const StudentDashboard = () => {
   const navigate = useNavigate();
   const { studentId } = useParams();
   const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const { year } = useYear();
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -41,20 +44,20 @@ const StudentDashboard = () => {
       setMetrics(data);
     } catch (err) {
       console.error('Erreur:', err);
-      setError('Impossible de charger les métriques');
+      setError(t('dash.errorMetrics'));
     } finally {
       setLoading(false);
     }
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   if (error || !metrics) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="text-red-600">{error || 'Erreur'}</div>
+        <div className="text-red-600">{error || t('common.error')}</div>
       </div>
     );
   }
@@ -64,16 +67,16 @@ const StudentDashboard = () => {
   // Déterminer le badge global
   const globalScore = Math.round((presenceScore + workScore + participationScore + disciplineScore) / 4);
   let badgeColor = 'bg-yellow-100 text-yellow-800';
-  let badgeText = 'Normal';
+  let badgeText = t('sdash.badge.normal');
   if (globalScore >= 80) {
     badgeColor = 'bg-green-100 text-green-800';
-    badgeText = 'Excellent';
+    badgeText = t('sdash.badge.excellent');
   } else if (globalScore >= 60) {
     badgeColor = 'bg-blue-100 text-blue-800';
-    badgeText = 'Bon';
+    badgeText = t('sdash.badge.good');
   } else if (globalScore < 40) {
     badgeColor = 'bg-red-100 text-red-800';
-    badgeText = 'Alerte';
+    badgeText = t('sdash.badge.alert');
   }
 
   // Composant KPI Card
@@ -123,7 +126,7 @@ const StudentDashboard = () => {
           className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium mb-4"
         >
           <ArrowLeft className="w-4 h-4" />
-          Retour
+          {t('sdash.back')}
         </button>
 
         <div className="flex items-center justify-between">
@@ -132,7 +135,7 @@ const StudentDashboard = () => {
               {student.first_name} {student.last_name}
             </h1>
             <p className="text-sm text-gray-600 mt-1">
-              Suivi pédagogique • {totalSessions} séances enregistrées
+              {t('sdash.subtitle', { n: totalSessions })}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -141,7 +144,7 @@ const StudentDashboard = () => {
                 onClick={() => setShowNotes(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm text-sm font-medium"
               >
-                <GraduationCap className="w-4 h-4" /> Notes de l'élève
+                <GraduationCap className="w-4 h-4" /> {t('sdash.studentNotes')}
               </button>
             )}
             <div className={`px-4 py-2 rounded-full font-semibold text-sm ${badgeColor}`}>
@@ -162,30 +165,30 @@ const StudentDashboard = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard title="Présence" score={presenceScore} icon={Activity} color="text-blue-600" />
-        <KPICard title="Travail" score={workScore} icon={TrendingUp} color="text-green-600" />
-        <KPICard title="Discipline" score={disciplineScore} icon={AlertCircle} color="text-orange-600" />
-        <KPICard title="Téléphone" score={phoneScore} icon={Activity} color="text-red-600" />
+        <KPICard title={t('sdash.kpi.presence')} score={presenceScore} icon={Activity} color="text-blue-600" />
+        <KPICard title={t('sdash.kpi.work')} score={workScore} icon={TrendingUp} color="text-green-600" />
+        <KPICard title={t('sdash.kpi.discipline')} score={disciplineScore} icon={AlertCircle} color="text-orange-600" />
+        <KPICard title={t('sdash.kpi.phone')} score={phoneScore} icon={Activity} color="text-red-600" />
       </div>
 
       {/* Heatmap Section */}
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm mb-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Thermique — 7 derniers jours</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-4">{t('sdash.heatmapTitle')}</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-2 font-semibold text-gray-600">Catégorie</th>
+                <th className="text-start py-2 px-2 font-semibold text-gray-600">{t('sdash.category')}</th>
                 {heatmap.map((day, idx) => (
                   <th key={idx} className="text-center py-2 px-1 font-semibold text-gray-600">
-                    {new Date(day.date).toLocaleDateString('fr-FR', { weekday: 'short', month: 'numeric', day: 'numeric' })}
+                    {new Date(day.date).toLocaleDateString(dateLocale, { weekday: 'short', month: 'numeric', day: 'numeric' })}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               <tr className="border-b border-gray-100">
-                <td className="py-3 px-2 font-medium text-gray-700">Présence</td>
+                <td className="py-3 px-2 font-medium text-gray-700">{t('sdash.kpi.presence')}</td>
                 {heatmap.map((day, idx) => (
                   <td key={idx} className="text-center py-3 px-1">
                     <HeatmapCell value={day.presence} label={day.presence} />
@@ -193,7 +196,7 @@ const StudentDashboard = () => {
                 ))}
               </tr>
               <tr className="border-b border-gray-100">
-                <td className="py-3 px-2 font-medium text-gray-700">Travail</td>
+                <td className="py-3 px-2 font-medium text-gray-700">{t('sdash.kpi.work')}</td>
                 {heatmap.map((day, idx) => (
                   <td key={idx} className="text-center py-3 px-1">
                     <HeatmapCell value={day.work_status} label={day.work_status} />
@@ -201,7 +204,7 @@ const StudentDashboard = () => {
                 ))}
               </tr>
               <tr className="border-b border-gray-100">
-                <td className="py-3 px-2 font-medium text-gray-700">Discipline</td>
+                <td className="py-3 px-2 font-medium text-gray-700">{t('sdash.kpi.discipline')}</td>
                 {heatmap.map((day, idx) => (
                   <td key={idx} className="text-center py-3 px-1">
                     <HeatmapCell value={day.discipline} label={day.discipline} />
@@ -209,10 +212,10 @@ const StudentDashboard = () => {
                 ))}
               </tr>
               <tr>
-                <td className="py-3 px-2 font-medium text-gray-700">Téléphone</td>
+                <td className="py-3 px-2 font-medium text-gray-700">{t('sdash.kpi.phone')}</td>
                 {heatmap.map((day, idx) => (
                   <td key={idx} className="text-center py-3 px-1">
-                    <HeatmapCell value={day.phone_use} label={day.phone_use ? 'Utilisé' : 'Non utilisé'} />
+                    <HeatmapCell value={day.phone_use} label={day.phone_use ? t('sdash.phoneUsed') : t('sdash.phoneNotUsed')} />
                   </td>
                 ))}
               </tr>
@@ -223,22 +226,22 @@ const StudentDashboard = () => {
 
       {/* Cahier Section */}
       <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm mb-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">Cahier de classe</h2>
+        <h2 className="text-lg font-bold text-gray-900 mb-4">{t('sdash.cahierTitle')}</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="rounded-lg bg-gradient-to-br from-blue-50 to-blue-100 p-4">
-            <p className="text-sm font-semibold text-blue-900 mb-2">Écriture de la leçon</p>
+            <p className="text-sm font-semibold text-blue-900 mb-2">{t('sdash.lesson')}</p>
             <p className="text-2xl font-bold text-blue-600">{cahierStats.lecon}</p>
-            <p className="text-xs text-blue-700 mt-1">séances complètes</p>
+            <p className="text-xs text-blue-700 mt-1">{t('sdash.fullSessions')}</p>
           </div>
           <div className="rounded-lg bg-gradient-to-br from-green-50 to-green-100 p-4">
-            <p className="text-sm font-semibold text-green-900 mb-2">Collage des documents</p>
+            <p className="text-sm font-semibold text-green-900 mb-2">{t('sdash.collage')}</p>
             <p className="text-2xl font-bold text-green-600">{cahierStats.collage}</p>
-            <p className="text-xs text-green-700 mt-1">séances correctes</p>
+            <p className="text-xs text-green-700 mt-1">{t('sdash.correctSessions')}</p>
           </div>
           <div className="rounded-lg bg-gradient-to-br from-purple-50 to-purple-100 p-4">
-            <p className="text-sm font-semibold text-purple-900 mb-2">Lisibilité</p>
+            <p className="text-sm font-semibold text-purple-900 mb-2">{t('sdash.legibility')}</p>
             <p className="text-2xl font-bold text-purple-600">{cahierStats.lisibilite}</p>
-            <p className="text-xs text-purple-700 mt-1">séances lisibles</p>
+            <p className="text-xs text-purple-700 mt-1">{t('sdash.legibleSessions')}</p>
           </div>
         </div>
       </div>
@@ -247,26 +250,26 @@ const StudentDashboard = () => {
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
         <h2 className="text-lg font-bold text-amber-900 mb-3 flex items-center gap-2">
           <Star className="w-5 h-5" />
-          Recommandations pédagogiques
+          {t('sdash.recoTitle')}
         </h2>
         <ul className="space-y-2 text-sm text-amber-800">
           {globalScore < 40 && (
-            <li>⚠️ <strong>Action urgente :</strong> Élève en difficulté. Prévoir un entretien avec la famille.</li>
+            <li>⚠️ <strong>{t('sdash.reco.urgentLabel')}</strong> {t('sdash.reco.urgent')}</li>
           )}
           {presenceScore < 60 && (
-            <li>📍 <strong>Présence :</strong> Taux d'absence élevé. Vérifier les raisons et communiquer avec les parents.</li>
+            <li>📍 <strong>{t('sdash.reco.presenceLabel')}</strong> {t('sdash.reco.presence')}</li>
           )}
           {workScore < 60 && (
-            <li>📚 <strong>Devoirs :</strong> Élève ne complète pas régulièrement ses devoirs. Mettre en place un suivi.</li>
+            <li>📚 <strong>{t('sdash.reco.homeworkLabel')}</strong> {t('sdash.reco.homework')}</li>
           )}
           {participationScore < 60 && (
-            <li>🗣️ <strong>Participation :</strong> Élève peu actif en classe. Encourager la participation.</li>
+            <li>🗣️ <strong>{t('sdash.reco.participationLabel')}</strong> {t('sdash.reco.participation')}</li>
           )}
           {disciplineScore < 60 && (
-            <li>⚡ <strong>Discipline :</strong> Comportement à améliorer. Discuter des attentes en classe.</li>
+            <li>⚡ <strong>{t('sdash.reco.disciplineLabel')}</strong> {t('sdash.reco.discipline')}</li>
           )}
           {globalScore >= 80 && (
-            <li>⭐ <strong>Excellent :</strong> Élève en très bonne progression. Continuer à encourager.</li>
+            <li>⭐ <strong>{t('sdash.reco.excellentLabel')}</strong> {t('sdash.reco.excellent')}</li>
           )}
         </ul>
       </div>

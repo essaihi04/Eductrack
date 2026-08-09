@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Edit2, Trash2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 
 const LessonPlan = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [weekStart, setWeekStart] = useState(getMonday(new Date()));
   const [lessons, setLessons] = useState({});
   const [loading, setLoading] = useState(true);
@@ -21,7 +22,7 @@ const LessonPlan = () => {
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
-  const dayLabels = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
+  const dayLabels = days.map((d) => t(`plan.day.${d}`));
 
   function getMonday(date) {
     const d = new Date(date);
@@ -145,8 +146,8 @@ const LessonPlan = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Cahier de classe</h1>
-          <p className="text-muted-foreground mt-1">Planning hebdomadaire</p>
+          <h1 className="text-3xl font-bold">{t('plan.title')}</h1>
+          <p className="text-muted-foreground mt-1">{t('plan.subtitle')}</p>
         </div>
         <button
           onClick={() => navigate(-1)}
@@ -165,7 +166,7 @@ const LessonPlan = () => {
         </button>
         <div className="text-center">
           <p className="font-semibold text-gray-900">
-            Semaine du {weekStart.toLocaleDateString('fr-FR')} au {weekEndDate.toLocaleDateString('fr-FR')}
+            {t('plan.week', { from: weekStart.toLocaleDateString(dateLocale), to: weekEndDate.toLocaleDateString(dateLocale) })}
           </p>
         </div>
         <button
@@ -188,7 +189,7 @@ const LessonPlan = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">{dayLabels[idx]}</CardTitle>
                 <CardDescription className="text-xs">
-                  {dayDate.toLocaleDateString('fr-FR')}
+                  {dayDate.toLocaleDateString(dateLocale)}
                 </CardDescription>
               </CardHeader>
 
@@ -196,42 +197,42 @@ const LessonPlan = () => {
                 {isEditing ? (
                   <div className="space-y-3 flex-1">
                     <div>
-                      <label className="text-xs font-medium text-gray-700">Thème</label>
+                      <label className="text-xs font-medium text-gray-700">{t('plan.theme')}</label>
                       <input
                         type="text"
                         value={formData.topic}
                         onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
-                        placeholder="Thème de la séance"
+                        placeholder={t('plan.themePlaceholder')}
                         className="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-sm"
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-gray-700">Objectifs</label>
+                      <label className="text-xs font-medium text-gray-700">{t('plan.objectives')}</label>
                       <textarea
                         value={formData.objectives}
                         onChange={(e) => setFormData({ ...formData, objectives: e.target.value })}
-                        placeholder="Objectifs pédagogiques"
+                        placeholder={t('plan.objectivesPlaceholder')}
                         className="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-sm resize-none"
                         rows="2"
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-gray-700">Ressources</label>
+                      <label className="text-xs font-medium text-gray-700">{t('plan.resources')}</label>
                       <input
                         type="text"
                         value={formData.resources}
                         onChange={(e) => setFormData({ ...formData, resources: e.target.value })}
-                        placeholder="Ressources utilisées"
+                        placeholder={t('plan.resourcesPlaceholder')}
                         className="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-sm"
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-gray-700">Devoirs</label>
+                      <label className="text-xs font-medium text-gray-700">{t('plan.homework')}</label>
                       <input
                         type="text"
                         value={formData.homework}
                         onChange={(e) => setFormData({ ...formData, homework: e.target.value })}
-                        placeholder="Devoirs à faire"
+                        placeholder={t('plan.homeworkPlaceholder')}
                         className="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-sm"
                       />
                     </div>
@@ -240,13 +241,13 @@ const LessonPlan = () => {
                         onClick={() => saveLesson(day)}
                         className="flex-1 px-2 py-1 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700 transition-colors"
                       >
-                        Sauvegarder
+                        {t('common.save')}
                       </button>
                       <button
                         onClick={() => setEditingLesson(null)}
                         className="flex-1 px-2 py-1 bg-gray-300 text-gray-700 rounded text-sm font-medium hover:bg-gray-400 transition-colors"
                       >
-                        Annuler
+                        {t('common.cancel')}
                       </button>
                     </div>
                   </div>
@@ -266,7 +267,7 @@ const LessonPlan = () => {
                       </div>
                     ) : (
                       <div className="flex-1 flex items-center justify-center">
-                        <p className="text-xs text-gray-500 text-center">Aucune séance planifiée</p>
+                        <p className="text-xs text-gray-500 text-center">{t('plan.none')}</p>
                       </div>
                     )}
                     <div className="flex gap-2 mt-4">
@@ -275,7 +276,7 @@ const LessonPlan = () => {
                         className="flex-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm font-medium hover:bg-blue-200 transition-colors flex items-center justify-center gap-1"
                       >
                         <Edit2 className="w-3 h-3" />
-                        Éditer
+                        {t('plan.edit')}
                       </button>
                       {lesson && (
                         <button

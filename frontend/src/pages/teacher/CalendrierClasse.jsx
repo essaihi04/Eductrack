@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, Edit2, Trash2, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 
 const CalendrierClasse = () => {
-  const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [classes, setClasses] = useState([]);
   const [controls, setControls] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
@@ -83,15 +84,11 @@ const CalendrierClasse = () => {
     }
   };
 
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case 'planned': return 'Planifié';
-      case 'in_progress': return 'En cours';
-      case 'completed': return 'Terminé';
-      case 'cancelled': return 'Annulé';
-      default: return status;
-    }
-  };
+  const getStatusLabel = (status) => (
+    ['planned', 'in_progress', 'completed', 'cancelled'].includes(status)
+      ? t(`cal.status.${status}`)
+      : status
+  );
 
   const previousMonth = () => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1));
@@ -107,27 +104,27 @@ const CalendrierClasse = () => {
   });
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   const days = getDaysInMonth(currentMonth);
-  const weekDays = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+  const weekDays = [0, 1, 2, 3, 4, 5, 6].map((d) => t(`cal.weekday.${d}`));
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-4xl font-bold">Calendrier de Classe</h1>
-        <p className="text-muted-foreground mt-2">Consultez tous les contrôles planifiés</p>
+        <h1 className="text-4xl font-bold">{t('cal.title')}</h1>
+        <p className="text-muted-foreground mt-2">{t('cal.subtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Filtres</CardTitle>
+            <CardTitle className="text-lg">{t('cal.filters')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Classe</label>
+              <label className="block text-sm font-medium mb-2">{t('common.class')}</label>
               <select
                 value={selectedClass || ''}
                 onChange={(e) => setSelectedClass(e.target.value)}
@@ -142,38 +139,38 @@ const CalendrierClasse = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">Statut</label>
+              <label className="block text-sm font-medium mb-2">{t('cal.status')}</label>
               <select
                 value={selectedFilter}
                 onChange={(e) => setSelectedFilter(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2"
               >
-                <option value="all">Tous</option>
-                <option value="planned">Planifiés</option>
-                <option value="in_progress">En cours</option>
-                <option value="completed">Terminés</option>
-                <option value="cancelled">Annulés</option>
+                <option value="all">{t('cal.filter.all')}</option>
+                <option value="planned">{t('cal.filter.planned')}</option>
+                <option value="in_progress">{t('cal.filter.inProgress')}</option>
+                <option value="completed">{t('cal.filter.completed')}</option>
+                <option value="cancelled">{t('cal.filter.cancelled')}</option>
               </select>
             </div>
 
             <div className="pt-4 border-t">
-              <h3 className="font-medium mb-3">Légende</h3>
+              <h3 className="font-medium mb-3">{t('cal.legend')}</h3>
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></div>
-                  <span>Planifié</span>
+                  <span>{t('cal.status.planned')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-yellow-100 border border-yellow-300 rounded"></div>
-                  <span>En cours</span>
+                  <span>{t('cal.status.in_progress')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-green-100 border border-green-300 rounded"></div>
-                  <span>Terminé</span>
+                  <span>{t('cal.status.completed')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 bg-red-100 border border-red-300 rounded"></div>
-                  <span>Annulé</span>
+                  <span>{t('cal.status.cancelled')}</span>
                 </div>
               </div>
             </div>
@@ -185,10 +182,10 @@ const CalendrierClasse = () => {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>
-                  {currentMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                  {currentMonth.toLocaleDateString(dateLocale, { month: 'long', year: 'numeric' })}
                 </CardTitle>
                 <CardDescription>
-                  {selectedClass ? classes.find(c => c.id === selectedClass)?.name : 'Sélectionnez une classe'}
+                  {selectedClass ? classes.find(c => c.id === selectedClass)?.name : t('cal.pickClass')}
                 </CardDescription>
               </div>
               <div className="flex items-center gap-2">
@@ -202,7 +199,7 @@ const CalendrierClasse = () => {
                   onClick={() => setCurrentMonth(new Date())}
                   className="px-3 py-2 text-sm font-medium hover:bg-gray-100 rounded-lg transition-colors"
                 >
-                  Aujourd'hui
+                  {t('cal.today')}
                 </button>
                 <button
                   onClick={nextMonth}
@@ -265,16 +262,16 @@ const CalendrierClasse = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Liste des Contrôles</CardTitle>
+          <CardTitle>{t('cal.listTitle')}</CardTitle>
           <CardDescription>
-            {selectedClass ? classes.find(c => c.id === selectedClass)?.name : 'Toutes les classes'}
+            {selectedClass ? classes.find(c => c.id === selectedClass)?.name : t('cal.allClasses')}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {filteredControls.length === 0 ? (
             <div className="text-center py-8">
               <CalendarIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-600">Aucun contrôle trouvé</p>
+              <p className="text-gray-600">{t('cal.empty')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -294,7 +291,7 @@ const CalendrierClasse = () => {
                       <div className="flex items-center gap-4 text-sm text-gray-600 mb-2">
                         <div className="flex items-center gap-1">
                           <CalendarIcon className="w-4 h-4" />
-                          {new Date(control.date).toLocaleDateString('fr-FR')}
+                          {new Date(control.date).toLocaleDateString(dateLocale)}
                         </div>
                         {control.start_time && (
                           <div className="flex items-center gap-1">
@@ -303,7 +300,7 @@ const CalendrierClasse = () => {
                           </div>
                         )}
                         <div className="flex items-center gap-1">
-                          <span className="font-medium">Prof:</span>
+                          <span className="font-medium">{t('cal.teacherAbbr')}</span>
                           {control.first_name} {control.last_name}
                         </div>
                       </div>

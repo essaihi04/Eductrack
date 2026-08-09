@@ -3,6 +3,7 @@ import { ChevronLeft, BarChart3, TrendingUp, AlertCircle, Users, Target, Phone, 
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 import { useYear } from '../../contexts/YearContext';
 import { toDashYear } from '../../lib/schoolYear';
 import StudentNotesModal from '../../components/StudentNotesModal';
@@ -15,6 +16,7 @@ const StudentProfile = () => {
   const { studentId } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const t = useT();
   const { year } = useYear();
   const [student, setStudent] = useState(null);
   const [stats, setStats] = useState(null);
@@ -63,13 +65,13 @@ const StudentProfile = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   if (!student) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-gray-600">Élève non trouvé</p>
+        <p className="text-gray-600">{t('sp.notFound')}</p>
       </div>
     );
   }
@@ -84,15 +86,9 @@ const StudentProfile = () => {
     }
   };
 
-  const getPresenceLabel = (status) => {
-    switch (status) {
-      case 'present': return 'Présent';
-      case 'absent': return 'Absent';
-      case 'late': return 'Retard';
-      case 'excused': return 'Excusé';
-      default: return status;
-    }
-  };
+  const getPresenceLabel = (status) => (
+    ['present', 'absent', 'late', 'excused'].includes(status) ? t(`track.status.${status}`) : status
+  );
 
   return (
     <div className="space-y-6">
@@ -105,14 +101,14 @@ const StudentProfile = () => {
         </button>
         <div className="flex-1 min-w-0">
           <h1 className="text-3xl font-bold">{student.first_name} {student.last_name}</h1>
-          <p className="text-muted-foreground mt-1">Fiche élève - Lecture seule</p>
+          <p className="text-muted-foreground mt-1">{t('sp.subtitle')}</p>
         </div>
         {canSeeNotes && (
           <button
             onClick={() => setShowNotes(true)}
             className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
           >
-            <GraduationCap className="w-4 h-4" /> Notes de l'élève (bulletin)
+            <GraduationCap className="w-4 h-4" /> {t('sp.notesButton')}
           </button>
         )}
       </div>
@@ -131,25 +127,25 @@ const StudentProfile = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Users className="w-5 h-5 text-blue-600" />
-              Présences
+              {t('sp.presences')}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Présent</span>
+                <span className="text-sm text-gray-600">{t('sp.present')}</span>
                 <span className="text-2xl font-bold text-green-600">{stats?.present_count ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Absent</span>
+                <span className="text-sm text-gray-600">{t('sp.absent')}</span>
                 <span className="text-2xl font-bold text-red-600">{stats?.absent_count ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Retards</span>
+                <span className="text-sm text-gray-600">{t('sp.late')}</span>
                 <span className="text-2xl font-bold text-yellow-600">{stats?.late_count || 0}</span>
               </div>
               <div className="mt-2 pt-2 border-t">
-                <div className="text-xs text-gray-500">Taux de présence</div>
+                <div className="text-xs text-gray-500">{t('sp.presenceRate')}</div>
                 <div className="text-lg font-bold text-green-600">
                   {stats?.total_sessions > 0 ? Math.round((stats.present_count / stats.total_sessions) * 100) : 0}%
                 </div>
@@ -162,37 +158,37 @@ const StudentProfile = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Target className="w-5 h-5 text-purple-600" />
-              Travail & Écriture
+              {t('sp.workWriting')}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">⭐ Excellent</span>
+                <span className="text-sm text-gray-600">{t('sp.excellent')}</span>
                 <span className="text-2xl font-bold text-green-600">{stats?.excellent_participation ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">🙋 Bon</span>
+                <span className="text-sm text-gray-600">{t('sp.good')}</span>
                 <span className="text-2xl font-bold text-blue-600">{stats?.bon_participation ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">😐 Faible</span>
+                <span className="text-sm text-gray-600">{t('sp.weak')}</span>
                 <span className="text-2xl font-bold text-yellow-600">{stats?.faible_participation ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">📚 Devoirs</span>
+                <span className="text-sm text-gray-600">{t('sp.homework')}</span>
                 <span className="text-2xl font-bold text-emerald-600">
                   {stats?.homework_rate !== null && stats?.homework_rate !== undefined ? `${stats.homework_rate}%` : '—'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">📘 Cahier</span>
+                <span className="text-sm text-gray-600">{t('sp.notebook')}</span>
                 <span className="text-2xl font-bold text-cyan-600">
                   {stats?.cahier_rate !== null && stats?.cahier_rate !== undefined ? `${stats.cahier_rate}%` : '—'}
                 </span>
               </div>
               <div className="mt-2 pt-2 border-t">
-                <div className="text-xs text-gray-500">✍️ Écriture</div>
+                <div className="text-xs text-gray-500">{t('sp.writing')}</div>
                 <div className="text-lg font-bold text-indigo-600">
                   {stats?.writing_rate !== null && stats?.writing_rate !== undefined ? `${stats.writing_rate}%` : '—'}
                 </div>
@@ -205,7 +201,7 @@ const StudentProfile = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Eye className="w-5 h-5 text-orange-600" />
-              Comportement
+              {t('sp.behavior')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -213,36 +209,36 @@ const StudentProfile = () => {
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600 flex items-center gap-1">
                   <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                  🟢 Concentré
+                  {t('sp.focused')}
                 </span>
                 <span className="text-2xl font-bold text-green-600">{stats?.concentre_count ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600 flex items-center gap-1">
                   <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
-                  🟡 Moyen
+                  {t('sp.medium')}
                 </span>
                 <span className="text-2xl font-bold text-yellow-600">{stats?.moyen_count ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-gray-600 flex items-center gap-1">
                   <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-                  🔴 Distrait
+                  {t('sp.distracted')}
                 </span>
                 <span className="text-2xl font-bold text-red-600">{stats?.distrait_count ?? 0}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">📱 Téléphone</span>
+                <span className="text-sm text-gray-600">{t('sp.phone')}</span>
                 <span className="text-2xl font-bold text-red-600">{stats?.phone_use_rate ?? 0}%</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">😴 Dort en classe</span>
+                <span className="text-sm text-gray-600">{t('sp.sleeps')}</span>
                 <span className="text-2xl font-bold text-orange-600">{stats?.sleeping_count ?? 0}</span>
               </div>
               <div className="mt-2 pt-2 border-t">
-                <div className="text-xs text-gray-500">Attitude</div>
+                <div className="text-xs text-gray-500">{t('sp.attitude')}</div>
                 <div className="text-sm text-gray-700">
-                  ✅ {stats?.correct_count ?? 0} correct · 💬 {stats?.bavarde_count ?? 0} bavarde · ⚠️ {stats?.perturbateur_count ?? 0} perturbateur
+                  {t('sp.attitudeSummary', { ok: stats?.correct_count ?? 0, chatty: stats?.bavarde_count ?? 0, disruptive: stats?.perturbateur_count ?? 0 })}
                 </div>
               </div>
             </div>
@@ -254,13 +250,13 @@ const StudentProfile = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />
-            Historique détaillé
+            {t('sp.historyTitle')}
           </CardTitle>
-          <CardDescription>10 dernières séances avec indicateurs complets</CardDescription>
+          <CardDescription>{t('sp.historySubtitle')}</CardDescription>
         </CardHeader>
         <CardContent>
           {recentTracking.length === 0 ? (
-            <p className="text-gray-600 text-center py-8">Aucun suivi enregistré</p>
+            <p className="text-gray-600 text-center py-8">{t('sp.noTracking')}</p>
           ) : (
             <div className="space-y-2">
               {recentTracking.map((tracking, idx) => (
@@ -274,63 +270,63 @@ const StudentProfile = () => {
                         ? 'bg-red-100 text-red-700'
                         : 'bg-yellow-100 text-yellow-700'
                     }`}>
-                      {tracking.presence === 'present' ? 'Présent' : tracking.presence === 'absent' ? 'Absent' : 'Retard'}
+                      {tracking.presence === 'present' ? t('sp.present') : tracking.presence === 'absent' ? t('sp.absent') : t('track.status.late')}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
                     <div className="flex flex-col">
-                      <span className="text-gray-500 mb-1">Travail</span>
+                      <span className="text-gray-500 mb-1">{t('sp.col.work')}</span>
                       <span className={`font-medium px-2 py-1 rounded text-center ${
                         tracking.work_status === 'excellent' ? 'bg-green-100 text-green-700' :
                         tracking.work_status === 'good' ? 'bg-blue-100 text-blue-700' :
                         tracking.work_status === 'average' ? 'bg-yellow-100 text-yellow-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {tracking.work_status === 'excellent' ? 'Excellent' : 
-                         tracking.work_status === 'good' ? 'Bon' :
-                         tracking.work_status === 'average' ? 'Moyen' : '—'}
+                        {tracking.work_status === 'excellent' ? t('sp.work.excellent') :
+                         tracking.work_status === 'good' ? t('sp.work.good') :
+                         tracking.work_status === 'average' ? t('sp.work.average') : '—'}
                       </span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-gray-500 mb-1">Vigilance</span>
+                      <span className="text-gray-500 mb-1">{t('sp.col.vigilance')}</span>
                       <span className={`font-medium px-2 py-1 rounded text-center ${
                         tracking.discipline === 'concentre' ? 'bg-green-100 text-green-700' :
                         tracking.discipline === 'moyen' ? 'bg-yellow-100 text-yellow-700' :
                         tracking.discipline === 'distrait' ? 'bg-orange-100 text-orange-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {tracking.discipline === 'concentre' ? 'Vigilant' :
-                         tracking.discipline === 'moyen' ? 'Moyen' :
-                         tracking.discipline === 'distrait' ? 'Distrait' : '—'}
+                        {tracking.discipline === 'concentre' ? t('sp.vig.focused') :
+                         tracking.discipline === 'moyen' ? t('sp.vig.medium') :
+                         tracking.discipline === 'distrait' ? t('sp.vig.distracted') : '—'}
                       </span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-gray-500 mb-1">Téléphone</span>
+                      <span className="text-gray-500 mb-1">{t('sp.col.phone')}</span>
                       <span className={`font-medium px-2 py-1 rounded text-center ${
                         tracking.phone_use ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
                       }`}>
-                        {tracking.phone_use ? '✓ Utilisé' : '○ Non utilisé'}
+                        {tracking.phone_use ? t('sp.phoneUsed') : t('sp.phoneNotUsed')}
                       </span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-gray-500 mb-1">Attitude</span>
+                      <span className="text-gray-500 mb-1">{t('sp.col.attitude')}</span>
                       <span className={`font-medium px-2 py-1 rounded text-center ${
                         tracking.attitude === 'correct' ? 'bg-green-100 text-green-700' :
                         tracking.attitude === 'bavarre' ? 'bg-blue-100 text-blue-700' :
                         tracking.attitude === 'perturbateur' ? 'bg-red-100 text-red-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
-                        {tracking.attitude === 'correct' ? 'Correct' :
-                         tracking.attitude === 'bavarre' ? 'Bavarre' :
-                         tracking.attitude === 'perturbateur' ? 'Perturbateur' : '—'}
+                        {tracking.attitude === 'correct' ? t('sp.att.correct') :
+                         tracking.attitude === 'bavarre' ? t('sp.att.chatty') :
+                         tracking.attitude === 'perturbateur' ? t('sp.att.disruptive') : '—'}
                       </span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-gray-500 mb-1">Écriture</span>
+                      <span className="text-gray-500 mb-1">{t('sp.col.writing')}</span>
                       <span className={`font-medium px-2 py-1 rounded text-center ${
                         tracking.writing ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700'
                       }`}>
-                        {tracking.writing ? '✓ Fait' : '○ Non fait'}
+                        {tracking.writing ? t('sp.writingDone') : t('sp.writingNotDone')}
                       </span>
                     </div>
                   </div>
@@ -343,15 +339,15 @@ const StudentProfile = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Observations</CardTitle>
-          <CardDescription>Remarques pédagogiques</CardDescription>
+          <CardTitle>{t('sp.observations')}</CardTitle>
+          <CardDescription>{t('sp.observationsSubtitle')}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
             <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div>
               <p className="text-sm text-blue-900">
-                Cette fiche est en lecture seule. Les données sont agrégées à partir des suivis de séance.
+                {t('sp.readOnlyNotice')}
               </p>
             </div>
           </div>
@@ -364,9 +360,9 @@ const StudentProfile = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5" />
-              Évolution sur 30 jours
+              {t('sp.trend30')}
             </CardTitle>
-            <CardDescription>Présence, participation et vigilance</CardDescription>
+            <CardDescription>{t('sp.trend30Subtitle')}</CardDescription>
           </CardHeader>
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -381,9 +377,9 @@ const StudentProfile = () => {
                 <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke="#94a3b8" />
                 <Tooltip formatter={(v) => `${v}%`} />
                 <Legend />
-                <Line type="monotone" dataKey="presence" name="Présence" stroke="#22c55e" strokeWidth={2} />
-                <Line type="monotone" dataKey="participation" name="Participation" stroke="#3b82f6" strokeWidth={2} />
-                <Line type="monotone" dataKey="vigilance" name="Vigilance" stroke="#eab308" strokeWidth={2} />
+                <Line type="monotone" dataKey="presence" name={t('sp.radar.presence')} stroke="#22c55e" strokeWidth={2} />
+                <Line type="monotone" dataKey="participation" name={t('sp.radar.participation')} stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="vigilance" name={t('sp.radar.vigilance')} stroke="#eab308" strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -393,24 +389,24 @@ const StudentProfile = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Target className="w-5 h-5" />
-              Profil global
+              {t('sp.radarTitle')}
             </CardTitle>
-            <CardDescription>Vue radar des compétences</CardDescription>
+            <CardDescription>{t('sp.radarSubtitle')}</CardDescription>
           </CardHeader>
           <CardContent className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart data={[
-                { subject: 'Présence', value: stats?.total_sessions > 0 ? Math.round((stats.present_count / stats.total_sessions) * 100) : 0, fullMark: 100 },
-                { subject: 'Participation', value: stats?.total_sessions > 0 ? Math.round(((stats.excellent_participation * 100 + stats.bon_participation * 70 + stats.faible_participation * 30) / stats.total_sessions)) : 0, fullMark: 100 },
-                { subject: 'Vigilance', value: stats?.total_sessions > 0 ? Math.round(((stats.concentre_count * 100 + stats.moyen_count * 60 + stats.distrait_count * 20) / stats.total_sessions)) : 0, fullMark: 100 },
-                { subject: 'Attitude', value: stats?.total_sessions > 0 ? Math.round(((stats.correct_count * 100 + stats.bavarde_count * 40 + stats.perturbateur_count * 10) / stats.total_sessions)) : 0, fullMark: 100 },
-                { subject: 'Écriture', value: stats?.writing_rate ?? 0, fullMark: 100 },
-                { subject: 'Cahier', value: stats?.cahier_rate ?? 0, fullMark: 100 }
+                { subject: t('sp.radar.presence'), value: stats?.total_sessions > 0 ? Math.round((stats.present_count / stats.total_sessions) * 100) : 0, fullMark: 100 },
+                { subject: t('sp.radar.participation'), value: stats?.total_sessions > 0 ? Math.round(((stats.excellent_participation * 100 + stats.bon_participation * 70 + stats.faible_participation * 30) / stats.total_sessions)) : 0, fullMark: 100 },
+                { subject: t('sp.radar.vigilance'), value: stats?.total_sessions > 0 ? Math.round(((stats.concentre_count * 100 + stats.moyen_count * 60 + stats.distrait_count * 20) / stats.total_sessions)) : 0, fullMark: 100 },
+                { subject: t('sp.radar.attitude'), value: stats?.total_sessions > 0 ? Math.round(((stats.correct_count * 100 + stats.bavarde_count * 40 + stats.perturbateur_count * 10) / stats.total_sessions)) : 0, fullMark: 100 },
+                { subject: t('sp.radar.writing'), value: stats?.writing_rate ?? 0, fullMark: 100 },
+                { subject: t('sp.radar.notebook'), value: stats?.cahier_rate ?? 0, fullMark: 100 }
               ]}>
                 <PolarGrid stroke="#e2e8f0" />
                 <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11 }} />
                 <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10 }} />
-                <Radar name="Compétences" dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
+                <Radar name={t('sp.radar.skills')} dataKey="value" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.3} />
                 <Tooltip formatter={(v) => `${Math.round(v)}%`} />
               </RadarChart>
             </ResponsiveContainer>
@@ -423,59 +419,59 @@ const StudentProfile = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Lightbulb className="w-5 h-5 text-blue-600" />
-            Recommandations pédagogiques
+            {t('sp.recoTitle')}
           </CardTitle>
-          <CardDescription>Stratégies personnalisées basées sur les observations</CardDescription>
+          <CardDescription>{t('sp.recoSubtitle')}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-3">
               <h4 className="font-semibold text-blue-900 flex items-center gap-2">
                 <Users className="w-4 h-4" />
-                Points forts
+                {t('sp.strengths')}
               </h4>
               <ul className="space-y-2 text-sm text-gray-700">
                 <li className="flex items-start gap-2">
                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-1.5"></div>
-                  <span>Assiduité remarquable ({stats?.present_count || 0} présences)</span>
+                  <span>{t('sp.strength1', { n: stats?.present_count || 0 })}</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-1.5"></div>
-                  <span>Comportement stable en classe</span>
+                  <span>{t('sp.strength2')}</span>
                 </li>
               </ul>
             </div>
             <div className="space-y-3">
               <h4 className="font-semibold text-orange-900 flex items-center gap-2">
                 <Target className="w-4 h-4" />
-                Axes d'amélioration
+                {t('sp.improvements')}
               </h4>
               <ul className="space-y-2 text-sm text-gray-700">
                 <li className="flex items-start gap-2">
                   <div className="w-1.5 h-1.5 bg-orange-500 rounded-full mt-1.5"></div>
-                  <span>Stimuler la participation orale</span>
+                  <span>{t('sp.improvement1')}</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <div className="w-1.5 h-1.5 bg-orange-500 rounded-full mt-1.5"></div>
-                  <span>Renforcer l'engagement dans les activités</span>
+                  <span>{t('sp.improvement2')}</span>
                 </li>
               </ul>
             </div>
           </div>
           <div className="mt-4 p-3 bg-white rounded-lg border border-blue-200">
-            <h5 className="font-medium text-blue-900 mb-2">Actions suggérées</h5>
+            <h5 className="font-medium text-blue-900 mb-2">{t('sp.suggestedActions')}</h5>
             <div className="flex flex-wrap gap-2">
               <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                Questions directes
+                {t('sp.action1')}
               </span>
               <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                Travail en binôme
+                {t('sp.action2')}
               </span>
               <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                Feedback positif
+                {t('sp.action3')}
               </span>
               <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">
-                Rôle de leader
+                {t('sp.action4')}
               </span>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { YearProvider } from './contexts/YearContext';
+import { LanguageProvider } from './i18n';
 import SchoolSplash, { readSplashCache } from './components/SchoolSplash';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
@@ -170,6 +171,7 @@ const ProtectedRoute = ({ children }) => {
 function App() {
   return (
     <AuthProvider>
+      <LanguageProvider>
       <YearProvider>
       <Router>
         <Routes>
@@ -306,6 +308,7 @@ function App() {
         </Routes>
       </Router>
       </YearProvider>
+      </LanguageProvider>
     </AuthProvider>
   );
 }

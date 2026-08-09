@@ -56,6 +56,8 @@ import {
   Home as HomeIcon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
+import LanguageSwitcher from '../LanguageSwitcher';
 import { cn } from '../../lib/utils';
 import { resolveLogoUrl } from '../../lib/schoolLogo';
 import { supabase } from '../../lib/supabase';
@@ -67,6 +69,17 @@ import { adminSidebarDomains, domainForPath } from '../../pages/admin/adminNav';
 const Sidebar = () => {
   const location = useLocation();
   const { profile, signOut, refreshProfile } = useAuth();
+  const { t, dir } = useI18n();
+  const isTeacher = profile?.role === 'teacher';
+  // Libellé de l'espace affiché sous le nom de l'école (traduit).
+  const spaceLabel = () => {
+    if (profile?.role === 'super_admin') return t('space.superadmin');
+    if (profile?.role === 'admin' || profile?.role === 'school_admin') return t('space.admin');
+    if (profile?.role === 'teacher') return t('space.teacher');
+    if (profile?.role === 'finance_manager') return t('space.finance');
+    if (profile?.role === 'student') return t('space.student');
+    return '';
+  };
 
   // ── Gestion du logo de l'école par l'admin (clic sur le logo) ──
   const isSchoolAdmin = profile?.role === 'admin' || profile?.role === 'school_admin';
@@ -125,21 +138,21 @@ const Sidebar = () => {
 
     if (profile?.role === 'teacher') {
       return [
-        { icon: BarChart3, label: 'Tableau de bord', path: '/teacher/dashboard' },
-        { icon: Users, label: 'Élèves', path: '/students' },
-        { icon: Calendar, label: 'Suivi Rapide', path: '/teacher/rapide' },
-        { icon: CheckSquare, label: 'Planificateur', path: '/teacher/planificateur' },
-        { icon: ClipboardList, label: 'Contrôles', path: '/teacher/controls' },
-        { icon: Upload, label: 'Documents pédagogiques', path: '/teacher/documents' },
-        { icon: FileText, label: 'Devoirs', path: '/teacher/devoirs' },
-        { icon: FileText, label: 'Cahier de texte', path: '/teacher/cahier-de-texte' },
-        { icon: Edit, label: 'Appréciations', path: '/teacher/appreciations' },
-        { icon: CalendarClock, label: 'Rendez-vous parents', path: '/teacher/appointments' },
-        { section: 'Vie scolaire', isSection: true },
-        { icon: ImageIcon, label: 'Cahier de vie', path: '/school-life/cahier-de-vie' },
-        { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
-        { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
-        { icon: AlertTriangle, label: 'Signalements', path: '/school-life/signalements' },
+        { icon: BarChart3, label: t('nav.dashboard'), path: '/teacher/dashboard' },
+        { icon: Users, label: t('nav.students'), path: '/students' },
+        { icon: Calendar, label: t('nav.quickTracking'), path: '/teacher/rapide' },
+        { icon: CheckSquare, label: t('nav.planner'), path: '/teacher/planificateur' },
+        { icon: ClipboardList, label: t('nav.controls'), path: '/teacher/controls' },
+        { icon: Upload, label: t('nav.teachingDocs'), path: '/teacher/documents' },
+        { icon: FileText, label: t('nav.homework'), path: '/teacher/devoirs' },
+        { icon: FileText, label: t('nav.textbook'), path: '/teacher/cahier-de-texte' },
+        { icon: Edit, label: t('nav.appreciations'), path: '/teacher/appreciations' },
+        { icon: CalendarClock, label: t('nav.parentAppointments'), path: '/teacher/appointments' },
+        { section: t('nav.section.schoolLife'), isSection: true },
+        { icon: ImageIcon, label: t('nav.lifeBook'), path: '/school-life/cahier-de-vie' },
+        { icon: Sparkles, label: t('nav.extracurricular'), path: '/school-life/parascolaire' },
+        { icon: Search, label: t('nav.lostFound'), path: '/school-life/objets-perdus' },
+        { icon: AlertTriangle, label: t('nav.reports'), path: '/school-life/signalements' },
       ];
     }
 
@@ -306,9 +319,14 @@ const Sidebar = () => {
 
   return (
     <motion.aside
-      initial={{ x: -300 }}
+      initial={{ x: dir === 'rtl' ? 300 : -300 }}
       animate={{ x: 0 }}
-      className="fixed left-0 top-0 h-screen w-64 bg-card border-r border-border flex flex-col"
+      className={cn(
+        // `border-e` = bordure côté « fin de ligne » : à droite en français,
+        // à gauche en arabe — la barre reste toujours contre le contenu.
+        'fixed top-0 h-screen w-64 bg-card flex flex-col border-e border-border',
+        dir === 'rtl' ? 'right-0' : 'left-0'
+      )}
     >
       <div className="p-6 border-b border-border">
         {profile?.school?.logo_url && profile?.role !== 'super_admin' ? (
@@ -337,12 +355,7 @@ const Sidebar = () => {
                 onError={(e) => { e.target.style.display = 'none'; }}
               />
             )}
-            <p className="text-xs text-muted-foreground truncate">
-              {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
-              {profile?.role === 'teacher' && 'Espace Professeur'}
-              {profile?.role === 'finance_manager' && 'Espace Finance'}
-              {profile?.role === 'student' && 'Espace Élève'}
-            </p>
+            <p className="text-xs text-muted-foreground truncate">{spaceLabel()}</p>
           </div>
         ) : profile?.school?.name && profile?.role !== 'super_admin' ? (
           <div>
@@ -350,12 +363,7 @@ const Sidebar = () => {
               <School className="w-7 h-7 flex-shrink-0" />
               <span className="truncate">{profile.school.name}</span>
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
-              {profile?.role === 'teacher' && 'Espace Professeur'}
-              {profile?.role === 'finance_manager' && 'Espace Finance'}
-              {profile?.role === 'student' && 'Espace Élève'}
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">{spaceLabel()}</p>
             {isSchoolAdmin && (
               <button
                 onClick={() => { setLogoError(''); setLogoModalOpen(true); }}
@@ -371,13 +379,7 @@ const Sidebar = () => {
               <GraduationCap className="w-8 h-8" />
               EduTrack
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {profile?.role === 'super_admin' && 'Super Administration'}
-              {(profile?.role === 'admin' || profile?.role === 'school_admin') && 'Administration'}
-              {profile?.role === 'teacher' && 'Espace Professeur'}
-              {profile?.role === 'finance_manager' && 'Espace Finance'}
-              {profile?.role === 'student' && 'Espace Élève'}
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">{spaceLabel()}</p>
           </div>
         )}
       </div>
@@ -434,7 +436,7 @@ const Sidebar = () => {
           {profile?.avatar_url ? (
             <img
               src={profile.avatar_url.startsWith('http') ? profile.avatar_url : `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}${profile.avatar_url}`}
-              alt="Photo de profil"
+              alt={t('nav.profilePhoto')}
               className="w-10 h-10 rounded-full object-cover cursor-pointer hover:scale-105 transition-transform border border-border"
             />
           ) : (
@@ -452,12 +454,15 @@ const Sidebar = () => {
           </div>
         </Link>
 
+        {/* Choix de la langue de l'interface (compte professeur). */}
+        {isTeacher && <LanguageSwitcher className="mb-3" />}
+
         <button
           onClick={signOut}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-muted-foreground hover:bg-destructive hover:text-destructive-foreground transition-colors"
         >
           <LogOut className="w-5 h-5" />
-          <span className="font-medium">Déconnexion</span>
+          <span className="font-medium">{t('nav.logout')}</span>
         </button>
       </div>
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 import Sidebar from './Sidebar';
 import MobileNav from './MobileNav';
 import DomainTabs from './DomainTabs';
@@ -41,6 +42,8 @@ const DashboardLayout = () => {
   const [isLandscape, setIsLandscape] = useState(false);
   const location = useLocation();
   const { profile } = useAuth();
+  const { dir, t } = useI18n();
+  const rtl = dir === 'rtl';
   const themeClass = themeClassFor(profile);
 
   // Détecter l'orientation du téléphone
@@ -119,8 +122,8 @@ const DashboardLayout = () => {
       {isLandscape && isTrackingPage && (
         <button
           onClick={() => setSidebarOpen(true)}
-          className="fixed top-2 left-2 z-50 p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90"
-          aria-label="Ouvrir le menu"
+          className={`fixed top-2 ${rtl ? 'right-2' : 'left-2'} z-50 p-2 bg-primary text-white rounded-lg shadow-lg hover:bg-primary/90`}
+          aria-label={t('header.menu')}
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -129,7 +132,7 @@ const DashboardLayout = () => {
       )}
 
       {/* Main content */}
-      <main className={`${!(isLandscape && isTrackingPage) ? 'md:ml-64' : ''} ${isLandscape && isTrackingPage ? 'pt-0' : 'pt-14 md:pt-0'} ${!(isLandscape && isTrackingPage) ? 'pb-20 md:pb-0' : 'pb-0'} ${isLandscape && isTrackingPage ? 'p-2' : 'p-4 md:p-8'}`}>
+      <main className={`${!(isLandscape && isTrackingPage) ? (rtl ? 'md:mr-64' : 'md:ml-64') : ''} ${isLandscape && isTrackingPage ? 'pt-0' : 'pt-14 md:pt-0'} ${!(isLandscape && isTrackingPage) ? 'pb-20 md:pb-0' : 'pb-0'} ${isLandscape && isTrackingPage ? 'p-2' : 'p-4 md:p-8'}`}>
         {/* Barre supérieure : contrôles de contexte (école, année, notifications)
             sur leur propre ligne, alignés à droite. Les onglets de domaine
             occupent ensuite TOUTE la largeur en dessous (pas de colonne étroite

@@ -2,6 +2,7 @@ import { Calendar } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useYear } from '../contexts/YearContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useT } from '../i18n';
 
 // Seuls ces rôles peuvent choisir l'année (écran /select-year). Doit rester
 // aligné avec YEAR_SELECT_ROLES de YearSelectionPage.jsx. Pour les autres
@@ -15,6 +16,7 @@ const YearSelector = ({ className = '' }) => {
   const { year } = useYear();
   const { profile } = useAuth();
   const navigate = useNavigate();
+  const t = useT();
 
   // Masqué pour les rôles sans droit de changer d'année.
   if (!profile || !YEAR_SELECT_ROLES.includes(profile.role)) return null;
@@ -23,7 +25,7 @@ const YearSelector = ({ className = '' }) => {
     <button
       type="button"
       onClick={() => navigate('/select-year')}
-      title="Changer d'année scolaire"
+      title={t('header.changeYear')}
       className={`flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm font-medium hover:bg-accent transition-colors ${className}`}
     >
       <Calendar className="w-4 h-4 text-primary shrink-0" />

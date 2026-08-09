@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 import { cn } from '../../lib/utils';
 import {
   LayoutDashboard,
@@ -27,6 +28,7 @@ import {
 const MobileNav = () => {
   const location = useLocation();
   const { profile } = useAuth();
+  const t = useT();
 
   const getNavItems = () => {
     if (profile?.role === 'super_admin') {
@@ -39,11 +41,11 @@ const MobileNav = () => {
 
     if (profile?.role === 'teacher') {
       return [
-        { icon: BarChart3, label: 'Tableau', path: '/teacher/dashboard' },
-        { icon: Users, label: 'Élèves', path: '/students' },
-        { icon: Calendar, label: 'Suivi', path: '/teacher/rapide' },
-        { icon: ClipboardList, label: 'Contrôles', path: '/teacher/controls' },
-        { icon: CalendarDays, label: 'Planning', path: '/teacher/planificateur' },
+        { icon: BarChart3, label: t('mnav.dashboard'), path: '/teacher/dashboard' },
+        { icon: Users, label: t('mnav.students'), path: '/students' },
+        { icon: Calendar, label: t('mnav.tracking'), path: '/teacher/rapide' },
+        { icon: ClipboardList, label: t('mnav.controls'), path: '/teacher/controls' },
+        { icon: CalendarDays, label: t('mnav.planning'), path: '/teacher/planificateur' },
       ];
     }
 

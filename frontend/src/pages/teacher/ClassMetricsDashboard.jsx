@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { 
   LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, 
@@ -70,6 +71,9 @@ const MetricCard = ({ icon: Icon, label, value, subLabel, accent = 'blue', trend
 const ClassMetricsDashboard = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  // Locale de formatage des dates alignee sur la langue de l'interface.
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
   const [students, setStudents] = useState([]);
@@ -115,7 +119,7 @@ const ClassMetricsDashboard = () => {
       }
     } catch (err) {
       console.error('Erreur:', err);
-      setError('Impossible de charger les classes');
+      setError(t('dash.errorClasses'));
     } finally {
       setLoading(false);
     }
@@ -133,7 +137,7 @@ const ClassMetricsDashboard = () => {
       setStudents(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Erreur:', err);
-      setError('Impossible de charger les métriques');
+      setError(t('dash.errorMetrics'));
     } finally {
       setLoading(false);
     }
@@ -215,7 +219,7 @@ const ClassMetricsDashboard = () => {
         <div className="flex items-start justify-between mb-3">
           <div>
             <h3 className="font-semibold text-gray-900">{student.name}</h3>
-            <p className="text-xs text-gray-500">{student.totalSessions} séances</p>
+            <p className="text-xs text-gray-500">{t('dash.sessionsCount', { n: student.totalSessions })}</p>
           </div>
           <span className={`px-2 py-1 rounded-full text-xs font-bold ${badgeColor}`}>
             {badgeIcon} {student.globalScore !== null ? `${student.globalScore}%` : 'N/A'}
@@ -225,7 +229,7 @@ const ClassMetricsDashboard = () => {
         <div className="space-y-2">
           {student.presenceScore !== null && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Présence</span>
+              <span className="text-gray-600">{t('dash.metric.presence')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-blue-500"
@@ -238,7 +242,7 @@ const ClassMetricsDashboard = () => {
 
           {student.writingScore !== null && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Écriture</span>
+              <span className="text-gray-600">{t('dash.metric.writing')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-indigo-500"
@@ -251,7 +255,7 @@ const ClassMetricsDashboard = () => {
 
           {student.sleepingScore !== null && (
             <div className="flex items-center justify-between text-xs gap-2">
-              <span className="text-gray-600 whitespace-nowrap flex items-center gap-1">😴 Dormance</span>
+              <span className="text-gray-600 whitespace-nowrap flex items-center gap-1">😴 {t('dash.metric.sleeping')}</span>
               <div className="flex-1"></div>
               <span className="font-semibold text-gray-900 w-12 text-right">{student.sleepingPercentage}%</span>
               {typeof student.sleepingIncidents === 'number' && (
@@ -264,7 +268,7 @@ const ClassMetricsDashboard = () => {
 
           {student.homeworkScore !== null && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Devoirs</span>
+              <span className="text-gray-600">{t('dash.metric.homework')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-green-500"
@@ -277,7 +281,7 @@ const ClassMetricsDashboard = () => {
 
           {student.participationScore !== null && (
             <div className="flex items-center justify-between text-xs gap-2">
-              <span className="text-gray-600 whitespace-nowrap flex items-center gap-1">🙋 Participation</span>
+              <span className="text-gray-600 whitespace-nowrap flex items-center gap-1">🙋 {t('dash.metric.participation')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-purple-500"
@@ -295,7 +299,7 @@ const ClassMetricsDashboard = () => {
 
           {student.attitudeScore !== null && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Attitude</span>
+              <span className="text-gray-600">{t('dash.metric.attitude')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-pink-500"
@@ -308,7 +312,7 @@ const ClassMetricsDashboard = () => {
 
           {student.disciplineScore !== null && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Vigilance</span>
+              <span className="text-gray-600">{t('dash.metric.vigilance')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-orange-500"
@@ -321,7 +325,7 @@ const ClassMetricsDashboard = () => {
 
           {student.phoneScore !== null && (
             <div className="flex items-center justify-between text-xs gap-2">
-              <span className="text-gray-600 whitespace-nowrap flex items-center gap-1">📱 Téléphone</span>
+              <span className="text-gray-600 whitespace-nowrap flex items-center gap-1">📱 {t('dash.metric.phone')}</span>
               <div className="flex-1"></div>
               <span className="font-semibold text-gray-900 w-12 text-right">{student.phoneUsePercentage}%</span>
               {typeof student.phoneIncidents === 'number' && (
@@ -334,7 +338,7 @@ const ClassMetricsDashboard = () => {
 
           {student.cahierScore !== null && (
             <div className="flex items-center justify-between text-xs">
-              <span className="text-gray-600">Cahier détails</span>
+              <span className="text-gray-600">{t('dash.metric.notebook')}</span>
               <div className="flex-1 mx-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-yellow-500"
@@ -364,9 +368,9 @@ const ClassMetricsDashboard = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
             <Activity className="w-8 h-8 text-blue-600" />
-            Tableau de bord pédagogique
+            {t('dash.title')}
           </h1>
-          <p className="text-gray-600 mt-1">Suivi en temps réel des performances de vos élèves</p>
+          <p className="text-gray-600 mt-1">{t('dash.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -385,7 +389,7 @@ const ClassMetricsDashboard = () => {
                   periodDays === d ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                {d}j
+                {t('dash.days', { n: d })}
               </button>
             ))}
           </div>
@@ -408,7 +412,7 @@ const ClassMetricsDashboard = () => {
                 onClick={() => { setSelectedClass(alert.classId); setActiveTab('overview'); }}
                 className="ml-auto text-sm text-blue-600 hover:underline"
               >
-                Voir
+                {t('common.view')}
               </button>
             </div>
           ))}
@@ -418,10 +422,10 @@ const ClassMetricsDashboard = () => {
       {/* Navigation par onglets */}
       <div className="flex gap-2 border-b pb-2 overflow-x-auto">
         {[
-          { id: 'overview', label: 'Vue classe', icon: Eye },
-          { id: 'students', label: 'Élèves', icon: Users },
-          { id: 'trends', label: 'Tendances', icon: TrendingUp },
-          { id: 'recommendations', label: 'Recommandations', icon: Lightbulb }
+          { id: 'overview', label: t('dash.tab.overview'), icon: Eye },
+          { id: 'students', label: t('dash.tab.students'), icon: Users },
+          { id: 'trends', label: t('dash.tab.trends'), icon: TrendingUp },
+          { id: 'recommendations', label: t('dash.tab.recommendations'), icon: Lightbulb }
         ].map(tab => (
           <button
             key={tab.id}
@@ -452,7 +456,7 @@ const ClassMetricsDashboard = () => {
         {classAnalytics && (
           <div className="flex items-center gap-2">
             <HealthScoreGauge score={classAnalytics.healthScore} status={classAnalytics.healthStatus} size="sm" />
-            <span className="text-sm text-gray-600">Score de santé</span>
+            <span className="text-sm text-gray-600">{t('dash.healthScore')}</span>
           </div>
         )}
       </div>
@@ -464,13 +468,13 @@ const ClassMetricsDashboard = () => {
           {classAnalytics && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
-                <MetricCard icon={Users} label="Présence" value={`${classAnalytics.metrics.presenceRate}%`} accent="green" />
-                <MetricCard icon={PenLine} label="Écriture" value={classAnalytics.metrics.writingRate === null ? '—' : `${classAnalytics.metrics.writingRate}%`} accent="purple" />
-                <MetricCard icon={MessageSquare} label="Participation +" value={`${classAnalytics.metrics.participationPositiveRate}%`} accent="blue" />
-                <MetricCard icon={Heart} label="Attitude" value={classAnalytics.metrics.attitudeCorrectRate === null ? '—' : `${classAnalytics.metrics.attitudeCorrectRate}%`} accent="pink" />
-                <MetricCard icon={Eye} label="Vigilance" value={`${classAnalytics.metrics.disciplineGoodRate}%`} accent="yellow" />
-                <MetricCard icon={Phone} label="Téléphone" value={`${classAnalytics.metrics.phoneUseRate}%`} accent="red" />
-                <MetricCard icon={Moon} label="Dormance" value={`${classAnalytics.metrics.sleepingRate}%`} accent="orange" />
+                <MetricCard icon={Users} label={t('dash.metric.presence')} value={`${classAnalytics.metrics.presenceRate}%`} accent="green" />
+                <MetricCard icon={PenLine} label={t('dash.metric.writing')} value={classAnalytics.metrics.writingRate === null ? '—' : `${classAnalytics.metrics.writingRate}%`} accent="purple" />
+                <MetricCard icon={MessageSquare} label={t('dash.metric.participationPlus')} value={`${classAnalytics.metrics.participationPositiveRate}%`} accent="blue" />
+                <MetricCard icon={Heart} label={t('dash.metric.attitude')} value={classAnalytics.metrics.attitudeCorrectRate === null ? '—' : `${classAnalytics.metrics.attitudeCorrectRate}%`} accent="pink" />
+                <MetricCard icon={Eye} label={t('dash.metric.vigilance')} value={`${classAnalytics.metrics.disciplineGoodRate}%`} accent="yellow" />
+                <MetricCard icon={Phone} label={t('dash.metric.phone')} value={`${classAnalytics.metrics.phoneUseRate}%`} accent="red" />
+                <MetricCard icon={Moon} label={t('dash.metric.sleeping')} value={`${classAnalytics.metrics.sleepingRate}%`} accent="orange" />
               </div>
 
             </>
@@ -481,25 +485,25 @@ const ClassMetricsDashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Card className="border-l-4 border-l-blue-500">
                 <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-600 uppercase">Total élèves</p>
+                  <p className="text-xs font-semibold text-gray-600 uppercase">{t('dash.stat.totalStudents')}</p>
                   <p className="text-2xl font-bold text-gray-900 mt-1">{students.length}</p>
                 </CardContent>
               </Card>
               <Card className="border-l-4 border-l-green-500">
                 <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-600 uppercase">Excellents ⭐</p>
+                  <p className="text-xs font-semibold text-gray-600 uppercase">{t('dash.stat.excellent')}</p>
                   <p className="text-2xl font-bold text-green-600 mt-1">{students.filter(s => s.badge === 'excellent').length}</p>
                 </CardContent>
               </Card>
               <Card className="border-l-4 border-l-blue-400">
                 <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-600 uppercase">Bons ✓</p>
+                  <p className="text-xs font-semibold text-gray-600 uppercase">{t('dash.stat.good')}</p>
                   <p className="text-2xl font-bold text-blue-600 mt-1">{students.filter(s => s.badge === 'good').length}</p>
                 </CardContent>
               </Card>
               <Card className="border-l-4 border-l-red-500">
                 <CardContent className="p-4">
-                  <p className="text-xs font-semibold text-gray-600 uppercase">À risque ⚠️</p>
+                  <p className="text-xs font-semibold text-gray-600 uppercase">{t('dash.stat.atRisk')}</p>
                   <p className="text-2xl font-bold text-red-600 mt-1">{students.filter(s => s.badge === 'alert').length}</p>
                 </CardContent>
               </Card>
@@ -512,7 +516,7 @@ const ClassMetricsDashboard = () => {
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Clock className="w-5 h-5" />
-                  Sessions récentes
+                  {t('dash.recentSessions')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -520,16 +524,16 @@ const ClassMetricsDashboard = () => {
                   {classAnalytics.recentSessions.map(session => (
                     <div key={session.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                       <div>
-                        <p className="font-medium text-sm">{session.topic || 'Sans titre'}</p>
+                        <p className="font-medium text-sm">{session.topic || t('common.untitled')}</p>
                         <p className="text-xs text-gray-500">
-                          {new Date(session.date).toLocaleDateString('fr-FR')} • {session.start_time?.slice(0,5)}
+                          {new Date(session.date).toLocaleDateString(dateLocale)} • {session.start_time?.slice(0,5)}
                         </p>
                       </div>
                       <div className="flex items-center gap-4 text-sm">
-                        <span className="text-green-600">{session.presenceRate}% présents</span>
-                        <span className="text-blue-600">{session.participationRate}% actifs</span>
+                        <span className="text-green-600">{t('dash.present', { n: session.presenceRate })}</span>
+                        <span className="text-blue-600">{t('dash.active', { n: session.participationRate })}</span>
                         {session.incidentsCount > 0 && (
-                          <span className="text-red-600">{session.incidentsCount} incidents</span>
+                          <span className="text-red-600">{t('dash.incidents', { n: session.incidentsCount })}</span>
                         )}
                       </div>
                     </div>
@@ -542,37 +546,37 @@ const ClassMetricsDashboard = () => {
           {/* Actions rapides */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Actions rapides</CardTitle>
+              <CardTitle className="text-lg">{t('dash.quickActions')}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <button 
                   onClick={() => navigate('/teacher/rapide')}
-                  className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg text-left transition-colors"
+                  className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg text-start transition-colors"
                 >
                   <Calendar className="w-6 h-6 text-blue-600 mb-2" />
-                  <p className="font-medium text-sm">Suivi rapide</p>
+                  <p className="font-medium text-sm">{t('dash.quickTracking')}</p>
                 </button>
                 <button 
                   onClick={() => navigate('/teacher/devoirs')}
-                  className="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-left transition-colors"
+                  className="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-start transition-colors"
                 >
                   <BookOpen className="w-6 h-6 text-green-600 mb-2" />
-                  <p className="font-medium text-sm">Devoirs</p>
+                  <p className="font-medium text-sm">{t('dash.homework')}</p>
                 </button>
                 <button 
                   onClick={() => setActiveTab('students')}
-                  className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-left transition-colors"
+                  className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-start transition-colors"
                 >
                   <Users className="w-6 h-6 text-purple-600 mb-2" />
-                  <p className="font-medium text-sm">Voir élèves</p>
+                  <p className="font-medium text-sm">{t('dash.seeStudents')}</p>
                 </button>
                 <button 
                   onClick={() => setActiveTab('recommendations')}
-                  className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-left transition-colors"
+                  className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-start transition-colors"
                 >
                   <Lightbulb className="w-6 h-6 text-orange-600 mb-2" />
-                  <p className="font-medium text-sm">Recommandations</p>
+                  <p className="font-medium text-sm">{t('dash.recommendations')}</p>
                 </button>
               </div>
             </CardContent>
@@ -591,7 +595,7 @@ const ClassMetricsDashboard = () => {
                 filterBadge === 'all' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border hover:bg-gray-50'
               }`}
             >
-              Tous ({students.length})
+              {t('dash.filter.all', { n: students.length })}
             </button>
             <button
               onClick={() => setFilterBadge('excellent')}
@@ -599,7 +603,7 @@ const ClassMetricsDashboard = () => {
                 filterBadge === 'excellent' ? 'bg-green-600 text-white' : 'bg-white text-gray-700 border hover:bg-gray-50'
               }`}
             >
-              ⭐ Excellents ({students.filter(s => s.badge === 'excellent').length})
+              {t('dash.filter.excellent', { n: students.filter(s => s.badge === 'excellent').length })}
             </button>
             <button
               onClick={() => setFilterBadge('good')}
@@ -607,7 +611,7 @@ const ClassMetricsDashboard = () => {
                 filterBadge === 'good' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border hover:bg-gray-50'
               }`}
             >
-              ✓ Bons ({students.filter(s => s.badge === 'good').length})
+              {t('dash.filter.good', { n: students.filter(s => s.badge === 'good').length })}
             </button>
             <button
               onClick={() => setFilterBadge('alert')}
@@ -615,7 +619,7 @@ const ClassMetricsDashboard = () => {
                 filterBadge === 'alert' ? 'bg-red-600 text-white' : 'bg-white text-gray-700 border hover:bg-gray-50'
               }`}
             >
-              ⚠️ À risque ({students.filter(s => s.badge === 'alert').length})
+              {t('dash.filter.alert', { n: students.filter(s => s.badge === 'alert').length })}
             </button>
             <button
               onClick={() => setFilterBadge('normal')}
@@ -623,7 +627,7 @@ const ClassMetricsDashboard = () => {
                 filterBadge === 'normal' ? 'bg-gray-800 text-white' : 'bg-white text-gray-700 border hover:bg-gray-50'
               }`}
             >
-              📉 Faibles ({normalCount})
+              {t('dash.filter.weak', { n: normalCount })}
             </button>
             <button
               onClick={() => setFilterBadge('unrated')}
@@ -631,7 +635,7 @@ const ClassMetricsDashboard = () => {
                 filterBadge === 'unrated' ? 'bg-gray-500 text-white' : 'bg-white text-gray-700 border hover:bg-gray-50'
               }`}
             >
-              🕐 Non évalués ({unratedCount})
+              {t('dash.filter.unrated', { n: unratedCount })}
             </button>
           </div>
 
@@ -644,7 +648,7 @@ const ClassMetricsDashboard = () => {
 
           {filteredStudents.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-gray-600">Aucun élève trouvé avec ce filtre</p>
+              <p className="text-gray-600">{t('dash.noStudentForFilter')}</p>
             </div>
           )}
         </div>
@@ -657,24 +661,24 @@ const ClassMetricsDashboard = () => {
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle>Évolution sur {periodDays} jours</CardTitle>
-                  <CardDescription>Présence, participation, attitude et vigilance</CardDescription>
+                  <CardTitle>{t('dash.trendTitle', { n: periodDays })}</CardTitle>
+                  <CardDescription>{t('dash.trendSubtitle')}</CardDescription>
                 </CardHeader>
                 <CardContent className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={classAnalytics.trends.map(t => ({
                       ...t,
-                      dateLabel: new Date(t.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+                      dateLabel: new Date(t.date).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short' })
                     }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="dateLabel" stroke="#94a3b8" tick={{ fontSize: 11 }} />
                       <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke="#94a3b8" />
                       <Tooltip formatter={(v) => `${v}%`} />
                       <Legend />
-                      <Line type="monotone" dataKey="presenceRate" name="Présence" stroke="#22c55e" strokeWidth={2} />
-                      <Line type="monotone" dataKey="participationRate" name="Participation" stroke="#3b82f6" strokeWidth={2} />
-                      <Line type="monotone" dataKey="attitudeRate" name="Attitude" stroke="#ec4899" strokeWidth={2} />
-                      <Line type="monotone" dataKey="disciplineRate" name="Vigilance" stroke="#eab308" strokeWidth={2} />
+                      <Line type="monotone" dataKey="presenceRate" name={t('dash.metric.presence')} stroke="#22c55e" strokeWidth={2} />
+                      <Line type="monotone" dataKey="participationRate" name={t('dash.metric.participation')} stroke="#3b82f6" strokeWidth={2} />
+                      <Line type="monotone" dataKey="attitudeRate" name={t('dash.metric.attitude')} stroke="#ec4899" strokeWidth={2} />
+                      <Line type="monotone" dataKey="disciplineRate" name={t('dash.metric.vigilance')} stroke="#eab308" strokeWidth={2} />
                     </LineChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -682,24 +686,24 @@ const ClassMetricsDashboard = () => {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Incidents</CardTitle>
-                  <CardDescription>Téléphone, dormance, perturbateur et bavard</CardDescription>
+                  <CardTitle>{t('dash.incidentsTitle')}</CardTitle>
+                  <CardDescription>{t('dash.incidentsSubtitle')}</CardDescription>
                 </CardHeader>
                 <CardContent className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={classAnalytics.trends.map(t => ({
                       ...t,
-                      dateLabel: new Date(t.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+                      dateLabel: new Date(t.date).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short' })
                     }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="dateLabel" stroke="#94a3b8" tick={{ fontSize: 11 }} />
                       <YAxis domain={[0, 50]} tickFormatter={(v) => `${v}%`} stroke="#94a3b8" />
                       <Tooltip formatter={(v) => `${v}%`} />
                       <Legend />
-                      <Bar dataKey="phoneRate" name="Téléphone" fill="#ef4444" />
-                      <Bar dataKey="sleepingRate" name="Dormance" fill="#f97316" />
-                      <Bar dataKey="perturbateurRate" name="Perturbateur" fill="#a855f7" />
-                      <Bar dataKey="bavardRate" name="Bavard" fill="#ec4899" />
+                      <Bar dataKey="phoneRate" name={t('dash.metric.phone')} fill="#ef4444" />
+                      <Bar dataKey="sleepingRate" name={t('dash.metric.sleeping')} fill="#f97316" />
+                      <Bar dataKey="perturbateurRate" name={t('dash.disruptive')} fill="#a855f7" />
+                      <Bar dataKey="bavardRate" name={t('dash.chatty')} fill="#ec4899" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -708,8 +712,8 @@ const ClassMetricsDashboard = () => {
           ) : (
             <div className="text-center py-12">
               <TrendingUp className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-600">Pas encore de données de tendances sur cette période</p>
-              <p className="text-sm text-gray-400 mt-1">Continuez à utiliser le suivi rapide pour voir les tendances</p>
+              <p className="text-gray-600">{t('dash.noTrends')}</p>
+              <p className="text-sm text-gray-400 mt-1">{t('dash.noTrendsHint')}</p>
             </div>
           )}
         </div>
@@ -722,7 +726,7 @@ const ClassMetricsDashboard = () => {
             <div className="space-y-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Target className="w-5 h-5 text-blue-600" />
-                Points d'amélioration identifiés
+                {t('dash.issuesTitle')}
               </h2>
               {classAnalytics.issues.map((issue, idx) => (
                 <Card key={idx} className={`border-l-4 ${issue.severity === 'high' ? 'border-l-red-500' : 'border-l-orange-500'}`}>
@@ -753,8 +757,8 @@ const ClassMetricsDashboard = () => {
           ) : (
             <div className="text-center py-12">
               <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-              <h3 className="font-semibold text-lg">Aucun problème majeur détecté</h3>
-              <p className="text-sm text-gray-600 mt-1">La classe {selectedClassData?.name} se porte bien ! Continuez ainsi.</p>
+              <h3 className="font-semibold text-lg">{t('dash.noIssue')}</h3>
+              <p className="text-sm text-gray-600 mt-1">{t('dash.noIssueHint', { name: selectedClassData?.name })}</p>
             </div>
           )}
 
@@ -763,26 +767,26 @@ const ClassMetricsDashboard = () => {
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
                 <Lightbulb className="w-5 h-5 text-blue-600" />
-                Conseils pédagogiques
+                {t('dash.tipsTitle')}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <ul className="space-y-2 text-sm">
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <span>Félicitez régulièrement les élèves qui progressent pour maintenir leur motivation</span>
+                  <span>{t('dash.tip1')}</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <span>Variez les formats de cours (travail en groupe, présentations) pour stimuler la participation</span>
+                  <span>{t('dash.tip2')}</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <span>Contactez les parents des élèves à risque pour un suivi personnalisé</span>
+                  <span>{t('dash.tip3')}</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <span>Utilisez le suivi rapide à chaque séance pour un historique complet</span>
+                  <span>{t('dash.tip4')}</span>
                 </li>
               </ul>
             </CardContent>

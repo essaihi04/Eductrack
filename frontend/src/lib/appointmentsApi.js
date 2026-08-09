@@ -51,12 +51,16 @@ export const APPOINTMENT_STATUS = {
   termine: { label: 'Terminé', cls: 'bg-gray-100 text-gray-600' },
 };
 
-/** « jeudi 4 septembre 2026 à 10:30 » */
-export function formatSlot(iso) {
+/**
+ * « jeudi 4 septembre 2026 à 10:30 ».
+ * `locale` / `at` permettent aux pages traduites (arabe) de rendre la même
+ * phrase dans leur langue sans dupliquer le formatage.
+ */
+export function formatSlot(iso, { locale = 'fr-FR', at = 'à' } = {}) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return `${d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+  return `${d.toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} ${at} ${d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 /** ISO → valeur pour <input type="datetime-local"> (heure locale). */

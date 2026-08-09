@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, FileText, Plus, Edit2, Trash2, Save, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 
 const Planificateur = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
 
   const [classes, setClasses] = useState([]);
   const [controls, setControls] = useState([]);
@@ -98,18 +99,9 @@ const Planificateur = () => {
     }
   };
 
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case 'planned':
-        return 'Planifié';
-      case 'in_progress':
-        return 'En cours';
-      case 'completed':
-        return 'Terminé';
-      default:
-        return status;
-    }
-  };
+  const getStatusLabel = (status) => (
+    ['planned', 'in_progress', 'completed'].includes(status) ? t(`planif.status.${status}`) : status
+  );
 
   const handleEdit = (control) => {
     setEditingControl(control);
@@ -125,7 +117,7 @@ const Planificateur = () => {
   };
 
   const handleDelete = async (controlId) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce contrôle ?')) {
+    if (!confirm(t('planif.confirmDelete'))) {
       return;
     }
 
@@ -139,11 +131,11 @@ const Planificateur = () => {
       if (res.ok) {
         setControls(controls.filter(c => c.id !== controlId));
       } else {
-        alert('Erreur lors de la suppression du contrôle');
+        alert(t('planif.deleteError'));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('Erreur lors de la suppression du contrôle');
+      alert(t('planif.deleteError'));
     }
   };
 
@@ -181,11 +173,11 @@ const Planificateur = () => {
         });
         fetchData();
       } else {
-        alert('Erreur lors de la sauvegarde du contrôle');
+        alert(t('planif.saveError'));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('Erreur lors de la sauvegarde du contrôle');
+      alert(t('planif.saveError'));
     } finally {
       setSaving(false);
     }
@@ -241,17 +233,14 @@ const Planificateur = () => {
     };
 
     const days = getDaysInMonth(currentDate);
-    const monthNames = [
-      'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
-      'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
-    ];
+    const monthNames = Array.from({ length: 12 }, (_, i) => t(`planif.month.${i}`));
 
     return (
       <>
         <Card>
           <CardHeader className="p-3 sm:p-6">
             <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
-              <span className="text-base sm:text-lg">Calendrier des Contrôles</span>
+              <span className="text-base sm:text-lg">{t('planif.calendarTitle')}</span>
               <div className="flex items-center justify-center gap-2">
                 <button
                   onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
@@ -273,7 +262,7 @@ const Planificateur = () => {
           </CardHeader>
           <CardContent className="p-2 sm:p-6">
             <div className="grid grid-cols-7 gap-1 sm:gap-2">
-              {['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'].map(day => (
+              {[0, 1, 2, 3, 4, 5, 6].map((d) => t(`cal.weekday.${d}`)).map(day => (
                 <div key={day} className="text-center text-[10px] sm:text-sm font-medium text-gray-600 p-1 sm:p-2">
                   {day}
                 </div>
@@ -304,7 +293,7 @@ const Planificateur = () => {
                         {controls.length > 0 && (
                           <div className="space-y-0.5 sm:space-y-1">
                             {controls.slice(0, 2).map((control, idx) => {
-                              const subjectName = control.subject_name || 'Non spécifié';
+                              const subjectName = control.subject_name || t('planif.unspecified');
                               const colorClass = getSubjectColor(subjectName);
                               const bgColorClass = colorClass.replace('bg-', 'bg-opacity-20 bg-');
                               const textColorClass = colorClass.replace('bg-', 'text-');
@@ -341,7 +330,7 @@ const Planificateur = () => {
             <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg sm:text-xl font-bold">
-                  Contrôles du {selectedDate.toLocaleDateString('fr-FR')}
+                  {t('planif.dayControls', { date: selectedDate.toLocaleDateString(dateLocale) })}
                 </h2>
                 <button
                   onClick={() => setShowModal(false)}
@@ -353,7 +342,7 @@ const Planificateur = () => {
 
               {selectedControls.length === 0 ? (
                 <p className="text-gray-600 text-center py-8">
-                  Aucun contrôle prévu pour cette date
+                  {t('planif.noControlThatDay')}
                 </p>
               ) : (
                 <div className="space-y-3 sm:space-y-4">
@@ -375,7 +364,7 @@ const Planificateur = () => {
                             )}
                             {control.subject_name && (
                               <div className="flex items-center gap-2">
-                                <span className="font-medium">Matière:</span>
+                                <span className="font-medium">{t('planif.subjectLabel')}</span>
                                 <span className="truncate">{control.subject_name}</span>
                               </div>
                             )}
@@ -393,7 +382,7 @@ const Planificateur = () => {
                               onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
                               className="px-3 py-1.5 bg-green-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors flex-shrink-0"
                             >
-                              Démarrer
+                              {t('planif.start')}
                             </button>
                           )}
                         </div>
@@ -414,7 +403,7 @@ const Planificateur = () => {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Chargement...</p>
+          <p className="text-gray-600">{t('common.loading')}</p>
         </div>
       </div>
     );
@@ -424,8 +413,8 @@ const Planificateur = () => {
     <div className="p-3 sm:p-6 max-w-7xl mx-auto pb-20 md:pb-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-4xl font-bold truncate">Planificateur</h1>
-          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">Vue calendrier de vos contrôles</p>
+          <h1 className="text-2xl sm:text-4xl font-bold truncate">{t('planif.title')}</h1>
+          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">{t('planif.subtitle')}</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
           <button
@@ -433,7 +422,7 @@ const Planificateur = () => {
             className="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
           >
             <FileText className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>Gérer les Contrôles</span>
+            <span>{t('planif.manageControls')}</span>
           </button>
           <button
             onClick={() => {
@@ -451,7 +440,7 @@ const Planificateur = () => {
             className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>Nouveau Contrôle</span>
+            <span>{t('planif.newControl')}</span>
           </button>
         </div>
       </div>
@@ -463,7 +452,7 @@ const Planificateur = () => {
           <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg sm:text-xl font-bold">
-                {editingControl ? 'Modifier le Contrôle' : 'Nouveau Contrôle'}
+                {editingControl ? t('planif.editControl') : t('planif.newControl')}
               </h2>
               <button
                 onClick={() => setShowCreateModal(false)}
@@ -476,7 +465,7 @@ const Planificateur = () => {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Classe *
+                  {t('planif.classRequired')}
                 </label>
                 <select
                   value={formData.class_id}
@@ -484,7 +473,7 @@ const Planificateur = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
                 >
-                  <option value="">Sélectionner une classe</option>
+                  <option value="">{t('planif.pickClass')}</option>
                   {classes.map(cls => (
                     <option key={cls.id} value={cls.id}>{cls.name}</option>
                   ))}
@@ -493,7 +482,7 @@ const Planificateur = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nom du contrôle *
+                  {t('planif.nameRequired')}
                 </label>
                 <input
                   type="text"
@@ -506,7 +495,7 @@ const Planificateur = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date *
+                  {t('planif.dateRequired')}
                 </label>
                 <input
                   type="date"
@@ -520,7 +509,7 @@ const Planificateur = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Heure de début
+                    {t('home.startTime')}
                   </label>
                   <input
                     type="time"
@@ -532,7 +521,7 @@ const Planificateur = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Heure de fin
+                    {t('home.endTime')}
                   </label>
                   <input
                     type="time"
@@ -545,7 +534,7 @@ const Planificateur = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
+                  {t('planif.description')}
                 </label>
                 <textarea
                   value={formData.description}
@@ -561,14 +550,14 @@ const Planificateur = () => {
                   onClick={() => setShowCreateModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Annuler
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                 >
-                  {saving ? 'Sauvegarde...' : (editingControl ? 'Modifier' : 'Créer')}
+                  {saving ? t('common.saving') : (editingControl ? t('common.modify') : t('common.create'))}
                 </button>
               </div>
             </form>

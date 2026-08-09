@@ -415,6 +415,60 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Arabe / RTL — activé par dir="rtl" posé sur <html> (voir src/i18n).
+   1. La police arabe passe en tête de la pile (IBM Plex Sans Arabic, chargée
+      dans index.html) pour un rendu correct des ligatures.
+   2. Les utilitaires directionnels les plus courants sont retournés : Tailwind
+      écrit des règles physiques (left/right), pas logiques.
+   ───────────────────────────────────────────────────────────────────────── */
+[dir='rtl'] body {
+  font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', 'Inter', system-ui, -apple-system,
+    'Segoe UI', Roboto, 'Arial Unicode MS', sans-serif;
+}
+[dir='rtl'] h1,
+[dir='rtl'] h2,
+[dir='rtl'] h3,
+[dir='rtl'] .font-display {
+  font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', 'Sora', system-ui, sans-serif;
+}
+/* Alignements : « left » signifie début de ligne, « right » fin de ligne. */
+[dir='rtl'] .text-left {
+  text-align: right;
+}
+[dir='rtl'] .text-right {
+  text-align: left;
+}
+/* Marges automatiques de rejet en fin de ligne (boutons « Voir », badges…). */
+[dir='rtl'] .ml-auto {
+  margin-left: 0;
+  margin-right: auto;
+}
+[dir='rtl'] .mr-auto {
+  margin-right: 0;
+  margin-left: auto;
+}
+/* Note : les liserés colorés `border-l-4 border-l-<couleur>` ne sont pas
+   retournés — Tailwind ne pose que `border-left-color`, un basculement à
+   droite perdrait la couleur. Le liseré reste donc à gauche en arabe. */
+/* Retraits d'arborescence (navigation en accordéon, listes imbriquées). */
+[dir='rtl'] .ml-4 {
+  margin-left: 0;
+  margin-right: 1rem;
+}
+[dir='rtl'] .pl-2 {
+  padding-left: 0;
+  padding-right: 0.5rem;
+}
+[dir='rtl'] .border-l {
+  border-left-width: 0;
+  border-right-width: 1px;
+}
+/* Chevrons et flèches : miroir horizontal. */
+[dir='rtl'] .rtl-mirror {
+  transform: scaleX(-1);
+}
+
 /* Barre latérale légèrement crème côté personnel (inspiration « école »).
    Règle non-layered : prioritaire sur l'utilitaire bg-card de l'aside. */
 .theme-school aside {

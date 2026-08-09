@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, Save, AlertCircle, Plus } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 
 const SuiviSeance = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const t = useT();
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
   const [students, setStudents] = useState([]);
@@ -87,7 +87,7 @@ const SuiviSeance = () => {
   const saveTracking = async () => {
     try {
       setSaving(true);
-      setAutoSaveStatus('Sauvegarde en cours...');
+      setAutoSaveStatus(t('track.saving'));
 
       const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = authSession?.access_token;
@@ -128,11 +128,11 @@ const SuiviSeance = () => {
         });
       }
 
-      setAutoSaveStatus('✓ Sauvegardé');
+      setAutoSaveStatus(t('track.saved'));
       setTimeout(() => setAutoSaveStatus(''), 2000);
     } catch (error) {
       console.error('Erreur de sauvegarde:', error);
-      setAutoSaveStatus('✗ Erreur de sauvegarde');
+      setAutoSaveStatus(t('track.saveError'));
     } finally {
       setSaving(false);
     }
@@ -169,7 +169,7 @@ const SuiviSeance = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   const selectedClassData = classes.find(c => c.id === selectedClass);
@@ -178,8 +178,8 @@ const SuiviSeance = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Suivi de Séance</h1>
-          <p className="text-muted-foreground mt-1">Enregistrez la présence, le travail, la discipline et l'usage du téléphone</p>
+          <h1 className="text-3xl font-bold">{t('track.pageTitle')}</h1>
+          <p className="text-muted-foreground mt-1">{t('track.pageSubtitle')}</p>
         </div>
         <div className="text-right">
           {autoSaveStatus && (
@@ -187,13 +187,13 @@ const SuiviSeance = () => {
               {autoSaveStatus}
             </p>
           )}
-          <p className="text-xs text-muted-foreground mt-1">Sauvegarde automatique</p>
+          <p className="text-xs text-muted-foreground mt-1">{t('track.autoSave')}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
-          <label className="text-sm font-medium text-gray-700">Classe</label>
+          <label className="text-sm font-medium text-gray-700">{t('common.class')}</label>
           <select
             value={selectedClass || ''}
             onChange={(e) => setSelectedClass(e.target.value)}
@@ -207,7 +207,7 @@ const SuiviSeance = () => {
           </select>
         </div>
         <div>
-          <label className="text-sm font-medium text-gray-700">Date</label>
+          <label className="text-sm font-medium text-gray-700">{t('track.date')}</label>
           <input
             type="date"
             value={sessionDate}
@@ -222,7 +222,7 @@ const SuiviSeance = () => {
             className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
-            Sauvegarder
+            {t('common.save')}
           </button>
         </div>
       </div>
@@ -230,8 +230,8 @@ const SuiviSeance = () => {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
         <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-blue-900">Conseil</p>
-          <p className="text-sm text-blue-800 mt-1">Cliquez sur les boutons pour changer le statut. Sauvegarde automatique toutes les 2 secondes.</p>
+          <p className="text-sm font-medium text-blue-900">{t('track.tip')}</p>
+          <p className="text-sm text-blue-800 mt-1">{t('track.tipButtons')}</p>
         </div>
       </div>
 
@@ -239,31 +239,31 @@ const SuiviSeance = () => {
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-gray-100 border-b-2 border-gray-300">
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100 z-10">
-                Élève
+              <th className="px-4 py-3 text-start text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100 z-10">
+                {t('track.student')}
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Présence</span>
-                  <span className="text-xs font-normal text-gray-500">P/A/R/E</span>
+                  <span>{t('track.presence')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.presence')}</span>
                 </div>
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Travail</span>
-                  <span className="text-xs font-normal text-gray-500">E/B/M/P</span>
+                  <span>{t('track.work')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.quality')}</span>
                 </div>
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Discipline</span>
-                  <span className="text-xs font-normal text-gray-500">E/B/M/P</span>
+                  <span>{t('track.discipline')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.quality')}</span>
                 </div>
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Téléphone</span>
-                  <span className="text-xs font-normal text-gray-500">O/N</span>
+                  <span>{t('track.phone')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.yesno')}</span>
                 </div>
               </th>
             </tr>
@@ -277,10 +277,10 @@ const SuiviSeance = () => {
                 <td className="px-4 py-3 text-center">
                   <div className="flex gap-1 justify-center">
                     {[
-                      { value: 'present', label: 'P', color: 'bg-green-500' },
-                      { value: 'absent', label: 'A', color: 'bg-red-500' },
-                      { value: 'late', label: 'R', color: 'bg-yellow-500' },
-                      { value: 'excused', label: 'E', color: 'bg-blue-500' }
+                      { value: 'present', label: t('track.abbr.present'), color: 'bg-green-500' },
+                      { value: 'absent', label: t('track.abbr.absent'), color: 'bg-red-500' },
+                      { value: 'late', label: t('track.abbr.late'), color: 'bg-yellow-500' },
+                      { value: 'excused', label: t('track.abbr.excused'), color: 'bg-blue-500' }
                     ].map(status => (
                       <button
                         key={status.value}
@@ -290,7 +290,7 @@ const SuiviSeance = () => {
                             ? `${status.color} text-white`
                             : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                         }`}
-                        title={status.value}
+                        title={t(`track.status.${status.value}`)}
                       >
                         {status.label}
                       </button>
@@ -300,10 +300,10 @@ const SuiviSeance = () => {
                 <td className="px-4 py-3 text-center">
                   <div className="flex gap-1 justify-center">
                     {[
-                      { value: 'excellent', label: 'E', color: 'bg-green-500' },
-                      { value: 'good', label: 'B', color: 'bg-blue-500' },
-                      { value: 'average', label: 'M', color: 'bg-yellow-500' },
-                      { value: 'poor', label: 'P', color: 'bg-red-500' }
+                      { value: 'excellent', label: t('track.abbr.excellent'), color: 'bg-green-500' },
+                      { value: 'good', label: t('track.abbr.good'), color: 'bg-blue-500' },
+                      { value: 'average', label: t('track.abbr.average'), color: 'bg-yellow-500' },
+                      { value: 'poor', label: t('track.abbr.poor'), color: 'bg-red-500' }
                     ].map(status => (
                       <button
                         key={status.value}
@@ -313,7 +313,7 @@ const SuiviSeance = () => {
                             ? `${status.color} text-white`
                             : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                         }`}
-                        title={status.value}
+                        title={t(`track.status.${status.value}`)}
                       >
                         {status.label}
                       </button>
@@ -323,10 +323,10 @@ const SuiviSeance = () => {
                 <td className="px-4 py-3 text-center">
                   <div className="flex gap-1 justify-center">
                     {[
-                      { value: 'excellent', label: 'E', color: 'bg-green-500' },
-                      { value: 'good', label: 'B', color: 'bg-blue-500' },
-                      { value: 'average', label: 'M', color: 'bg-yellow-500' },
-                      { value: 'poor', label: 'P', color: 'bg-red-500' }
+                      { value: 'excellent', label: t('track.abbr.excellent'), color: 'bg-green-500' },
+                      { value: 'good', label: t('track.abbr.good'), color: 'bg-blue-500' },
+                      { value: 'average', label: t('track.abbr.average'), color: 'bg-yellow-500' },
+                      { value: 'poor', label: t('track.abbr.poor'), color: 'bg-red-500' }
                     ].map(status => (
                       <button
                         key={status.value}
@@ -336,7 +336,7 @@ const SuiviSeance = () => {
                             ? `${status.color} text-white`
                             : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                         }`}
-                        title={status.value}
+                        title={t(`track.status.${status.value}`)}
                       >
                         {status.label}
                       </button>
@@ -351,7 +351,7 @@ const SuiviSeance = () => {
                         ? 'bg-red-500 text-white'
                         : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                     }`}
-                    title="Téléphone"
+                    title={t('track.phone')}
                   >
                     {tracking[student.id]?.phone_use ? '✓' : '○'}
                   </button>
@@ -367,7 +367,7 @@ const SuiviSeance = () => {
           onClick={() => navigate(-1)}
           className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
-          Retour
+          {t('common.back')}
         </button>
         <button
           onClick={saveTracking}

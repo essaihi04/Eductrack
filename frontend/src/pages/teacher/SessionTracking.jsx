@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, Save, Clock, AlertCircle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 
 const StatusButton = ({ value, onChange, options, label }) => {
+  const t = useT();
   const colors = {
     present: 'bg-green-100 text-green-800 border-green-300',
     absent: 'bg-red-100 text-red-800 border-red-300',
@@ -27,7 +28,7 @@ const StatusButton = ({ value, onChange, options, label }) => {
               value === option ? colors[option] : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'
             }`}
           >
-            {option.charAt(0).toUpperCase() + option.slice(1)}
+            {t(`track.status.${option}`)}
           </button>
         ))}
       </div>
@@ -38,7 +39,7 @@ const StatusButton = ({ value, onChange, options, label }) => {
 const SessionTracking = () => {
   const { classId, sessionId } = useParams();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const t = useT();
   const [session, setSession] = useState(null);
   const [students, setStudents] = useState([]);
   const [tracking, setTracking] = useState({});
@@ -102,7 +103,7 @@ const SessionTracking = () => {
   const saveTracking = async () => {
     try {
       setSaving(true);
-      setAutoSaveStatus('Sauvegarde...');
+      setAutoSaveStatus(t('track.saving'));
 
       const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = authSession?.access_token;
@@ -122,11 +123,11 @@ const SessionTracking = () => {
         });
       }
 
-      setAutoSaveStatus('Sauvegardé ✓');
+      setAutoSaveStatus(t('track.saved'));
       setTimeout(() => setAutoSaveStatus(''), 2000);
     } catch (error) {
       console.error('Error saving tracking:', error);
-      setAutoSaveStatus('Erreur de sauvegarde');
+      setAutoSaveStatus(t('track.saveError'));
     } finally {
       setSaving(false);
     }
@@ -143,7 +144,7 @@ const SessionTracking = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   return (
@@ -157,9 +158,9 @@ const SessionTracking = () => {
             <ChevronLeft className="w-6 h-6" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold">Suivi de séance</h1>
+            <h1 className="text-3xl font-bold">{t('track.title')}</h1>
             <p className="text-muted-foreground mt-1">
-              {session?.topic || 'Séance'} - {students.length} élèves
+              {t('track.subtitle', { topic: session?.topic || t('track.session'), n: students.length })}
             </p>
           </div>
         </div>
@@ -169,15 +170,15 @@ const SessionTracking = () => {
               {autoSaveStatus}
             </p>
           )}
-          <p className="text-xs text-muted-foreground mt-1">Sauvegarde automatique</p>
+          <p className="text-xs text-muted-foreground mt-1">{t('track.autoSave')}</p>
         </div>
       </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
         <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-blue-900">Conseil</p>
-          <p className="text-sm text-blue-800 mt-1">Cliquez sur les colonnes pour changer le statut. Sauvegarde automatique toutes les 2 secondes.</p>
+          <p className="text-sm font-medium text-blue-900">{t('track.tip')}</p>
+          <p className="text-sm text-blue-800 mt-1">{t('track.tipText')}</p>
         </div>
       </div>
 
@@ -185,31 +186,31 @@ const SessionTracking = () => {
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-gray-100 border-b-2 border-gray-300">
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100 z-10">
-                Élève
+              <th className="px-4 py-3 text-start text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100 z-10">
+                {t('track.student')}
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Présence</span>
-                  <span className="text-xs font-normal text-gray-500">P/A/R/E</span>
+                  <span>{t('track.presence')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.presence')}</span>
                 </div>
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Travail</span>
-                  <span className="text-xs font-normal text-gray-500">E/B/M/P</span>
+                  <span>{t('track.work')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.quality')}</span>
                 </div>
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Discipline</span>
-                  <span className="text-xs font-normal text-gray-500">E/B/M/P</span>
+                  <span>{t('track.discipline')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.quality')}</span>
                 </div>
               </th>
               <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
                 <div className="flex flex-col items-center gap-1">
-                  <span>Téléphone</span>
-                  <span className="text-xs font-normal text-gray-500">O/N</span>
+                  <span>{t('track.phone')}</span>
+                  <span className="text-xs font-normal text-gray-500">{t('track.legend.yesno')}</span>
                 </div>
               </th>
             </tr>
@@ -234,9 +235,9 @@ const SessionTracking = () => {
                               'bg-blue-500 text-white'
                             : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                         }`}
-                        title={status}
+                        title={t(`track.status.${status}`)}
                       >
-                        {status[0].toUpperCase()}
+                        {t(`track.abbr.${status}`)}
                       </button>
                     ))}
                   </div>
@@ -255,9 +256,9 @@ const SessionTracking = () => {
                               'bg-red-500 text-white'
                             : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                         }`}
-                        title={status}
+                        title={t(`track.status.${status}`)}
                       >
-                        {status[0].toUpperCase()}
+                        {t(`track.abbr.${status}`)}
                       </button>
                     ))}
                   </div>
@@ -276,9 +277,9 @@ const SessionTracking = () => {
                               'bg-red-500 text-white'
                             : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                         }`}
-                        title={status}
+                        title={t(`track.status.${status}`)}
                       >
-                        {status[0].toUpperCase()}
+                        {t(`track.abbr.${status}`)}
                       </button>
                     ))}
                   </div>
@@ -291,7 +292,7 @@ const SessionTracking = () => {
                         ? 'bg-red-500 text-white'
                         : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
                     }`}
-                    title="Téléphone"
+                    title={t('track.phone')}
                   >
                     {tracking[student.id]?.phone_use ? '✓' : '○'}
                   </button>
@@ -307,7 +308,7 @@ const SessionTracking = () => {
           onClick={() => navigate(-1)}
           className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
-          Retour
+          {t('common.back')}
         </button>
         <button
           onClick={saveTracking}
@@ -315,7 +316,7 @@ const SessionTracking = () => {
           className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50"
         >
           <Save className="w-4 h-4" />
-          Sauvegarder
+          {t('common.save')}
         </button>
       </div>
     </div>

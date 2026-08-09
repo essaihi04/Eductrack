@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, Plus, Trash2, CheckCircle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 
 const CompetencyLevel = ({ level, onChange }) => {
+  const t = useT();
   const levels = [
-    { value: 'not_acquired', label: 'Non acquis', color: 'bg-red-100 text-red-800' },
-    { value: 'in_progress', label: 'En cours', color: 'bg-yellow-100 text-yellow-800' },
-    { value: 'acquired', label: 'Acquis', color: 'bg-blue-100 text-blue-800' },
-    { value: 'mastered', label: 'Maîtrisé', color: 'bg-green-100 text-green-800' }
+    { value: 'not_acquired', label: t('mini.notAcquired'), color: 'bg-red-100 text-red-800' },
+    { value: 'in_progress', label: t('mini.inProgress'), color: 'bg-yellow-100 text-yellow-800' },
+    { value: 'acquired', label: t('mini.acquired'), color: 'bg-blue-100 text-blue-800' },
+    { value: 'mastered', label: t('mini.mastered'), color: 'bg-green-100 text-green-800' }
   ];
 
   return (
@@ -34,7 +35,7 @@ const CompetencyLevel = ({ level, onChange }) => {
 const MiniAssessments = () => {
   const { classId, sessionId } = useParams();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const t = useT();
   const [students, setStudents] = useState([]);
   const [competencies, setCompetencies] = useState([]);
   const [assessments, setAssessments] = useState({});
@@ -135,7 +136,7 @@ const MiniAssessments = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   const assessedCount = Object.values(assessments).filter(a => a.assessed).length;
@@ -151,8 +152,8 @@ const MiniAssessments = () => {
             <ChevronLeft className="w-6 h-6" />
           </button>
           <div>
-            <h1 className="text-3xl font-bold">Mini-évaluations</h1>
-            <p className="text-muted-foreground mt-1">{assessedCount} / {students.length} élèves évalués</p>
+            <h1 className="text-3xl font-bold">{t('mini.title')}</h1>
+            <p className="text-muted-foreground mt-1">{t('mini.progress', { done: assessedCount, total: students.length })}</p>
           </div>
         </div>
       </div>
@@ -184,7 +185,7 @@ const MiniAssessments = () => {
                       {student.first_name} {student.last_name}
                     </p>
                     <p className="text-sm text-gray-600">
-                      {assessments[student.id]?.assessed ? 'Évalué' : 'Non évalué'}
+                      {assessments[student.id]?.assessed ? t('mini.assessed') : t('mini.notAssessed')}
                     </p>
                   </div>
                 </div>
@@ -220,14 +221,14 @@ const MiniAssessments = () => {
           onClick={() => navigate(-1)}
           className="px-6 py-2 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
         >
-          Annuler
+          {t('common.cancel')}
         </button>
         <button
           onClick={saveAssessments}
           disabled={assessedCount === 0}
           className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Sauvegarder
+          {t('common.save')}
         </button>
       </div>
     </div>

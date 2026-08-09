@@ -3,10 +3,12 @@ import { Plus, Clock, BookOpen, BarChart3, CheckSquare, AlertCircle } from 'luci
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 
 const TeacherHome = () => {
   const navigate = useNavigate();
   const { profile } = useAuth();
+  const t = useT();
   const [classes, setClasses] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -131,7 +133,7 @@ const TeacherHome = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   const selectedClassData = classes.find(c => c.id === selectedClass);
@@ -142,15 +144,15 @@ const TeacherHome = () => {
   return (
     <div className="space-y-4 md:space-y-8">
       <div>
-        <h1 className="text-2xl md:text-4xl font-bold">Bienvenue, {profile.first_name}</h1>
-        <p className="text-muted-foreground mt-2">Gérez vos séances et suivez vos élèves</p>
+        <h1 className="text-2xl md:text-4xl font-bold">{t('home.welcome', { name: profile.first_name })}</h1>
+        <p className="text-muted-foreground mt-2">{t('home.subtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Choisir une classe</CardTitle>
-            <CardDescription>Sélectionnez la classe à suivre</CardDescription>
+            <CardTitle>{t('home.pickClass')}</CardTitle>
+            <CardDescription>{t('home.pickClassHint')}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -158,7 +160,7 @@ const TeacherHome = () => {
                 <button
                   key={cls.id}
                   onClick={() => handleClassChange(cls.id)}
-                  className={`p-4 rounded-lg border-2 transition-all text-left ${
+                  className={`p-4 rounded-lg border-2 transition-all text-start ${
                     selectedClass === cls.id
                       ? 'border-blue-500 bg-blue-50'
                       : 'border-gray-200 bg-white hover:border-gray-300'
@@ -174,7 +176,7 @@ const TeacherHome = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Actions rapides</CardTitle>
+            <CardTitle className="text-lg">{t('home.quickActions')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <button
@@ -183,14 +185,14 @@ const TeacherHome = () => {
               className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="w-5 h-5" />
-              Nouvelle séance
+              {t('home.newSession')}
             </button>
             <button
               onClick={() => navigate(`/teacher/planificateur`)}
               className="w-full px-4 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
             >
               <CheckSquare className="w-5 h-5" />
-              Planificateur
+              {t('home.planner')}
             </button>
           </CardContent>
         </Card>
@@ -199,9 +201,9 @@ const TeacherHome = () => {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
         <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-blue-900">Nouvelles fonctionnalités</p>
+          <p className="text-sm font-medium text-blue-900">{t('home.newFeatures')}</p>
           <p className="text-sm text-blue-800 mt-1">
-            Vous avez accès à : Suivi de séance, Mini-évaluations et Fiches élèves. Sélectionnez une classe pour commencer.
+            {t('home.newFeaturesText')}
           </p>
         </div>
       </div>
@@ -212,7 +214,7 @@ const TeacherHome = () => {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Séances d'aujourd'hui</CardTitle>
+                  <CardTitle>{t('home.todaySessions')}</CardTitle>
                   <CardDescription>{selectedClassData.name}</CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -224,7 +226,7 @@ const TeacherHome = () => {
                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                     }`}
                   >
-                    Toutes
+                    {t('home.filterAll')}
                   </button>
                   <button
                     onClick={() => setSessionFilter('normal')}
@@ -234,7 +236,7 @@ const TeacherHome = () => {
                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                     }`}
                   >
-                    Normales
+                    {t('home.filterNormal')}
                   </button>
                   <button
                     onClick={() => setSessionFilter('control')}
@@ -244,7 +246,7 @@ const TeacherHome = () => {
                         : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                     }`}
                   >
-                    Contrôles
+                    {t('home.filterControl')}
                   </button>
                 </div>
               </div>
@@ -253,12 +255,12 @@ const TeacherHome = () => {
               {todaySessions.length === 0 ? (
                 <div className="text-center py-8">
                   <Clock className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-600">Aucune séance aujourd'hui</p>
+                  <p className="text-gray-600">{t('home.noSessionToday')}</p>
                   <button
                     onClick={openCreateModal}
                     className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
                   >
-                    Créer une séance
+                    {t('home.createSession')}
                   </button>
                 </div>
               ) : (
@@ -295,7 +297,7 @@ const TeacherHome = () => {
                           )}
                           <div>
                             <p className="font-semibold text-gray-900">
-                              {session.topic || (session.type === 'control' ? 'Contrôle' : 'Séance sans titre')}
+                              {session.topic || (session.type === 'control' ? t('home.control') : t('home.untitledSession'))}
                             </p>
                             <p className="text-sm text-gray-600 mt-1">
                               {session.start_time && `${session.start_time} - ${session.end_time}`}
@@ -306,7 +308,7 @@ const TeacherHome = () => {
                           <p className={`text-sm font-medium ${
                             session.type === 'control' ? 'text-red-600' : 'text-blue-600'
                           }`}>
-                            {session.type === 'control' ? 'Suivi' : 'Continuer'}
+                            {session.type === 'control' ? t('home.track') : t('home.continue')}
                           </p>
                         </div>
                       </div>
@@ -319,12 +321,12 @@ const TeacherHome = () => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Dernières séances</CardTitle>
-              <CardDescription>Historique des séances</CardDescription>
+              <CardTitle>{t('home.lastSessions')}</CardTitle>
+              <CardDescription>{t('home.sessionsHistory')}</CardDescription>
             </CardHeader>
             <CardContent>
               {sessions.length === 0 ? (
-                <p className="text-gray-600 text-center py-8">Aucune séance enregistrée</p>
+                <p className="text-gray-600 text-center py-8">{t('home.noSession')}</p>
               ) : (
                 <div className="space-y-2">
                   {sessions.slice(0, 5).map(session => (
@@ -351,7 +353,7 @@ const TeacherHome = () => {
                         )}
                         <div>
                           <p className="text-sm font-medium text-gray-900">
-                            {session.topic || (session.type === 'control' ? 'Contrôle' : 'Séance')}
+                            {session.topic || (session.type === 'control' ? t('home.control') : t('home.session'))}
                           </p>
                           <p className="text-xs text-gray-600">{session.date}</p>
                         </div>
@@ -368,11 +370,11 @@ const TeacherHome = () => {
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
-            <h2 className="text-xl font-bold mb-4">Créer une nouvelle séance</h2>
+            <h2 className="text-xl font-bold mb-4">{t('home.createModalTitle')}</h2>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Type de séance</label>
+                <label className="block text-sm font-medium mb-2">{t('home.sessionType')}</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setSessionType('normal')}
@@ -384,8 +386,8 @@ const TeacherHome = () => {
                   >
                     <div className="text-center">
                       <BookOpen className="w-6 h-6 mx-auto mb-2 text-gray-600" />
-                      <p className="font-medium">Séance normale</p>
-                      <p className="text-xs text-gray-600 mt-1">Cours standard</p>
+                      <p className="font-medium">{t('home.normalSession')}</p>
+                      <p className="text-xs text-gray-600 mt-1">{t('home.standardCourse')}</p>
                     </div>
                   </button>
                   <button
@@ -398,32 +400,32 @@ const TeacherHome = () => {
                   >
                     <div className="text-center">
                       <CheckSquare className="w-6 h-6 mx-auto mb-2 text-gray-600" />
-                      <p className="font-medium">Contrôle</p>
-                      <p className="text-xs text-gray-600 mt-1">Examen / Évaluation</p>
+                      <p className="font-medium">{t('home.control')}</p>
+                      <p className="text-xs text-gray-600 mt-1">{t('home.examEvaluation')}</p>
                     </div>
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Sujet</label>
+                <label className="block text-sm font-medium mb-2">{t('home.topic')}</label>
                 <input
                   type="text"
                   value={sessionTopic}
                   onChange={(e) => setSessionTopic(e.target.value)}
-                  placeholder="Sujet de la séance"
+                  placeholder={t('home.topicPlaceholder')}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">Matière</label>
+                <label className="block text-sm font-medium mb-2">{t('common.subject')}</label>
                 <select
                   value={selectedSubject}
                   onChange={(e) => setSelectedSubject(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">Sélectionner une matière</option>
+                  <option value="">{t('home.pickSubject')}</option>
                   {subjects.map(subject => (
                     <option key={subject.id} value={subject.id}>{subject.name}</option>
                   ))}
@@ -432,7 +434,7 @@ const TeacherHome = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Heure de début</label>
+                  <label className="block text-sm font-medium mb-2">{t('home.startTime')}</label>
                   <input
                     type="time"
                     value={sessionStartTime}
@@ -441,7 +443,7 @@ const TeacherHome = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-2">Heure de fin</label>
+                  <label className="block text-sm font-medium mb-2">{t('home.endTime')}</label>
                   <input
                     type="time"
                     value={sessionEndTime}
@@ -457,13 +459,13 @@ const TeacherHome = () => {
                 onClick={closeCreateModal}
                 className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-medium hover:bg-gray-300 transition-colors"
               >
-                Annuler
+                {t('common.cancel')}
               </button>
               <button
                 onClick={createSession}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
               >
-                Créer
+                {t('common.create')}
               </button>
             </div>
           </div>

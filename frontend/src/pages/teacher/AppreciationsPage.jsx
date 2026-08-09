@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Save, RefreshCw, Wand2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { useT } from '../../i18n';
 
 const AppreciationsPage = () => {
+  const t = useT();
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [subjectName, setSubjectName] = useState('');
@@ -139,7 +141,7 @@ const AppreciationsPage = () => {
         body: JSON.stringify({ appreciations: rows })
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      setMsg(`✅ ${rows.length} appréciations sauvegardées`);
+      setMsg(t('appr.saved', { n: rows.length }));
     } catch (e) {
       setMsg(`❌ ${e.message}`);
     } finally {
@@ -164,7 +166,7 @@ const AppreciationsPage = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      setMsg(`✅ ${data.generated} appréciations auto-générées`);
+      setMsg(t('appr.generated', { n: data.generated }));
       fetchAppreciations();
     } catch (e) {
       setMsg(`❌ ${e.message}`);
@@ -176,7 +178,7 @@ const AppreciationsPage = () => {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold flex items-center gap-2">
-        <MessageSquare className="w-6 h-6 text-blue-600" /> Appréciations par Matière
+        <MessageSquare className="w-6 h-6 text-blue-600" /> {t('appr.title')}
       </h1>
 
       {/* Filtres */}
@@ -184,10 +186,10 @@ const AppreciationsPage = () => {
         <CardContent className="pt-6">
           <div className="flex flex-wrap gap-4 items-end">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Classe</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('common.class')}</label>
               <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)}
                 className="border rounded-lg px-3 py-2 text-sm min-w-[200px]">
-                <option value="">— Choisir —</option>
+                <option value="">{t('appr.choose')}</option>
                 {classes.map(c => (
                   <option key={c.id || c.class_id} value={c.id || c.class_id}>
                     {c.name || c.classes?.name} ({c.level || c.classes?.level})
@@ -196,18 +198,18 @@ const AppreciationsPage = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Matière</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('common.subject')}</label>
               <input type="text" value={subjectName} onChange={e => setSubjectName(e.target.value)}
                 className="border rounded-lg px-3 py-2 text-sm w-48"
-                placeholder={teacherSubject || 'Nom de la matière'} />
+                placeholder={teacherSubject || t('appr.subjectPlaceholder')} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Année</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('appr.year')}</label>
               <input type="text" value={academicYear} onChange={e => setAcademicYear(e.target.value)}
                 className="border rounded-lg px-3 py-2 text-sm w-28" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Semestre</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{t('appr.semester')}</label>
               <select value={semester} onChange={e => setSemester(Number(e.target.value))}
                 className="border rounded-lg px-3 py-2 text-sm">
                 <option value={1}>S1</option>
@@ -217,7 +219,7 @@ const AppreciationsPage = () => {
             <button onClick={handleAutoGenerate} disabled={autoGenerating || !selectedClass || !subjectName}
               className="flex items-center gap-1 px-3 py-2 text-sm border rounded-lg hover:bg-yellow-50 text-yellow-700 border-yellow-300 disabled:opacity-40">
               {autoGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-              Auto-générer
+              {t('appr.autoGenerate')}
             </button>
           </div>
         </CardContent>
@@ -233,10 +235,10 @@ const AppreciationsPage = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50">
-                    <th className="text-left px-3 py-2 font-medium text-gray-600 w-8">#</th>
-                    <th className="text-left px-3 py-2 font-medium text-gray-600">Élève</th>
-                    <th className="text-left px-3 py-2 font-medium text-gray-600">Appréciation</th>
-                    <th className="text-center px-3 py-2 font-medium text-gray-600 w-16">Auto</th>
+                    <th className="text-start px-3 py-2 font-medium text-gray-600 w-8">#</th>
+                    <th className="text-start px-3 py-2 font-medium text-gray-600">{t('appr.student')}</th>
+                    <th className="text-start px-3 py-2 font-medium text-gray-600">{t('appr.appreciation')}</th>
+                    <th className="text-center px-3 py-2 font-medium text-gray-600 w-16">{t('appr.auto')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -248,7 +250,7 @@ const AppreciationsPage = () => {
                         <input type="text" value={r.appreciation}
                           onChange={e => updateAppreciation(r.student_id, e.target.value)}
                           className="w-full border rounded px-2 py-1 text-sm"
-                          placeholder="Saisir l'appréciation..." />
+                          placeholder={t('appr.inputPlaceholder')} />
                       </td>
                       <td className="px-3 py-2 text-center">
                         {r.is_auto_generated && <span className="text-xs text-yellow-500">🤖</span>}
@@ -262,13 +264,13 @@ const AppreciationsPage = () => {
             <div className="flex justify-end mt-4">
               <button onClick={handleSave} disabled={saving}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                <Save className="w-4 h-4" /> {saving ? 'Sauvegarde...' : 'Sauvegarder'}
+                <Save className="w-4 h-4" /> {saving ? t('appr.saving') : t('common.save')}
               </button>
             </div>
           </CardContent>
         </Card>
       ) : selectedClass ? (
-        <p className="text-gray-400 text-sm text-center py-8">Sélectionnez une classe et une matière pour commencer.</p>
+        <p className="text-gray-400 text-sm text-center py-8">{t('appr.pickClassSubject')}</p>
       ) : null}
 
       {msg && <p className="text-sm font-medium">{msg}</p>}
