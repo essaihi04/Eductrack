@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 import { saveBlob } from '../../lib/download';
 import { FileText, Download, Calendar, BookOpen, Pencil, Check, ChevronDown } from 'lucide-react';
 import { loadLogoForPdf, addLogoToPdf } from '../../lib/schoolLogo';
 
 const CahierDeTexte = () => {
   const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -105,13 +108,13 @@ const CahierDeTexte = () => {
   };
 
   const classLabel = () => {
-    if (selectedClasses.length === 0) return 'Aucune classe';
-    if (selectedClasses.length === classes.length) return 'Toutes les classes';
+    if (selectedClasses.length === 0) return t('cdt.noClass');
+    if (selectedClasses.length === classes.length) return t('cdt.allClasses');
     if (selectedClasses.length === 1) {
       const cls = classes.find(c => c.id === selectedClasses[0]);
-      return cls?.name || '1 classe';
+      return cls?.name || t('cdt.oneClass');
     }
-    return `${selectedClasses.length} classes`;
+    return t('cdt.nClasses', { n: selectedClasses.length });
   };
 
   const fetchCahier = useCallback(async () => {
@@ -183,8 +186,13 @@ const CahierDeTexte = () => {
 
   const formatDateFr = (dateStr) => {
     const d = new Date(dateStr);
-    return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    return d.toLocaleDateString(dateLocale, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   };
+
+  // Le PDF reste en francais : jsPDF (police helvetica) ne sait pas rendre
+  // l'arabe cote navigateur — un export arabe produirait des carres vides.
+  const formatDatePdf = (dateStr) => new Date(dateStr)
+    .toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   const formatTime = (t) => t ? t.slice(0, 5) : '—';
 
@@ -221,7 +229,7 @@ const CahierDeTexte = () => {
         autoTable = autoTableModule.default;
       } catch (error) {
         console.error('Erreur lors du chargement de jsPDF:', error);
-        alert('Impossible de générer le PDF. Veuillez réessayer.');
+        alert(t('cdt.pdfLoadError'));
         return;
       }
 
@@ -232,7 +240,7 @@ const CahierDeTexte = () => {
 
       const classGroups = getClassGroups();
       if (classGroups.length === 0) {
-        alert('Aucune donnée à exporter.');
+        alert(t('cdt.pdfNoData'));
         setPdfGenerating(false);
         return;
       }
@@ -303,7 +311,7 @@ const CahierDeTexte = () => {
 
         // === TABLE ===
         const tableData = sessions.map(s => {
-          const dateFr = formatDateFr(s.date);
+          const dateFr = formatDatePdf(s.date);
           const timeRange = `${formatTime(s.start_time)} – ${formatTime(s.end_time)}`;
           const duration = calcDuration(s.start_time, s.end_time);
           const timeCell = `${timeRange}${duration ? '\n' + duration : ''}`;
@@ -383,7 +391,7 @@ const CahierDeTexte = () => {
       await saveBlob(doc.output('blob'), fileName.replace(/\s+/g, '_'));
     } catch (error) {
       console.error('Erreur génération PDF:', error);
-      alert('Erreur lors de la génération du PDF.');
+      alert(t('cdt.pdfError'));
     } finally {
       setPdfGenerating(false);
     }
@@ -398,10 +406,10 @@ const CahierDeTexte = () => {
         <div className="min-w-0">
           <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
             <BookOpen className="w-6 h-6 text-indigo-600 flex-shrink-0" />
-            Cahier de Texte
+            {t('cdt.title')}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            {isAdmin ? 'Consultez le cahier de texte de toutes les classes' : 'Gérez le contenu pédagogique de vos séances'}
+            {isAdmin ? t('cdt.subtitleAdmin') : t('cdt.subtitleTeacher')}
           </p>
         </div>
         {sessions.length > 0 && (
@@ -411,7 +419,7 @@ const CahierDeTexte = () => {
             className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium w-full sm:w-auto"
           >
             <Download className="w-4 h-4" />
-            {pdfGenerating ? 'Génération...' : 'Télécharger PDF'}
+            {pdfGenerating ? t('cdt.generating') : t('cdt.downloadPdf')}
           </button>
         )}
       </div>
@@ -421,7 +429,7 @@ const CahierDeTexte = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Multi-select classes */}
           <div className="relative" ref={classDropdownRef}>
-            <label className="text-xs font-semibold text-gray-600 block mb-1">Classes</label>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">{t('cdt.classes')}</label>
             <button
               type="button"
               onClick={() => setClassDropdownOpen(!classDropdownOpen)}
@@ -439,7 +447,7 @@ const CahierDeTexte = () => {
                     onChange={toggleAllClasses}
                     className="w-4 h-4 rounded text-indigo-600"
                   />
-                  <span className="text-sm font-semibold text-indigo-700">Toutes les classes</span>
+                  <span className="text-sm font-semibold text-indigo-700">{t('cdt.allClasses')}</span>
                 </label>
                 {classes.map(cls => (
                   <label key={cls.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer">
@@ -457,13 +465,13 @@ const CahierDeTexte = () => {
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-gray-600 block mb-1">Matière</label>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">{t('common.subject')}</label>
             <select
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
               className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
             >
-              {isAdmin && <option value="">Toutes les matières</option>}
+              {isAdmin && <option value="">{t('cdt.allSubjects')}</option>}
               {subjects.map(sub => (
                 <option key={sub.id} value={sub.id}>{sub.name}</option>
               ))}
@@ -472,13 +480,13 @@ const CahierDeTexte = () => {
 
           {isAdmin && (
             <div>
-              <label className="text-xs font-semibold text-gray-600 block mb-1">Professeur</label>
+              <label className="text-xs font-semibold text-gray-600 block mb-1">{t('cdt.teacher')}</label>
               <select
                 value={selectedTeacher}
                 onChange={(e) => setSelectedTeacher(e.target.value)}
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
               >
-                <option value="">Tous les professeurs</option>
+                <option value="">{t('cdt.allTeachers')}</option>
                 {teachers.map(t => (
                   <option key={t.id} value={t.id}>{t.first_name} {t.last_name}</option>
                 ))}
@@ -487,7 +495,7 @@ const CahierDeTexte = () => {
           )}
 
           <div>
-            <label className="text-xs font-semibold text-gray-600 block mb-1">Du</label>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">{t('cdt.from')}</label>
             <input
               type="date"
               value={startDate}
@@ -497,7 +505,7 @@ const CahierDeTexte = () => {
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-gray-600 block mb-1">Au</label>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">{t('cdt.to')}</label>
             <input
               type="date"
               value={endDate}
@@ -519,12 +527,12 @@ const CahierDeTexte = () => {
           <div className="flex gap-4 text-sm">
             <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-lg">
               <FileText className="w-4 h-4 text-indigo-600" />
-              <span className="font-medium">{sessions.length} séance(s)</span>
+              <span className="font-medium">{t('cdt.sessionsCount', { n: sessions.length })}</span>
             </div>
             <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg">
               <Calendar className="w-4 h-4 text-gray-600" />
               <span className="text-gray-700">
-                {new Date(startDate).toLocaleDateString('fr-FR')} — {new Date(endDate).toLocaleDateString('fr-FR')}
+                {new Date(startDate).toLocaleDateString(dateLocale)} — {new Date(endDate).toLocaleDateString(dateLocale)}
               </span>
             </div>
           </div>
@@ -534,13 +542,13 @@ const CahierDeTexte = () => {
             <div key={gIdx} className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
               {getClassGroups().length > 1 && (
                 <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-200">
-                  <p className="text-sm font-semibold text-indigo-900">{group.classInfo?.name || 'Classe'}</p>
+                  <p className="text-sm font-semibold text-indigo-900">{group.classInfo?.name || t('cdt.class')}</p>
                 </div>
               )}
               {/* Vue cartes mobile */}
               <div className="md:hidden divide-y divide-gray-100">
                 {(group.sessions || []).length === 0 ? (
-                  <p className="px-4 py-8 text-center text-gray-400 text-sm">Aucune séance trouvée pour cette période.</p>
+                  <p className="px-4 py-8 text-center text-gray-400 text-sm">{t('cdt.noSessionPeriod')}</p>
                 ) : (
                   (group.sessions || []).map((s, idx) => (
                     <div key={s.id || idx} className="p-3 space-y-2 bg-white">
@@ -549,7 +557,7 @@ const CahierDeTexte = () => {
                           <p className="text-xs font-semibold text-indigo-700">{formatDateFr(s.date)}</p>
                           <p className="text-xs text-gray-500">{formatTime(s.start_time)} – {formatTime(s.end_time)}{calcDuration(s.start_time, s.end_time) ? ` · ${calcDuration(s.start_time, s.end_time)}` : ''}</p>
                         </div>
-                        {s.type === 'control' && <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium flex-shrink-0">Contrôle</span>}
+                        {s.type === 'control' && <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium flex-shrink-0">{t('cdt.control')}</span>}
                       </div>
                       {editingId === s.id ? (
                         <div className="space-y-2">
@@ -557,22 +565,22 @@ const CahierDeTexte = () => {
                             type="text"
                             value={editTopic}
                             onChange={(e) => setEditTopic(e.target.value)}
-                            placeholder="Chapitre / Titre de la leçon"
+                            placeholder={t('cdt.topicPlaceholder')}
                             className="w-full rounded border border-indigo-300 px-2 py-1.5 text-sm focus:ring-1 focus:ring-indigo-500"
                             autoFocus
                           />
                           <textarea
                             value={editNotes}
                             onChange={(e) => setEditNotes(e.target.value)}
-                            placeholder="Objectif / Description"
+                            placeholder={t('cdt.notesPlaceholder')}
                             rows="2"
                             className="w-full rounded border border-indigo-300 px-2 py-1 text-sm resize-none focus:ring-1 focus:ring-indigo-500"
                           />
                           <div className="flex gap-2">
                             <button onClick={() => saveEdit(s.id)} disabled={savingEdit} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-xs hover:bg-green-700 disabled:opacity-50">
-                              <Check className="w-3 h-3" />{savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                              <Check className="w-3 h-3" />{savingEdit ? t('cdt.savingEdit') : t('cdt.saveEdit')}
                             </button>
-                            <button onClick={() => setEditingId(null)} className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">Annuler</button>
+                            <button onClick={() => setEditingId(null)} className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">{t('common.cancel')}</button>
                           </div>
                         </div>
                       ) : (
@@ -580,16 +588,16 @@ const CahierDeTexte = () => {
                           {s.topic ? (
                             <>
                               <p className="text-sm font-semibold text-gray-900">{s.topic}</p>
-                              {s.notes && <p className="text-xs text-gray-600 mt-0.5"><span className="font-medium">OBJECTIF :</span> {s.notes}</p>}
+                              {s.notes && <p className="text-xs text-gray-600 mt-0.5"><span className="font-medium">{t('cdt.objective')}</span> {s.notes}</p>}
                             </>
                           ) : (
-                            <p className="text-sm text-gray-400 italic">{s.type === 'control' ? 'Contrôle' : 'Non renseigné'}</p>
+                            <p className="text-sm text-gray-400 italic">{s.type === 'control' ? t('cdt.control') : t('cdt.notFilled')}</p>
                           )}
-                          {isAdmin && s.teacher && <p className="text-xs text-indigo-500 mt-1">Prof : {s.teacher.first_name} {s.teacher.last_name}</p>}
+                          {isAdmin && s.teacher && <p className="text-xs text-indigo-500 mt-1">{t('cdt.teacherPrefix')} {s.teacher.first_name} {s.teacher.last_name}</p>}
                           {s.subject?.name && <p className="text-xs text-gray-400">{s.subject.name}</p>}
                           {!isAdmin && s.type !== 'control' && editingId !== s.id && (
                             <button onClick={() => startEditing(s)} className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs mt-1">
-                              <Pencil className="w-3 h-3" />Modifier
+                              <Pencil className="w-3 h-3" />{t('cdt.edit')}
                             </button>
                           )}
                         </div>
@@ -604,16 +612,16 @@ const CahierDeTexte = () => {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700 w-40">Date</th>
-                      <th className="px-4 py-2 text-center font-semibold text-gray-700 w-28">Heure</th>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700">Leçon — Objectif</th>
-                      <th className="px-4 py-2 text-left font-semibold text-gray-700 w-32">Observation</th>
+                      <th className="px-4 py-2 text-start font-semibold text-gray-700 w-40">{t('cdt.col.date')}</th>
+                      <th className="px-4 py-2 text-center font-semibold text-gray-700 w-28">{t('cdt.col.time')}</th>
+                      <th className="px-4 py-2 text-start font-semibold text-gray-700">{t('cdt.col.lesson')}</th>
+                      <th className="px-4 py-2 text-start font-semibold text-gray-700 w-32">{t('cdt.col.observation')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(group.sessions || []).length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="px-4 py-8 text-center text-gray-400">Aucune séance trouvée pour cette période.</td>
+                        <td colSpan="4" className="px-4 py-8 text-center text-gray-400">{t('cdt.noSessionPeriod')}</td>
                       </tr>
                     ) : (
                       (group.sessions || []).map((s, idx) => (
@@ -634,14 +642,14 @@ const CahierDeTexte = () => {
                                   type="text"
                                   value={editTopic}
                                   onChange={(e) => setEditTopic(e.target.value)}
-                                  placeholder="Chapitre / Titre de la leçon"
+                                  placeholder={t('cdt.topicPlaceholder')}
                                   className="w-full rounded border border-indigo-300 px-2 py-1 text-sm focus:ring-1 focus:ring-indigo-500"
                                   autoFocus
                                 />
                                 <textarea
                                   value={editNotes}
                                   onChange={(e) => setEditNotes(e.target.value)}
-                                  placeholder="Objectif / Description"
+                                  placeholder={t('cdt.notesPlaceholder')}
                                   rows="2"
                                   className="w-full rounded border border-indigo-300 px-2 py-1 text-sm resize-none focus:ring-1 focus:ring-indigo-500"
                                 />
@@ -652,13 +660,13 @@ const CahierDeTexte = () => {
                                     className="flex items-center gap-1 px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 disabled:opacity-50"
                                   >
                                     <Check className="w-3 h-3" />
-                                    {savingEdit ? 'Enregistrement...' : 'Enregistrer'}
+                                    {savingEdit ? t('cdt.savingEdit') : t('cdt.saveEdit')}
                                   </button>
                                   <button
                                     onClick={() => setEditingId(null)}
                                     className="px-2 py-1 border border-gray-300 rounded text-xs hover:bg-gray-50"
                                   >
-                                    Annuler
+                                    {t('common.cancel')}
                                   </button>
                                 </div>
                               </div>
@@ -669,15 +677,15 @@ const CahierDeTexte = () => {
                                     <p className="font-semibold text-gray-900">{s.topic}</p>
                                     {s.notes && (
                                       <p className="text-xs text-gray-600 mt-1">
-                                        <span className="font-medium">OBJECTIF :</span> {s.notes}
+                                        <span className="font-medium">{t('cdt.objective')}</span> {s.notes}
                                       </p>
                                     )}
                                   </>
                                 ) : (
-                                  <p className="text-gray-400 italic">{s.type === 'control' ? 'Contrôle' : 'Non renseigné'}</p>
+                                  <p className="text-gray-400 italic">{s.type === 'control' ? t('cdt.control') : t('cdt.notFilled')}</p>
                                 )}
                                 {isAdmin && s.teacher && (
-                                  <p className="text-xs text-indigo-500 mt-1">Prof : {s.teacher.first_name} {s.teacher.last_name}</p>
+                                  <p className="text-xs text-indigo-500 mt-1">{t('cdt.teacherPrefix')} {s.teacher.first_name} {s.teacher.last_name}</p>
                                 )}
                                 {s.subject?.name && (
                                   <p className="text-xs text-gray-400 mt-0.5">{s.subject.name}</p>
@@ -687,15 +695,15 @@ const CahierDeTexte = () => {
                           </td>
                           <td className="px-4 py-3 text-gray-600 text-xs">
                             <div className="flex flex-col items-start gap-1">
-                              {s.type === 'control' && <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">Contrôle</span>}
+                              {s.type === 'control' && <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">{t('cdt.control')}</span>}
                               {!isAdmin && s.type !== 'control' && editingId !== s.id && (
                                 <button
                                   onClick={() => startEditing(s)}
                                   className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 text-xs"
-                                  title="Modifier le contenu"
+                                  title={t('cdt.editTitle')}
                                 >
                                   <Pencil className="w-3 h-3" />
-                                  Modifier
+                                  {t('cdt.edit')}
                                 </button>
                               )}
                             </div>
@@ -712,7 +720,7 @@ const CahierDeTexte = () => {
       ) : (
         <div className="flex flex-col items-center justify-center py-16 text-gray-400">
           <BookOpen className="w-12 h-12 mb-3" />
-          <p className="text-sm">{selectedClasses.length === 0 ? 'Sélectionnez au moins une classe pour afficher le cahier de texte.' : 'Aucune séance trouvée pour les filtres sélectionnés.'}</p>
+          <p className="text-sm">{selectedClasses.length === 0 ? t('cdt.pickClassFirst') : t('cdt.noSessionFilters')}</p>
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Save, Trash2, BookOpen, CheckSquare, Clock, RefreshCw, Plus, ChevronDown, Users, CalendarDays, Zap, AlertCircle, CheckCircle2, Loader2, X, Search } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 
 const DEFAULT_TRACKING_OPTIONS = {
   presence: true,
@@ -49,6 +50,8 @@ const SuiviRapide = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState(null);
   const [subjects, setSubjects] = useState([]);
@@ -115,7 +118,7 @@ const SuiviRapide = () => {
       setControlDescription(description || '');
       setStartTime(startTimeParam || '');
       setEndTime(endTimeParam || '');
-      setSessionInfo(`Contrôle planifié: ${name}`);
+      setSessionInfo(t('sr.plannedControl', { name }));
     }
   }, [searchParams]);
 
@@ -146,13 +149,13 @@ const SuiviRapide = () => {
       });
       const data = await res.json();
       if (!res.ok || !data) {
-        throw new Error(data?.error || 'Impossible de charger la séance.');
+        throw new Error(data?.error || t('sr.loadSessionError'));
       }
       applySessionData(data);
       fetchSessionTracking(sessionId);
     } catch (error) {
       console.error('Erreur lors du chargement de la séance:', error);
-      setSessionError(error.message || 'Impossible de charger la séance.');
+      setSessionError(error.message || t('sr.loadSessionError'));
     } finally {
       setSessionLoading(false);
     }
@@ -174,8 +177,8 @@ const SuiviRapide = () => {
     const range =
       start !== '—'
         ? `${start}${end !== '—' ? ` - ${end}` : ''}`
-        : 'Horaire non défini';
-    return `Séance du ${dateLabel} • ${range}`;
+        : t('sr.noTime');
+    return t('sr.sessionSummary', { date: dateLabel, range });
   };
 
   const applySessionData = (sessionData, options = { persist: true, updateDate: true }) => {
@@ -497,7 +500,7 @@ const SuiviRapide = () => {
   };
 
   const deleteSession = async (sessionId) => {
-    if (!window.confirm('Êtes-vous sûr de vouloir supprimer cette séance ? Cette action est irréversible.')) {
+    if (!window.confirm(t('sr.confirmDeleteSession'))) {
       return;
     }
 
@@ -509,15 +512,15 @@ const SuiviRapide = () => {
       });
 
       if (!res.ok) {
-        throw new Error('Erreur lors de la suppression');
+        throw new Error(t('sr.deleteError'));
       }
 
-      setAutoSaveStatus('✓ Séance supprimée');
+      setAutoSaveStatus(t('sr.sessionDeleted'));
       setTimeout(() => setAutoSaveStatus(''), 2000);
       fetchExistingSessions();
     } catch (error) {
       console.error('Erreur:', error);
-      setAutoSaveStatus('✗ Erreur lors de la suppression');
+      setAutoSaveStatus(t('sr.deleteFailed'));
     }
   };
 
@@ -614,11 +617,11 @@ const SuiviRapide = () => {
           setEndTime('');
         }
         setSessionInfo('');
-        setSessionError('Aucune séance créée pour cette date.');
+        setSessionError(t('sr.noSessionForDate'));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      setSessionError("Impossible de charger la séance. Veuillez réessayer.");
+      setSessionError(t('sr.loadRetry'));
     } finally {
       setSessionLoading(false);
     }
@@ -626,23 +629,23 @@ const SuiviRapide = () => {
 
   const handleCreateSession = async () => {
     if (!selectedClass) {
-      setSessionError('Veuillez choisir une classe.');
+      setSessionError(t('sr.err.pickClass'));
       return;
     }
     if (!sessionDate) {
-      setSessionError('Veuillez choisir une date.');
+      setSessionError(t('sr.err.pickDate'));
       return;
     }
     if (!startTime) {
-      setSessionError("L'heure de début est obligatoire.");
+      setSessionError(t('sr.err.startTime'));
       return;
     }
     if (sessionType === 'control' && !controlName) {
-      setSessionError('Le nom du contrôle est obligatoire.');
+      setSessionError(t('sr.err.controlName'));
       return;
     }
     if (currentSession) {
-      setSessionError('Une séance existe déjà pour cette date.');
+      setSessionError(t('sr.err.sessionExists'));
       return;
     }
 
@@ -689,14 +692,14 @@ const SuiviRapide = () => {
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 409) {
-          setSessionError('⚠️ Séance déjà enregistrée pour cette date et cet horaire.');
+          setSessionError(t('sr.err.duplicate'));
         } else {
-          setSessionError(data?.error || 'Impossible de créer la séance.');
+          setSessionError(data?.error || t('sr.err.createSession'));
         }
         return;
       }
 
-      setAutoSaveStatus('✓ Séance créée');
+      setAutoSaveStatus(t('sr.sessionCreated'));
       fetchExistingSessions();
       fetchActiveHomework();
 
@@ -708,7 +711,7 @@ const SuiviRapide = () => {
       }
     } catch (error) {
       console.error('Erreur:', error);
-      setSessionError("Erreur lors de la création de la séance.");
+      setSessionError(t('sr.err.createSessionGeneric'));
     } finally {
       setSessionLoading(false);
     }
@@ -724,13 +727,13 @@ const SuiviRapide = () => {
     }
     const missing = students.filter((s) => !tracking[s.id]?.presence);
     if (missing.length > 0) {
-      setSessionError(`Présence obligatoire pour tous les élèves. ${missing.length} élève(s) manquant(s).`);
+      setSessionError(t('sr.err.presenceRequired', { n: missing.length }));
       return;
     }
     try {
       setSavingPresence(true);
       setSessionError('');
-      setAutoSaveStatus('Enregistrement de la présence...');
+      setAutoSaveStatus(t('sr.savingPresence'));
       const token = await getAuthToken();
       for (const student of students) {
         const data = tracking[student.id] || {};
@@ -759,11 +762,11 @@ const SuiviRapide = () => {
         });
       }
       setPresenceSaved(true);
-      setAutoSaveStatus('✓ Présence enregistrée — parents des absents notifiés');
+      setAutoSaveStatus(t('sr.presenceSaved'));
       setTimeout(() => setAutoSaveStatus(''), 3000);
     } catch (e) {
       console.error('Erreur enregistrement présence:', e);
-      setAutoSaveStatus('✗ Erreur présence');
+      setAutoSaveStatus(t('sr.presenceError'));
     } finally {
       setSavingPresence(false);
     }
@@ -783,7 +786,7 @@ const SuiviRapide = () => {
 
     if (missingPresence.length > 0) {
       setSessionError(
-        `Présence obligatoire pour tous les élèves. ${missingPresence.length} élève(s) sans présence enregistrée.`
+        t('sr.err.presenceMissing', { n: missingPresence.length })
       );
       return;
     }
@@ -866,7 +869,7 @@ const SuiviRapide = () => {
       }
 
       if (errorCount === 0) {
-        setAutoSaveStatus('✓ Séance enregistrée');
+        setAutoSaveStatus(t('sr.sessionSaved'));
         setSessionSaved(true);
         setTimeout(() => {
           setAutoSaveStatus('');
@@ -882,12 +885,12 @@ const SuiviRapide = () => {
           await markControlAsCompleted(urlParamsRef.current.controlId);
         }
       } else {
-        setAutoSaveStatus(`⚠️ ${successCount}/${students.length} élèves sauvegardés`);
+        setAutoSaveStatus(t('sr.partialSave', { ok: successCount, total: students.length }));
         setTimeout(() => setAutoSaveStatus(''), 5000);
       }
     } catch (error) {
       console.error('Erreur:', error);
-      setAutoSaveStatus('✗ Erreur');
+      setAutoSaveStatus(t('sr.genericError'));
     } finally {
       setSaving(false);
     }
@@ -895,7 +898,7 @@ const SuiviRapide = () => {
 
   const updateTracking = (studentId, field, value) => {
     if (!currentSession) {
-      setSessionError("Créez d'abord une séance pour cette date.");
+      setSessionError(t('sr.err.createFirstForDate'));
       return;
     }
     
@@ -973,7 +976,7 @@ const SuiviRapide = () => {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <p className="text-sm text-gray-500">Chargement...</p>
+        <p className="text-sm text-gray-500">{t('common.loading')}</p>
       </div>
     );
   }
@@ -999,8 +1002,8 @@ const SuiviRapide = () => {
             <Zap className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">Suivi Rapide</h1>
-            <p className="text-xs text-gray-500">{selectedClassData?.name || 'Sélectionnez une classe'} • {students.length} élèves</p>
+            <h1 className="text-xl font-bold text-gray-900">{t('sr.title')}</h1>
+            <p className="text-xs text-gray-500">{t('sr.headerSub', { class: selectedClassData?.name || t('sr.pickClass'), n: students.length })}</p>
           </div>
         </div>
         {autoSaveStatus && (
@@ -1017,7 +1020,7 @@ const SuiviRapide = () => {
       {/* ── Sélecteurs : Classe / Matière / Date ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
-          <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Classe</label>
+          <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t('common.class')}</label>
           <select
             value={selectedClass || ''}
             onChange={(e) => setSelectedClass(e.target.value)}
@@ -1029,7 +1032,7 @@ const SuiviRapide = () => {
           </select>
         </div>
         <div>
-          <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Matière</label>
+          <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t('common.subject')}</label>
           <select
             value={selectedSubject || ''}
             onChange={(e) => setSelectedSubject(e.target.value)}
@@ -1041,7 +1044,7 @@ const SuiviRapide = () => {
           </select>
         </div>
         <div>
-          <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Date</label>
+          <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t('track.date')}</label>
           <div className="flex gap-2">
             <input
               type="date"
@@ -1053,7 +1056,7 @@ const SuiviRapide = () => {
               onClick={fetchSessionFromApi}
               disabled={sessionLoading}
               className="px-2.5 py-2 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-blue-600 disabled:opacity-50 transition"
-              title="Recharger la séance"
+              title={t('sr.reloadSession')}
             >
               <RefreshCw className={`w-4 h-4 ${sessionLoading ? 'animate-spin' : ''}`} />
             </button>
@@ -1068,13 +1071,13 @@ const SuiviRapide = () => {
         <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <CalendarDays className="w-4 h-4 text-gray-500" />
-            <span className="text-sm font-semibold text-gray-700">Séance du {sessionDate ? new Date(sessionDate + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : '—'}</span>
+            <span className="text-sm font-semibold text-gray-700">{t('sr.sessionOf', { date: sessionDate ? new Date(sessionDate + 'T00:00:00').toLocaleDateString(dateLocale, { weekday: 'long', day: 'numeric', month: 'long' }) : '—' })}</span>
           </div>
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full ${
               currentSession ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
             }`}>
-              {currentSession ? <><CheckCircle2 className="w-3 h-3" /> Active</> : <><AlertCircle className="w-3 h-3" /> Aucune</>}
+              {currentSession ? <><CheckCircle2 className="w-3 h-3" /> {t('sr.active')}</> : <><AlertCircle className="w-3 h-3" /> {t('sr.none')}</>}
             </span>
           </div>
         </div>
@@ -1098,7 +1101,7 @@ const SuiviRapide = () => {
                     : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
                 }`}
               >
-                <BookOpen className="w-4 h-4" /> Cours
+                <BookOpen className="w-4 h-4" /> {t('sr.course')}
               </button>
               <button
                 onClick={() => setSessionType('control')}
@@ -1108,7 +1111,7 @@ const SuiviRapide = () => {
                     : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
                 }`}
               >
-                <CheckSquare className="w-4 h-4" /> Contrôle
+                <CheckSquare className="w-4 h-4" /> {t('sr.control')}
               </button>
             </div>
 
@@ -1117,7 +1120,7 @@ const SuiviRapide = () => {
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  {(['pedagogical_director', 'pedagogical_manager'].includes(profile?.role) ? 'Créneaux de la classe' : 'Mes créneaux')} — {{ monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' }[timetableSlots[0]?.day_of_week] || ''}
+                  {(['pedagogical_director', 'pedagogical_manager'].includes(profile?.role) ? t('sr.classSlots') : t('sr.mySlots'))} — {timetableSlots[0]?.day_of_week ? t(`plan.day.${timetableSlots[0].day_of_week}`) : ''}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {timetableSlots.map((slot) => {
@@ -1154,7 +1157,7 @@ const SuiviRapide = () => {
             ) : selectedClass && (
               <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2">
                 <p className="text-xs text-amber-700">
-                  <span className="font-semibold">Aucun créneau programmé</span> dans cette classe à cette date. Veuillez définir manuellement l'horaire ci-dessous ou contacter l'administration.
+                  <span className="font-semibold">{t('sr.noSlotBold')}</span> {t('sr.noSlotRest')}
                 </p>
               </div>
             )}
@@ -1162,7 +1165,7 @@ const SuiviRapide = () => {
             {/* Horaires + Bouton créer */}
             <div className="flex items-end gap-3">
               <div className="flex-1">
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Début *</label>
+                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t('sr.start')}</label>
                 <input
                   type="time"
                   value={startTime}
@@ -1171,7 +1174,7 @@ const SuiviRapide = () => {
                 />
               </div>
               <div className="flex-1">
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">Fin</label>
+                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1 block">{t('sr.end')}</label>
                 <input
                   type="time"
                   value={endTime}
@@ -1185,7 +1188,7 @@ const SuiviRapide = () => {
                 className="flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 shadow-sm shadow-blue-200 transition whitespace-nowrap"
               >
                 {sessionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                {sessionLoading ? 'Création...' : 'Créer'}
+                {sessionLoading ? t('sr.creating') : t('common.create')}
               </button>
               <button
                 onClick={() => {
@@ -1205,7 +1208,7 @@ const SuiviRapide = () => {
                 className="flex items-center gap-2 px-5 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition whitespace-nowrap"
               >
                 <Trash2 className="w-4 h-4" />
-                Annuler
+                {t('common.cancel')}
               </button>
             </div>
 
@@ -1213,19 +1216,19 @@ const SuiviRapide = () => {
             {sessionType === 'normal' && (
               <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
                 <p className="text-xs font-semibold text-indigo-800 flex items-center gap-1.5">
-                  <BookOpen className="w-3.5 h-3.5" /> Cahier de texte
+                  <BookOpen className="w-3.5 h-3.5" /> {t('sr.textbook')}
                 </p>
                 <input
                   type="text"
                   value={lessonTitle}
                   onChange={(e) => setLessonTitle(e.target.value)}
-                  placeholder="Chapitre / Titre de la leçon"
+                  placeholder={t('cdt.topicPlaceholder')}
                   className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 />
                 <textarea
                   value={lessonDescription}
                   onChange={(e) => setLessonDescription(e.target.value)}
-                  placeholder="Objectif / Description de la séance"
+                  placeholder={t('sr.lessonDescPlaceholder')}
                   rows="2"
                   className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 />
@@ -1236,19 +1239,19 @@ const SuiviRapide = () => {
             {sessionType === 'control' && (
               <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-2">
                 <p className="text-xs font-semibold text-red-800 flex items-center gap-1.5">
-                  <CheckSquare className="w-3.5 h-3.5" /> Informations du contrôle
+                  <CheckSquare className="w-3.5 h-3.5" /> {t('sr.controlInfo')}
                 </p>
                 <input
                   type="text"
                   value={controlName}
                   onChange={(e) => { setControlName(e.target.value); setSessionError(''); }}
-                  placeholder="Nom du contrôle *"
+                  placeholder={t('sr.controlNamePlaceholder')}
                   className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
                 />
                 <textarea
                   value={controlDescription}
                   onChange={(e) => setControlDescription(e.target.value)}
-                  placeholder="Description (optionnel)"
+                  placeholder={t('sr.descOptional')}
                   rows="2"
                   className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-sm resize-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
                 />
@@ -1258,17 +1261,17 @@ const SuiviRapide = () => {
             {/* Éléments à suivre (cours uniquement) */}
             {sessionType !== 'control' && (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Éléments à suivre</p>
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{t('sr.trackItems')}</p>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { key: 'cahier_present', label: '📘 Cahier', checked: trackingOptions.cahier_present },
-                    { key: 'cahier', label: '🗂️ Cahier détails', checked: trackingOptions.cahier },
-                    { key: 'discipline', label: '👁️ Vigilance', checked: trackingOptions.discipline },
-                    { key: 'participation', label: '🙋 Participation', checked: trackingOptions.participation },
-                    { key: 'attitude', label: '🙂 Attitude', checked: trackingOptions.attitude },
-                    { key: 'sleeping', label: '😴 Veille', checked: trackingOptions.sleeping },
-                    { key: 'phone_use', label: '📱 Téléphone', checked: trackingOptions.phone_use },
-                    { key: 'writing', label: '✍️ Écriture', checked: trackingOptions.writing },
+                    { key: 'cahier_present', label: t('sr.opt.notebook'), checked: trackingOptions.cahier_present },
+                    { key: 'cahier', label: t('sr.opt.notebookDetails'), checked: trackingOptions.cahier },
+                    { key: 'discipline', label: t('sr.opt.vigilance'), checked: trackingOptions.discipline },
+                    { key: 'participation', label: t('sr.opt.participation'), checked: trackingOptions.participation },
+                    { key: 'attitude', label: t('sr.opt.attitude'), checked: trackingOptions.attitude },
+                    { key: 'sleeping', label: t('sr.opt.sleeping'), checked: trackingOptions.sleeping },
+                    { key: 'phone_use', label: t('sr.opt.phone'), checked: trackingOptions.phone_use },
+                    { key: 'writing', label: t('sr.opt.writing'), checked: trackingOptions.writing },
                   ].map(opt => (
                     <button
                       key={opt.key}
@@ -1308,7 +1311,7 @@ const SuiviRapide = () => {
                           : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
                       }`}
                     >
-                      📚 Devoirs
+                      {t('sr.homeworkChip')}
                     </button>
                   )}
                 </div>
@@ -1322,7 +1325,7 @@ const SuiviRapide = () => {
       {!currentSession && (
         <div className="flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
           <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-          <p className="text-sm text-amber-800">Créez une séance ci-dessus pour commencer le suivi des élèves.</p>
+          <p className="text-sm text-amber-800">{t('sr.createFirst')}</p>
         </div>
       )}
 
@@ -1331,7 +1334,7 @@ const SuiviRapide = () => {
           <summary className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 transition rounded-xl">
             <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
               <Clock className="w-4 h-4 text-gray-400" />
-              Séances enregistrées
+              {t('sr.savedSessions')}
               <span className="text-xs font-normal text-gray-400">({existingSessions.length})</span>
             </span>
             <ChevronDown className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" />
@@ -1368,10 +1371,10 @@ const SuiviRapide = () => {
                   )}
                   <div className="min-w-0">
                     <p className="font-medium text-gray-800 text-sm truncate">
-                      {session.topic || (session.type === 'control' ? 'Contrôle' : 'Séance')}
+                      {session.topic || (session.type === 'control' ? t('sr.control') : t('sr.session'))}
                     </p>
                     <p className="text-[11px] text-gray-500">
-                      {new Date(session.date).toLocaleDateString('fr-FR')} • {session.start_time?.substring(0,5)}{session.end_time ? ` — ${session.end_time?.substring(0,5)}` : ''}
+                      {new Date(session.date).toLocaleDateString(dateLocale)} • {session.start_time?.substring(0,5)}{session.end_time ? ` — ${session.end_time?.substring(0,5)}` : ''}
                     </p>
                   </div>
                 </div>
@@ -1381,7 +1384,7 @@ const SuiviRapide = () => {
                     deleteSession(session.id);
                   }}
                   className="p-1.5 rounded-lg hover:bg-red-100 transition opacity-0 group-hover/item:opacity-100"
-                  title="Supprimer"
+                  title={t('sr.delete')}
                 >
                   <Trash2 className="w-3.5 h-3.5 text-red-500" />
                 </button>
@@ -1394,13 +1397,13 @@ const SuiviRapide = () => {
       {sessionSaved && (
         <div className="rounded-xl border border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 p-5 text-center shadow-sm">
           <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-2" />
-          <p className="text-base font-semibold text-green-900 mb-1">Séance enregistrée avec succès</p>
-          <p className="text-sm text-green-700 mb-4">Tous les suivis ont été sauvegardés.</p>
+          <p className="text-base font-semibold text-green-900 mb-1">{t('sr.savedTitle')}</p>
+          <p className="text-sm text-green-700 mb-4">{t('sr.savedText')}</p>
           <button
             onClick={handleResetSession}
             className="inline-flex items-center gap-2 px-5 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 shadow-sm transition"
           >
-            <Plus className="w-4 h-4" /> Nouvelle séance
+            <Plus className="w-4 h-4" /> {t('sr.newSession')}
           </button>
         </div>
       )}
@@ -1411,7 +1414,7 @@ const SuiviRapide = () => {
             {/* ── Actions rapides ── */}
             <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mr-1">Actions rapides</span>
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mr-1">{t('sr.quickActions')}</span>
                 {(() => {
                   const allPresent = students.length > 0 && students.every(s => tracking[s.id]?.presence === 'present');
                   return (
@@ -1420,7 +1423,7 @@ const SuiviRapide = () => {
                       disabled={presenceSaved}
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allPresent ? 'bg-green-600 text-white border-green-600' : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'} ${presenceSaved ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      ✔️ Tout présent
+                      {t('sr.allPresent')}
                     </button>
                   );
                 })()}
@@ -1432,7 +1435,7 @@ const SuiviRapide = () => {
                       disabled={presenceSaved}
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allAbsent ? 'bg-red-600 text-white border-red-600' : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'} ${presenceSaved ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      ✖️ Tout absent
+                      {t('sr.allAbsent')}
                     </button>
                   );
                 })()}
@@ -1443,7 +1446,7 @@ const SuiviRapide = () => {
                       onClick={() => setAllCahierPresent(!allChecked)}
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allChecked ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}`}
                     >
-                      📘 Tout cahier
+                      {t('sr.allNotebook')}
                     </button>
                   );
                 })()}
@@ -1454,7 +1457,7 @@ const SuiviRapide = () => {
                       onClick={() => setAllWriting(!allChecked)}
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allChecked ? 'bg-purple-600 text-white border-purple-600' : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'}`}
                     >
-                      ✍️ Tout écrit
+                      {t('sr.allWriting')}
                     </button>
                   );
                 })()}
@@ -1465,7 +1468,7 @@ const SuiviRapide = () => {
                       onClick={() => setAllHomework(!allChecked)}
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allChecked ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
                     >
-                      📚 Tout devoirs
+                      {t('sr.allHomework')}
                     </button>
                   );
                 })()}
@@ -1476,7 +1479,7 @@ const SuiviRapide = () => {
                       onClick={() => setAllAttitude(allChecked ? null : 'correct')}
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border transition text-xs font-semibold ${allChecked ? 'bg-pink-600 text-white border-pink-600' : 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100'}`}
                     >
-                      🙂 Tout correct
+                      {t('sr.allCorrect')}
                     </button>
                   );
                 })()}
@@ -1490,7 +1493,7 @@ const SuiviRapide = () => {
                 type="text"
                 value={studentSearch}
                 onChange={(e) => setStudentSearch(e.target.value)}
-                placeholder="Rechercher un élève par nom ou prénom…"
+                placeholder={t('sr.searchPlaceholder')}
                 className="w-full pl-9 pr-9 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
               />
               {studentSearch && (
@@ -1498,7 +1501,7 @@ const SuiviRapide = () => {
                   type="button"
                   onClick={() => setStudentSearch('')}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 text-gray-400"
-                  aria-label="Effacer la recherche"
+                  aria-label={t('sr.clearSearch')}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1506,17 +1509,17 @@ const SuiviRapide = () => {
             </div>
             {normalizedSearch && (
               <p className="text-[11px] text-gray-500">
-                {filteredStudents.length} élève(s) trouvé(s) sur {students.length}
+                {t('sr.foundCount', { n: filteredStudents.length, total: students.length })}
               </p>
             )}
 
             {/* ── Vue CARTE mobile (visible uniquement sur mobile) ── */}
             <div className="md:hidden space-y-3">
               {filteredStudents.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-6">Aucun élève ne correspond à « {studentSearch} ».</p>
+                <p className="text-sm text-gray-400 text-center py-6">{t('sr.noMatch', { q: studentSearch })}</p>
               ) : filteredStudents.map((student) => {
-                const t = tracking[student.id] || {};
-                const isAbsent = t.presence === 'absent';
+                const st = tracking[student.id] || {};
+                const isAbsent = st.presence === 'absent';
                 return (
                   <div key={student.id} className={`rounded-xl border p-3 space-y-2 ${isAbsent ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}`}>
                     {/* Nom + Présence */}
@@ -1528,7 +1531,7 @@ const SuiviRapide = () => {
                       <div className="flex gap-1">
                         {[{value:'present',icon:'✔️'},{value:'absent',icon:'✖️'},{value:'late',icon:'⏱️'}].map(opt => (
                           <button key={opt.value} disabled={presenceSaved} onClick={() => updateTracking(student.id, 'presence', opt.value)}
-                            className={`w-8 h-8 rounded-lg text-sm ${t.presence === opt.value ? 'bg-blue-600 text-white' : 'bg-gray-200'} ${presenceSaved ? 'opacity-60 cursor-not-allowed' : ''}`}>
+                            className={`w-8 h-8 rounded-lg text-sm ${st.presence === opt.value ? 'bg-blue-600 text-white' : 'bg-gray-200'} ${presenceSaved ? 'opacity-60 cursor-not-allowed' : ''}`}>
                             {opt.icon}
                           </button>
                         ))}
@@ -1540,23 +1543,23 @@ const SuiviRapide = () => {
                       <div className="flex flex-wrap gap-2">
                         {trackingOptions?.cahier_present && (
                           <label className="flex items-center gap-1 text-xs bg-blue-50 px-2 py-1 rounded-lg border border-blue-200 cursor-pointer">
-                            <input type="checkbox" checked={t.cahier_present || false}
+                            <input type="checkbox" checked={st.cahier_present || false}
                               onChange={(e) => updateTracking(student.id, 'cahier_present', e.target.checked)}
                               className="w-4 h-4" />
-                            📘 Cahier
+                            {t('sr.opt.notebook')}
                           </label>
                         )}
                         {trackingOptions?.writing && (
-                          <button onClick={() => updateTracking(student.id, 'writing', !t.writing)}
-                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${t.writing ? 'bg-purple-600 text-white border-purple-600' : 'bg-purple-50 border-purple-200'}`}>
-                            ✍️ Écrit
+                          <button onClick={() => updateTracking(student.id, 'writing', !st.writing)}
+                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${st.writing ? 'bg-purple-600 text-white border-purple-600' : 'bg-purple-50 border-purple-200'}`}>
+                            {t('sr.written')}
                           </button>
                         )}
                         {trackingOptions?.discipline && (
                           <div className="flex gap-1">
-                            {[{value:'concentre',icon:'🟢',label:'Concentré'},{value:'moyen',icon:'🟡',label:'Moyen'},{value:'distrait',icon:'🔴',label:'Distrait'}].map(opt => (
+                            {[{value:'concentre',icon:'🟢',label:t('sr.disc.focused')},{value:'moyen',icon:'🟡',label:t('sr.disc.medium')},{value:'distrait',icon:'🔴',label:t('sr.disc.distracted')}].map(opt => (
                               <button key={opt.value} onClick={() => updateTracking(student.id, 'discipline', opt.value)}
-                                className={`text-xs px-1.5 py-1 rounded border ${t.discipline === opt.value ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}
+                                className={`text-xs px-1.5 py-1 rounded border ${st.discipline === opt.value ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}
                                 title={opt.label}>
                                 {opt.icon}
                               </button>
@@ -1565,9 +1568,9 @@ const SuiviRapide = () => {
                         )}
                         {trackingOptions?.participation && (
                           <div className="flex gap-1">
-                            {[{value:'faible',icon:'😐',label:'Faible'},{value:'bon',icon:'🙋',label:'Bonne'},{value:'excellent',icon:'⭐',label:'Excellente'}].map(opt => (
+                            {[{value:'faible',icon:'😐',label:t('sr.part.weak')},{value:'bon',icon:'🙋',label:t('sr.part.good')},{value:'excellent',icon:'⭐',label:t('sr.part.excellent')}].map(opt => (
                               <button key={opt.value} onClick={() => updateTracking(student.id, 'participation', opt.value)}
-                                className={`text-xs px-1.5 py-1 rounded border ${t.participation === opt.value ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 border-green-200'}`}
+                                className={`text-xs px-1.5 py-1 rounded border ${st.participation === opt.value ? 'bg-green-500 text-white border-green-500' : 'bg-green-50 border-green-200'}`}
                                 title={opt.label}>
                                 {opt.icon}
                               </button>
@@ -1575,63 +1578,63 @@ const SuiviRapide = () => {
                           </div>
                         )}
                         {trackingOptions?.sleeping && (
-                          <button onClick={() => updateTracking(student.id, 'sleeping', !t.sleeping)}
-                            className={`text-xs px-2 py-1 rounded-lg border ${t.sleeping ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 border-blue-200'}`}>
-                            😴 Veille
+                          <button onClick={() => updateTracking(student.id, 'sleeping', !st.sleeping)}
+                            className={`text-xs px-2 py-1 rounded-lg border ${st.sleeping ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 border-blue-200'}`}>
+                            {t('sr.opt.sleeping')}
                           </button>
                         )}
                         {trackingOptions?.phone_use && (
-                          <button onClick={() => updateTracking(student.id, 'phone_use', !t.phone_use)}
-                            className={`text-xs px-2 py-1 rounded-lg border ${t.phone_use ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}>
-                            📱 Tél.
+                          <button onClick={() => updateTracking(student.id, 'phone_use', !st.phone_use)}
+                            className={`text-xs px-2 py-1 rounded-lg border ${st.phone_use ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-yellow-50 border-yellow-200'}`}>
+                            {t('sr.phoneShort')}
                           </button>
                         )}
                         {(activeHomework.length > 0 ? activeHomework : []).map(hw => {
                           const hwKey = `homework_${hw.id}`;
                           if (!trackingOptions[hwKey]) return null;
                           return (
-                            <button key={hw.id} onClick={() => updateTracking(student.id, hwKey, t[hwKey] !== 'done' ? 'done' : null)}
-                              className={`text-xs px-2 py-1 rounded-lg border ${t[hwKey] === 'done' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 border-emerald-200'}`}>
+                            <button key={hw.id} onClick={() => updateTracking(student.id, hwKey, st[hwKey] !== 'done' ? 'done' : null)}
+                              className={`text-xs px-2 py-1 rounded-lg border ${st[hwKey] === 'done' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 border-emerald-200'}`}>
                               📚 {hw.title}
                             </button>
                           );
                         })}
                         {trackingOptions?.homework && activeHomework.length === 0 && (
-                          <button onClick={() => updateTracking(student.id, 'homework', t.homework === 'done' ? null : 'done')}
-                            className={`text-xs px-2 py-1 rounded-lg border ${t.homework === 'done' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 border-emerald-200'}`}>
-                            📚 Devoir
+                          <button onClick={() => updateTracking(student.id, 'homework', st.homework === 'done' ? null : 'done')}
+                            className={`text-xs px-2 py-1 rounded-lg border ${st.homework === 'done' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-emerald-50 border-emerald-200'}`}>
+                            {t('sr.homeworkOne')}
                           </button>
                         )}
                       </div>
                     )}
 
                     {/* Détails du cahier (si option activée) */}
-                    {!isAbsent && trackingOptions?.cahier && t.cahier_present && (
+                    {!isAbsent && trackingOptions?.cahier && st.cahier_present && (
                       <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-200">
                         <label className="flex items-center gap-1 text-xs bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 cursor-pointer">
-                          <input type="checkbox" checked={t.cahier_lesson === 'complete' || false}
+                          <input type="checkbox" checked={st.cahier_lesson === 'complete' || false}
                             onChange={(e) => updateTracking(student.id, 'cahier_lesson', e.target.checked ? 'complete' : null)}
                             className="w-4 h-4" />
-                          ✏️ Leçon complète
+                          {t('sr.lessonComplete')}
                         </label>
                         <label className="flex items-center gap-1 text-xs bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 cursor-pointer">
-                          <input type="checkbox" checked={t.cahier_documents === 'correct' || false}
+                          <input type="checkbox" checked={st.cahier_documents === 'correct' || false}
                             onChange={(e) => updateTracking(student.id, 'cahier_documents', e.target.checked ? 'correct' : null)}
                             className="w-4 h-4" />
-                          📄 Documents corrects
+                          {t('sr.docsCorrect')}
                         </label>
                         <label className="flex items-center gap-1 text-xs bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 cursor-pointer">
-                          <input type="checkbox" checked={t.cahier_readability === 'readable' || false}
+                          <input type="checkbox" checked={st.cahier_readability === 'readable' || false}
                             onChange={(e) => updateTracking(student.id, 'cahier_readability', e.target.checked ? 'readable' : null)}
                             className="w-4 h-4" />
-                          🔍 Lisible
+                          {t('sr.readable')}
                         </label>
                       </div>
                     )}
 
                     {/* Note */}
-                    <input type="text" placeholder="Observation..." maxLength="80"
-                      value={t.comment || ''}
+                    <input type="text" placeholder={t('sr.observationPlaceholder')} maxLength="80"
+                      value={st.comment || ''}
                       onChange={(e) => updateTracking(student.id, 'comment', e.target.value)}
                       className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50" />
                   </div>
@@ -1644,18 +1647,18 @@ const SuiviRapide = () => {
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-[10px]">
-                    <th className="px-2 py-1 sticky left-0 bg-gray-50 z-10 font-bold">Élève</th>
-                    <th className="px-1 py-1 bg-blue-50 font-bold">P</th>
-                    {trackingOptions?.cahier_present && <th className="px-1 py-1 bg-blue-50 font-bold">📘 Cahier</th>}
-                    {trackingOptions?.writing && <th className="px-1 py-1 bg-purple-50 font-bold">✍️ Écrit.</th>}
+                    <th className="px-2 py-1 sticky start-0 bg-gray-50 z-10 font-bold">{t('sr.col.student')}</th>
+                    <th className="px-1 py-1 bg-blue-50 font-bold">{t('sr.col.presence')}</th>
+                    {trackingOptions?.cahier_present && <th className="px-1 py-1 bg-blue-50 font-bold">{t('sr.opt.notebook')}</th>}
+                    {trackingOptions?.writing && <th className="px-1 py-1 bg-purple-50 font-bold">{t('sr.col.writing')}</th>}
                     {trackingOptions?.cahier && (
                       <>
-                        <th className="px-1 py-1 bg-orange-50 font-bold">✏️ Leçon</th>
-                        <th className="px-1 py-1 bg-orange-50 font-bold">📄 Docs</th>
-                        <th className="px-1 py-1 bg-orange-50 font-bold">🔍 Lisib.</th>
+                        <th className="px-1 py-1 bg-orange-50 font-bold">{t('sr.col.lesson')}</th>
+                        <th className="px-1 py-1 bg-orange-50 font-bold">{t('sr.col.docs')}</th>
+                        <th className="px-1 py-1 bg-orange-50 font-bold">{t('sr.col.readability')}</th>
                       </>
                     )}
-                    {trackingOptions?.discipline && <th className="px-1 py-1 bg-yellow-50 font-bold">👁️ Vigilance</th>}
+                    {trackingOptions?.discipline && <th className="px-1 py-1 bg-yellow-50 font-bold">{t('sr.opt.vigilance')}</th>}
                     {activeHomework.length > 0 ? activeHomework.map(hw => {
                       const homeworkKey = `homework_${hw.id}`;
                       if (trackingOptions[homeworkKey]) {
@@ -1667,13 +1670,13 @@ const SuiviRapide = () => {
                       }
                       return null;
                     }) : trackingOptions?.homework && (
-                      <th className="px-1 py-1 bg-green-50 font-bold">📚 Devoir</th>
+                      <th className="px-1 py-1 bg-green-50 font-bold">{t('sr.homeworkOne')}</th>
                     )}
-                    {trackingOptions?.participation && <th className="px-1 py-1 bg-green-50 font-bold">🙋 Partic.</th>}
-                    {trackingOptions?.attitude && <th className="px-1 py-1 bg-pink-50 font-bold">🙂 Attitude</th>}
-                    {trackingOptions?.sleeping && <th className="px-1 py-1 bg-blue-50 font-bold">😴 Veille</th>}
-                    {trackingOptions?.phone_use && <th className="px-1 py-1 bg-yellow-50 font-bold">📱 Tél.</th>}
-                    <th className="px-1 py-1 bg-pink-50 font-bold">🗒️ Notes</th>
+                    {trackingOptions?.participation && <th className="px-1 py-1 bg-green-50 font-bold">{t('sr.col.participation')}</th>}
+                    {trackingOptions?.attitude && <th className="px-1 py-1 bg-pink-50 font-bold">{t('sr.opt.attitude')}</th>}
+                    {trackingOptions?.sleeping && <th className="px-1 py-1 bg-blue-50 font-bold">{t('sr.opt.sleeping')}</th>}
+                    {trackingOptions?.phone_use && <th className="px-1 py-1 bg-yellow-50 font-bold">{t('sr.phoneShort')}</th>}
+                    <th className="px-1 py-1 bg-pink-50 font-bold">{t('sr.col.notes')}</th>
                   </tr>
                 </thead>
               <tbody>
@@ -1681,7 +1684,7 @@ const SuiviRapide = () => {
                   const hasPresence = !!tracking[student.id]?.presence;
                   return (
                     <tr key={student.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className={`px-2 py-1 font-medium sticky left-0 z-10 bg-inherit border-r border-gray-200 whitespace-nowrap ${
+                      <td className={`px-2 py-1 font-medium sticky start-0 z-10 bg-inherit border-r border-gray-200 whitespace-nowrap ${
                         !hasPresence ? 'bg-red-50' : ''
                       }`}>
                         <div className="flex items-center gap-2">
@@ -1695,9 +1698,9 @@ const SuiviRapide = () => {
                       <td className="px-1 py-1 text-center">
                         <div className="flex gap-0.5 justify-center">
                           {[
-                            { value: 'present', icon: '✔️', label: 'Présent' },
-                            { value: 'absent', icon: '✖️', label: 'Absent' },
-                            { value: 'late', icon: '⏱️', label: 'Retard' }
+                            { value: 'present', icon: '✔️', label: t('track.status.present') },
+                            { value: 'absent', icon: '✖️', label: t('track.status.absent') },
+                            { value: 'late', icon: '⏱️', label: t('track.status.late') }
                           ].map(opt => (
                             <button
                               key={opt.value}
@@ -1708,7 +1711,7 @@ const SuiviRapide = () => {
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-gray-200 hover:bg-gray-300'
                               } ${presenceSaved ? 'opacity-60 cursor-not-allowed' : ''}`}
-                              title={presenceSaved ? 'Présence verrouillée — cliquez sur Modifier la présence' : `Présence : ${opt.label}`}
+                              title={presenceSaved ? t('sr.presenceLocked') : t('sr.presenceTitle', { label: opt.label })}
                             >
                               {opt.icon}
                             </button>
@@ -1727,7 +1730,7 @@ const SuiviRapide = () => {
                               checked={tracking[student.id]?.cahier_present || false}
                               onChange={(e) => updateTracking(student.id, 'cahier_present', e.target.checked)}
                               className="w-4 h-4 cursor-pointer"
-                              title="Cahier présent"
+                              title={t('sr.notebookPresent')}
                             />
                           )}
                         </td>
@@ -1752,7 +1755,7 @@ const SuiviRapide = () => {
                                   ? 'bg-purple-600 text-white'
                                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                               }`}
-                              title="Cliquez si l'élève a écrit"
+                              title={t('sr.clickIfWritten')}
                             >
                               ✍️
                             </button>
@@ -1772,7 +1775,7 @@ const SuiviRapide = () => {
                                 checked={tracking[student.id]?.cahier_lesson === 'complete' || false}
                                 onChange={(e) => updateTracking(student.id, 'cahier_lesson', e.target.checked ? 'complete' : null)}
                                 className="w-4 h-4 cursor-pointer"
-                                title="Leçon complète"
+                                title={t('sr.lessonCompleteTitle')}
                               />
                             )}
                           </td>
@@ -1785,7 +1788,7 @@ const SuiviRapide = () => {
                                 checked={tracking[student.id]?.cahier_documents === 'correct' || false}
                                 onChange={(e) => updateTracking(student.id, 'cahier_documents', e.target.checked ? 'correct' : null)}
                                 className="w-4 h-4 cursor-pointer"
-                                title="Documents corrects"
+                                title={t('sr.docsCorrectTitle')}
                               />
                             )}
                           </td>
@@ -1798,7 +1801,7 @@ const SuiviRapide = () => {
                                 checked={tracking[student.id]?.cahier_readability === 'readable' || false}
                                 onChange={(e) => updateTracking(student.id, 'cahier_readability', e.target.checked ? 'readable' : null)}
                                 className="w-4 h-4 cursor-pointer"
-                                title="Cahier lisible"
+                                title={t('sr.readableTitle')}
                               />
                             )}
                           </td>
@@ -1813,9 +1816,9 @@ const SuiviRapide = () => {
                           ) : (
                             <div className="flex gap-0.5 justify-center">
                               {[
-                                { value: 'concentre', icon: '🟢', label: 'Concentré' },
-                                { value: 'moyen', icon: '🟡', label: 'Moyen' },
-                                { value: 'distrait', icon: '🔴', label: 'Distrait' }
+                                { value: 'concentre', icon: '🟢', label: t('sr.disc.focused') },
+                                { value: 'moyen', icon: '🟡', label: t('sr.disc.medium') },
+                                { value: 'distrait', icon: '🔴', label: t('sr.disc.distracted') }
                               ].map(opt => (
                                 <button
                                   key={opt.value}
@@ -1879,7 +1882,7 @@ const SuiviRapide = () => {
                               checked={tracking[student.id]?.homework === 'done' || tracking[student.id]?.homework === true || false}
                               onChange={(e) => updateTracking(student.id, 'homework', e.target.checked ? 'done' : null)}
                               className="w-4 h-4 cursor-pointer"
-                              title="Devoir fait"
+                              title={t('sr.homeworkDone')}
                             />
                           )}
                         </td>
@@ -1893,9 +1896,9 @@ const SuiviRapide = () => {
                           ) : (
                             <div className="flex gap-0.5 justify-center">
                               {[
-                                { value: 'faible', icon: '😐', label: 'Faible' },
-                                { value: 'bon', icon: '🙋', label: 'Bonne' },
-                                { value: 'excellent', icon: '⭐', label: 'Excellente' }
+                                { value: 'faible', icon: '😐', label: t('sr.part.weak') },
+                                { value: 'bon', icon: '🙋', label: t('sr.part.good') },
+                                { value: 'excellent', icon: '⭐', label: t('sr.part.excellent') }
                               ].map(opt => (
                                 <button
                                   key={opt.value}
@@ -1923,9 +1926,9 @@ const SuiviRapide = () => {
                           ) : (
                             <div className="flex gap-0.5 justify-center">
                               {[
-                                { value: 'correct', icon: '✓', label: 'Correct' },
-                                { value: 'bavarre', icon: '💬', label: 'Bavarre' },
-                                { value: 'perturbateur', icon: '⚠️', label: 'Perturbateur' }
+                                { value: 'correct', icon: '✓', label: t('sr.att.correct') },
+                                { value: 'bavarre', icon: '💬', label: t('sr.att.chatty') },
+                                { value: 'perturbateur', icon: '⚠️', label: t('sr.att.disruptive') }
                               ].map(opt => (
                                 <button
                                   key={opt.value}
@@ -1964,7 +1967,7 @@ const SuiviRapide = () => {
                                   ? 'bg-blue-600 text-white'
                                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                               }`}
-                              title="Cliquez si l'élève s'est endormi"
+                              title={t('sr.clickIfSleeping')}
                             >
                               😴
                             </button>
@@ -1991,7 +1994,7 @@ const SuiviRapide = () => {
                                   ? 'bg-yellow-500 text-white'
                                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                               }`}
-                              title="Cliquez si l'élève a utilisé le téléphone"
+                              title={t('sr.clickIfPhone')}
                             >
                               📱
                             </button>
@@ -2022,11 +2025,11 @@ const SuiviRapide = () => {
               <div className="text-sm">
                 {presenceSaved ? (
                   <span className="text-green-800 font-medium flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" /> Présence enregistrée — parents des absents notifiés. Colonnes verrouillées.
+                    <CheckCircle2 className="w-4 h-4" /> {t('sr.presenceSavedNote')}
                   </span>
                 ) : (
                   <span className="text-amber-800 font-medium flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4" /> Enregistrez la présence en début de séance : les absents sont signalés aux parents immédiatement.
+                    <AlertCircle className="w-4 h-4" /> {t('sr.presenceHint')}
                   </span>
                 )}
               </div>
@@ -2035,7 +2038,7 @@ const SuiviRapide = () => {
                   onClick={() => { setPresenceSaved(false); setAutoSaveStatus(''); }}
                   className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg border border-amber-400 bg-white text-amber-700 text-sm font-semibold hover:bg-amber-50 transition whitespace-nowrap"
                 >
-                  <RefreshCw className="w-4 h-4" /> Modifier la présence
+                  <RefreshCw className="w-4 h-4" /> {t('sr.editPresence')}
                 </button>
               ) : (
                 <button
@@ -2048,7 +2051,7 @@ const SuiviRapide = () => {
                   }`}
                 >
                   {savingPresence ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-4 h-4" />}
-                  {savingPresence ? 'Enregistrement...' : 'Enregistrer la présence'}
+                  {savingPresence ? t('sr.savingLabel') : t('sr.savePresence')}
                 </button>
               )}
             </div>
@@ -2058,7 +2061,7 @@ const SuiviRapide = () => {
           {saving && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-semibold text-blue-900">Enregistrement...</p>
+                <p className="text-sm font-semibold text-blue-900">{t('sr.savingLabel')}</p>
                 <p className="text-xs text-blue-700 font-medium">
                   {saveProgress.current} / {saveProgress.total}
                 </p>
@@ -2076,14 +2079,14 @@ const SuiviRapide = () => {
 
       {/* ── Barre flottante de sauvegarde ── */}
       {!sessionSaved && currentSession && (
-        <div className="fixed bottom-0 left-0 md:left-64 right-0 z-40 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+        <div className="fixed bottom-0 inset-x-0 md:ms-64 z-40 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
           <div className="flex items-center justify-between px-3 md:px-6 py-3 max-w-full">
             {/* Indicateur de complétude */}
             <div className="flex items-center gap-2">
               <Users className="w-4 h-4 text-gray-400 flex-shrink-0" />
               <span className="text-xs md:text-sm font-medium text-gray-700">
                 {students.filter(s => tracking[s.id]?.presence).length}/{students.length}
-                <span className="hidden sm:inline"> présences</span>
+                <span className="hidden sm:inline">{t('sr.presencesLabel')}</span>
               </span>
               <div className="w-16 md:w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                 <div
@@ -2097,7 +2100,7 @@ const SuiviRapide = () => {
               </div>
               {students.filter(s => tracking[s.id]?.presence).length < students.length && (
                 <span className="hidden sm:inline text-[11px] text-amber-600 font-medium">
-                  {students.length - students.filter(s => tracking[s.id]?.presence).length} restant(s)
+                  {t('sr.remaining', { n: students.length - students.filter(s => tracking[s.id]?.presence).length })}
                 </span>
               )}
             </div>
@@ -2118,8 +2121,8 @@ const SuiviRapide = () => {
                 ) : (
                   <Save className="w-4 h-4" />
                 )}
-                <span className="hidden sm:inline">{saving ? 'Enregistrement...' : 'Enregistrer la séance'}</span>
-                <span className="sm:hidden">{saving ? '...' : 'Enregistrer'}</span>
+                <span className="hidden sm:inline">{saving ? t('sr.savingLabel') : t('sr.saveSession')}</span>
+                <span className="sm:hidden">{saving ? '...' : t('sr.saveShort')}</span>
               </button>
               
               <button
@@ -2127,7 +2130,7 @@ const SuiviRapide = () => {
                   if (!currentSession?.id) return;
                   
                   // Confirmer l'annulation
-                  if (!window.confirm('Êtes-vous sûr de vouloir annuler cette séance ? Toutes les données seront supprimées.')) {
+                  if (!window.confirm(t('sr.confirmCancel'))) {
                     return;
                   }
                   
@@ -2166,15 +2169,15 @@ const SuiviRapide = () => {
                     
                   } catch (error) {
                     console.error('Erreur lors de l\'annulation de la séance:', error);
-                    setSessionError('Impossible d\'annuler la séance. Veuillez réessayer.');
+                    setSessionError(t('sr.cancelError'));
                   }
                 }}
                 disabled={saving || !currentSession?.id}
                 className="inline-flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-lg border border-red-300 bg-white text-red-700 text-sm font-semibold hover:bg-red-50 disabled:opacity-50 transition shadow-sm"
               >
                 <X className="w-4 h-4" />
-                <span className="hidden sm:inline">Annuler la séance</span>
-                <span className="sm:hidden">Annuler</span>
+                <span className="hidden sm:inline">{t('sr.cancelSession')}</span>
+                <span className="sm:hidden">{t('common.cancel')}</span>
               </button>
             </div>
           </div>

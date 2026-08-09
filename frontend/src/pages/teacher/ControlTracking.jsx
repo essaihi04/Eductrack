@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { ChevronLeft, Save, Clock, AlertCircle, CheckSquare, Phone, BookOpen, FileText, AlertTriangle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 
 const ControlTracking = () => {
   const { classId, sessionId } = useParams();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [session, setSession] = useState(null);
   const [students, setStudents] = useState([]);
   const [tracking, setTracking] = useState({});
@@ -116,7 +117,7 @@ const ControlTracking = () => {
   const saveTracking = async () => {
     try {
       setSaving(true);
-      setAutoSaveStatus('Sauvegarde en cours...');
+      setAutoSaveStatus(t('ct.savingBar'));
 
       const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = authSession?.access_token;
@@ -141,14 +142,14 @@ const ControlTracking = () => {
         });
       }
 
-      setAutoSaveStatus('✓ Sauvegardé');
+      setAutoSaveStatus(t('track.saved'));
       setTimeout(() => {
         setAutoSaveStatus('');
         navigate('/teacher/dashboard');
       }, 1500);
     } catch (error) {
       console.error('Erreur de sauvegarde:', error);
-      setAutoSaveStatus('✗ Erreur de sauvegarde');
+      setAutoSaveStatus(t('track.saveError'));
     } finally {
       setSaving(false);
     }
@@ -243,7 +244,7 @@ const ControlTracking = () => {
                   ? presenceColors[status] 
                   : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'
               }`}
-              title={status === 'present' ? 'Présent' : status === 'absent' ? 'Absent' : status === 'excused' ? 'Excusé' : 'Retard'}
+              title={t(`ct.presence.${status}`)}
             >
               {presenceEmojis[status]}
             </button>
@@ -254,7 +255,7 @@ const ControlTracking = () => {
             type="text"
             value={trackingData.presence_reason}
             onChange={(e) => updateTracking(student.id, 'presence_reason', e.target.value)}
-            placeholder="Justification"
+            placeholder={t('ct.justification')}
             className="w-full px-1 py-1 text-[10px] border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         ) : null}
@@ -291,7 +292,7 @@ const ControlTracking = () => {
                   ? materialColors[status] 
                   : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'
               }`}
-              title={status === 'complete' ? 'Complet' : status === 'incomplete' ? 'Incomplet' : 'Manquant'}
+              title={t(`ct.material.${status}`)}
             >
               {materialEmojis[status]}
             </button>
@@ -302,7 +303,7 @@ const ControlTracking = () => {
             type="text"
             value={trackingData.missing_materials}
             onChange={(e) => updateTracking(student.id, 'missing_materials', e.target.value)}
-            placeholder="Matériel manquant"
+            placeholder={t('ct.missingMaterial')}
             className="w-full px-1 py-1 text-[10px] border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         ) : null}
@@ -325,7 +326,7 @@ const ControlTracking = () => {
                 ? 'bg-red-100 text-red-800 border-red-300' 
                 : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'
             }`}
-            title={trackingData.phone_use ? 'Téléphone utilisé' : 'Téléphone non utilisé'}
+            title={trackingData.phone_use ? t('ct.phoneUsed') : t('ct.phoneNotUsed')}
           >
             {trackingData.phone_use ? '📱' : '📵'}
           </button>
@@ -338,7 +339,7 @@ const ControlTracking = () => {
               onChange={(e) => updateTracking(student.id, 'phone_confiscated', e.target.checked)}
               className="rounded w-3 h-3"
             />
-            🔒 Confisqué
+            {t('ct.confiscated')}
           </label>
         )}
       </div>
@@ -376,7 +377,7 @@ const ControlTracking = () => {
                   ? disciplineColors[status] 
                   : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'
               }`}
-              title={status === 'good' ? 'Bon' : status === 'warning' ? 'Avertissement' : status === 'cheating_attempt' ? 'Tentative de triche' : 'Triche confirmée'}
+              title={t(`ct.disc.${status}`)}
             >
               {disciplineEmojis[status]}
             </button>
@@ -387,7 +388,7 @@ const ControlTracking = () => {
             type="text"
             value={trackingData.discipline_notes}
             onChange={(e) => updateTracking(student.id, 'discipline_notes', e.target.value)}
-            placeholder="Notes"
+            placeholder={t('ct.notes')}
             className="w-full px-1 py-1 text-[10px] border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         )}
@@ -409,14 +410,14 @@ const ControlTracking = () => {
             onChange={(e) => updateTracking(student.id, 'copy_submitted', e.target.checked)}
             className="rounded w-3 h-3"
           />
-          {trackingData.copy_submitted ? '📄' : '📋'} Copie rendue
+          {trackingData.copy_submitted ? '📄' : '📋'} {t('ct.copySubmitted')}
         </label>
         {trackingData.copy_submitted && (
           <input
             type="text"
             value={trackingData.copy_notes}
             onChange={(e) => updateTracking(student.id, 'copy_notes', e.target.value)}
-            placeholder="Notes sur la copie"
+            placeholder={t('ct.copyNotes')}
             className="w-full px-1 py-1 text-[10px] border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         )}
@@ -425,7 +426,7 @@ const ControlTracking = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Chargement...</div>;
+    return <div className="flex items-center justify-center h-screen">{t('common.loading')}</div>;
   }
 
   return (
@@ -441,10 +442,10 @@ const ControlTracking = () => {
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <CheckSquare className="w-6 h-6 text-red-600" />
-              Suivi de Contrôle
+              {t('ct.title')}
             </h1>
             <p className="text-muted-foreground mt-1">
-              {session?.topic || 'Contrôle sans titre'} - {new Date(session?.date).toLocaleDateString('fr-FR')}
+              {t('ct.subtitle', { topic: session?.topic || t('ct.untitled'), date: new Date(session?.date).toLocaleDateString(dateLocale) })}
             </p>
           </div>
         </div>
@@ -458,9 +459,9 @@ const ControlTracking = () => {
       <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex gap-3">
         <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-red-900">Suivi rapide de contrôle</p>
+          <p className="text-sm font-medium text-red-900">{t('ct.bannerTitle')}</p>
           <p className="text-sm text-red-800 mt-1">
-            Cochez les cases et utilisez les boutons pour suivre rapidement la présence, le matériel, l'utilisation du téléphone, la discipline et la remise des copies.
+            {t('ct.bannerText')}
           </p>
         </div>
       </div>
@@ -475,7 +476,7 @@ const ControlTracking = () => {
                 allPresent ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-green-600 text-white hover:bg-green-700'
               }`}
             >
-              <span>{allPresent ? '❌' : '✅'}</span> {allPresent ? 'Tout désélectionner' : 'Tout présent'}
+              <span>{allPresent ? '❌' : '✅'}</span> {allPresent ? t('ct.unselectAll') : t('ct.allPresent')}
             </button>
           );
         })()}
@@ -488,7 +489,7 @@ const ControlTracking = () => {
                 allComplete ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-blue-600 text-white hover:bg-blue-700'
               }`}
             >
-              <span>{allComplete ? '❌' : '✅'}</span> {allComplete ? 'Tout désélectionner' : 'Tout matériel complet'}
+              <span>{allComplete ? '❌' : '✅'}</span> {allComplete ? t('ct.unselectAll') : t('ct.allMaterial')}
             </button>
           );
         })()}
@@ -501,7 +502,7 @@ const ControlTracking = () => {
                 allGood ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-yellow-600 text-white hover:bg-yellow-700'
               }`}
             >
-              <span>{allGood ? '❌' : '✅'}</span> {allGood ? 'Tout désélectionner' : 'Tout discipline bon'}
+              <span>{allGood ? '❌' : '✅'}</span> {allGood ? t('ct.unselectAll') : t('ct.allDiscipline')}
             </button>
           );
         })()}
@@ -514,7 +515,7 @@ const ControlTracking = () => {
                 allSubmitted ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-purple-600 text-white hover:bg-purple-700'
               }`}
             >
-              <span>{allSubmitted ? '❌' : '📄'}</span> {allSubmitted ? 'Tout désélectionner' : 'Toutes les copies rendues'}
+              <span>{allSubmitted ? '❌' : '📄'}</span> {allSubmitted ? t('ct.unselectAll') : t('ct.allCopies')}
             </button>
           );
         })()}
@@ -539,19 +540,19 @@ const ControlTracking = () => {
                   {!isAbsent && (
                     <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                       <div>
-                        <span className="text-[10px] font-bold text-blue-600 uppercase mb-1 block">Matériel</span>
+                        <span className="text-[10px] font-bold text-blue-600 uppercase mb-1 block">{t('ct.material')}</span>
                         <MaterialCell student={student} trackingData={studentTracking} />
                       </div>
                       <div>
-                        <span className="text-[10px] font-bold text-red-600 uppercase mb-1 block">Téléphone</span>
+                        <span className="text-[10px] font-bold text-red-600 uppercase mb-1 block">{t('ct.phone')}</span>
                         <PhoneCell student={student} trackingData={studentTracking} />
                       </div>
                       <div>
-                        <span className="text-[10px] font-bold text-yellow-600 uppercase mb-1 block">Discipline</span>
+                        <span className="text-[10px] font-bold text-yellow-600 uppercase mb-1 block">{t('ct.discipline')}</span>
                         <DisciplineCell student={student} trackingData={studentTracking} />
                       </div>
                       <div>
-                        <span className="text-[10px] font-bold text-purple-600 uppercase mb-1 block">Copie</span>
+                        <span className="text-[10px] font-bold text-purple-600 uppercase mb-1 block">{t('ct.copy')}</span>
                         <CopyCell student={student} trackingData={studentTracking} />
                       </div>
                     </div>
@@ -566,23 +567,23 @@ const ControlTracking = () => {
             <table className="w-full text-xs border-collapse">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-2 py-1 text-left text-[10px] font-bold text-gray-600 uppercase sticky left-0 bg-gray-50 z-10 min-w-[150px]">
-                    Élève
+                  <th className="px-2 py-1 text-start text-[10px] font-bold text-gray-600 uppercase sticky start-0 bg-gray-50 z-10 min-w-[150px]">
+                    {t('ct.col.student')}
                   </th>
-                  <th className="px-1 py-1 text-left text-[10px] font-bold text-gray-600 uppercase bg-green-50">
-                    ✅ Présence
+                  <th className="px-1 py-1 text-start text-[10px] font-bold text-gray-600 uppercase bg-green-50">
+                    {t('ct.col.presence')}
                   </th>
-                  <th className="px-1 py-1 text-left text-[10px] font-bold text-gray-600 uppercase bg-blue-50">
-                    ✅ Matériel
+                  <th className="px-1 py-1 text-start text-[10px] font-bold text-gray-600 uppercase bg-blue-50">
+                    {t('ct.col.material')}
                   </th>
-                  <th className="px-1 py-1 text-left text-[10px] font-bold text-gray-600 uppercase bg-red-50">
-                    📱 Téléphone
+                  <th className="px-1 py-1 text-start text-[10px] font-bold text-gray-600 uppercase bg-red-50">
+                    {t('ct.col.phone')}
                   </th>
-                  <th className="px-1 py-1 text-left text-[10px] font-bold text-gray-600 uppercase bg-yellow-50">
-                    ⚠️ Discipline
+                  <th className="px-1 py-1 text-start text-[10px] font-bold text-gray-600 uppercase bg-yellow-50">
+                    {t('ct.col.discipline')}
                   </th>
-                  <th className="px-1 py-1 text-left text-[10px] font-bold text-gray-600 uppercase bg-purple-50">
-                    📄 Copie
+                  <th className="px-1 py-1 text-start text-[10px] font-bold text-gray-600 uppercase bg-purple-50">
+                    {t('ct.col.copy')}
                   </th>
                 </tr>
               </thead>
@@ -592,7 +593,7 @@ const ControlTracking = () => {
                   const isAbsent = studentTracking.presence === 'absent' || studentTracking.presence === 'excused';
                   return (
                     <tr key={student.id} className={`hover:bg-gray-50 ${isAbsent ? 'bg-gray-100 opacity-50' : ''}`}>
-                      <td className="px-2 py-1 sticky left-0 bg-white z-10">
+                      <td className="px-2 py-1 sticky start-0 bg-white z-10">
                         <div>
                           <p className="font-medium text-gray-900 text-xs">{student.first_name} {student.last_name}</p>
                         </div>
@@ -629,7 +630,7 @@ const ControlTracking = () => {
           className="px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-200"
         >
           <Save className="w-5 h-5" />
-          {saving ? 'Sauvegarde...' : 'Enregistrer'}
+          {saving ? t('common.saving') : t('ct.save')}
         </button>
       </div>
 
@@ -645,7 +646,7 @@ const ControlTracking = () => {
                 ></div>
               </div>
               <span className="text-sm font-medium text-blue-700 whitespace-nowrap">
-                Sauvegarde en cours...
+                {t('ct.savingBar')}
               </span>
             </div>
           </div>
@@ -659,8 +660,8 @@ const ControlTracking = () => {
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Save className="w-8 h-8 text-green-600" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Enregistré !</h3>
-            <p className="text-gray-600 mb-6">Toutes les données du contrôle ont été sauvegardées avec succès.</p>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">{t('ct.savedTitle')}</h3>
+            <p className="text-gray-600 mb-6">{t('ct.savedText')}</p>
             <button
               onClick={() => {
                 setAutoSaveStatus('');
@@ -668,7 +669,7 @@ const ControlTracking = () => {
               }}
               className="w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
             >
-              Retourner à l'accueil
+              {t('ct.backHome')}
             </button>
           </div>
         </div>

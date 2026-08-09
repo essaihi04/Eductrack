@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Plus, BookOpen, Calendar, Users, Trash2, Edit2, X, Check, PieChart, Target, TrendingUp, Clock, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 import { supabase } from '../../lib/supabase';
 
 const Devoirs = () => {
-  const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [classes, setClasses] = useState([]);
   const [homework, setHomework] = useState([]);
   const [students, setStudents] = useState([]);
@@ -142,22 +143,22 @@ const Devoirs = () => {
         setToast({
           type: 'success',
           message: wasEdit
-            ? '✅ Devoir modifié avec succès.'
-            : `✅ Devoir envoyé${targetCount ? ` à ${targetCount} élève${targetCount > 1 ? 's' : ''}` : ''} avec succès.`,
+            ? t('hw.toast.updated')
+            : (targetCount ? t('hw.toast.sentTo', { n: targetCount }) : t('hw.toast.sent')),
         });
       } else {
         let detail = '';
         try { const j = await res.json(); detail = j?.error || j?.message || ''; } catch {}
         setToast({
           type: 'error',
-          message: `❌ Échec de l'envoi du devoir${detail ? ` : ${detail}` : ''}.`,
+          message: detail ? t('hw.toast.failedDetail', { detail }) : t('hw.toast.failed'),
         });
       }
     } catch (error) {
       console.error('Error saving homework:', error);
       setToast({
         type: 'error',
-        message: `❌ Erreur réseau : ${error.message || 'connexion impossible.'}`,
+        message: t('hw.toast.network', { message: error.message || t('hw.toast.networkFallback') }),
       });
     } finally {
       setSubmitting(false);
@@ -187,7 +188,7 @@ const Devoirs = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce devoir ?')) return;
+    if (!confirm(t('hw.confirmDelete'))) return;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -232,16 +233,11 @@ const Devoirs = () => {
     return icons[type] || '📄';
   };
 
-  const getTypeLabel = (type) => {
-    const labels = {
-      exercice: 'Exercice',
-      revision: 'Révision',
-      projet: 'Projet',
-      recherche: 'Recherche',
-      presentation: 'Présentation'
-    };
-    return labels[type] || type;
-  };
+  const getTypeLabel = (type) => (
+    ['exercice', 'revision', 'projet', 'recherche', 'presentation'].includes(type)
+      ? t(`hw.type.${type}`)
+      : type
+  );
 
   const isOverdue = (dueDate) => {
     return new Date(dueDate) < new Date();
@@ -264,7 +260,7 @@ const Devoirs = () => {
   const classStats = homework.reduce((acc, hw) => {
     if (!acc[hw.class_id]) {
       acc[hw.class_id] = {
-        name: hw.classes?.name || 'Classe inconnue',
+        name: hw.classes?.name || t('hw.unknownClass'),
         assigned: 0,
         submitted: 0
       };
@@ -288,14 +284,14 @@ const Devoirs = () => {
     return getHomeworkStatus(hw) === statusFilter;
   });
   const filterOptions = [
-    { key: 'all', label: 'Tous', count: homework.length },
-    { key: 'submitted', label: 'Soumis', count: homework.filter(hw => getHomeworkStatus(hw) === 'submitted').length },
-    { key: 'partial', label: 'Partiel', count: homework.filter(hw => getHomeworkStatus(hw) === 'partial').length },
-    { key: 'pending', label: 'Non soumis', count: homework.filter(hw => getHomeworkStatus(hw) === 'pending').length }
+    { key: 'all', label: t('hw.filter.all'), count: homework.length },
+    { key: 'submitted', label: t('hw.filter.submitted'), count: homework.filter(hw => getHomeworkStatus(hw) === 'submitted').length },
+    { key: 'partial', label: t('hw.filter.partial'), count: homework.filter(hw => getHomeworkStatus(hw) === 'partial').length },
+    { key: 'pending', label: t('hw.filter.pending'), count: homework.filter(hw => getHomeworkStatus(hw) === 'pending').length }
   ];
 
   if (loading) {
-    return <div className="p-8">Chargement...</div>;
+    return <div className="p-8">{t('common.loading')}</div>;
   }
 
   return (
@@ -318,7 +314,7 @@ const Devoirs = () => {
               type="button"
               onClick={() => setToast(null)}
               className="text-current opacity-60 hover:opacity-100"
-              aria-label="Fermer"
+              aria-label={t('hw.close')}
             >
               <X className="w-4 h-4" />
             </button>
@@ -337,15 +333,15 @@ const Devoirs = () => {
       {/* En-tête */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Devoirs</h1>
-          <p className="text-muted-foreground mt-2">Gérez les devoirs de vos classes</p>
+          <h1 className="text-3xl font-bold">{t('hw.title')}</h1>
+          <p className="text-muted-foreground mt-2">{t('hw.subtitle')}</p>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
         >
           <Plus className="w-5 h-5" />
-          Donner un devoir
+          {t('hw.give')}
         </button>
       </div>
 
@@ -355,33 +351,33 @@ const Devoirs = () => {
             <Card className="bg-gradient-to-br from-indigo-600 to-indigo-500 text-white">
               <CardContent className="p-4 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <span>Total assignés</span>
+                  <span>{t('hw.totalAssigned')}</span>
                   <PieChart className="w-5 h-5 opacity-80" />
                 </div>
                 <p className="text-3xl font-bold">{totalAssigned}</p>
-                <p className="text-xs text-indigo-100">Tous devoirs confondus</p>
+                <p className="text-xs text-indigo-100">{t('hw.allHomework')}</p>
               </CardContent>
             </Card>
 
             <Card className="bg-gradient-to-br from-emerald-600 to-emerald-500 text-white">
               <CardContent className="p-4 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <span>Soumissions</span>
+                  <span>{t('hw.submissions')}</span>
                   <TrendingUp className="w-5 h-5 opacity-80" />
                 </div>
                 <p className="text-3xl font-bold">{totalSubmitted}</p>
-                <p className="text-xs text-emerald-100">Dont {averageSubmissionRate}% rendus</p>
+                <p className="text-xs text-emerald-100">{t('hw.submittedRate', { n: averageSubmissionRate })}</p>
               </CardContent>
             </Card>
 
             <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white">
               <CardContent className="p-4 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <span>En attente</span>
+                  <span>{t('hw.pending')}</span>
                   <Clock className="w-5 h-5 opacity-80" />
                 </div>
                 <p className="text-3xl font-bold">{totalPending}</p>
-                <p className="text-xs text-amber-100">À relancer</p>
+                <p className="text-xs text-amber-100">{t('hw.toFollowUp')}</p>
               </CardContent>
             </Card>
 
@@ -389,17 +385,17 @@ const Devoirs = () => {
               <CardContent className="p-4 flex flex-col gap-3">
                 <div className="flex items-center gap-2 text-slate-600">
                   <Target className="w-4 h-4" />
-                  <span className="text-sm font-semibold">Meilleure classe</span>
+                  <span className="text-sm font-semibold">{t('hw.bestClass')}</span>
                 </div>
                 {bestClass ? (
                   <>
                     <p className="text-lg font-semibold">{bestClass.name}</p>
                     <p className="text-sm text-slate-500">
-                      {bestClass.rate}% remis ({bestClass.submitted}/{bestClass.assigned || 0})
+                      {t('hw.bestClassRate', { rate: bestClass.rate, submitted: bestClass.submitted, assigned: bestClass.assigned || 0 })}
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-slate-500">Aucune donnée disponible</p>
+                  <p className="text-sm text-slate-500">{t('hw.noData')}</p>
                 )}
               </CardContent>
             </Card>
@@ -407,8 +403,8 @@ const Devoirs = () => {
 
           <Card>
             <CardHeader>
-              <CardTitle>Progression par devoir</CardTitle>
-              <CardDescription>Prochains devoirs à échéance</CardDescription>
+              <CardTitle>{t('hw.progressTitle')}</CardTitle>
+              <CardDescription>{t('hw.progressSubtitle')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {nextDeadlines.map(hw => {
@@ -419,12 +415,11 @@ const Devoirs = () => {
                       <div>
                         <p className="font-semibold">{hw.title}</p>
                         <p className="text-xs text-gray-500">
-                          À rendre le{' '}
-                          {new Date(hw.due_date).toLocaleDateString('fr-FR', {
-                            day: 'numeric',
-                            month: 'short'
-                          })}{' '}
-                          • {hw.submitted_count}/{hw.assigned_count || 0} remis
+                          {t('hw.dueOn', {
+                            date: new Date(hw.due_date).toLocaleDateString(dateLocale, { day: 'numeric', month: 'short' }),
+                            submitted: hw.submitted_count,
+                            assigned: hw.assigned_count || 0,
+                          })}
                         </p>
                       </div>
                       <span className={`text-sm font-semibold ${rate >= 70 ? 'text-emerald-600' : rate >= 40 ? 'text-amber-600' : 'text-rose-600'}`}>
@@ -441,7 +436,7 @@ const Devoirs = () => {
                 );
               })}
               {nextDeadlines.length === 0 && (
-                <p className="text-sm text-gray-500">Aucun devoir planifié pour le moment.</p>
+                <p className="text-sm text-gray-500">{t('hw.nonePlanned')}</p>
               )}
             </CardContent>
           </Card>
@@ -455,8 +450,8 @@ const Devoirs = () => {
             <Card className="shadow-xl">
               <CardHeader className="flex flex-row items-start justify-between">
                 <div>
-                  <CardTitle>{editingHomework ? 'Modifier le devoir' : 'Nouveau devoir'}</CardTitle>
-                  <CardDescription>Remplissez les informations pour créer un devoir</CardDescription>
+                  <CardTitle>{editingHomework ? t('hw.editTitle') : t('hw.newTitle')}</CardTitle>
+                  <CardDescription>{t('hw.formSubtitle')}</CardDescription>
                 </div>
                 <button
                   type="button"
@@ -464,14 +459,14 @@ const Devoirs = () => {
                   disabled={submitting}
                   className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Fermer
+                  {t('hw.close')}
                 </button>
               </CardHeader>
               {submitting && (
                 <div className="px-6 -mt-2 pb-2">
                   <div className="flex items-center gap-2 text-sm text-blue-700 mb-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{editingHomework ? 'Mise à jour du devoir…' : 'Envoi du devoir aux élèves…'}</span>
+                    <span>{editingHomework ? t('hw.updating') : t('hw.sending')}</span>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-blue-100 overflow-hidden">
                     <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 animate-[progress_1.2s_ease-in-out_infinite]" style={{ animation: 'progress-slide 1.2s ease-in-out infinite' }} />
@@ -481,7 +476,7 @@ const Devoirs = () => {
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="text-sm font-medium block mb-2">Titre *</label>
+                <label className="text-sm font-medium block mb-2">{t('hw.fieldTitle')}</label>
                 <input
                   type="text"
                   name="title"
@@ -489,25 +484,25 @@ const Devoirs = () => {
                   onChange={handleInputChange}
                   required
                   className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Titre du devoir"
+                  placeholder={t('hw.titlePlaceholder')}
                 />
               </div>
 
               <div>
-                <label className="text-sm font-medium block mb-2">Description</label>
+                <label className="text-sm font-medium block mb-2">{t('hw.description')}</label>
                 <textarea
                   name="description"
                   value={formData.description}
                   onChange={handleInputChange}
                   rows={3}
                   className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Description du devoir (optionnel)"
+                  placeholder={t('hw.descriptionPlaceholder')}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-sm font-medium block mb-2">Classe *</label>
+                  <label className="text-sm font-medium block mb-2">{t('hw.classRequired')}</label>
                   <select
                     name="classId"
                     value={formData.classId}
@@ -515,7 +510,7 @@ const Devoirs = () => {
                     required
                     className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Sélectionner une classe</option>
+                    <option value="">{t('hw.pickClass')}</option>
                     {classes.map(cls => (
                       <option key={cls.id} value={cls.id}>{cls.name}</option>
                     ))}
@@ -523,7 +518,7 @@ const Devoirs = () => {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium block mb-2">Type *</label>
+                  <label className="text-sm font-medium block mb-2">{t('hw.typeRequired')}</label>
                   <select
                     name="type"
                     value={formData.type}
@@ -531,17 +526,17 @@ const Devoirs = () => {
                     required
                     className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="exercice">📝 Exercice</option>
-                    <option value="revision">📚 Révision</option>
-                    <option value="projet">🎯 Projet</option>
-                    <option value="recherche">🔍 Recherche</option>
-                    <option value="presentation">🎤 Présentation</option>
+                    <option value="exercice">📝 {t('hw.type.exercice')}</option>
+                    <option value="revision">📚 {t('hw.type.revision')}</option>
+                    <option value="projet">🎯 {t('hw.type.projet')}</option>
+                    <option value="recherche">🔍 {t('hw.type.recherche')}</option>
+                    <option value="presentation">🎤 {t('hw.type.presentation')}</option>
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="text-sm font-medium block mb-2">Date de remise *</label>
+                <label className="text-sm font-medium block mb-2">{t('hw.dueDateRequired')}</label>
                 <input
                   type="date"
                   name="dueDate"
@@ -554,7 +549,7 @@ const Devoirs = () => {
               </div>
 
               <div>
-                <label className="text-sm font-medium block mb-2">Cible *</label>
+                <label className="text-sm font-medium block mb-2">{t('hw.targetRequired')}</label>
                 <div className="flex gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -565,7 +560,7 @@ const Devoirs = () => {
                       onChange={handleInputChange}
                       className="w-4 h-4 text-blue-600"
                     />
-                    <span>Toute la classe</span>
+                    <span>{t('hw.wholeClass')}</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -576,7 +571,7 @@ const Devoirs = () => {
                       onChange={handleInputChange}
                       className="w-4 h-4 text-blue-600"
                     />
-                    <span>Groupe d'élèves</span>
+                    <span>{t('hw.studentGroup')}</span>
                   </label>
                 </div>
               </div>
@@ -584,12 +579,12 @@ const Devoirs = () => {
               {formData.targetType === 'group' && (
                 <div>
                   <label className="text-sm font-medium block mb-2">
-                    Sélectionner les élèves ({formData.studentIds.length} sélectionné(s))
+                    {t('hw.pickStudents', { n: formData.studentIds.length })}
                   </label>
                   <div className="border rounded-lg p-3 max-h-60 overflow-y-auto">
                     {students.length === 0 ? (
                       <p className="text-sm text-gray-500">
-                        Sélectionnez d'abord une classe
+                        {t('hw.pickClassFirst')}
                       </p>
                     ) : (
                       <div className="grid grid-cols-2 gap-2">
@@ -628,10 +623,10 @@ const Devoirs = () => {
                   {submitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      {editingHomework ? 'Modification…' : 'Envoi en cours…'}
+                      {editingHomework ? t('hw.modifying') : t('hw.sendingShort')}
                     </>
                   ) : (
-                    editingHomework ? 'Modifier' : 'Créer et envoyer'
+                    editingHomework ? t('common.modify') : t('hw.createAndSend')
                   )}
                 </button>
                 <button
@@ -640,7 +635,7 @@ const Devoirs = () => {
                   disabled={submitting}
                   className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Annuler
+                  {t('common.cancel')}
                 </button>
               </div>
                 </form>
@@ -675,8 +670,8 @@ const Devoirs = () => {
           <Card>
             <CardContent className="p-8 text-center">
               <BookOpen className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-              <p className="text-gray-500">Aucun devoir pour ce filtre.</p>
-              <p className="text-sm text-gray-400 mt-2">Essayez un autre statut ou créez un devoir.</p>
+              <p className="text-gray-500">{t('hw.emptyFilter')}</p>
+              <p className="text-sm text-gray-400 mt-2">{t('hw.emptyFilterHint')}</p>
             </CardContent>
           </Card>
         ) : (
@@ -712,12 +707,12 @@ const Devoirs = () => {
                         }`}
                       >
                         {getHomeworkStatus(hw) === 'submitted'
-                          ? 'Soumis'
+                          ? t('hw.status.submitted')
                           : getHomeworkStatus(hw) === 'partial'
-                            ? 'Partiel'
+                            ? t('hw.status.partial')
                             : isOverdue(hw.due_date)
-                              ? 'En retard'
-                              : 'Non soumis'}
+                              ? t('hw.status.overdue')
+                              : t('hw.status.pending')}
                       </span>
                     </div>
                     
@@ -728,12 +723,12 @@ const Devoirs = () => {
                     <div className="flex items-center gap-4 text-sm text-gray-500">
                       <div className="flex items-center gap-1">
                         <Users className="w-4 h-4" />
-                        <span>{hw.classes?.name || 'Classe inconnue'}</span>
+                        <span>{hw.classes?.name || t('hw.unknownClass')}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <Calendar className="w-4 h-4" />
                         <span>
-                          {new Date(hw.due_date).toLocaleDateString('fr-FR', {
+                          {new Date(hw.due_date).toLocaleDateString(dateLocale, {
                             day: 'numeric',
                             month: 'long',
                             year: 'numeric'
@@ -744,7 +739,7 @@ const Devoirs = () => {
 
                     {hw.target_type === 'group' && hw.homework_students && hw.homework_students.length > 0 && (
                       <div className="mt-3 flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Élèves concernés :</span>
+                        <span className="text-xs text-gray-500">{t('hw.concernedStudents')}</span>
                         <div className="flex -space-x-2">
                           {hw.homework_students.slice(0, 5).map(hs => (
                             <div
@@ -769,14 +764,14 @@ const Devoirs = () => {
                     <button
                       onClick={() => handleEdit(hw)}
                       className="p-2 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Modifier"
+                      title={t('common.modify')}
                     >
                       <Edit2 className="w-4 h-4 text-blue-600" />
                     </button>
                     <button
                       onClick={() => handleDelete(hw.id)}
                       className="p-2 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Supprimer"
+                      title={t('hw.delete')}
                     >
                       <Trash2 className="w-4 h-4 text-red-600" />
                     </button>

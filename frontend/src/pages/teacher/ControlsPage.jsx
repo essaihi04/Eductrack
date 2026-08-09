@@ -3,11 +3,16 @@ import { Calendar, Clock, FileText, Plus, Edit2, Trash2, Save, X, CheckCircle, U
 import { saveBlob } from '../../lib/download';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 
 const ControlsPage = () => {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  // La dispersion est stockee en francais (valeur metier) : on ne traduit que l'affichage.
+  const dispersionLabel = (d) => (
+    d === 'Faible' ? t('cp.dispersion.low') : d === 'Moyen' ? t('cp.dispersion.medium') : t('cp.dispersion.high')
+  );
 
   // Composant pour afficher une carte de contrôle avec statistiques (optimisé avec cache)
   const ControlCard = ({ control }) => {
@@ -20,7 +25,7 @@ const ControlsPage = () => {
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
               <h3 className="text-base sm:text-lg font-semibold text-gray-900 truncate">{control.name}</h3>
               {control.kind === 'activity' && (
-                <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 flex-shrink-0">Activité</span>
+                <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 flex-shrink-0">{t('cp.activity')}</span>
               )}
               <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${getStatusColor(control.status)}`}>
                 {getStatusLabel(control.status)}
@@ -29,7 +34,7 @@ const ControlsPage = () => {
             <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-600 mb-2">
               <div className="flex items-center gap-1 flex-shrink-0">
                 <Calendar className="w-3 h-3 sm:w-4 sm:h-4" />
-                {new Date(control.date).toLocaleDateString('fr-FR')}
+                {new Date(control.date).toLocaleDateString(dateLocale)}
               </div>
               {control.start_time && (
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -52,7 +57,7 @@ const ControlsPage = () => {
                 onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
                 className="px-2 py-1 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors flex-shrink-0"
               >
-                Démarrer
+                {t('cp.start')}
               </button>
             )}
             <button
@@ -64,19 +69,19 @@ const ControlsPage = () => {
               className="px-2 py-1 sm:px-3 sm:py-1.5 bg-blue-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1 flex-shrink-0"
             >
               <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4" />
-              Notes
+              {t('cp.notes')}
             </button>
             <button
               onClick={() => handleEdit(control)}
               className="p-1.5 sm:p-2 hover:bg-blue-100 rounded transition flex-shrink-0"
-              title="Modifier"
+              title={t('common.modify')}
             >
               <Edit2 className="w-3 h-3 sm:w-4 sm:h-4 text-blue-600" />
             </button>
             <button
               onClick={() => handleDelete(control.id)}
               className="p-1.5 sm:p-2 hover:bg-red-100 rounded transition flex-shrink-0"
-              title="Supprimer"
+              title={t('sr.delete')}
             >
               <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-600" />
             </button>
@@ -89,23 +94,23 @@ const ControlsPage = () => {
             {statsLoading && !stats ? (
               <div className="text-center text-gray-500 py-2">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                Chargement des statistiques...
+                {t('cp.loadingStats')}
               </div>
             ) : stats && stats.totalStudents > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left py-2">Catégorie</th>
-                      <th className="text-center py-2">Nombre</th>
-                      <th className="text-center py-2">Pourcentage</th>
+                      <th className="text-start py-2">{t('cp.category')}</th>
+                      <th className="text-center py-2">{t('cp.count')}</th>
+                      <th className="text-center py-2">{t('cp.percentage')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <UserX className="w-4 h-4 text-red-500" />
-                        <span>Absences</span>
+                        <span>{t('cp.absences')}</span>
                       </td>
                       <td className="text-center text-red-600 font-medium">{stats.absences}</td>
                       <td className="text-center text-red-600">
@@ -115,7 +120,7 @@ const ControlsPage = () => {
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <Package className="w-4 h-4 text-green-500" />
-                        <span>Matériel complet</span>
+                        <span>{t('cp.materialComplete')}</span>
                       </td>
                       <td className="text-center text-green-600 font-medium">{stats.materialComplete}</td>
                       <td className="text-center text-green-600">
@@ -125,7 +130,7 @@ const ControlsPage = () => {
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <Shield className="w-4 h-4 text-blue-500" />
-                        <span>Bonne discipline</span>
+                        <span>{t('cp.disciplineGood')}</span>
                       </td>
                       <td className="text-center text-blue-600 font-medium">{stats.disciplineGood}</td>
                       <td className="text-center text-blue-600">
@@ -135,7 +140,7 @@ const ControlsPage = () => {
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <Phone className="w-4 h-4 text-orange-500" />
-                        <span>Utilisation téléphone</span>
+                        <span>{t('cp.phoneUse')}</span>
                       </td>
                       <td className="text-center text-orange-600 font-medium">{stats.phoneUsage}</td>
                       <td className="text-center text-orange-600">
@@ -145,7 +150,7 @@ const ControlsPage = () => {
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                        <span>Tentatives de triche</span>
+                        <span>{t('cp.cheatingAttempts')}</span>
                       </td>
                       <td className="text-center text-yellow-600 font-medium">{stats.cheatingAttempts}</td>
                       <td className="text-center text-yellow-600">
@@ -155,7 +160,7 @@ const ControlsPage = () => {
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <Eye className="w-4 h-4 text-red-600" />
-                        <span>Triches confirmées</span>
+                        <span>{t('cp.cheatingConfirmed')}</span>
                       </td>
                       <td className="text-center text-red-600 font-medium">{stats.cheatingCaught}</td>
                       <td className="text-center text-red-600">
@@ -165,7 +170,7 @@ const ControlsPage = () => {
                     <tr className="border-b">
                       <td className="py-2 flex items-center gap-2">
                         <FileCheck className="w-4 h-4 text-purple-500" />
-                        <span>Copies rendues</span>
+                        <span>{t('cp.copiesSubmitted')}</span>
                       </td>
                       <td className="text-center text-purple-600 font-medium">{stats.copiesSubmitted}</td>
                       <td className="text-center text-purple-600">
@@ -175,7 +180,7 @@ const ControlsPage = () => {
                     <tr className="font-semibold">
                       <td className="py-2 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-green-600" />
-                        <span>Taux de réussite</span>
+                        <span>{t('cp.successRate')}</span>
                       </td>
                       <td className="text-center text-green-600" colSpan="2">
                         {Math.round((stats.copiesSubmitted / stats.totalStudents) * 100)}%
@@ -184,12 +189,12 @@ const ControlsPage = () => {
                   </tbody>
                 </table>
                 <div className="mt-2 text-xs text-gray-500 text-center">
-                  Total élèves: {stats.totalStudents}
+                  {t('cp.totalStudents', { n: stats.totalStudents })}
                 </div>
               </div>
             ) : (
               <div className="text-center text-gray-500 text-sm py-2">
-                {statsLoading ? 'Chargement...' : 'Aucune statistique disponible'}
+                {statsLoading ? t('common.loading') : t('cp.noStats')}
               </div>
             )}
           </div>
@@ -440,7 +445,7 @@ const ControlsPage = () => {
         }));
 
       if (notesData.length === 0) {
-        alert('Aucune note à enregistrer');
+        alert(t('cp.noNoteToSave'));
         return;
       }
 
@@ -461,7 +466,7 @@ const ControlsPage = () => {
         console.log('Notes enregistrées avec succès:', result);
         
         // Afficher un message de succès
-        alert(`✅ ${notesData.length} note(s) enregistrée(s) avec succès !`);
+        alert(t('cp.notesSaved', { n: notesData.length }));
         
         // Fermer automatiquement la modal de saisie manuelle
         setShowNotesModal(false);
@@ -477,11 +482,11 @@ const ControlsPage = () => {
       } else {
         const error = await res.json();
         console.error('Erreur lors de l\'enregistrement:', error);
-        alert(`❌ Erreur lors de l'enregistrement: ${error.error || 'Erreur inconnue'}`);
+        alert(t('cp.saveNotesError', { detail: error.error || t('cp.unknownError') }));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('❌ Erreur lors de l\'enregistrement des notes');
+      alert(t('cp.saveNotesFailed'));
     }
   };
 
@@ -527,7 +532,7 @@ const ControlsPage = () => {
     // Afficher un message de confirmation
     const notesCount = notes.length;
     const studentsCount = Math.min(notesCount, classStudents.length);
-    alert(`✅ ${studentsCount} note(s) collée(s) avec succès !\n\n📝 ${notesCount} note(s) assignée(s) aux élèves\n\n💾 Cliquez sur "Enregistrer les notes" pour sauvegarder.`);
+    alert(t('cp.pasted', { students: studentsCount, notes: notesCount }));
   };
 
   // Fonction pour calculer les statistiques d'un contrôle
@@ -601,7 +606,7 @@ const ControlsPage = () => {
         })
         .map(([studentId, noteData]) => {
           const student = classStudents.find(s => s.id === studentId);
-          const studentName = student ? `${student.first_name} ${student.last_name}` : 'Inconnu';
+          const studentName = student ? `${student.first_name} ${student.last_name}` : t('cp.unknownStudent');
           return { id: studentId, name: studentName, note: noteData.note };
         });
 
@@ -628,7 +633,7 @@ const ControlsPage = () => {
       .filter(n => n.note !== null && n.note !== undefined && parseFloat(n.note) < 10)
       .map(n => ({
         id: n.student_id,
-        name: n.student_name || 'Élève',
+        name: n.student_name || t('cp.studentFallback'),
         note: n.note
       }));
 
@@ -722,7 +727,7 @@ const ControlsPage = () => {
       return classData.name;
     }
     
-    return 'Non définie';
+    return t('cp.notDefined');
   };
 
   // Fonction pour exporter un contrôle en PDF
@@ -741,7 +746,7 @@ const ControlsPage = () => {
       await saveBlob(blob, `rapport_controle_${(control.name || 'controle').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`);
     } catch (error) {
       console.error('Erreur lors de l\'exportation PDF:', error);
-      alert('Erreur lors de la generation du PDF. Veuillez reessayer.');
+      alert(t('cp.pdfError'));
     }
   };
 
@@ -773,16 +778,16 @@ const ControlsPage = () => {
     
     switch(dispersion) {
       case 'Faible':
-        interpretation = '📉 Interprétation\n\nLa classe est homogène.\nLes élèves ont un niveau similaire\net maîtrisent bien la matière.';
-        advice = '💡 Recommandations\n\n• Poursuivre la progression actuelle\n• Proposer des exercices d\'approfondissement\n• Envisager des activités de groupe';
+        interpretation = t('cp.interp.low');
+        advice = t('cp.advice.low');
         break;
       case 'Moyen':
-        interpretation = '📉 Interprétation\n\nLa classe présente des écarts notables.\nCertains élèves maîtrisent bien,\nd\'autres sont en difficulté.';
-        advice = '💡 Recommandations\n\n• Prévoir une différenciation pédagogique\n• Organiser des groupes de niveau\n• Proposer un soutien personnalisé\n• Adapter les exercices';
+        interpretation = t('cp.interp.medium');
+        advice = t('cp.advice.medium');
         break;
       case 'Élevé':
-        interpretation = '📉 Interprétation\n\nLa classe est très hétérogène.\nGros écarts entre les élèves.\nNécessite une attention particulière.';
-        advice = '💡 Recommandations\n\n• Repenser l\'approche pédagogique\n• Créer des groupes de compétences\n• Planifier des évaluations adaptées\n• Envisager un tutorat par pairs';
+        interpretation = t('cp.interp.high');
+        advice = t('cp.advice.high');
         break;
     }
     
@@ -872,7 +877,7 @@ const ControlsPage = () => {
         importResult: null
       }));
     if (newFiles.length === 0) {
-      setExcelGlobalError('Aucun fichier Excel valide sélectionné (.xlsx, .xls, .csv)');
+      setExcelGlobalError(t('cp.excelNoValidFile'));
       return;
     }
     setExcelFiles(prev => [...prev, ...newFiles]);
@@ -927,7 +932,7 @@ const ControlsPage = () => {
   // Parser un fichier pour une classe donnée
   const parseExcelFile = async (fileEntry) => {
     if (!fileEntry.classId) {
-      updateExcelFile(fileEntry.id, { error: 'Veuillez sélectionner une classe.' });
+      updateExcelFile(fileEntry.id, { error: t('cp.excelPickClass') });
       return;
     }
     updateExcelFile(fileEntry.id, { parsing: true, error: null, parsed: null, mappings: {} });
@@ -944,14 +949,14 @@ const ControlsPage = () => {
       });
       const data = await res.json();
       if (!res.ok) {
-        updateExcelFile(fileEntry.id, { parsing: false, error: data.error || 'Erreur analyse' });
+        updateExcelFile(fileEntry.id, { parsing: false, error: data.error || t('cp.excelParseError') });
         return;
       }
       const mappings = autoMapColumns(data);
       updateExcelFile(fileEntry.id, { parsing: false, parsed: data, mappings });
     } catch (err) {
       console.error('Erreur parse Excel:', err);
-      updateExcelFile(fileEntry.id, { parsing: false, error: 'Erreur lors de l\'analyse du fichier' });
+      updateExcelFile(fileEntry.id, { parsing: false, error: t('cp.excelParseFailed') });
     }
   };
 
@@ -984,7 +989,7 @@ const ControlsPage = () => {
   const handleExcelImportAll = async () => {
     const readyFiles = excelFiles.filter(f => f.parsed && Object.values(f.mappings).some(v => v));
     if (readyFiles.length === 0) {
-      setExcelGlobalError('Aucun fichier prêt à importer. Assignez une classe et des contrôles.');
+      setExcelGlobalError(t('cp.excelNothingReady'));
       return;
     }
 
@@ -1043,7 +1048,7 @@ const ControlsPage = () => {
 
       setExcelGlobalResult({
         success: true,
-        message: `${totalInserted} note(s) importée(s) depuis ${readyFiles.length} fichier(s)`,
+        message: t('cp.excelImported', { notes: totalInserted, files: readyFiles.length }),
         totalInserted,
         totalErrors,
         skippedStudents: totalSkipped,
@@ -1056,7 +1061,7 @@ const ControlsPage = () => {
       setNotesVersion(prev => prev + 1);
     } catch (err) {
       console.error('Erreur import Excel:', err);
-      setExcelGlobalError('Erreur lors de l\'importation des notes');
+      setExcelGlobalError(t('cp.excelImportError'));
     } finally {
       setExcelImporting(false);
     }
@@ -1255,18 +1260,9 @@ const ControlsPage = () => {
     }
   };
 
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case 'planned':
-        return 'Planifié';
-      case 'in_progress':
-        return 'En cours';
-      case 'completed':
-        return 'Terminé';
-      default:
-        return status;
-    }
-  };
+  const getStatusLabel = (status) => (
+    ['planned', 'in_progress', 'completed'].includes(status) ? t(`cp.status.${status}`) : status
+  );
 
   const handleEdit = (control) => {
     setEditingControl(control);
@@ -1283,7 +1279,7 @@ const ControlsPage = () => {
   };
 
   const handleDelete = async (controlId) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce contrôle ?')) {
+    if (!confirm(t('cp.confirmDelete'))) {
       return;
     }
 
@@ -1297,11 +1293,11 @@ const ControlsPage = () => {
       if (res.ok) {
         setControls(controls.filter(c => c.id !== controlId));
       } else {
-        alert('Erreur lors de la suppression du contrôle');
+        alert(t('cp.deleteError'));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('Erreur lors de la suppression du contrôle');
+      alert(t('cp.deleteError'));
     }
   };
 
@@ -1340,11 +1336,11 @@ const ControlsPage = () => {
         });
         fetchData();
       } else {
-        alert('Erreur lors de la sauvegarde du contrôle');
+        alert(t('cp.saveError'));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('Erreur lors de la sauvegarde du contrôle');
+      alert(t('cp.saveError'));
     } finally {
       setSaving(false);
     }
@@ -1355,7 +1351,7 @@ const ControlsPage = () => {
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Chargement...</p>
+          <p className="text-gray-600">{t('common.loading')}</p>
         </div>
       </div>
     );
@@ -1365,8 +1361,8 @@ const ControlsPage = () => {
     <div className="p-3 sm:p-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-4xl font-bold truncate">Gestion des Contrôles</h1>
-          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">Gérez et suivez tous vos contrôles</p>
+          <h1 className="text-2xl sm:text-4xl font-bold truncate">{t('cp.title')}</h1>
+          <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">{t('cp.subtitle')}</p>
         </div>
         <button
           onClick={() => {
@@ -1385,37 +1381,37 @@ const ControlsPage = () => {
           className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 flex-shrink-0"
         >
           <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-sm sm:text-base">Nouveau Contrôle</span>
+          <span className="text-sm sm:text-base">{t('cp.newControl')}</span>
         </button>
       </div>
 
       {/* Filtre professionnel */}
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle className="text-lg">Filtre des Contrôles</CardTitle>
+          <CardTitle className="text-lg">{t('cp.filterTitle')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4">
             <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Statut</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('cp.status')}</label>
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="all">Tous les contrôles</option>
-                <option value="planned">Planifiés</option>
-                <option value="completed">Terminés</option>
+                <option value="all">{t('cp.allControls')}</option>
+                <option value="planned">{t('cp.planned')}</option>
+                <option value="completed">{t('cp.completed')}</option>
               </select>
             </div>
             <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Classe</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('common.class')}</label>
               <select
                 value={filterClass}
                 onChange={(e) => setFilterClass(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="all">Toutes les classes</option>
+                <option value="all">{t('cp.allClasses')}</option>
                 {classes.map(cls => (
                   <option key={cls.id} value={cls.id}>{cls.name}</option>
                 ))}
@@ -1430,13 +1426,13 @@ const ControlsPage = () => {
         <CardHeader className="cursor-pointer" onClick={() => setShowExcelImportSection(prev => !prev)}>
           <CardTitle className="text-lg flex items-center gap-2">
             <Upload className="w-5 h-5 text-green-600" />
-            Importer les notes via Excel
+            {t('cp.excelTitle')}
             {excelFiles.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-normal">{excelFiles.length} fichier(s)</span>
+              <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-normal">{t('cp.excelFiles', { n: excelFiles.length })}</span>
             )}
-            <span className="ml-auto text-sm text-gray-400">{showExcelImportSection ? '▲ Masquer' : '▼ Afficher'}</span>
+            <span className="ml-auto text-sm text-gray-400">{showExcelImportSection ? t('cp.hide') : t('cp.show')}</span>
           </CardTitle>
-          <CardDescription>Importez les notes depuis un ou plusieurs fichiers Excel (un fichier par classe)</CardDescription>
+          <CardDescription>{t('cp.excelSubtitle')}</CardDescription>
         </CardHeader>
         {showExcelImportSection && (
           <CardContent>
@@ -1465,13 +1461,13 @@ const ControlsPage = () => {
                             <div className="flex items-center gap-2 flex-wrap">
                               {d.success ? <CheckCircle className="w-4 h-4 text-green-500" /> : <AlertTriangle className="w-4 h-4 text-red-500" />}
                               <span className="font-semibold text-green-800">{key}</span>
-                              <span className="text-green-700">: {d.success ? `${d.count} note(s)` : d.error}</span>
+                              <span className="text-green-700">: {d.success ? t('cp.notesCount', { n: d.count }) : d.error}</span>
                               {d.success && d.totalStudents != null && (
-                                <span className="text-xs text-gray-500">• {d.notedStudents}/{d.totalStudents} notés</span>
+                                <span className="text-xs text-gray-500">• {t('cp.noted', { noted: d.notedStudents, total: d.totalStudents })}</span>
                               )}
                               {['red','orange','yellow','gray'].map(lvl => counts[lvl] ? (
                                 <span key={lvl} className={`text-xs px-2 py-0.5 rounded-full font-medium ${levelStyle[lvl].chip}`}>
-                                  {counts[lvl]} {lvl === 'red' ? 'critiques' : lvl === 'orange' ? 'incidents' : lvl === 'yellow' ? 'sans note' : 'absents'}
+                                  {counts[lvl]} {lvl === 'red' ? t('cp.critical') : lvl === 'orange' ? t('cp.incidents') : lvl === 'yellow' ? t('cp.noNote') : t('cp.absent')}
                                 </span>
                               ) : null)}
                             </div>
@@ -1493,11 +1489,11 @@ const ControlsPage = () => {
                   )}
                   {excelGlobalResult.skippedStudents > 0 && (
                     <p className="text-sm text-yellow-700 mt-2 flex items-center gap-1">
-                      <AlertTriangle className="w-4 h-4" /> {excelGlobalResult.skippedStudents} élève(s) du fichier non reconnu(s) — vérifiez le code Massar / le nom.
+                      <AlertTriangle className="w-4 h-4" /> {t('cp.skipped', { n: excelGlobalResult.skippedStudents })}
                     </p>
                   )}
                   <button onClick={resetExcelImport} className="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium">
-                    Nouvel import
+                    {t('cp.newImport')}
                   </button>
                 </div>
               )}
@@ -1508,7 +1504,7 @@ const ControlsPage = () => {
                   <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="text-red-800 font-medium">{excelGlobalError}</p>
-                    <button onClick={() => setExcelGlobalError(null)} className="text-sm text-red-600 underline mt-1">Fermer</button>
+                    <button onClick={() => setExcelGlobalError(null)} className="text-sm text-red-600 underline mt-1">{t('common.close')}</button>
                   </div>
                 </div>
               )}
@@ -1528,12 +1524,12 @@ const ControlsPage = () => {
                   >
                     <Upload className={`w-10 h-10 mx-auto mb-3 ${excelDragOver ? 'text-green-500' : 'text-gray-400'}`} />
                     <p className="text-gray-700 font-medium mb-1">
-                      Glissez-déposez vos fichiers Excel ici
+                      {t('cp.dropFiles')}
                     </p>
-                    <p className="text-sm text-gray-500 mb-3">ou</p>
+                    <p className="text-sm text-gray-500 mb-3">{t('cp.or')}</p>
                     <label className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer text-sm font-medium">
                       <Upload className="w-4 h-4" />
-                      Sélectionner des fichiers
+                      {t('cp.pickFiles')}
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
@@ -1542,15 +1538,15 @@ const ControlsPage = () => {
                         className="hidden"
                       />
                     </label>
-                    <p className="text-xs text-gray-400 mt-3">Formats acceptés : .xlsx, .xls, .csv — Un fichier par classe</p>
+                    <p className="text-xs text-gray-400 mt-3">{t('cp.formats')}</p>
                   </div>
 
                   {/* Liste des fichiers ajoutés */}
                   {excelFiles.length > 0 && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-gray-800">{excelFiles.length} fichier(s) ajouté(s)</h4>
-                        <button onClick={resetExcelImport} className="text-sm text-red-500 hover:text-red-700 underline">Tout supprimer</button>
+                        <h4 className="font-semibold text-gray-800">{t('cp.filesAdded', { n: excelFiles.length })}</h4>
+                        <button onClick={resetExcelImport} className="text-sm text-red-500 hover:text-red-700 underline">{t('cp.removeAll')}</button>
                       </div>
 
                       {excelFiles.map((fileEntry, fileIdx) => {
@@ -1592,8 +1588,7 @@ const ControlsPage = () => {
                                   {className_file && <span className="ml-2 text-blue-600 font-medium">{className_file}</span>}
                                   {fileEntry.parsed && (
                                     <span className="ml-2 text-green-600">
-                                      {fileEntry.parsed.totalMatchedStudents}/{fileEntry.parsed.totalExcelStudents} élèves reconnus
-                                      — {fileEntry.parsed.detectedColumns?.length || 0} colonnes
+                                      {t('cp.recognized', { matched: fileEntry.parsed.totalMatchedStudents, total: fileEntry.parsed.totalExcelStudents, cols: fileEntry.parsed.detectedColumns?.length || 0 })}
                                     </span>
                                   )}
                                 </p>
@@ -1611,7 +1606,7 @@ const ControlsPage = () => {
                                     disabled={fileEntry.parsing}
                                     className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 max-w-[180px]"
                                   >
-                                    <option value="">Classe...</option>
+                                    <option value="">{t('cp.classPlaceholder')}</option>
                                     {classes.map(cls => (
                                       <option key={cls.id} value={cls.id}>{cls.name}</option>
                                     ))}
@@ -1631,7 +1626,7 @@ const ControlsPage = () => {
                             {fileEntry.parsed && !hasResult && (
                               <div className="px-3 pb-3 space-y-2">
                                 <div className="border-t border-gray-200 pt-2">
-                                  <p className="text-xs font-medium text-gray-600 mb-2">Associer les colonnes aux contrôles :</p>
+                                  <p className="text-xs font-medium text-gray-600 mb-2">{t('cp.mapColumns')}</p>
                                   <div className="space-y-1.5">
                                     {fileEntry.parsed.detectedColumns?.map((col, idx) => (
                                       <div key={idx} className="flex items-center gap-2 text-sm">
@@ -1642,10 +1637,10 @@ const ControlsPage = () => {
                                           onChange={(e) => setExcelFileMapping(fileEntry.id, col.label, e.target.value)}
                                           className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                         >
-                                          <option value="">-- Ne pas importer --</option>
+                                          <option value="">{t('cp.dontImport')}</option>
                                           {fileEntry.parsed.dbControls?.map(c => (
                                             <option key={c.id} value={c.id}>
-                                              {c.name} ({new Date(c.date).toLocaleDateString('fr-FR')})
+                                              {c.name} ({new Date(c.date).toLocaleDateString(dateLocale)})
                                             </option>
                                           ))}
                                         </select>
@@ -1653,22 +1648,22 @@ const ControlsPage = () => {
                                     ))}
                                   </div>
                                   {fileEntry.parsed.dbControls?.length === 0 && (
-                                    <p className="text-xs text-yellow-700 mt-1">Aucun contrôle trouvé pour cette classe.</p>
+                                    <p className="text-xs text-yellow-700 mt-1">{t('cp.noControlForClass')}</p>
                                   )}
                                 </div>
 
                                 {/* Aperçu compact des élèves */}
                                 <details className="group">
                                   <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800 font-medium">
-                                    Voir l'aperçu des {fileEntry.parsed.students?.length} élèves
+                                    {t('cp.previewStudents', { n: fileEntry.parsed.students?.length })}
                                   </summary>
                                   <div className="mt-2 overflow-x-auto max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
                                     <table className="w-full text-xs">
                                       <thead className="bg-gray-100 sticky top-0">
                                         <tr>
                                           <th className="px-2 py-1 text-left">#</th>
-                                          <th className="px-2 py-1 text-left">Nom</th>
-                                          <th className="px-2 py-1 text-left">Match</th>
+                                          <th className="px-2 py-1 text-start">{t('cp.name')}</th>
+                                          <th className="px-2 py-1 text-start">{t('cp.match')}</th>
                                           {fileEntry.parsed.detectedColumns?.map((col, i) => (
                                             <th key={i} className="px-2 py-1 text-center whitespace-nowrap">{col.label}</th>
                                           ))}
@@ -1709,7 +1704,7 @@ const ControlsPage = () => {
                       {/* Boutons d'action */}
                       <div className="flex items-center justify-between pt-2">
                         <div className="text-sm text-gray-500">
-                          {excelFiles.filter(f => f.parsed && Object.values(f.mappings).some(v => v)).length} / {excelFiles.length} fichier(s) prêt(s)
+                          {t('cp.filesReady', { ready: excelFiles.filter(f => f.parsed && Object.values(f.mappings).some(v => v)).length, total: excelFiles.length })}
                         </div>
                         <button
                           onClick={handleExcelImportAll}
@@ -1719,12 +1714,12 @@ const ControlsPage = () => {
                           {excelImporting ? (
                             <>
                               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              Importation en cours...
+                              {t('cp.importing')}
                             </>
                           ) : (
                             <>
                               <Save className="w-4 h-4" />
-                              Importer toutes les notes
+                              {t('cp.importAll')}
                             </>
                           )}
                         </button>
@@ -1735,14 +1730,14 @@ const ControlsPage = () => {
                   {/* Info format */}
                   {excelFiles.length === 0 && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <h4 className="font-medium text-blue-800 mb-2">Format Excel marocain supporté :</h4>
+                      <h4 className="font-medium text-blue-800 mb-2">{t('cp.formatTitle')}</h4>
                       <ul className="text-sm text-blue-700 space-y-1">
-                        <li>- Colonne <strong>رقم التلميذ</strong> : Code Massar</li>
-                        <li>- Colonne <strong>إسم التلميذ</strong> : Nom de l'élève</li>
-                        <li>- Colonnes <strong>الفرض الأول، الفرض الثاني...</strong> : Notes des contrôles</li>
-                        <li>- Colonne <strong>الأنشطة المندمجة</strong> : Note des activités</li>
+                        <li>- <strong>رقم التلميذ</strong>{t('cp.formatMassar')}</li>
+                        <li>- <strong>إسم التلميذ</strong>{t('cp.formatName')}</li>
+                        <li>- <strong>الفرض الأول، الفرض الثاني...</strong>{t('cp.formatControls')}</li>
+                        <li>- <strong>الأنشطة المندمجة</strong>{t('cp.formatActivities')}</li>
                       </ul>
-                      <p className="text-xs text-blue-600 mt-2">Vous pouvez importer plusieurs fichiers en même temps (un par classe).</p>
+                      <p className="text-xs text-blue-600 mt-2">{t('cp.formatHint')}</p>
                     </div>
                   )}
                 </>
@@ -1758,7 +1753,7 @@ const ControlsPage = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Calendar className="w-5 h-5 text-blue-600" />
-              Contrôles Planifiés
+              {t('cp.plannedControls')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1771,7 +1766,7 @@ const ControlsPage = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <CheckCircle className="w-5 h-5 text-green-600" />
-              Contrôles Terminés
+              {t('cp.completedControls')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1784,7 +1779,7 @@ const ControlsPage = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Users className="w-5 h-5 text-purple-600" />
-              Classes Assignées
+              {t('cp.assignedClasses')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1797,7 +1792,7 @@ const ControlsPage = () => {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Users className="w-5 h-5 text-orange-600" />
-              Total Élèves
+              {t('cp.totalStudentsShort')}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1810,19 +1805,19 @@ const ControlsPage = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle>Mes Contrôles</CardTitle>
-          <CardDescription>Liste de tous vos contrôles</CardDescription>
+          <CardTitle>{t('cp.myControls')}</CardTitle>
+          <CardDescription>{t('cp.myControlsSubtitle')}</CardDescription>
         </CardHeader>
         <CardContent>
           {filteredControls.length === 0 ? (
             <div className="text-center py-8">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-600">Aucun contrôle trouvé</p>
+              <p className="text-gray-600">{t('cp.empty')}</p>
               <button
                 onClick={() => setShowCreateModal(true)}
                 className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
               >
-                Créer un contrôle
+                {t('cp.createControl')}
               </button>
             </div>
           ) : (
@@ -1841,17 +1836,12 @@ const ControlsPage = () => {
           <div className="bg-white rounded-lg w-full max-w-4xl max-h-[95vh] flex flex-col">
             <div className="flex items-center justify-between p-2 sm:p-4 border-b flex-shrink-0">
               <div className="min-w-0 flex-1 pr-2">
-                <h2 className="text-sm sm:text-xl font-bold findex-Cv8VOZy7.js:47 Uncaught Error: Missing Supabase environment variables
-    at index-Cv8VOZy7.js:47:35188
-contentScript.js:2 i18next: languageChanged fr-FR
-contentScript.js:2 i18next: initialized 
-{debug: true, initImmediate: true, ns: Array(1), defaultNS: Array(1), fallbackLng: Array(1), …}
-content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-center gap-1 sm:gap-2 truncate">
+                <h2 className="text-sm sm:text-xl font-bold flex items-center gap-1 sm:gap-2 truncate">
                   <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
-                  <span className="truncate">Notes – {selectedControlForNotes.name}</span>
+                  <span className="truncate">{t('cp.notesFor', { name: selectedControlForNotes.name })}</span>
                 </h2>
                 <p className="text-gray-600 mt-0.5 sm:mt-1 text-[10px] sm:text-sm truncate">
-                  {selectedControlForNotes.class_name} · {new Date(selectedControlForNotes.date).toLocaleDateString('fr-FR')}
+                  {selectedControlForNotes.class_name} · {new Date(selectedControlForNotes.date).toLocaleDateString(dateLocale)}
                 </p>
               </div>
               <button
@@ -1874,8 +1864,8 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   }`}
                 >
                   <Upload className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span className="hidden sm:inline">Import Excel</span>
-                  <span className="sm:hidden">Excel</span>
+                  <span className="hidden sm:inline">{t('cp.tab.import')}</span>
+                  <span className="sm:hidden">{t('cp.tab.importShort')}</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('manual')}
@@ -1886,7 +1876,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   }`}
                 >
                   <Edit3 className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span>Saisie</span>
+                  <span>{t('cp.tab.manual')}</span>
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('stats')}
@@ -1897,7 +1887,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   }`}
                 >
                   <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span>Stats</span>
+                  <span>{t('cp.tab.stats')}</span>
                 </button>
               </div>
             </div>
@@ -1907,9 +1897,9 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               {activeNotesTab === 'import' && (
                 <div className="text-center py-4">
                   <Upload className="w-8 h-8 sm:w-12 sm:h-12 text-green-400 mx-auto mb-2 sm:mb-4" />
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">Import Excel disponible en haut</h3>
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">{t('cp.importAbove')}</h3>
                   <p className="text-xs sm:text-sm text-gray-600 mb-4">
-                    Utilisez la section <strong>« Importer les notes via Excel »</strong> en haut de la page.
+                    {t('cp.importAboveHint')}
                   </p>
                   <button
                     onClick={() => {
@@ -1920,24 +1910,24 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                     className="px-4 py-2 sm:px-6 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium inline-flex items-center gap-2"
                   >
                     <Upload className="w-4 h-4" />
-                    Aller à l'import Excel
+                    {t('cp.goToImport')}
                   </button>
                 </div>
               )}
 
               {activeNotesTab === 'manual' && (
                 <div className="space-y-3 sm:space-y-4">
-                  <h3 className="text-base sm:text-lg font-semibold hidden sm:block">Saisie manuelle des notes</h3>
+                  <h3 className="text-base sm:text-lg font-semibold hidden sm:block">{t('cp.manualTitle')}</h3>
                   
                   {loadingStudents ? (
                     <div className="text-center py-4 sm:py-8">
                       <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600 mx-auto mb-2 sm:mb-4"></div>
-                      <p className="text-xs sm:text-sm text-gray-600">Chargement...</p>
+                      <p className="text-xs sm:text-sm text-gray-600">{t('common.loading')}</p>
                     </div>
                   ) : classStudents.length === 0 ? (
                     <div className="text-center py-4 sm:py-8">
                       <Users className="w-8 h-8 sm:w-12 sm:h-12 text-gray-400 mx-auto mb-2 sm:mb-4" />
-                      <p className="text-xs sm:text-sm text-gray-600">Aucun élève trouvé</p>
+                      <p className="text-xs sm:text-sm text-gray-600">{t('cp.noStudent')}</p>
                     </div>
                   ) : (
                     <>
@@ -1965,9 +1955,9 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                         <table className="w-full border border-gray-200 rounded-lg">
                           <thead className="bg-gray-50">
                             <tr>
-                              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Élève</th>
-                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Note /20</th>
-                              <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Appréciation</th>
+                              <th className="px-4 py-3 text-start text-sm font-medium text-gray-700">{t('sr.col.student')}</th>
+                              <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">{t('cp.noteOn20')}</th>
+                              <th className="px-4 py-3 text-start text-sm font-medium text-gray-700">{t('cp.appreciation')}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
@@ -2001,7 +1991,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                                 <td className="px-4 py-3">
                                   <input
                                     type="text"
-                                    placeholder="Appréciation..."
+                                    placeholder={t('cp.appreciationPlaceholder')}
                                     value={studentsNotes[student.id]?.appreciation || ''}
                                     onChange={(e) => {
                                       setStudentsNotes(prev => ({
@@ -2027,17 +2017,17 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                             className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm flex-1 sm:flex-none"
                           >
                             <Upload className="w-3 h-3 sm:w-4 sm:h-4" />
-                            Coller notes
+                            {t('cp.pasteNotes')}
                           </button>
                           <div className="text-[10px] sm:text-sm text-gray-600">
-                            {classStudents.length} élève(s)
+                            {t('cp.studentsCount', { n: classStudents.length })}
                           </div>
                         </div>
                         <button 
                           onClick={handleSaveNotes}
                           className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
                         >
-                          Enregistrer
+                          {t('sr.saveShort')}
                         </button>
                       </div>
                     </>
@@ -2047,7 +2037,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
 
               {activeNotesTab === 'stats' && (
                 <div className="space-y-3 sm:space-y-6">
-                  <h3 className="text-sm sm:text-lg font-semibold">Statistiques des notes</h3>
+                  <h3 className="text-sm sm:text-lg font-semibold">{t('cp.statsTitle')}</h3>
                   
                   {/* Statistiques calculées dynamiquement */}
                   {(() => {
@@ -2058,34 +2048,34 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                           <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 sm:p-4">
                             <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                               <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                              <h4 className="text-xs sm:text-sm font-medium text-blue-800">Moyenne</h4>
+                              <h4 className="text-xs sm:text-sm font-medium text-blue-800">{t('cp.average')}</h4>
                             </div>
                             <p className="text-lg sm:text-2xl font-bold text-blue-600">{stats.average.toFixed(2)}/20</p>
-                            <p className="text-[10px] sm:text-sm text-blue-600 truncate">Classe : {getClassName(selectedControlForNotes)}</p>
+                            <p className="text-[10px] sm:text-sm text-blue-600 truncate">{t('cp.classLabel', { name: getClassName(selectedControlForNotes) })}</p>
                           </div>
                           
                           <div className="bg-green-50 border border-green-200 rounded-lg p-2 sm:p-4">
                             <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                               <Users className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
-                              <h4 className="text-xs sm:text-sm font-medium text-green-800">Élèves notés</h4>
+                              <h4 className="text-xs sm:text-sm font-medium text-green-800">{t('cp.notedStudents')}</h4>
                             </div>
                             <p className="text-lg sm:text-2xl font-bold text-green-600">{stats.notedStudents}/{stats.totalStudents}</p>
-                            <p className="text-[10px] sm:text-sm text-green-600">{stats.notedPercentage}% des élèves</p>
+                            <p className="text-[10px] sm:text-sm text-green-600">{t('cp.notedPercentage', { n: stats.notedPercentage })}</p>
                           </div>
                           
                           <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 sm:p-4">
                             <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                               <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
-                              <h4 className="text-xs sm:text-sm font-medium text-purple-800 truncate">Taux de réussite</h4>
+                              <h4 className="text-xs sm:text-sm font-medium text-purple-800 truncate">{t('cp.successRate')}</h4>
                             </div>
                             <button
                               onClick={() => showFailingStudents(stats)}
                               className="text-lg sm:text-2xl font-bold text-purple-600 hover:text-purple-700 transition-colors cursor-pointer block"
-                              title="Cliquez pour voir les élèves en échec"
+                              title={t('cp.clickFailing')}
                             >
                               {stats.successRate}%
                             </button>
-                            <p className="text-[10px] sm:text-sm text-purple-600">≥ 10/20 (cliquable)</p>
+                            <p className="text-[10px] sm:text-sm text-purple-600">{t('cp.passThreshold')}</p>
                           </div>
 
                           <div className={`border rounded-lg p-2 sm:p-4 ${
@@ -2095,7 +2085,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                           }`}>
                             <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                               <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
-                              <h4 className="text-xs sm:text-sm font-medium text-gray-800">Dispersion</h4>
+                              <h4 className="text-xs sm:text-sm font-medium text-gray-800">{t('cp.dispersion')}</h4>
                             </div>
                             <button
                               onClick={() => showDispersionInterpretation(stats.dispersion)}
@@ -2104,20 +2094,20 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                                 stats.dispersion === 'Moyen' ? 'text-yellow-600' :
                                 'text-red-600'
                               }`}
-                              title="Cliquez pour voir l'interprétation détaillée"
+                              title={t('cp.clickInterpretation')}
                             >
-                              {stats.dispersion}
+                              {dispersionLabel(stats.dispersion)}
                             </button>
                             <p className="text-[10px] sm:text-sm text-gray-600 truncate">
-                              {stats.dispersion === 'Faible' ? 'Classe homogène' :
-                               stats.dispersion === 'Moyen' ? 'Écarts moyens' :
-                               'Gros écarts'} (cliquable)
+                              {stats.dispersion === 'Faible' ? t('cp.homogeneous') :
+                               stats.dispersion === 'Moyen' ? t('cp.mediumGaps') :
+                               t('cp.bigGaps')} {t('cp.clickable')}
                             </p>
                           </div>
                         </div>
 
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
-                          <h4 className="text-sm sm:text-base font-medium text-gray-800 mb-2 sm:mb-4">Répartition des notes</h4>
+                          <h4 className="text-sm sm:text-base font-medium text-gray-800 mb-2 sm:mb-4">{t('cp.distribution')}</h4>
                           <div className="space-y-2 sm:space-y-3">
                             <div className="flex items-center gap-2 sm:gap-3">
                               <div className="w-12 sm:w-20 text-xs sm:text-sm">15-20</div>
@@ -2147,19 +2137,19 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                           <div className="bg-orange-50 border border-orange-200 rounded-lg p-2 sm:p-4">
                             <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                               <TrendingDown className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
-                              <h4 className="text-xs sm:text-sm font-medium text-orange-800">Note minimale</h4>
+                              <h4 className="text-xs sm:text-sm font-medium text-orange-800">{t('cp.minNote')}</h4>
                             </div>
                             <p className="text-lg sm:text-2xl font-bold text-orange-600">{stats.minNote}/20</p>
-                            <p className="text-[10px] sm:text-sm text-orange-600">Qui a chuté ?</p>
+                            <p className="text-[10px] sm:text-sm text-orange-600">{t('cp.whoDropped')}</p>
                           </div>
                           
                           <div className="bg-teal-50 border border-teal-200 rounded-lg p-2 sm:p-4">
                             <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                               <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-teal-600" />
-                              <h4 className="text-xs sm:text-sm font-medium text-teal-800">Note maximale</h4>
+                              <h4 className="text-xs sm:text-sm font-medium text-teal-800">{t('cp.maxNote')}</h4>
                             </div>
                             <p className="text-lg sm:text-2xl font-bold text-teal-600">{stats.maxNote}/20</p>
-                            <p className="text-[10px] sm:text-sm text-teal-600">Sujet trop dur ?</p>
+                            <p className="text-[10px] sm:text-sm text-teal-600">{t('cp.tooHard')}</p>
                           </div>
                         </div>
 
@@ -2168,13 +2158,13 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                             onClick={() => exportControlToPDF(selectedControlForNotes)}
                             className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
                           >
-                            Exporter en PDF
+                            {t('cp.exportPdf')}
                           </button>
                           <button 
                             onClick={() => viewControlDetails(selectedControlForNotes)}
                             className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
                           >
-                            Voir le détail
+                            {t('cp.viewDetails')}
                           </button>
                         </div>
                       </>
@@ -2194,7 +2184,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
             <div className="flex items-center justify-between p-4 md:p-6 border-b">
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <Upload className="w-5 h-5 text-purple-600" />
-                Coller les notes
+                {t('cp.pasteTitle')}
               </h3>
               <button
                 onClick={() => setShowPasteModal(false)}
@@ -2207,7 +2197,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
             <div className="p-4 md:p-6">
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Collez toutes les notes ici (une par ligne) :
+                  {t('cp.pasteLabel')}
                 </label>
                 <textarea
                   value={pasteNotesText}
@@ -2221,20 +2211,19 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                  <h4 className="font-medium text-purple-800 mb-2">📋 Instructions :</h4>
+                  <h4 className="font-medium text-purple-800 mb-2">{t('cp.instructions')}</h4>
                   <ul className="text-sm text-purple-700 space-y-1">
-                    <li>• <strong>Collez toutes vos notes d'un coup</strong></li>
-                    <li>• <strong>Une note par ligne</strong></li>
-                    <li>• <strong>Virgule ou point</strong> comme séparateur</li>
-                    <li>• <strong>Ligne 1 → Élève 1</strong></li>
+                    <li>• <strong>{t('cp.instr1')}</strong></li>
+                    <li>• <strong>{t('cp.instr2')}</strong></li>
+                    <li>• <strong>{t('cp.instr3')}</strong></li>
+                    <li>• <strong>{t('cp.instr4')}</strong></li>
                   </ul>
                 </div>
                 
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                   <div className="text-sm text-green-800">
-                    <strong>🎯 Résultat automatique :</strong><br/>
-                    Toutes les notes seront <strong>remplies automatiquement</strong> 
-                    dans le tableau sans saisie manuelle.
+                    <strong>{t('cp.autoResult')}</strong><br/>
+                    {t('cp.autoResultText')}
                   </div>
                 </div>
               </div>
@@ -2242,10 +2231,10 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-yellow-800">
                   <div>
-                    <strong>👥 Élèves concernés :</strong> {classStudents.length} élève(s)
+                    <strong>{t('cp.concernedStudents')}</strong> {t('cp.studentsCount', { n: classStudents.length })}
                   </div>
                   <div>
-                    <strong>📝 Notes détectées :</strong> {pasteNotesText.split('\n').filter(line => line.trim()).length} note(s)
+                    <strong>{t('cp.detectedNotes')}</strong> {t('cp.notesCount', { n: pasteNotesText.split('\n').filter(line => line.trim()).length })}
                   </div>
                 </div>
               </div>
@@ -2255,13 +2244,13 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   onClick={() => setShowPasteModal(false)}
                   className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Annuler
+                  {t('common.cancel')}
                 </button>
                 <button
                   onClick={handlePasteNotes}
                   className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold"
                 >
-                  🚀 Coller et fermer
+                  {t('cp.pasteAndClose')}
                 </button>
               </div>
             </div>
@@ -2274,7 +2263,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
           <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">
-                {editingControl ? 'Modifier le Contrôle' : 'Nouveau Contrôle'}
+                {editingControl ? t('cp.editControl') : t('cp.newControl')}
               </h2>
               <button
                 onClick={() => setShowCreateModal(false)}
@@ -2287,7 +2276,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Classe *
+                  {t('cp.classRequired')}
                 </label>
                 <select
                   value={formData.class_id}
@@ -2295,7 +2284,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   required
                 >
-                  <option value="">Sélectionner une classe</option>
+                  <option value="">{t('cp.pickClass')}</option>
                   {classes.map(cls => (
                     <option key={cls.id} value={cls.id}>{cls.name}</option>
                   ))}
@@ -2304,7 +2293,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nom du contrôle *
+                  {t('cp.nameRequired')}
                 </label>
                 <input
                   type="text"
@@ -2317,7 +2306,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date *
+                  {t('cp.dateRequired')}
                 </label>
                 <input
                   type="date"
@@ -2331,7 +2320,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Heure de début
+                    {t('home.startTime')}
                   </label>
                   <input
                     type="time"
@@ -2343,7 +2332,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Heure de fin
+                    {t('home.endTime')}
                   </label>
                   <input
                     type="time"
@@ -2356,7 +2345,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
+                  {t('cp.description')}
                 </label>
                 <textarea
                   value={formData.description}
@@ -2367,16 +2356,16 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{t('cp.type')}</label>
                 <div className="flex gap-3">
                   <button type="button" onClick={() => setFormData({ ...formData, kind: 'control' })}
                     className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                       formData.kind !== 'activity' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}>Contrôle</button>
+                    }`}>{t('cp.control')}</button>
                   <button type="button" onClick={() => setFormData({ ...formData, kind: 'activity' })}
                     className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
                       formData.kind === 'activity' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}>Activité intégrée</button>
+                    }`}>{t('cp.activityIntegrated')}</button>
                 </div>
               </div>
 
@@ -2393,7 +2382,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   disabled={saving}
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                 >
-                  {saving ? 'Sauvegarde...' : (editingControl ? 'Modifier' : 'Créer')}
+                  {saving ? t('common.saving') : (editingControl ? t('common.modify') : t('common.create'))}
                 </button>
               </div>
             </form>
@@ -2408,7 +2397,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
             <div className="flex items-center justify-between p-4 md:p-6 border-b">
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <FileText className="w-5 h-5 text-blue-600" />
-                Détails du contrôle
+                {t('cp.detailsTitle')}
               </h3>
               <button
                 onClick={() => setShowDetailsModal(false)}
@@ -2423,33 +2412,33 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <h4 className="font-medium text-blue-800 mb-3 flex items-center gap-2">
                   <FileText className="w-4 h-4" />
-                  Informations générales
+                {t('cp.generalInfo')}
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <span className="font-medium text-blue-700">📝 Nom :</span>
+                    <span className="font-medium text-blue-700">{t('cp.fieldName')}</span>
                     <span className="ml-2 text-blue-900">{detailsData.control.name}</span>
                   </div>
                   <div>
-                    <span className="font-medium text-blue-700">📅 Date :</span>
+                    <span className="font-medium text-blue-700">{t('cp.fieldDate')}</span>
                     <span className="ml-2 text-blue-900">
-                      {new Date(detailsData.control.date).toLocaleDateString('fr-FR')}
+                      {new Date(detailsData.control.date).toLocaleDateString(dateLocale)}
                     </span>
                   </div>
                   <div>
-                    <span className="font-medium text-blue-700">👥 Heures :</span>
+                    <span className="font-medium text-blue-700">{t('cp.fieldHours')}</span>
                     <span className="ml-2 text-blue-900">
                       {detailsData.control.start_time} - {detailsData.control.end_time}
                     </span>
                   </div>
                   <div>
-                    <span className="font-medium text-blue-700">🏫 Classe :</span>
+                    <span className="font-medium text-blue-700">{t('cp.fieldClass')}</span>
                     <span className="ml-2 text-blue-900">{getClassName(detailsData.control)}</span>
                   </div>
                   <div className="md:col-span-2">
-                    <span className="font-medium text-blue-700">📋 Description :</span>
+                    <span className="font-medium text-blue-700">{t('cp.fieldDescription')}</span>
                     <span className="ml-2 text-blue-900">
-                      {detailsData.control.description || 'Aucune description'}
+                      {detailsData.control.description || t('cp.noDescription')}
                     </span>
                   </div>
                 </div>
@@ -2460,7 +2449,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
-                    <h5 className="text-xs sm:text-sm font-medium text-green-800">Moyenne</h5>
+                    <h5 className="text-xs sm:text-sm font-medium text-green-800">{t('cp.average')}</h5>
                   </div>
                   <p className="text-lg sm:text-xl font-bold text-green-600">
                     {detailsData.stats.average.toFixed(2)}/20
@@ -2470,7 +2459,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 sm:p-4">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
-                    <h5 className="text-xs sm:text-sm font-medium text-purple-800 leading-tight">Élèves notés</h5>
+                    <h5 className="text-xs sm:text-sm font-medium text-purple-800 leading-tight">{t('cp.notedStudents')}</h5>
                   </div>
                   <p className="text-lg sm:text-xl font-bold text-purple-600">
                     {detailsData.stats.notedStudents}/{detailsData.stats.totalStudents}
@@ -2483,12 +2472,12 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 sm:p-4">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
-                    <h5 className="text-xs sm:text-sm font-medium text-orange-800">Réussite</h5>
+                    <h5 className="text-xs sm:text-sm font-medium text-orange-800">{t('cp.success')}</h5>
                   </div>
                   <p className="text-lg sm:text-xl font-bold text-orange-600">
                     {detailsData.stats.successRate}%
                   </p>
-                  <p className="text-[10px] sm:text-xs text-orange-600">≥ 10/20</p>
+                  <p className="text-[10px] sm:text-xs text-orange-600">{t('cp.passThresholdShort')}</p>
                 </div>
 
                 <div className={`border rounded-lg p-3 sm:p-4 ${
@@ -2498,14 +2487,14 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                 }`}>
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" />
-                    <h5 className="text-xs sm:text-sm font-medium text-gray-800">Dispersion</h5>
+                    <h5 className="text-xs sm:text-sm font-medium text-gray-800">{t('cp.dispersion')}</h5>
                   </div>
                   <p className={`text-lg sm:text-xl font-bold ${
                     detailsData.stats.dispersion === 'Faible' ? 'text-green-600' :
                     detailsData.stats.dispersion === 'Moyen' ? 'text-yellow-600' :
                     'text-red-600'
                   }`}>
-                    {detailsData.stats.dispersion}
+                    {dispersionLabel(detailsData.stats.dispersion)}
                   </p>
                 </div>
               </div>
@@ -2515,29 +2504,29 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <TrendingDown className="w-4 h-4 sm:w-5 sm:h-5 text-red-600" />
-                    <h5 className="text-xs sm:text-sm font-medium text-red-800 truncate">Note min</h5>
+                    <h5 className="text-xs sm:text-sm font-medium text-red-800 truncate">{t('cp.minShort')}</h5>
                   </div>
                   <p className="text-lg sm:text-xl font-bold text-red-600">
                     {detailsData.stats.minNote}/20
                   </p>
-                  <p className="text-[10px] sm:text-xs text-red-600">Qui a chuté ?</p>
+                  <p className="text-[10px] sm:text-xs text-red-600">{t('cp.whoDropped')}</p>
                 </div>
                 
                 <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 sm:p-4">
                   <div className="flex items-center gap-1 sm:gap-2 mb-1 sm:mb-2">
                     <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-teal-600" />
-                    <h5 className="text-xs sm:text-sm font-medium text-teal-800 truncate">Note max</h5>
+                    <h5 className="text-xs sm:text-sm font-medium text-teal-800 truncate">{t('cp.maxShort')}</h5>
                   </div>
                   <p className="text-lg sm:text-xl font-bold text-teal-600">
                     {detailsData.stats.maxNote}/20
                   </p>
-                  <p className="text-[10px] sm:text-xs text-teal-600">Sujet trop dur ?</p>
+                  <p className="text-[10px] sm:text-xs text-teal-600">{t('cp.tooHard')}</p>
                 </div>
               </div>
 
               {/* Répartition détaillée */}
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
-                <h4 className="text-sm sm:text-base font-medium text-gray-800 mb-3 sm:mb-4">Répartition détaillée des notes</h4>
+                <h4 className="text-sm sm:text-base font-medium text-gray-800 mb-3 sm:mb-4">{t('cp.detailedDistribution')}</h4>
                 <div className="space-y-2 sm:space-y-3">
                   <div className="flex items-center gap-2 sm:gap-3">
                     <div className="w-12 sm:w-20 text-xs sm:text-sm font-medium">15-20</div>
@@ -2550,7 +2539,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                       </div>
                     </div>
                     <div className="w-12 sm:w-16 text-xs sm:text-sm text-right leading-tight">
-                      {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.high / 100)} élèves
+                      {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.high / 100)} {t('cp.studentsUnit')}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 sm:gap-3">
@@ -2564,7 +2553,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                       </div>
                     </div>
                     <div className="w-12 sm:w-16 text-xs sm:text-sm text-right leading-tight">
-                      {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.medium / 100)} élèves
+                      {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.medium / 100)} {t('cp.studentsUnit')}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 sm:gap-3">
@@ -2578,7 +2567,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                       </div>
                     </div>
                     <div className="w-12 sm:w-16 text-xs sm:text-sm text-right leading-tight">
-                      {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.low / 100)} élèves
+                      {Math.round(detailsData.stats.notedStudents * detailsData.stats.distribution.low / 100)} {t('cp.studentsUnit')}
                     </div>
                   </div>
                 </div>
@@ -2589,7 +2578,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   onClick={() => setShowDetailsModal(false)}
                   className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
                 >
-                  Fermer
+                  {t('common.close')}
                 </button>
                 <button
                   onClick={() => exportControlToPDF(detailsData.control)}
@@ -2610,7 +2599,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
             <div className="flex items-center justify-between p-3 sm:p-4 md:p-6 border-b">
               <h3 className="text-base sm:text-lg font-semibold flex items-center gap-1 sm:gap-2">
                 <AlertTriangle className="w-4 h-4 sm:w-5 sm:h-5 text-red-600" />
-                Élèves en échec (&lt; 10/20)
+                {t('cp.failingTitle')}
               </h3>
               <button
                 onClick={() => setShowFailingModal(false)}
@@ -2624,21 +2613,21 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
               {failingStudents.length === 0 ? (
                 <div className="text-center py-4 sm:py-8">
                   <CheckCircle className="w-8 h-8 sm:w-12 sm:h-12 text-green-500 mx-auto mb-2 sm:mb-4" />
-                  <p className="text-sm sm:text-base text-gray-600">Aucun élève en échec ! 🎉</p>
-                  <p className="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">Tous les élèves ont une note supérieure ou égale à 10/20</p>
+                  <p className="text-sm sm:text-base text-gray-600">{t('cp.noFailing')}</p>
+                  <p className="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">{t('cp.noFailingHint')}</p>
                 </div>
               ) : (
                 <>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 sm:p-4 mb-3 sm:mb-4">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-xs sm:text-sm text-red-800">
                       <div>
-                        <strong>📊 Nombre d'élèves en échec :</strong> {failingStudents.length}
+                        <strong>{t('cp.failingCount')}</strong> {failingStudents.length}
                       </div>
                       <div>
-                        <strong>📈 Pourcentage d'échec :</strong> {Math.round((failingStudents.length / classStudents.length) * 100)}%
+                        <strong>{t('cp.failingPercentage')}</strong> {Math.round((failingStudents.length / classStudents.length) * 100)}%
                       </div>
                       <div>
-                        <strong>🎯 Taux de réussite :</strong> {100 - Math.round((failingStudents.length / classStudents.length) * 100)}%
+                        <strong>{t('cp.successRateShort')}</strong> {100 - Math.round((failingStudents.length / classStudents.length) * 100)}%
                       </div>
                     </div>
                   </div>
@@ -2669,9 +2658,9 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                     <table className="w-full border border-gray-200 rounded-lg">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Élève</th>
-                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Note</th>
-                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Écart par rapport à 10</th>
+                          <th className="px-4 py-3 text-start text-sm font-medium text-gray-700">{t('sr.col.student')}</th>
+                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">{t('cp.notes')}</th>
+                          <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">{t('cp.gapTo10')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
@@ -2703,12 +2692,12 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   </div>
                   
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 sm:p-4 mt-3 sm:mt-4">
-                    <h4 className="text-sm font-medium text-yellow-800 mb-1 sm:mb-2">💡 Recommandations pédagogiques :</h4>
+                    <h4 className="text-sm font-medium text-yellow-800 mb-1 sm:mb-2">{t('cp.recoTitle')}</h4>
                     <ul className="text-xs sm:text-sm text-yellow-700 space-y-1 pl-1">
-                      <li>• Prévoir une séance de soutien pour les élèves avec &gt; 3 pts d'écart</li>
-                      <li>• Proposer des exercices de renforcement personnalisés</li>
-                      <li>• Envisager un rattrapage pour les notes &lt; 5/20</li>
-                      <li>• Analyser les questions qui ont posé le plus de difficultés</li>
+                      <li>• {t('cp.reco1')}</li>
+                      <li>• {t('cp.reco2')}</li>
+                      <li>• {t('cp.reco3')}</li>
+                      <li>• {t('cp.reco4')}</li>
                     </ul>
                   </div>
                 </>
@@ -2719,7 +2708,7 @@ content.js:284 Content script loaded at: https://edtrack.duckdns.org/lex items-c
                   onClick={() => setShowFailingModal(false)}
                   className="w-full sm:w-auto px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
                 >
-                  Fermer
+                  {t('common.close')}
                 </button>
               </div>
             </div>

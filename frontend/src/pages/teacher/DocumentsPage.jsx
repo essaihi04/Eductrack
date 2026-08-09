@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, FileText, BookOpen, Edit3, Home, RotateCcw, Star, Trash2, Download, Eye, Users, Calendar, Clock } from 'lucide-react';
 import { saveBlob } from '../../lib/download';
+import { useI18n } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+// Le libelle est traduit a l'affichage (voir typeLabel) : seuls la valeur
+// stockee en base, l'emoji et l'icone sont figes ici.
 const DOCUMENT_TYPES = [
-  { value: 'cours', label: '📘 Cours', icon: BookOpen },
-  { value: 'exercice', label: '✏️ Exercice', icon: Edit3 },
-  { value: 'devoir', label: '📝 Devoir maison', icon: Home },
-  { value: 'rattrapage', label: '🔁 Rattrapage', icon: RotateCcw },
-  { value: 'approfondissement', label: '⭐ Approfondissement', icon: Star }
+  { value: 'cours', emoji: '📘', icon: BookOpen },
+  { value: 'exercice', emoji: '✏️', icon: Edit3 },
+  { value: 'devoir', emoji: '📝', icon: Home },
+  { value: 'rattrapage', emoji: '🔁', icon: RotateCcw },
+  { value: 'approfondissement', emoji: '⭐', icon: Star }
 ];
 
 const DocumentsPage = () => {
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  const typeLabel = (type) => {
+    const dt = DOCUMENT_TYPES.find((d) => d.value === type);
+    return dt ? `${dt.emoji} ${t(`doc.type.${dt.value}`)}` : type;
+  };
   const [classes, setClasses] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [controls, setControls] = useState([]);
@@ -162,7 +171,7 @@ const DocumentsPage = () => {
       // Validation du fichier
       const maxSize = 20 * 1024 * 1024; // 20 Mo
       if (file.size > maxSize) {
-        alert('❌ Le fichier est trop volumineux (max 20 Mo)');
+        alert(t('doc.err.tooBig'));
         return;
       }
       
@@ -183,7 +192,7 @@ const DocumentsPage = () => {
           fileType: file.type, 
           ext 
         });
-        alert('❌ Type de fichier non autorisé. Types acceptés: PDF, images, documents Word/PowerPoint');
+        alert(t('doc.err.badType'));
         return;
       }
       
@@ -203,12 +212,12 @@ const DocumentsPage = () => {
     
     // Validation des champs obligatoires
     if (!formData.classIds?.length || !formData.title || !formData.documentType || !formData.file) {
-      alert('❌ Veuillez remplir tous les champs obligatoires');
+      alert(t('doc.err.required'));
       return;
     }
     
     if (formData.title.length > 60) {
-      alert('❌ Le titre ne doit pas dépasser 60 caractères');
+      alert(t('doc.err.titleTooLong'));
       return;
     }
     
@@ -265,7 +274,7 @@ const DocumentsPage = () => {
       });
       
       if (res.ok) {
-        alert('✅ Document envoyé avec succès !');
+        alert(t('doc.ok.sent'));
         setShowForm(false);
         setFormData({
           classIds: [],
@@ -280,7 +289,7 @@ const DocumentsPage = () => {
       } else {
         const error = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
         console.error('[DocumentsPage] Upload backend error', { requestId, error, status: res.status });
-        alert(`❌ Erreur: ${error.error || 'Échec upload document'}`);
+        alert(t('doc.err.upload', { detail: error.error || t('doc.err.uploadFallback') }));
       }
     } catch (error) {
       console.error('[DocumentsPage] Upload fetch failed', {
@@ -290,14 +299,14 @@ const DocumentsPage = () => {
         apiUrl,
         online: navigator.onLine
       });
-      alert('❌ Erreur lors de l\'envoi du document');
+      alert(t('doc.err.uploadNetwork'));
     } finally {
       setUploading(false);
     }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce document ?')) return;
+    if (!confirm(t('doc.confirmDelete'))) return;
     
     try {
       const token = await getAuthToken();
@@ -307,14 +316,14 @@ const DocumentsPage = () => {
       });
       
       if (res.ok) {
-        alert('✅ Document supprimé avec succès');
+        alert(t('doc.ok.deleted'));
         loadDocuments();
       } else {
-        alert('❌ Erreur lors de la suppression');
+        alert(t('doc.err.delete'));
       }
     } catch (error) {
       console.error('Erreur:', error);
-      alert('❌ Erreur lors de la suppression');
+      alert(t('doc.err.delete'));
     }
   };
 
@@ -335,7 +344,7 @@ const DocumentsPage = () => {
       await saveBlob(blob, doc?.file_name || `document-${id}`);
     } catch (error) {
       console.error('Erreur:', error);
-      alert('❌ Erreur lors du téléchargement');
+      alert(t('doc.err.download'));
     }
   };
 
@@ -360,7 +369,7 @@ const DocumentsPage = () => {
       setDocumentStats(data);
     } catch (error) {
       console.error('Erreur:', error);
-      alert('❌ Erreur lors du chargement des statistiques');
+      alert(t('doc.err.stats'));
       setShowStatsModal(false);
     } finally {
       setStatsLoading(false);
@@ -370,25 +379,23 @@ const DocumentsPage = () => {
   const formatDateTime = (date) => {
     if (!date) return '-';
     try {
-      return new Date(date).toLocaleString('fr-FR');
+      return new Date(date).toLocaleString(dateLocale);
     } catch {
       return date;
     }
   };
 
   const getDocumentTypeIcon = (type) => {
-    const docType = DOCUMENT_TYPES.find(t => t.value === type);
+    // `dt` et non `t` : `t` est la fonction de traduction du composant.
+    const docType = DOCUMENT_TYPES.find(dt => dt.value === type);
     const Icon = docType ? docType.icon : FileText;
     return <Icon className="w-5 h-5" />;
   };
 
-  const getDocumentTypeLabel = (type) => {
-    const docType = DOCUMENT_TYPES.find(t => t.value === type);
-    return docType ? docType.label : type;
-  };
+  const getDocumentTypeLabel = (type) => typeLabel(type);
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('fr-FR', {
+    return new Date(dateString).toLocaleDateString(dateLocale, {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
@@ -410,21 +417,21 @@ const DocumentsPage = () => {
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">📚 Documents pédagogiques</h1>
-        <p className="text-gray-600">Envoyez des cours, exercices et devoirs à vos élèves</p>
+        <h1 className="text-3xl font-bold text-gray-800 mb-2">{t('doc.title')}</h1>
+        <p className="text-gray-600">{t('doc.subtitle')}</p>
       </div>
 
       {/* Filtres */}
       <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
         <div className="flex flex-wrap gap-4">
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Classe</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t('common.class')}</label>
             <select
               value={selectedClass}
               onChange={(e) => setSelectedClass(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="">Toutes les classes</option>
+              <option value="">{t('doc.allClasses')}</option>
               {classes.map((cls) => (
                 <option key={cls.id} value={cls.id}>{cls.name}</option>
               ))}
@@ -432,15 +439,15 @@ const DocumentsPage = () => {
           </div>
           
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Type de document</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{t('doc.documentType')}</label>
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="">Tous les types</option>
+              <option value="">{t('doc.allTypes')}</option>
               {DOCUMENT_TYPES.map((type) => (
-                <option key={type.value} value={type.value}>{type.label}</option>
+                <option key={type.value} value={type.value}>{typeLabel(type.value)}</option>
               ))}
             </select>
           </div>
@@ -451,7 +458,7 @@ const DocumentsPage = () => {
               className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors"
             >
               <Upload className="w-5 h-5" />
-              Envoyer un document
+              {t('doc.send')}
             </button>
           </div>
         </div>
@@ -461,7 +468,7 @@ const DocumentsPage = () => {
       {showForm && (
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6 border-2 border-blue-200">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-gray-800">➕ Envoyer un document</h2>
+            <h2 className="text-xl font-bold text-gray-800">{t('doc.formTitle')}</h2>
             <button
               onClick={() => setShowForm(false)}
               className="text-gray-500 hover:text-gray-700"
@@ -474,7 +481,7 @@ const DocumentsPage = () => {
             {/* Classe (obligatoire) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Classes destinataires <span className="text-red-500">*</span>
+                {t('doc.targetClasses')} <span className="text-red-500">*</span>
               </label>
               <div className="border border-gray-300 rounded-lg p-3 max-h-52 overflow-y-auto space-y-2">
                 {classes.map((cls) => (
@@ -490,14 +497,14 @@ const DocumentsPage = () => {
                 ))}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                {formData.classIds.length} classe(s) sélectionnée(s)
+                {t('doc.selectedClasses', { n: formData.classIds.length })}
               </p>
             </div>
 
             {/* Type de contenu (obligatoire) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Type de contenu <span className="text-red-500">*</span>
+                {t('doc.contentType')} <span className="text-red-500">*</span>
               </label>
               <select
                 value={formData.documentType}
@@ -505,9 +512,9 @@ const DocumentsPage = () => {
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="">Sélectionner le type</option>
+                <option value="">{t('doc.pickType')}</option>
                 {DOCUMENT_TYPES.map((type) => (
-                  <option key={type.value} value={type.value}>{type.label}</option>
+                  <option key={type.value} value={type.value}>{typeLabel(type.value)}</option>
                 ))}
               </select>
             </div>
@@ -515,24 +522,24 @@ const DocumentsPage = () => {
             {/* Titre (obligatoire) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Titre <span className="text-red-500">*</span>
+                {t('doc.fieldTitle')} <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="Ex: Chapitre 1 - Les fractions"
+                placeholder={t('doc.titlePlaceholder')}
                 maxLength={60}
                 required
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p className="text-xs text-gray-500 mt-1">{formData.title.length}/60 caractères</p>
+              <p className="text-xs text-gray-500 mt-1">{t('doc.titleCount', { n: formData.title.length })}</p>
             </div>
 
             {/* Fichier (obligatoire) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Fichier <span className="text-red-500">*</span>
+                {t('doc.file')} <span className="text-red-500">*</span>
               </label>
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
                 <input
@@ -548,10 +555,10 @@ const DocumentsPage = () => {
                 >
                   <Upload className="w-12 h-12 text-gray-400 mb-2" />
                   <p className="text-sm text-gray-600">
-                    {formData.file ? formData.file.name : 'Cliquez pour sélectionner un fichier'}
+                    {formData.file ? formData.file.name : t('doc.pickFile')}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    PDF, image, Word ou PowerPoint (max 20 Mo)
+                    {t('doc.fileHint')}
                   </p>
                 </label>
               </div>
@@ -560,12 +567,12 @@ const DocumentsPage = () => {
             {/* Description (optionnel) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Description (optionnel)
+                {t('doc.description')}
               </label>
               <textarea
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Contexte pédagogique, instructions..."
+                placeholder={t('doc.descriptionPlaceholder')}
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
@@ -575,17 +582,17 @@ const DocumentsPage = () => {
             {formData.classIds.length === 1 && controls.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Lier à un contrôle (optionnel)
+                  {t('doc.linkControl')}
                 </label>
                 <select
                   value={formData.controlId}
                   onChange={(e) => setFormData({ ...formData, controlId: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option value="">Aucun contrôle</option>
+                  <option value="">{t('doc.noControl')}</option>
                   {controls.map((ctrl) => (
                     <option key={ctrl.id} value={ctrl.id}>
-                      {ctrl.name} - {new Date(ctrl.date).toLocaleDateString('fr-FR')}
+                      {ctrl.name} - {new Date(ctrl.date).toLocaleDateString(dateLocale)}
                     </option>
                   ))}
                 </select>
@@ -602,12 +609,12 @@ const DocumentsPage = () => {
                 {uploading ? (
                   <>
                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    Envoi en cours...
+                    {t('doc.sending')}
                   </>
                 ) : (
                   <>
                     <Upload className="w-5 h-5" />
-                    Envoyer le document
+                    {t('doc.sendFile')}
                   </>
                 )}
               </button>
@@ -616,7 +623,7 @@ const DocumentsPage = () => {
                 onClick={() => setShowForm(false)}
                 className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors"
               >
-                Annuler
+                {t('common.cancel')}
               </button>
             </div>
           </form>
@@ -627,16 +634,16 @@ const DocumentsPage = () => {
       {loading ? (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Chargement des documents...</p>
+          <p className="mt-4 text-gray-600">{t('doc.loadingDocs')}</p>
         </div>
       ) : documents.length === 0 ? (
         <div className="bg-white rounded-lg shadow-sm p-12 text-center">
           <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-xl font-medium text-gray-700 mb-2">Aucun document</h3>
+          <h3 className="text-xl font-medium text-gray-700 mb-2">{t('doc.empty')}</h3>
           <p className="text-gray-500 mb-4">
-            {selectedClass || selectedType 
-              ? 'Aucun document ne correspond à vos filtres' 
-              : 'Commencez par envoyer votre premier document'}
+            {selectedClass || selectedType
+              ? t('doc.emptyFilters')
+              : t('doc.emptyFirst')}
           </p>
           {!selectedClass && !selectedType && (
             <button
@@ -644,7 +651,7 @@ const DocumentsPage = () => {
               className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 mx-auto transition-colors"
             >
               <Upload className="w-5 h-5" />
-              Envoyer un document
+              {t('doc.send')}
             </button>
           )}
         </div>
@@ -679,21 +686,21 @@ const DocumentsPage = () => {
                       <button
                         onClick={() => openStatsModal(doc)}
                         className="p-2 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors"
-                        title="Statistiques (vues / téléchargements)"
+                        title={t('doc.statsTitle')}
                       >
                         <Eye className="w-5 h-5" />
                       </button>
                       <button
                         onClick={() => handleDownload(doc.id)}
                         className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Télécharger"
+                        title={t('doc.download')}
                       >
                         <Download className="w-5 h-5" />
                       </button>
                       <button
                         onClick={() => handleDelete(doc.id)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Supprimer"
+                        title={t('doc.delete')}
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
@@ -704,7 +711,7 @@ const DocumentsPage = () => {
                   <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-500">
                     <div className="flex items-center gap-1">
                       <Users className="w-4 h-4" />
-                      <span>{doc.classes?.name || 'Classe inconnue'}</span>
+                      <span>{doc.classes?.name || t('doc.unknownClass')}</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <Calendar className="w-4 h-4" />
@@ -712,11 +719,11 @@ const DocumentsPage = () => {
                     </div>
                     <div className="flex items-center gap-1">
                       <Eye className="w-4 h-4" />
-                      <span>{doc.viewed_count || 0}/{doc.total_students || 0} vues</span>
+                      <span>{t('doc.views', { viewed: doc.viewed_count || 0, total: doc.total_students || 0 })}</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <Download className="w-4 h-4" />
-                      <span>{doc.downloaded_count || 0} téléchargements</span>
+                      <span>{t('doc.downloads', { n: doc.downloaded_count || 0 })}</span>
                     </div>
                   </div>
                   
@@ -730,7 +737,7 @@ const DocumentsPage = () => {
                   {/* Lien vers un contrôle */}
                   {doc.controls && (
                     <div className="mt-2 text-sm text-blue-600">
-                      🔗 Lié au contrôle: {doc.controls.name}
+                      {t('doc.linkedControl', { name: doc.controls.name })}
                     </div>
                   )}
                 </div>
@@ -749,7 +756,7 @@ const DocumentsPage = () => {
           <div className="relative bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-gray-800">📊 Statistiques du document</h2>
+                <h2 className="text-xl font-bold text-gray-800">{t('doc.statsModalTitle')}</h2>
                 <p className="text-sm text-gray-600 mt-1">
                   {selectedDocument?.title}
                 </p>
@@ -758,7 +765,7 @@ const DocumentsPage = () => {
                 onClick={() => setShowStatsModal(false)}
                 className="px-3 py-1 rounded-lg border hover:bg-gray-50"
               >
-                Fermer
+                {t('common.close')}
               </button>
             </div>
 
@@ -766,27 +773,27 @@ const DocumentsPage = () => {
               {statsLoading ? (
                 <div className="text-center py-12">
                   <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto"></div>
-                  <p className="mt-3 text-gray-600">Chargement des statistiques...</p>
+                  <p className="mt-3 text-gray-600">{t('doc.loadingStats')}</p>
                 </div>
               ) : !documentStats ? (
-                <p className="text-sm text-gray-600">Aucune donnée.</p>
+                <p className="text-sm text-gray-600">{t('doc.noStats')}</p>
               ) : (
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="p-4 bg-gray-50 rounded-lg">
-                      <p className="text-xs text-gray-500">Élèves</p>
+                      <p className="text-xs text-gray-500">{t('doc.students')}</p>
                       <p className="text-lg font-semibold text-gray-900">
                         {documentStats.total_students || 0}
                       </p>
                     </div>
                     <div className="p-4 bg-blue-50 rounded-lg">
-                      <p className="text-xs text-blue-600">Vues</p>
+                      <p className="text-xs text-blue-600">{t('doc.viewsShort')}</p>
                       <p className="text-lg font-semibold text-blue-900">
                         {documentStats.viewed_count || 0}
                       </p>
                     </div>
                     <div className="p-4 bg-green-50 rounded-lg">
-                      <p className="text-xs text-green-600">Téléchargements</p>
+                      <p className="text-xs text-green-600">{t('doc.downloadsShort')}</p>
                       <p className="text-lg font-semibold text-green-900">
                         {documentStats.downloaded_count || 0}
                       </p>
@@ -795,9 +802,9 @@ const DocumentsPage = () => {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <h3 className="font-semibold text-gray-800 mb-3">👁️ Élèves qui ont vu</h3>
+                      <h3 className="font-semibold text-gray-800 mb-3">{t('doc.whoViewed')}</h3>
                       {(documentStats.viewed_by || []).length === 0 ? (
-                        <p className="text-sm text-gray-500">Aucune vue pour le moment.</p>
+                        <p className="text-sm text-gray-500">{t('doc.noView')}</p>
                       ) : (
                         <div className="space-y-2">
                           {documentStats.viewed_by.map((s) => (
@@ -813,9 +820,9 @@ const DocumentsPage = () => {
                     </div>
 
                     <div>
-                      <h3 className="font-semibold text-gray-800 mb-3">⬇️ Élèves qui ont téléchargé</h3>
+                      <h3 className="font-semibold text-gray-800 mb-3">{t('doc.whoDownloaded')}</h3>
                       {(documentStats.downloaded_by || []).length === 0 ? (
-                        <p className="text-sm text-gray-500">Aucun téléchargement pour le moment.</p>
+                        <p className="text-sm text-gray-500">{t('doc.noDownload')}</p>
                       ) : (
                         <div className="space-y-2">
                           {documentStats.downloaded_by.map((s) => (
