@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GraduationCap, Bus, BookOpen, AlertCircle, CheckCircle2, ChevronRight, User, Bell } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useT } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const ParentDashboard = () => {
   const navigate = useNavigate();
+  const t = useT();
   const [children, setChildren] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -21,7 +23,7 @@ const ParentDashboard = () => {
       const res = await fetch(`${apiUrl}/api/parent/children`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error('Erreur de chargement');
+      if (!res.ok) throw new Error(t('pdash.loadError'));
       const data = await res.json();
       setChildren(Array.isArray(data) ? data : []);
     } catch (e) {
@@ -31,27 +33,27 @@ const ParentDashboard = () => {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64">Chargement…</div>;
+  if (loading) return <div className="flex items-center justify-center h-64">{t('common.loading')}</div>;
   if (error) return <div className="p-6 text-red-600">{error}</div>;
 
   return (
     <div className="p-4 md:p-6 max-w-6xl mx-auto">
       <header className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Espace parent</h1>
-        <p className="text-gray-600 mt-1">Suivi pédagogique et transport de vos enfants</p>
+        <h1 className="text-3xl font-bold text-gray-900">{t('pdash.title')}</h1>
+        <p className="text-gray-600 mt-1">{t('pdash.subtitle')}</p>
       </header>
 
       {children.length === 0 && (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center">
           <User className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-          <p className="text-gray-700 font-medium">Aucun enfant n'est encore associé à votre compte.</p>
-          <p className="text-gray-500 text-sm mt-1">Contactez l'établissement pour finaliser l'association.</p>
+          <p className="text-gray-700 font-medium">{t('pdash.noChild')}</p>
+          <p className="text-gray-500 text-sm mt-1">{t('pdash.noChildHint')}</p>
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {children.map(child => (
-          <ChildCard key={child.id} child={child} onOpen={() => navigate(`/parent/children/${child.id}`)} />
+          <ChildCard key={child.id} child={child} t={t} onOpen={() => navigate(`/parent/children/${child.id}`)} />
         ))}
       </div>
 
@@ -64,8 +66,8 @@ const ParentDashboard = () => {
             <div className="flex items-center gap-3">
               <div className="rounded-lg bg-purple-100 p-3"><Bell className="w-6 h-6 text-purple-600" /></div>
               <div className="text-left">
-                <p className="font-semibold text-gray-900">Notifications</p>
-                <p className="text-sm text-gray-500">Messages de l'école (absences, contrôles, transport…)</p>
+                <p className="font-semibold text-gray-900">{t('pdash.notifications')}</p>
+                <p className="text-sm text-gray-500">{t('pdash.notificationsHint')}</p>
               </div>
             </div>
             <ChevronRight className="w-5 h-5 text-gray-400" />
@@ -77,8 +79,8 @@ const ParentDashboard = () => {
             <div className="flex items-center gap-3">
               <div className="rounded-lg bg-blue-100 p-3"><Bus className="w-6 h-6 text-blue-600" /></div>
               <div className="text-left">
-                <p className="font-semibold text-gray-900">Suivi transport en direct</p>
-                <p className="text-sm text-gray-500">Position du bus et événements</p>
+                <p className="font-semibold text-gray-900">{t('pdash.transport')}</p>
+                <p className="text-sm text-gray-500">{t('pdash.transportHint')}</p>
               </div>
             </div>
             <ChevronRight className="w-5 h-5 text-gray-400" />
@@ -89,7 +91,7 @@ const ParentDashboard = () => {
   );
 };
 
-const ChildCard = ({ child, onOpen }) => {
+const ChildCard = ({ child, onOpen, t }) => {
   const s = child.summary || {};
   const presence = s.presence_rate;
   const presenceColor = presence === null
@@ -123,7 +125,7 @@ const ChildCard = ({ child, onOpen }) => {
             <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-700" />
           </div>
           <p className="text-sm text-gray-500 truncate">
-            {child.class ? `${child.class.name}${child.class.level ? ` • ${child.class.level}` : ''}` : 'Aucune classe'}
+            {child.class ? `${child.class.name}${child.class.level ? ` • ${child.class.level}` : ''}` : t('pdash.noClass')}
             {child.relationship ? ` • ${child.relationship}` : ''}
           </p>
 
@@ -131,19 +133,19 @@ const ChildCard = ({ child, onOpen }) => {
             <Metric
               icon={CheckCircle2}
               color={presenceColor}
-              label="Présence"
+              label={t('pdash.metric.presence')}
               value={presence === null ? '—' : `${presence}%`}
             />
             <Metric
               icon={BookOpen}
               color="text-purple-600"
-              label="Devoirs à rendre"
+              label={t('pdash.metric.homework')}
               value={s.pending_homework ?? 0}
             />
             <Metric
               icon={GraduationCap}
               color="text-gray-700"
-              label="Séances"
+              label={t('pdash.metric.sessions')}
               value={s.total_sessions ?? 0}
             />
           </div>
@@ -152,19 +154,19 @@ const ChildCard = ({ child, onOpen }) => {
             {s.overdue_homework > 0 && (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
                 <AlertCircle className="w-3.5 h-3.5" />
-                {s.overdue_homework} devoir{s.overdue_homework > 1 ? 's' : ''} en retard
+                {t(s.overdue_homework > 1 ? 'pdash.badge.overdueMany' : 'pdash.badge.overdueOne', { n: s.overdue_homework })}
               </span>
             )}
             {s.upcoming_homework > 0 && (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
                 <BookOpen className="w-3.5 h-3.5" />
-                {s.upcoming_homework} à venir
+                {t('pdash.badge.upcoming', { n: s.upcoming_homework })}
               </span>
             )}
             {s.absent_count > 0 && (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
                 <AlertCircle className="w-3.5 h-3.5" />
-                {s.absent_count} absence{s.absent_count > 1 ? 's' : ''}
+                {t(s.absent_count > 1 ? 'pdash.badge.absentMany' : 'pdash.badge.absentOne', { n: s.absent_count })}
               </span>
             )}
           </div>

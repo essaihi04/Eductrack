@@ -71,6 +71,7 @@ const Sidebar = () => {
   const { profile, signOut, refreshProfile } = useAuth();
   const { t, dir } = useI18n();
   const isTeacher = profile?.role === 'teacher';
+  const isParent = profile?.role === 'parent';
   // Libellé de l'espace affiché sous le nom de l'école (traduit).
   const spaceLabel = () => {
     if (profile?.role === 'super_admin') return t('space.superadmin');
@@ -78,6 +79,7 @@ const Sidebar = () => {
     if (profile?.role === 'teacher') return t('space.teacher');
     if (profile?.role === 'finance_manager') return t('space.finance');
     if (profile?.role === 'student') return t('space.student');
+    if (profile?.role === 'parent') return t('space.parent');
     return '';
   };
 
@@ -190,19 +192,19 @@ const Sidebar = () => {
 
     if (profile?.role === 'parent') {
       return [
-        { icon: Users2, label: 'Mes enfants', path: '/parent' },
-        { icon: Wallet, label: 'Finance', path: '/parent/finance' },
-        { icon: Bell, label: 'Notifications', path: '/parent/notifications' },
-        { icon: FileText, label: 'Bulletins', path: '/parent/bulletins' },
-        { icon: Bus, label: 'Transport', path: '/parent/transport' },
-        { icon: CalendarClock, label: 'Rendez-vous', path: '/parent/appointments' },
-        { section: 'Vie scolaire', isSection: true },
-        { icon: ImageIcon, label: 'Cahier de vie', path: '/school-life/cahier-de-vie' },
-        { icon: Sparkles, label: 'Parascolaire', path: '/school-life/parascolaire' },
-        { icon: BarChart2, label: 'Sondages', path: '/school-life/sondages' },
-        { icon: Search, label: 'Objets perdus', path: '/school-life/objets-perdus' },
-        { icon: AlertTriangle, label: 'Signalements', path: '/parent/signalements' },
-        { icon: Edit, label: 'Profil', path: '/profile' },
+        { icon: Users2, label: t('pnav.children'), path: '/parent' },
+        { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
+        { icon: Bell, label: t('pnav.notifications'), path: '/parent/notifications' },
+        { icon: FileText, label: t('pnav.bulletins'), path: '/parent/bulletins' },
+        { icon: Bus, label: t('pnav.transport'), path: '/parent/transport' },
+        { icon: CalendarClock, label: t('pnav.appointments'), path: '/parent/appointments' },
+        { section: t('nav.section.schoolLife'), isSection: true },
+        { icon: ImageIcon, label: t('nav.lifeBook'), path: '/school-life/cahier-de-vie' },
+        { icon: Sparkles, label: t('nav.extracurricular'), path: '/school-life/parascolaire' },
+        { icon: BarChart2, label: t('pnav.polls'), path: '/school-life/sondages' },
+        { icon: Search, label: t('nav.lostFound'), path: '/school-life/objets-perdus' },
+        { icon: AlertTriangle, label: t('nav.reports'), path: '/parent/signalements' },
+        { icon: Edit, label: t('pnav.profile'), path: '/profile' },
       ];
     }
 
@@ -454,8 +456,8 @@ const Sidebar = () => {
           </div>
         </Link>
 
-        {/* Choix de la langue de l'interface (compte professeur). */}
-        {isTeacher && <LanguageSwitcher className="mb-3" />}
+        {/* Choix de la langue de l'interface (comptes professeur et parent). */}
+        {(isTeacher || isParent) && <LanguageSwitcher className="mb-3" />}
 
         <button
           onClick={signOut}

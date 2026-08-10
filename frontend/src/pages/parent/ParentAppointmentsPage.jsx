@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import {
   appointmentsApi, APPOINTMENT_STATUS, formatSlot, personName,
 } from '../../lib/appointmentsApi';
+import { useI18n } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -17,6 +18,9 @@ const EMPTY_FORM = {
 };
 
 export default function ParentAppointmentsPage() {
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  const slotOpts = { locale: dateLocale, at: t('appt.at') };
   const [items, setItems] = useState([]);
   const [children, setChildren] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -84,7 +88,7 @@ export default function ParentAppointmentsPage() {
   };
 
   const cancel = async (appt) => {
-    if (!confirm('Annuler cette demande de rendez-vous ?')) return;
+    if (!confirm(t('pappt.confirmCancel'))) return;
     try {
       await appointmentsApi.cancel(appt.id, {});
       await load();
@@ -95,12 +99,9 @@ export default function ParentAppointmentsPage() {
     <div className="p-4 md:p-6 max-w-3xl mx-auto">
       <div className="rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white p-6 shadow-lg mb-6">
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <CalendarClock className="w-7 h-7" /> Mes rendez-vous
+          <CalendarClock className="w-7 h-7" /> {t('pappt.title')}
         </h1>
-        <p className="text-white/80 text-sm">
-          Demandez un rendez-vous avec l'administration ou un professeur. L'école vous
-          confirmera la date et l'heure par notification.
-        </p>
+        <p className="text-white/80 text-sm">{t('pappt.intro')}</p>
       </div>
 
       <button
@@ -108,19 +109,21 @@ export default function ParentAppointmentsPage() {
         disabled={children.length === 0}
         className="mb-6 inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
       >
-        <Plus className="w-4 h-4" /> Demander un rendez-vous
+        <Plus className="w-4 h-4" /> {t('pappt.new')}
       </button>
 
       {loading ? (
-        <div className="flex items-center justify-center h-40 text-gray-500">Chargement…</div>
+        <div className="flex items-center justify-center h-40 text-gray-500">{t('common.loading')}</div>
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-gray-500">
-          Vous n'avez encore demandé aucun rendez-vous.
+          {t('pappt.empty')}
         </div>
       ) : (
         <div className="space-y-3">
           {items.map((a) => {
-            const st = APPOINTMENT_STATUS[a.status] || { label: a.status, cls: 'bg-gray-100 text-gray-600' };
+            const st = APPOINTMENT_STATUS[a.status]
+              ? { label: t(`appt.status.${a.status}`), cls: APPOINTMENT_STATUS[a.status].cls }
+              : { label: a.status, cls: 'bg-gray-100 text-gray-600' };
             return (
               <div key={a.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
@@ -131,8 +134,8 @@ export default function ParentAppointmentsPage() {
                 <div className="flex flex-wrap gap-2 mt-2 text-xs">
                   <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 inline-flex items-center gap-1">
                     {a.target_type === 'teacher'
-                      ? <><GraduationCap className="w-3 h-3" /> {personName(a.teacher) || 'Professeur'}</>
-                      : <><Building2 className="w-3 h-3" /> Administration</>}
+                      ? <><GraduationCap className="w-3 h-3" /> {personName(a.teacher) || t('pappt.teacher')}</>
+                      : <><Building2 className="w-3 h-3" /> {t('pappt.administration')}</>}
                   </span>
                   {a.student && (
                     <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 inline-flex items-center gap-1">
@@ -143,7 +146,7 @@ export default function ParentAppointmentsPage() {
 
                 {a.status === 'confirme' && a.scheduled_at && (
                   <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
-                    <div className="font-semibold">📅 {formatSlot(a.scheduled_at)}</div>
+                    <div className="font-semibold">📅 {formatSlot(a.scheduled_at, slotOpts)}</div>
                     {a.location && (
                       <div className="inline-flex items-center gap-1 mt-1">
                         <MapPin className="w-3.5 h-3.5" /> {a.location}
@@ -161,17 +164,17 @@ export default function ParentAppointmentsPage() {
 
                 {a.message && <p className="text-sm text-gray-700 mt-2 whitespace-pre-line">{a.message}</p>}
                 {a.preferred_slot && (
-                  <p className="text-xs text-gray-500 mt-1">Votre souhait : {a.preferred_slot}</p>
+                  <p className="text-xs text-gray-500 mt-1">{t('pappt.wish', { slot: a.preferred_slot })}</p>
                 )}
 
                 <div className="flex items-center justify-between mt-3">
                   <span className="text-xs text-gray-400">
-                    Demandé le {new Date(a.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
-                    {a.source === 'whatsapp' ? ' · via WhatsApp' : ''}
+                    {t('pappt.requestedOn', { date: new Date(a.created_at).toLocaleDateString(dateLocale, { day: '2-digit', month: 'long', year: 'numeric' }) })}
+                    {a.source === 'whatsapp' ? t('pappt.viaWhatsapp') : ''}
                   </span>
                   {['en_attente', 'propose', 'confirme'].includes(a.status) && (
                     <button onClick={() => cancel(a)} className="text-xs text-red-600 hover:underline">
-                      Annuler
+                      {t('pappt.cancel')}
                     </button>
                   )}
                 </div>
@@ -185,13 +188,13 @@ export default function ParentAppointmentsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <form onSubmit={submit} className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="font-bold text-gray-900">Demander un rendez-vous</h2>
+              <h2 className="font-bold text-gray-900">{t('pappt.new')}</h2>
               <button type="button" onClick={() => setShowForm(false)}><X className="w-5 h-5 text-gray-500" /></button>
             </div>
 
             <div className="p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Enfant concerné</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.child')}</label>
                 <select
                   value={form.student_id}
                   onChange={(e) => setForm({ ...form, student_id: e.target.value, teacher_id: '' })}
@@ -207,11 +210,11 @@ export default function ParentAppointmentsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Avec qui ?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.with')}</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { value: 'administration', label: 'Administration', icon: Building2 },
-                    { value: 'teacher', label: 'Un professeur', icon: GraduationCap },
+                    { value: 'administration', label: t('pappt.administration'), icon: Building2 },
+                    { value: 'teacher', label: t('pappt.form.teacherOption'), icon: GraduationCap },
                   ].map(({ value, label, icon: Icon }) => (
                     <button
                       key={value}
@@ -231,14 +234,14 @@ export default function ParentAppointmentsPage() {
 
               {form.target_type === 'teacher' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Professeur</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.teacherLabel')}</label>
                   <select
                     value={form.teacher_id}
                     onChange={(e) => setForm({ ...form, teacher_id: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2"
                     required
                   >
-                    <option value="">— Choisir —</option>
+                    <option value="">{t('pappt.form.pick')}</option>
                     {teachers.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}{t.subjects?.length ? ` (${t.subjects.join(', ')})` : ''}
@@ -247,25 +250,25 @@ export default function ParentAppointmentsPage() {
                   </select>
                   {teachers.length === 0 && (
                     <p className="text-xs text-amber-600 mt-1">
-                      Aucun professeur n'est rattaché à la classe de cet enfant.
+                      {t('pappt.form.noTeacher')}
                     </p>
                   )}
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Objet du rendez-vous</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.subject')}</label>
                 <input
                   value={form.subject}
                   onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                  placeholder="Ex. résultats du 1er semestre"
+                  placeholder={t('pappt.form.subjectPlaceholder')}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Détails (facultatif)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.details')}</label>
                 <textarea
                   value={form.message}
                   onChange={(e) => setForm({ ...form, message: e.target.value })}
@@ -275,15 +278,15 @@ export default function ParentAppointmentsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Créneau souhaité (facultatif)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.slot')}</label>
                 <input
                   value={form.preferred_slot}
                   onChange={(e) => setForm({ ...form, preferred_slot: e.target.value })}
-                  placeholder="Ex. jeudi matin, après 16h…"
+                  placeholder={t('pappt.form.slotPlaceholder')}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  L'école fixe l'horaire définitif et vous le confirme par notification.
+                  {t('pappt.form.slotHint')}
                 </p>
               </div>
 
@@ -291,13 +294,13 @@ export default function ParentAppointmentsPage() {
             </div>
 
             <div className="flex justify-end gap-2 p-4 border-t">
-              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600">Annuler</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600">{t('common.cancel')}</button>
               <button
                 type="submit"
                 disabled={saving}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
               >
-                {saving ? 'Envoi…' : 'Envoyer la demande'}
+                {saving ? t('pappt.form.sending') : t('pappt.form.submit')}
               </button>
             </div>
           </form>

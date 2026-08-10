@@ -8,16 +8,19 @@ import { transportApi, pushApi } from '../../lib/transportApi';
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon, homeTopViewIcon } from '../../lib/mapAssets';
+import { useI18n } from '../../i18n';
 
 const homeIcon = homeTopViewIcon(34);
 
-const eventLabel = (e) => {
-  if (!e) return '—';
-  const map = { boarded: '🚌 Monté(e) dans le bus', dropped: '✅ Arrivé(e)', absent: '⚠️ Absent(e)', no_show: '⚠️ Pas venu(e)', approaching: '⏰ Bus approche' };
-  return map[e.event_type] || e.event_type;
-};
+const EVENT_TYPES = ['boarded', 'dropped', 'absent', 'no_show', 'approaching'];
 
 export default function ParentTransportPage() {
+  const { t, lang } = useI18n();
+  const timeLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  const eventLabel = (e) => {
+    if (!e) return '—';
+    return EVENT_TYPES.includes(e.event_type) ? t(`ptrans.ev.${e.event_type}`) : e.event_type;
+  };
   const [data, setData] = useState({ children: [] });
   const [loading, setLoading] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(false);
@@ -42,8 +45,8 @@ export default function ParentTransportPage() {
   const enablePush = async () => {
     try {
       const ok = await enablePushNotifications();
-      if (ok) { setPushEnabled(true); alert('🔔 Notifications activées !'); }
-    } catch (e) { alert('Erreur : ' + e.message); }
+      if (ok) { setPushEnabled(true); alert(t('ptrans.pushOk')); }
+    } catch (e) { alert(t('ptrans.error', { msg: e.message })); }
   };
 
   // Calculer le centre de la carte
@@ -58,31 +61,31 @@ export default function ParentTransportPage() {
     <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Bus className="w-6 h-6 text-orange-600" /> Transport scolaire</h1>
-          <p className="text-sm text-gray-500">Suivi en direct du bus de votre enfant</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Bus className="w-6 h-6 text-orange-600" /> {t('ptrans.title')}</h1>
+          <p className="text-sm text-gray-500">{t('ptrans.subtitle')}</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={load} className="text-sm text-gray-600 flex items-center gap-1 px-3 py-1.5 border rounded-lg hover:bg-gray-50"><RefreshCw className="w-4 h-4" /> Actualiser</button>
+          <button onClick={load} className="text-sm text-gray-600 flex items-center gap-1 px-3 py-1.5 border rounded-lg hover:bg-gray-50"><RefreshCw className="w-4 h-4" /> {t('ptrans.refresh')}</button>
           {!pushEnabled && (
-            <button onClick={enablePush} className="text-sm bg-orange-600 text-white flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-orange-700">🔔 Activer notifications</button>
+            <button onClick={enablePush} className="text-sm bg-orange-600 text-white flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-orange-700">{t('ptrans.enablePush')}</button>
           )}
         </div>
       </div>
 
-      {loading ? <div className="text-center py-12 text-gray-400">Chargement...</div> : (
+      {loading ? <div className="text-center py-12 text-gray-400">{t('common.loading')}</div> : (
         <>
-          {data.children.length === 0 && <div className="text-center py-12 text-gray-400">Aucun enfant rattaché à votre compte.</div>}
+          {data.children.length === 0 && <div className="text-center py-12 text-gray-400">{t('ptrans.noChild')}</div>}
           {data.children.map(c => (
             <div key={c.student.id} className="bg-white rounded-xl shadow border overflow-hidden">
               <div className="p-4 border-b bg-gray-50 flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-xl">👦</div>
                 <div className="flex-1">
                   <h2 className="font-bold text-lg">{c.student.first_name} {c.student.last_name}</h2>
-                  <p className="text-sm text-gray-600">{eventLabel(c.last_event)} {c.last_event && <span className="text-xs text-gray-400">• {new Date(c.last_event.recorded_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>}</p>
+                  <p className="text-sm text-gray-600">{eventLabel(c.last_event)} {c.last_event && <span className="text-xs text-gray-400">• {new Date(c.last_event.recorded_at).toLocaleTimeString(timeLocale, { hour: '2-digit', minute: '2-digit' })}</span>}</p>
                 </div>
               </div>
 
-              {c.buses.length === 0 && <div className="p-6 text-center text-gray-400">Aucun bus assigné à cet élève</div>}
+              {c.buses.length === 0 && <div className="p-6 text-center text-gray-400">{t('ptrans.noBus')}</div>}
               {c.buses.map(b => (
                 <div key={b.id} className="p-4 space-y-3">
                   <div className="flex items-center gap-3">
@@ -90,13 +93,13 @@ export default function ParentTransportPage() {
                       <Bus className="w-5 h-5" />
                     </div>
                     <div className="flex-1">
-                      <div className="font-semibold">Bus {b.plate_number}</div>
+                      <div className="font-semibold">{t('ptrans.bus', { plate: b.plate_number })}</div>
                       <div className="text-xs text-gray-500">{b.model || ''}</div>
                     </div>
                     {b.active_trip ? (
-                      <span className="text-xs text-green-700 flex items-center gap-1 bg-green-50 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> En route</span>
+                      <span className="text-xs text-green-700 flex items-center gap-1 bg-green-50 px-2 py-1 rounded-full"><span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> {t('ptrans.enRoute')}</span>
                     ) : (
-                      <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Inactif</span>
+                      <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">{t('ptrans.inactive')}</span>
                     )}
                   </div>
 
@@ -105,17 +108,17 @@ export default function ParentTransportPage() {
                       <MapContainer center={[b.last_position.lat, b.last_position.lng]} zoom={13} style={{ height: '100%', width: '100%' }}>
                         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} subdomains={TILE_SUBDOMAINS} maxZoom={TILE_MAX_ZOOM} />
                         <Marker position={[b.last_position.lat, b.last_position.lng]} icon={busTopViewIcon(b.color || '#f59e0b', b.last_position.heading || 0, 44)}>
-                          <Popup>Bus {b.plate_number}<br />{b.last_position.speed_kmh ? `${Math.round(b.last_position.speed_kmh)} km/h` : ''}</Popup>
+                          <Popup>{t('ptrans.bus', { plate: b.plate_number })}<br />{b.last_position.speed_kmh ? `${Math.round(b.last_position.speed_kmh)} km/h` : ''}</Popup>
                         </Marker>
                         <Marker position={[c.student.home_lat, c.student.home_lng]} icon={homeIcon}>
-                          <Popup>🏠 Maison</Popup>
+                          <Popup>{t('ptrans.home')}</Popup>
                         </Marker>
                       </MapContainer>
                     </div>
                   )}
 
-                  {!b.last_position && b.active_trip && <div className="text-xs text-gray-500 text-center py-3">⏳ En attente de la position GPS du chauffeur...</div>}
-                  {!b.active_trip && <div className="text-xs text-gray-500 text-center py-3">Le bus n'est pas en circulation pour le moment.</div>}
+                  {!b.last_position && b.active_trip && <div className="text-xs text-gray-500 text-center py-3">{t('ptrans.waitingGps')}</div>}
+                  {!b.active_trip && <div className="text-xs text-gray-500 text-center py-3">{t('ptrans.notRunning')}</div>}
                 </div>
               ))}
             </div>

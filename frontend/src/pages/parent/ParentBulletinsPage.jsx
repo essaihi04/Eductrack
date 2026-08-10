@@ -3,9 +3,11 @@ import { FileText, Download, Eye, RefreshCw } from 'lucide-react';
 import { openPdfUrl } from '../../lib/download';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
+import { useT } from '../../i18n';
 
 const ParentBulletinsPage = () => {
   const { profile } = useAuth();
+  const t = useT();
   const [children, setChildren] = useState([]);
   const [selectedChild, setSelectedChild] = useState('');
   const [bulletins, setBulletins] = useState([]);
@@ -73,13 +75,13 @@ const ParentBulletinsPage = () => {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold flex items-center gap-2">
-        <FileText className="w-6 h-6 text-blue-600" /> Bulletins Scolaires
+        <FileText className="w-6 h-6 text-blue-600" /> {t('pbul.title')}
       </h1>
 
       {/* Sélecteur enfant */}
       {children.length > 1 && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Enfant</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t('pbul.child')}</label>
           <select value={selectedChild} onChange={e => handleChildChange(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm">
             {children.map(c => {
@@ -100,16 +102,16 @@ const ParentBulletinsPage = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-semibold text-lg">
-                      {b.academic_year} — Semestre {b.semester}
+                      {t('pbul.semester', { year: b.academic_year, n: b.semester })}
                     </h3>
                     <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-                      <span>Moyenne : <strong className={mentionColor(b.general_average)}>
+                      <span>{t('pbul.average')} <strong className={mentionColor(b.general_average)}>
                         {b.general_average != null ? `${Number(b.general_average).toFixed(2)}/20` : '—'}
                       </strong></span>
-                      <span>Rang : <strong>{b.general_rank || '—'}/{b.total_students_in_class || '—'}</strong></span>
-                      {b.mention && <span>Mention : <strong className={mentionColor(b.general_average)}>{b.mention}</strong></span>}
+                      <span>{t('pbul.rank')} <strong>{b.general_rank || '—'}/{b.total_students_in_class || '—'}</strong></span>
+                      {b.mention && <span>{t('pbul.mention')} <strong className={mentionColor(b.general_average)}>{b.mention}</strong></span>}
                       {b.is_exam_level && b.certification_average != null && (
-                        <span className="text-blue-700">Moy. certification : <strong className={mentionColor(b.certification_average)}>
+                        <span className="text-blue-700">{t('pbul.certAverage')} <strong className={mentionColor(b.certification_average)}>
                           {Number(b.certification_average).toFixed(2)}/20
                         </strong>{b.certification_mention ? ` (${b.certification_mention})` : ''}</span>
                       )}
@@ -117,7 +119,7 @@ const ParentBulletinsPage = () => {
                   </div>
                   <button onClick={() => openPdf(b.id)}
                     className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-                    <Eye className="w-4 h-4" /> Voir le bulletin
+                    <Eye className="w-4 h-4" /> {t('pbul.view')}
                   </button>
                 </div>
 
@@ -127,11 +129,11 @@ const ParentBulletinsPage = () => {
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-gray-50">
-                          <th className="text-left px-2 py-1 font-medium text-gray-600">Matière</th>
-                          <th className="text-center px-2 py-1 font-medium text-gray-600">Note /20</th>
-                          <th className="text-center px-2 py-1 font-medium text-gray-600">Coef</th>
-                          <th className="text-center px-2 py-1 font-medium text-gray-600">Rang</th>
-                          <th className="text-left px-2 py-1 font-medium text-gray-600">Appréciation</th>
+                          <th className="text-left px-2 py-1 font-medium text-gray-600">{t('pbul.col.subject')}</th>
+                          <th className="text-center px-2 py-1 font-medium text-gray-600">{t('pbul.col.note')}</th>
+                          <th className="text-center px-2 py-1 font-medium text-gray-600">{t('pbul.col.coef')}</th>
+                          <th className="text-center px-2 py-1 font-medium text-gray-600">{t('pbul.col.rank')}</th>
+                          <th className="text-left px-2 py-1 font-medium text-gray-600">{t('pbul.col.appreciation')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -157,7 +159,7 @@ const ParentBulletinsPage = () => {
       ) : (
         <div className="text-center py-12 text-gray-400">
           <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p>Aucun bulletin publié pour le moment.</p>
+          <p>{t('pbul.empty')}</p>
         </div>
       )}
     </div>

@@ -3,29 +3,32 @@ import { Bell, BellRing, Bus, GraduationCap, Wallet, MessageSquare, Image as Ima
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
 import { isNativePush, enableNativePush, nativePushState } from '../../lib/nativePush';
+import { useI18n, useT } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+// Icônes et couleurs seulement : les libellés viennent du dictionnaire
+// (pnotif.cat.*), la clé '' correspondant au filtre « Tout ».
 const CATEGORIES = [
-  { key: '', label: 'Tout', icon: Bell, color: 'text-gray-700' },
-  { key: 'pedagogical', label: 'Pédagogique', icon: GraduationCap, color: 'text-blue-600' },
-  { key: 'transport', label: 'Transport', icon: Bus, color: 'text-orange-600' },
-  { key: 'financial', label: 'Finance', icon: Wallet, color: 'text-emerald-600' },
-  { key: 'general', label: 'Général', icon: MessageSquare, color: 'text-purple-600' },
+  { key: '', labelKey: 'pnotif.cat.all', icon: Bell, color: 'text-gray-700' },
+  { key: 'pedagogical', labelKey: 'pnotif.cat.pedagogical', icon: GraduationCap, color: 'text-blue-600' },
+  { key: 'transport', labelKey: 'pnotif.cat.transport', icon: Bus, color: 'text-orange-600' },
+  { key: 'financial', labelKey: 'pnotif.cat.financial', icon: Wallet, color: 'text-emerald-600' },
+  { key: 'general', labelKey: 'pnotif.cat.general', icon: MessageSquare, color: 'text-purple-600' },
 ];
 
 const CATEGORY_BADGE = {
-  pedagogical: { label: 'Pédagogique', cls: 'bg-blue-100 text-blue-700', icon: GraduationCap },
-  transport: { label: 'Transport', cls: 'bg-orange-100 text-orange-700', icon: Bus },
-  financial: { label: 'Finance', cls: 'bg-emerald-100 text-emerald-700', icon: Wallet },
-  general: { label: 'Général', cls: 'bg-purple-100 text-purple-700', icon: MessageSquare },
+  pedagogical: { labelKey: 'pnotif.cat.pedagogical', cls: 'bg-blue-100 text-blue-700', icon: GraduationCap },
+  transport: { labelKey: 'pnotif.cat.transport', cls: 'bg-orange-100 text-orange-700', icon: Bus },
+  financial: { labelKey: 'pnotif.cat.financial', cls: 'bg-emerald-100 text-emerald-700', icon: Wallet },
+  general: { labelKey: 'pnotif.cat.general', cls: 'bg-purple-100 text-purple-700', icon: MessageSquare },
 };
 
-const fmtDateTime = (iso) => {
+const fmtDateTime = (iso, locale = 'fr-FR') => {
   if (!iso) return '';
   try {
     const d = new Date(iso);
-    return d.toLocaleString('fr-FR', {
+    return d.toLocaleString(locale, {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
       timeZone: 'Africa/Casablanca',
@@ -35,14 +38,14 @@ const fmtDateTime = (iso) => {
   }
 };
 
-const fmtRelative = (iso) => {
+const fmtRelative = (iso, t, locale) => {
   if (!iso) return '';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 60) return 'à l\'instant';
-  if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
-  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
-  if (diff < 7 * 86400) return `il y a ${Math.floor(diff / 86400)} j`;
-  return fmtDateTime(iso);
+  if (diff < 60) return t('pnotif.now');
+  if (diff < 3600) return t('pnotif.minAgo', { n: Math.floor(diff / 60) });
+  if (diff < 86400) return t('pnotif.hAgo', { n: Math.floor(diff / 3600) });
+  if (diff < 7 * 86400) return t('pnotif.dAgo', { n: Math.floor(diff / 86400) });
+  return fmtDateTime(iso, locale);
 };
 
 // Bandeau « Activer la cloche sur ce téléphone ». Sans abonnement push actif,
@@ -51,6 +54,7 @@ const fmtRelative = (iso) => {
 // autoriser les notifications → crée l'abonnement (push_subscriptions) qui
 // permet à l'école de faire sonner la cloche, même app fermée.
 const PushEnableBanner = () => {
+  const t = useT();
   // 'unsupported' | 'enabled' | 'denied' | 'prompt' | 'loading'
   const [state, setState] = useState('loading');
   const [busy, setBusy] = useState(false);
@@ -86,17 +90,17 @@ const PushEnableBanner = () => {
         const ok = await enableNativePush();
         await refresh();
         if (!ok) {
-          alert("Notifications non activées. Autorisez-les dans les réglages du téléphone (Applications → Eductrack → Notifications), puis réessayez.");
+          alert(t('pnotif.push.failedNative'));
         }
         return;
       }
       const ok = await enablePushNotifications();
       await refresh();
       if (!ok && Notification.permission !== 'granted') {
-        alert("Notifications non activées. Autorisez-les dans les réglages du navigateur, puis réessayez.");
+        alert(t('pnotif.push.failedWeb'));
       }
     } catch (e) {
-      alert('Erreur : ' + (e.message || 'activation impossible'));
+      alert(t('pnotif.push.error', { msg: e.message || t('pnotif.push.cannotEnable') }));
     } finally {
       setBusy(false);
     }
@@ -110,8 +114,7 @@ const PushEnableBanner = () => {
   if (state === 'unsupported') {
     return (
       <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        🔔 Pour recevoir les notifications de l'école directement sur ce téléphone,
-        {isIOS ? " ajoutez l'application à votre écran d'accueil (Partager → « Sur l'écran d'accueil »), puis rouvrez-la." : ' utilisez un navigateur récent (Chrome, Edge, Firefox) ou installez l\'application.'}
+        {t(isIOS ? 'pnotif.push.unsupportedIOS' : 'pnotif.push.unsupportedOther')}
       </div>
     );
   }
@@ -122,11 +125,9 @@ const PushEnableBanner = () => {
         <BellRing className="w-5 h-5 text-white" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-semibold text-gray-900">Activez la cloche sur ce téléphone</p>
+        <p className="font-semibold text-gray-900">{t('pnotif.push.title')}</p>
         <p className="text-sm text-gray-600 mt-0.5">
-          {state === 'denied'
-            ? "Les notifications sont bloquées. Autorisez-les dans les réglages de votre navigateur pour ce site, puis réessayez."
-            : "Recevez une notification sonore dès que l'école vous envoie un message — même quand l'application est fermée."}
+          {t(state === 'denied' ? 'pnotif.push.denied' : 'pnotif.push.hint')}
         </p>
         {state === 'prompt' && (
           <button
@@ -135,11 +136,11 @@ const PushEnableBanner = () => {
             className="mt-3 inline-flex items-center gap-2 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
             <BellRing className="w-4 h-4" />
-            {busy ? 'Activation…' : 'Activer les notifications'}
+            {busy ? t('pnotif.push.enabling') : t('pnotif.push.enable')}
           </button>
         )}
       </div>
-      <button onClick={() => setHidden(true)} className="p-1 text-gray-400 hover:text-gray-600" aria-label="Masquer">
+      <button onClick={() => setHidden(true)} className="p-1 text-gray-400 hover:text-gray-600" aria-label={t('pnotif.push.hide')}>
         <X className="w-4 h-4" />
       </button>
     </div>
@@ -147,6 +148,8 @@ const PushEnableBanner = () => {
 };
 
 const ParentNotificationsPage = () => {
+  const { t, lang } = useI18n();
+  const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -164,7 +167,7 @@ const ParentNotificationsPage = () => {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Erreur de chargement');
+        throw new Error(err.error || t('pnotif.loadError'));
       }
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
@@ -186,7 +189,7 @@ const ParentNotificationsPage = () => {
     return c;
   }, [items]);
 
-  if (loading) return <div className="flex items-center justify-center h-64">Chargement…</div>;
+  if (loading) return <div className="flex items-center justify-center h-64">{t('common.loading')}</div>;
   if (error) return <div className="p-6 text-red-600">{error}</div>;
 
   return (
@@ -196,8 +199,8 @@ const ParentNotificationsPage = () => {
           <Bell className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Notifications</h1>
-          <p className="text-gray-600 text-sm">Historique des messages WhatsApp reçus de l'école</p>
+          <h1 className="text-3xl font-bold text-gray-900">{t('pnotif.title')}</h1>
+          <p className="text-gray-600 text-sm">{t('pnotif.subtitle')}</p>
         </div>
       </header>
 
@@ -219,7 +222,7 @@ const ParentNotificationsPage = () => {
               }`}
             >
               <Icon className={`w-4 h-4 ${active ? 'text-white' : c.color}`} />
-              {c.label}
+              {t(c.labelKey)}
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20' : 'bg-gray-100 text-gray-600'}`}>
                 {counts[c.key] ?? 0}
               </span>
@@ -231,15 +234,15 @@ const ParentNotificationsPage = () => {
       {filtered.length === 0 && (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center">
           <Bell className="w-10 h-10 mx-auto text-gray-400 mb-3" />
-          <p className="text-gray-700 font-medium">Aucune notification.</p>
+          <p className="text-gray-700 font-medium">{t('pnotif.empty')}</p>
           <p className="text-gray-500 text-sm mt-1">
-            {filter ? 'Aucun message dans cette catégorie pour le moment.' : 'Les messages WhatsApp envoyés par l\'école apparaîtront ici.'}
+            {t(filter ? 'pnotif.emptyFiltered' : 'pnotif.emptyHint')}
           </p>
         </div>
       )}
 
       <div className="space-y-3">
-        {filtered.map(n => <NotificationCard key={n.id} n={n} />)}
+        {filtered.map(n => <NotificationCard key={n.id} n={n} dateLocale={dateLocale} />)}
       </div>
     </div>
   );
@@ -264,7 +267,8 @@ const stripLinks = (text) => {
     .trim();
 };
 
-const NotificationCard = ({ n }) => {
+const NotificationCard = ({ n, dateLocale }) => {
+  const t = useT();
   const cat = CATEGORY_BADGE[n.category] || CATEGORY_BADGE.general;
   const Icon = cat.icon;
 
@@ -289,7 +293,7 @@ const NotificationCard = ({ n }) => {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Erreur');
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || t('pnotif.error'));
     return res.json();
   };
 
@@ -332,25 +336,25 @@ const NotificationCard = ({ n }) => {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${cat.cls}`}>
-              {cat.label}
+              {t(cat.labelKey)}
             </span>
             {isSent && (
               <span className="text-[10px] uppercase font-semibold text-green-700 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Reçu
+                <CheckCircle2 className="w-3 h-3" /> {t('pnotif.received')}
               </span>
             )}
             {isFailed && (
               <span className="text-[10px] uppercase font-semibold text-red-700 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" /> Échec
+                <AlertCircle className="w-3 h-3" /> {t('pnotif.failed')}
               </span>
             )}
             {isPending && (
               <span className="text-[10px] uppercase font-semibold text-orange-700 flex items-center gap-1">
-                <Clock className="w-3 h-3" /> En attente
+                <Clock className="w-3 h-3" /> {t('pnotif.pending')}
               </span>
             )}
-            <span className="text-xs text-gray-500 ml-auto" title={fmtDateTime(n.sent_at)}>
-              {fmtRelative(n.sent_at)}
+            <span className="text-xs text-gray-500 ml-auto" title={fmtDateTime(n.sent_at, dateLocale)}>
+              {fmtRelative(n.sent_at, t, dateLocale)}
             </span>
           </div>
 
@@ -376,7 +380,7 @@ const NotificationCard = ({ n }) => {
               className="mt-2 inline-flex items-center gap-2 text-sm text-blue-600 hover:underline"
             >
               <FileText className="w-4 h-4" />
-              {n.file_name || 'Document joint'}
+              {n.file_name || t('pnotif.attachment')}
             </a>
           )}
 
@@ -392,25 +396,25 @@ const NotificationCard = ({ n }) => {
               }`}
             >
               <ThumbsUp className={`w-3.5 h-3.5 ${reaction ? 'fill-blue-600 text-blue-600' : ''}`} />
-              {reaction ? 'Aimé' : "J'aime"}
+              {t(reaction ? 'pnotif.liked' : 'pnotif.like')}
             </button>
             <button
               onClick={() => setShowReply((v) => !v)}
               disabled={busy}
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200 bg-white text-gray-600 hover:border-emerald-300 transition disabled:opacity-50"
             >
-              <Reply className="w-3.5 h-3.5" /> Répondre
+              <Reply className="w-3.5 h-3.5" /> {t('pnotif.reply')}
             </button>
             {respondedAt && !showReply && (
               <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Répondu
+                <CheckCircle2 className="w-3.5 h-3.5" /> {t('pnotif.replied')}
               </span>
             )}
           </div>
 
           {responseText && !showReply && (
             <div className="mt-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
-              <p className="text-[11px] font-semibold text-emerald-700 mb-0.5">Votre réponse</p>
+              <p className="text-[11px] font-semibold text-emerald-700 mb-0.5">{t('pnotif.yourReply')}</p>
               <p className="text-sm text-gray-700 whitespace-pre-line">{responseText}</p>
             </div>
           )}
@@ -421,7 +425,7 @@ const NotificationCard = ({ n }) => {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 rows={2}
-                placeholder="Écrire une réponse à l'école…"
+                placeholder={t('pnotif.replyPlaceholder')}
                 className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none"
               />
               <button
@@ -429,7 +433,7 @@ const NotificationCard = ({ n }) => {
                 disabled={busy || !draft.trim()}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
               >
-                <Send className="w-4 h-4" /> Envoyer
+                <Send className="w-4 h-4" /> {t('pnotif.send')}
               </button>
             </div>
           )}
