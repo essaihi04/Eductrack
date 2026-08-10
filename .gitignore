@@ -55,3 +55,6 @@ scripts/gen-proposal.cjs
 # Secrets de signature Android (ne jamais committer)
 *.keystore
 keystore.properties
+
+# Donnees de migration self-host (dumps DB + fichiers Storage) - JAMAIS dans git
+migration-selfhost/data/
