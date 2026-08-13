@@ -10,7 +10,7 @@ const stats = [
     suffix: '+',
     label: 'Modules intégrés',
     description: 'Pédagogie, transport, finance, parents…',
-    color: 'from-blue-500 to-blue-600'
+    color: 'from-[#2A9D8F] to-[#247F76]'
   },
   {
     icon: Users,
@@ -18,7 +18,7 @@ const stats = [
     suffix: '',
     label: 'Rôles utilisateurs',
     description: 'Admin, prof, parent, élève, chauffeur, responsable',
-    color: 'from-green-500 to-green-600'
+    color: 'from-[#E66F51] to-[#C94F35]'
   },
   {
     icon: Target,
@@ -26,7 +26,7 @@ const stats = [
     suffix: 's',
     label: 'Prise de présence',
     description: 'Pour une classe entière',
-    color: 'from-purple-500 to-purple-600'
+    color: 'from-[#E8B447] to-[#CE8D1E]'
   },
   {
     icon: Smartphone,
@@ -34,7 +34,7 @@ const stats = [
     suffix: '',
     label: 'Plateformes',
     description: 'Web, Android (APK), Desktop',
-    color: 'from-orange-500 to-orange-600'
+    color: 'from-[#5A83A0] to-[#173A59]'
   }
 ];
 
@@ -78,7 +78,7 @@ const AnimatedCounter = ({ value, suffix, duration = 2000 }) => {
 
 const Stats = () => {
   return (
-    <section className="py-20 bg-gradient-to-br from-green-600 to-emerald-700 dark:from-green-900 dark:to-emerald-950">
+    <section className="py-20 bg-gradient-to-br from-[#173A59] via-[#204D63] to-[#2A9D8F] dark:from-[#102638] dark:to-[#173A59]">
       <div className="container mx-auto px-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -90,7 +90,7 @@ const Stats = () => {
           <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
             Une plateforme complète
           </h2>
-          <p className="text-xl text-green-100 max-w-2xl mx-auto">
+          <p className="text-xl text-[#D8E7E4] max-w-2xl mx-auto">
             Conçue pour couvrir toute la chaîne de la vie scolaire
           </p>
         </motion.div>
@@ -120,7 +120,7 @@ const Stats = () => {
                     {stat.label}
                   </h3>
                   
-                  <p className="text-green-100 text-sm">
+                  <p className="text-[#D8E7E4] text-sm">
                     {stat.description}
                   </p>
                 </div>

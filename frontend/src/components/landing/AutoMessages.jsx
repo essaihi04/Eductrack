@@ -152,11 +152,11 @@ const AutoMessages = () => {
   };
 
   return (
-    <section className="relative py-24 bg-gradient-to-br from-slate-50 via-green-50 to-emerald-50 dark:from-gray-900 dark:via-gray-900 dark:to-emerald-950 overflow-hidden">
+    <section className="relative py-24 bg-gradient-to-br from-slate-50 via-[#FFF7E9] to-[#2A9D8F]/10 dark:from-gray-900 dark:via-gray-900 dark:to-[#173A59] overflow-hidden">
       {/* Background blobs */}
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-10 left-10 w-72 h-72 bg-green-300/20 dark:bg-green-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-10 right-10 w-96 h-96 bg-emerald-300/20 dark:bg-emerald-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-10 left-10 w-72 h-72 bg-[#E66F51]/15 rounded-full blur-3xl" />
+        <div className="absolute bottom-10 right-10 w-96 h-96 bg-[#2A9D8F]/20 rounded-full blur-3xl" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-teal-300/10 dark:bg-teal-500/5 rounded-full blur-3xl" />
       </div>
 
@@ -169,12 +169,12 @@ const AutoMessages = () => {
           transition={{ duration: 0.6 }}
           className="text-center mb-16 max-w-3xl mx-auto"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-sm font-semibold mb-4">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#E66F51]/10 dark:bg-[#E66F51]/20 text-[#B64A33] dark:text-[#FFB29F] text-sm font-semibold mb-4">
             <Sparkles className="w-4 h-4" />
             Notifications instantanées
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
-            Le parent, informé <span className="text-green-600">en direct</span> sur WhatsApp
+            Le parent, informé <span className="text-[#2A9D8F]">en direct</span> sur WhatsApp
           </h2>
           <p className="text-lg text-gray-600 dark:text-gray-300">
             Dès qu'un professeur planifie un contrôle, publie un devoir, signale une absence

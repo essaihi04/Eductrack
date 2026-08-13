@@ -61,6 +61,7 @@ import LanguageSwitcher from '../LanguageSwitcher';
 import { cn } from '../../lib/utils';
 import { resolveLogoUrl } from '../../lib/schoolLogo';
 import { supabase } from '../../lib/supabase';
+import BrandLogo from '../BrandLogo';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 import { FINANCE_POLES, poleForPath, tabForPath } from '../../pages/finance/financeNav';
@@ -377,10 +378,7 @@ const Sidebar = () => {
           </div>
         ) : (
           <div>
-            <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
-              <GraduationCap className="w-8 h-8" />
-              EduTrack
-            </h1>
+            <BrandLogo iconClassName="h-14 w-14" showTagline taglineClassName="max-w-[9rem]" />
             <p className="text-sm text-muted-foreground mt-1">{spaceLabel()}</p>
           </div>
         )}

@@ -8,10 +8,17 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
-        display: ['Sora', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
+        sans: ['Nunito Sans', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
+        display: ['Nunito Sans', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
       },
       colors: {
+        brand: {
+          navy: '#173A59',
+          coral: '#E66F51',
+          gold: '#E8B447',
+          teal: '#2A9D8F',
+          cream: '#FFF7E9',
+        },
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',

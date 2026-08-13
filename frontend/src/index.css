@@ -3,35 +3,35 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Thème « Encre & Safran » — identité EduTrack.
-   Encre indigo (savoir) + safran (craie, énergie) + menthe (succès) sur un
-   fond papier crème ; mode sombre « tableau d'ardoise ».
+   Identité « Alliance famille-école » — Boussoule.
+   Bleu nuit (confiance) + corail (proximité) + or (réussite) + turquoise
+   (accompagnement) sur un fond crème chaleureux.
    - :root         → parents / élèves (dominante menthe, chaleureuse)
    - .theme-school → personnel (dominante encre indigo)
    ───────────────────────────────────────────────────────────────────────── */
 
 @layer base {
   :root {
-    --background: 42 40% 97%;
-    --foreground: 248 19% 20%;
+    --background: 38 100% 96%;
+    --foreground: 207 59% 22%;
     --card: 0 0% 100%;
-    --card-foreground: 248 19% 20%;
+    --card-foreground: 207 59% 22%;
     --popover: 0 0% 100%;
-    --popover-foreground: 248 19% 20%;
-    --primary: 165 80% 35%;
+    --popover-foreground: 207 59% 22%;
+    --primary: 173 58% 39%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 162 45% 94%;
-    --secondary-foreground: 168 65% 16%;
-    --muted: 45 25% 94%;
-    --muted-foreground: 250 10% 45%;
-    --accent: 41 85% 92%;
-    --accent-foreground: 35 80% 26%;
+    --secondary: 12 75% 95%;
+    --secondary-foreground: 12 65% 34%;
+    --muted: 38 45% 92%;
+    --muted-foreground: 207 18% 42%;
+    --accent: 42 78% 91%;
+    --accent-foreground: 37 70% 28%;
     --destructive: 4 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 44 24% 87%;
-    --input: 44 24% 87%;
-    --ring: 165 80% 35%;
-    --radius: 0.75rem;
+    --border: 36 34% 86%;
+    --input: 36 34% 86%;
+    --ring: 173 58% 39%;
+    --radius: 0.9rem;
   }
 
   .dark {
@@ -41,19 +41,19 @@
     --card-foreground: 220 40% 94%;
     --popover: 223 27% 16%;
     --popover-foreground: 220 40% 94%;
-    --primary: 163 62% 53%;
+    --primary: 173 58% 53%;
     --primary-foreground: 225 30% 8%;
     --secondary: 223 20% 21%;
     --secondary-foreground: 220 40% 94%;
     --muted: 223 20% 21%;
     --muted-foreground: 222 14% 66%;
-    --accent: 38 42% 18%;
-    --accent-foreground: 42 90% 70%;
+    --accent: 12 45% 22%;
+    --accent-foreground: 12 90% 76%;
     --destructive: 4 60% 48%;
     --destructive-foreground: 0 0% 100%;
     --border: 223 20% 24%;
     --input: 223 20% 24%;
-    --ring: 163 62% 53%;
+    --ring: 173 58% 53%;
   }
 }
 
@@ -65,26 +65,26 @@
      layout selon le rôle (les élèves/parents gardent la variante menthe).
      ───────────────────────────────────────────────────────────── */
   .theme-school {
-    --background: 42 40% 97%;
-    --foreground: 247 26% 21%;
+    --background: 38 100% 96%;
+    --foreground: 207 59% 22%;
     --card: 0 0% 100%;
-    --card-foreground: 247 26% 21%;
+    --card-foreground: 207 59% 22%;
     --popover: 0 0% 100%;
-    --popover-foreground: 247 26% 21%;
-    --primary: 243 53% 52%;
+    --popover-foreground: 207 59% 22%;
+    --primary: 207 59% 22%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 243 45% 95%;
-    --secondary-foreground: 244 42% 30%;
-    --muted: 45 25% 94%;
-    --muted-foreground: 248 12% 46%;
-    --accent: 41 85% 92%;
-    --accent-foreground: 35 80% 26%;
+    --secondary: 173 40% 93%;
+    --secondary-foreground: 173 58% 27%;
+    --muted: 38 45% 92%;
+    --muted-foreground: 207 18% 42%;
+    --accent: 12 75% 94%;
+    --accent-foreground: 12 65% 34%;
     --destructive: 4 72% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 14% 89%;
-    --input: 240 14% 89%;
-    --ring: 243 53% 52%;
-    --radius: 0.75rem;
+    --border: 36 34% 86%;
+    --input: 36 34% 86%;
+    --ring: 173 58% 39%;
+    --radius: 0.9rem;
   }
 
   .dark .theme-school {
@@ -94,7 +94,7 @@
     --card-foreground: 220 40% 94%;
     --popover: 223 27% 16%;
     --popover-foreground: 220 40% 94%;
-    --primary: 243 80% 70%;
+    --primary: 173 58% 53%;
     --primary-foreground: 228 35% 10%;
     --secondary: 223 20% 21%;
     --secondary-foreground: 220 40% 94%;
@@ -106,7 +106,7 @@
     --destructive-foreground: 0 0% 100%;
     --border: 223 20% 24%;
     --input: 223 20% 24%;
-    --ring: 243 80% 70%;
+    --ring: 173 58% 53%;
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -119,40 +119,40 @@
   .theme-junior {
     --background: 40 55% 96.5%;
     --foreground: 248 22% 18%;
-    --primary: 160 84% 36%;
+    --primary: 173 58% 39%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 160 55% 93%;
-    --secondary-foreground: 168 70% 15%;
-    --accent: 41 95% 88%;
+    --secondary: 173 45% 93%;
+    --secondary-foreground: 173 58% 27%;
+    --accent: 12 82% 92%;
     --accent-foreground: 32 85% 24%;
     --border: 42 35% 85%;
     --input: 42 35% 85%;
-    --ring: 160 84% 36%;
+    --ring: 173 58% 39%;
     --radius: 1.1rem;
   }
   .dark .theme-junior {
-    --primary: 160 70% 55%;
+    --primary: 173 58% 53%;
     --primary-foreground: 225 30% 8%;
     --accent: 38 50% 20%;
     --accent-foreground: 42 95% 72%;
-    --ring: 160 70% 55%;
+    --ring: 173 58% 53%;
     --radius: 1.1rem;
   }
 
   .theme-teen {
-    --primary: 258 70% 56%;
+    --primary: 207 59% 28%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 258 55% 95%;
-    --secondary-foreground: 259 50% 28%;
-    --accent: 41 85% 92%;
+    --secondary: 173 45% 93%;
+    --secondary-foreground: 173 58% 27%;
+    --accent: 12 75% 94%;
     --accent-foreground: 35 80% 26%;
-    --ring: 258 70% 56%;
+    --ring: 173 58% 39%;
     --radius: 0.85rem;
   }
   .dark .theme-teen {
-    --primary: 258 85% 74%;
+    --primary: 173 58% 53%;
     --primary-foreground: 228 35% 10%;
-    --ring: 258 85% 74%;
+    --ring: 173 58% 53%;
   }
 
   .theme-parent {
@@ -187,14 +187,15 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont,
+    font-family: 'Nunito Sans', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont,
       'Segoe UI', Roboto, 'Noto Sans Arabic', 'Arial Unicode MS', sans-serif;
     /* Chiffres tabulaires : colonnes de montants et de notes alignées. */
     font-variant-numeric: tabular-nums;
   }
-  /* Titres en Sora : géométrique et amical, signature du thème. */
+  /* Nunito Sans : ronde, claire et rassurante, signature de Boussoule. */
   h1, h2, h3, .font-display {
-    font-family: 'Sora', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+    font-family: 'Nunito Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+    font-weight: 800;
   }
 }
 
@@ -271,23 +272,22 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Splash « logo de l'école » — connexion et rechargement de page.
-   Le logo surgit avec un rebond élastique, des anneaux rayonnent autour
-   (indigo / safran / menthe) et un reflet lumineux le traverse.
+   Splash école + plateforme — connexion et rechargement de page.
+   Le logo surgit avec un rebond élastique dans les couleurs Boussoule.
    ───────────────────────────────────────────────────────────────────────── */
 .et-splash-bg {
-  background-color: hsl(42 40% 97%);
+  background-color: hsl(38 100% 96%);
   background-image:
-    radial-gradient(900px 480px at 100% -10%, hsl(243 53% 55% / 0.08), transparent 55%),
-    radial-gradient(760px 440px at -10% 105%, hsl(38 92% 55% / 0.08), transparent 55%);
+    radial-gradient(900px 480px at 100% -10%, hsl(12 75% 61% / 0.10), transparent 55%),
+    radial-gradient(760px 440px at -10% 105%, hsl(173 58% 39% / 0.10), transparent 55%);
   opacity: 1;
   transition: opacity 0.45s ease;
 }
 .dark .et-splash-bg {
   background-color: hsl(225 28% 11%);
   background-image:
-    radial-gradient(900px 480px at 100% -10%, hsl(243 80% 70% / 0.07), transparent 55%),
-    radial-gradient(760px 440px at -10% 105%, hsl(38 92% 60% / 0.05), transparent 55%);
+    radial-gradient(900px 480px at 100% -10%, hsl(12 75% 61% / 0.08), transparent 55%),
+    radial-gradient(760px 440px at -10% 105%, hsl(173 58% 45% / 0.07), transparent 55%);
 }
 .et-splash-exit {
   opacity: 0;
@@ -423,14 +423,14 @@
       écrit des règles physiques (left/right), pas logiques.
    ───────────────────────────────────────────────────────────────────────── */
 [dir='rtl'] body {
-  font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', 'Inter', system-ui, -apple-system,
+  font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', 'Nunito Sans', system-ui, -apple-system,
     'Segoe UI', Roboto, 'Arial Unicode MS', sans-serif;
 }
 [dir='rtl'] h1,
 [dir='rtl'] h2,
 [dir='rtl'] h3,
 [dir='rtl'] .font-display {
-  font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', 'Sora', system-ui, sans-serif;
+  font-family: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', 'Nunito Sans', system-ui, sans-serif;
 }
 /* Alignements : « left » signifie début de ligne, « right » fin de ligne. */
 [dir='rtl'] .text-left {
@@ -472,7 +472,8 @@
 /* Barre latérale légèrement crème côté personnel (inspiration « école »).
    Règle non-layered : prioritaire sur l'utilitaire bg-card de l'aside. */
 .theme-school aside {
-  background-color: hsl(45 52% 97.5%);
+  background-color: hsl(38 100% 98%);
+  box-shadow: 10px 0 30px hsl(207 59% 22% / 0.04);
 }
 .dark .theme-school aside {
   background-color: hsl(223 27% 16%);

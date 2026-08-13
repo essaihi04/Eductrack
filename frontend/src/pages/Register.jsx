@@ -85,7 +85,7 @@ const Register = () => {
               <span>Plateforme éducative intelligente</span>
             </div>
             <h1 className="mt-6 text-4xl lg:text-5xl font-semibold leading-tight">
-              Créez votre espace EduTrack
+              Créez votre espace Boussoule
             </h1>
             <p className="mt-4 text-lg text-white/80">
               Rejoignez la plateforme de suivi pédagogique qui unifie présence, comportement, devoirs et

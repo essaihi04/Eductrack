@@ -150,12 +150,12 @@ const ChatbotHero = () => {
   const showBot = phase === 'bot';
 
   return (
-    <section className="relative min-h-[calc(100vh-4rem)] flex items-center justify-center bg-gradient-to-br from-emerald-50 via-teal-50 to-green-50 dark:from-gray-900 dark:via-emerald-950 dark:to-gray-900 overflow-hidden py-12">
+    <section className="relative min-h-[calc(100vh-4rem)] flex items-center justify-center bg-gradient-to-br from-[#FFF7E9] via-white to-[#2A9D8F]/15 dark:from-gray-900 dark:via-[#173A59] dark:to-gray-900 overflow-hidden py-12">
       {/* Background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-emerald-400/25 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-green-400/25 rounded-full blur-3xl" />
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-teal-300/15 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-[#E66F51]/20 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-[#2A9D8F]/25 rounded-full blur-3xl" />
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-[#E8B447]/10 rounded-full blur-3xl" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
@@ -171,24 +171,23 @@ const ChatbotHero = () => {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ delay: 0.1, type: 'spring' }}
-              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-sm font-semibold mb-6"
+              className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#E66F51]/10 dark:bg-[#E66F51]/20 text-[#B64A33] dark:text-[#FFB29F] text-sm font-semibold mb-6"
             >
               <Sparkles className="w-4 h-4" />
               Assistant IA disponible 24/7 sur WhatsApp
             </motion.div>
 
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6 leading-[1.1]">
-              Posez n'importe quelle question.{' '}
-              <span className="bg-gradient-to-r from-emerald-600 via-teal-500 to-green-600 bg-clip-text text-transparent">
-                L'IA de votre école répond.
+              L’école et la famille,{' '}
+              <span className="bg-gradient-to-r from-[#E66F51] via-[#E8B447] to-[#2A9D8F] bg-clip-text text-transparent">
+                un même cap pour l’élève.
               </span>
             </h1>
 
             <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300 mb-8 leading-relaxed">
-              Vos parents discutent directement avec un assistant IA personnalisé,
-              entraîné sur les données de leur enfant : absences, devoirs, notes,
-              comportement, emploi du temps. Plus de tickets, plus d'appels —
-              juste WhatsApp.
+              Boussoule réunit la direction, les professeurs et les familles autour
+              d’informations claires : absences, devoirs, notes, comportement, emploi
+              du temps et transport. Chacun sait où en est l’élève et comment l’accompagner.
             </p>
 
             {/* Exemples de questions */}
@@ -214,7 +213,7 @@ const ChatbotHero = () => {
                 <Button
                   onClick={() => navigate('/login')}
                   size="lg"
-                  className="w-full sm:w-auto text-base px-7 py-6 shadow-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
+                  className="w-full sm:w-auto text-base px-7 py-6 shadow-xl bg-gradient-to-r from-[#E66F51] to-[#D85A3E] hover:from-[#D85A3E] hover:to-[#C64B31]"
                 >
                   Essayer gratuitement
                   <ArrowRight className="ml-2 w-5 h-5" />
@@ -222,10 +221,10 @@ const ChatbotHero = () => {
               </motion.div>
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
-                  onClick={() => window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20d%C3%A9mo%20de%20l%27assistant%20IA%20EduTrack', '_blank')}
+                  onClick={() => window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20d%C3%A9mo%20de%20Boussoule', '_blank')}
                   variant="outline"
                   size="lg"
-                  className="w-full sm:w-auto text-base px-7 py-6 border-2 border-emerald-500 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                  className="w-full sm:w-auto text-base px-7 py-6 border-2 border-[#2A9D8F] text-[#247F76] dark:text-[#7DD3C7] hover:bg-[#2A9D8F]/10"
                 >
                   <MessageCircle className="mr-2 w-5 h-5" />
                   Voir une démo

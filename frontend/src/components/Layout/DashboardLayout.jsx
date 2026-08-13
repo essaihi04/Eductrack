@@ -8,6 +8,7 @@ import DomainTabs from './DomainTabs';
 import NotificationsBell from '../NotificationsBell';
 import YearSelector from '../YearSelector';
 import SchoolSwitcher from '../SchoolSwitcher';
+import BrandLogo from '../BrandLogo';
 
 /** Âge en années à partir d'une date de naissance (null si invalide). */
 const ageFromDob = (dob) => {
@@ -109,7 +110,7 @@ const DashboardLayout = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="font-bold text-primary text-lg">Eductrack</span>
+          <BrandLogo iconClassName="h-9 w-9" nameClassName="text-lg" />
           <div className="flex items-center gap-2">
             <SchoolSwitcher />
             <YearSelector />

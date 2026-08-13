@@ -156,11 +156,11 @@ const TransportTracking = () => {
   })();
 
   return (
-    <section className="relative py-24 bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 dark:from-gray-900 dark:via-emerald-950 dark:to-gray-900 overflow-hidden">
+    <section className="relative py-24 bg-gradient-to-br from-[#FFF7E9] via-white to-[#2A9D8F]/15 dark:from-gray-900 dark:via-[#173A59] dark:to-gray-900 overflow-hidden">
       {/* Background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-96 h-96 bg-green-400/25 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-teal-400/25 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-[#E8B447]/20 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-[#2A9D8F]/25 rounded-full blur-3xl" />
       </div>
 
       <div className="container mx-auto px-4 relative z-10">
@@ -172,13 +172,13 @@ const TransportTracking = () => {
           transition={{ duration: 0.6 }}
           className="text-center mb-16 max-w-3xl mx-auto"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-sm font-semibold mb-4">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#E8B447]/18 dark:bg-[#E8B447]/20 text-[#9B6919] dark:text-[#F4CF78] text-sm font-semibold mb-4">
             <Navigation className="w-4 h-4" />
             Suivi GPS temps réel
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
             Le bus de votre enfant,{' '}
-            <span className="bg-gradient-to-r from-green-600 via-emerald-500 to-teal-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#E66F51] via-[#E8B447] to-[#2A9D8F] bg-clip-text text-transparent">
               suivi en direct
             </span>
           </h2>

@@ -14,7 +14,7 @@ const benefitsData = [
   {
     role: 'Administration',
     icon: Shield,
-    color: 'blue',
+    color: 'navy',
     benefits: [
       { title: 'Vue centralisée', description: 'Pédagogie, transport, finance et communication dans un seul tableau de bord' },
       { title: 'Création de comptes auto', description: 'Identifiants parents générés automatiquement et envoyés par WhatsApp' },
@@ -25,7 +25,7 @@ const benefitsData = [
   {
     role: 'Professeurs',
     icon: GraduationCap,
-    color: 'green',
+    color: 'teal',
     benefits: [
       { title: 'Suivi Rapide', description: 'Présence, comportement, cahier et participation en quelques clics par séance' },
       { title: 'Contrôles & devoirs', description: 'Saisie des notes, devoirs avec soumissions et statistiques de classe' },
@@ -36,7 +36,7 @@ const benefitsData = [
   {
     role: 'Parents',
     icon: Users,
-    color: 'purple',
+    color: 'coral',
     benefits: [
       { title: 'Portail dédié', description: 'Un compte par parent, plusieurs enfants suivis en un seul endroit' },
       { title: 'Notifications WhatsApp', description: 'Absences, contrôles, montée bus et arrivée à l\'école automatiques' },
@@ -47,7 +47,7 @@ const benefitsData = [
   {
     role: 'Élèves',
     icon: Heart,
-    color: 'pink',
+    color: 'gold',
     benefits: [
       { title: 'Gamification', description: 'Badges, système de niveaux et tableau personnel motivant' },
       { title: 'Devoirs en ligne', description: 'Réception des consignes et soumission directe depuis l\'app' },
@@ -58,7 +58,7 @@ const benefitsData = [
   {
     role: 'Chauffeurs',
     icon: Bus,
-    color: 'orange',
+    color: 'navy',
     benefits: [
       { title: 'Tournée guidée', description: 'Liste ordonnée des élèves avec drag-and-drop, bannière élève courant' },
       { title: 'Navigation externe', description: 'Ouverture directe dans Google Maps ou Waze d\'un seul clic' },
@@ -72,11 +72,10 @@ const Benefits = () => {
   const [activeTab, setActiveTab] = useState(0);
 
   const colorClasses = {
-    blue: 'bg-blue-500 text-blue-500 border-blue-500',
-    green: 'bg-green-500 text-green-500 border-green-500',
-    purple: 'bg-purple-500 text-purple-500 border-purple-500',
-    pink: 'bg-pink-500 text-pink-500 border-pink-500',
-    orange: 'bg-orange-500 text-orange-500 border-orange-500'
+    navy: 'bg-[#173A59] text-[#173A59] border-[#173A59]',
+    teal: 'bg-[#2A9D8F] text-[#2A9D8F] border-[#2A9D8F]',
+    coral: 'bg-[#E66F51] text-[#E66F51] border-[#E66F51]',
+    gold: 'bg-[#E8B447] text-[#E8B447] border-[#E8B447]'
   };
 
   return (
@@ -160,7 +159,7 @@ const Benefits = () => {
             >
               <img
                 src={roleImages[benefitsData[activeTab].role]}
-                alt={`EduTrack - ${benefitsData[activeTab].role}`}
+                alt={`Boussoule - ${benefitsData[activeTab].role}`}
                 className="w-full h-72 object-cover object-top"
               />
               <div className="bg-white dark:bg-gray-800 px-4 py-3 text-center">

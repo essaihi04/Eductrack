@@ -24,61 +24,61 @@ const features = [
     icon: Clock,
     title: 'Suivi Rapide en classe',
     description: 'Présence, retards, comportement, contrôle des cahiers et participation enregistrés en quelques clics par séance',
-    color: 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300'
+    color: 'bg-[#173A59]/10 dark:bg-[#173A59]/40 text-[#173A59] dark:text-[#A9C8DA]'
   },
   {
     icon: BookOpen,
     title: 'Contrôles & Devoirs',
     description: 'Saisie des notes par contrôle, mini-évaluations, devoirs avec soumissions et statistiques de classe',
-    color: 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-300'
+    color: 'bg-[#2A9D8F]/12 dark:bg-[#2A9D8F]/30 text-[#247F76] dark:text-[#7DD3C7]'
   },
   {
     icon: Bus,
     title: 'Transport scolaire GPS',
     description: 'Suivi temps réel des bus, 4 directions de tournée, notifications montée/dépose, Google Maps & Waze pour les chauffeurs',
-    color: 'bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-300'
+    color: 'bg-[#E8B447]/18 dark:bg-[#E8B447]/25 text-[#A36E15] dark:text-[#F4CF78]'
   },
   {
     icon: Wallet,
     title: 'Gestion financière',
     description: 'Modèles de frais, génération de factures, suivi des impayés et relances WhatsApp automatiques',
-    color: 'bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300'
+    color: 'bg-[#2A9D8F]/12 dark:bg-[#2A9D8F]/30 text-[#247F76] dark:text-[#7DD3C7]'
   },
   {
     icon: MessageCircle,
     title: 'WhatsApp intégré',
     description: 'Notifications automatiques par catégorie (pédagogique, transport, finance) et chatbot pédagogique pour les parents',
-    color: 'bg-purple-100 dark:bg-purple-900 text-purple-600 dark:text-purple-300'
+    color: 'bg-[#E66F51]/12 dark:bg-[#E66F51]/25 text-[#B64A33] dark:text-[#FFB29F]'
   },
   {
     icon: Users,
     title: 'Portail Parents',
     description: 'Compte automatique par parent : suivi de chaque enfant (devoirs, notes, suivi, documents, emploi du temps, transport en direct)',
-    color: 'bg-rose-100 dark:bg-rose-900 text-rose-600 dark:text-rose-300'
+    color: 'bg-[#E66F51]/12 dark:bg-[#E66F51]/25 text-[#B64A33] dark:text-[#FFB29F]'
   },
   {
     icon: FolderOpen,
     title: 'Documents pédagogiques',
     description: 'Partage de fiches, cours et corrigés avec parents et élèves, suivi des vues et téléchargements par enfant',
-    color: 'bg-cyan-100 dark:bg-cyan-900 text-cyan-600 dark:text-cyan-300'
+    color: 'bg-[#2A9D8F]/12 dark:bg-[#2A9D8F]/30 text-[#247F76] dark:text-[#7DD3C7]'
   },
   {
     icon: TrendingUp,
     title: 'Tableaux de bord',
     description: 'Statistiques classe & élève, heatmap comportementale, alertes automatiques pour la direction',
-    color: 'bg-indigo-100 dark:bg-indigo-900 text-indigo-600 dark:text-indigo-300'
+    color: 'bg-[#173A59]/10 dark:bg-[#173A59]/40 text-[#173A59] dark:text-[#A9C8DA]'
   },
   {
     icon: Calendar,
     title: 'Planification',
     description: 'Emplois du temps, cahier de texte, planificateur de contrôles, calendrier de classe partagé',
-    color: 'bg-orange-100 dark:bg-orange-900 text-orange-600 dark:text-orange-300'
+    color: 'bg-[#E8B447]/18 dark:bg-[#E8B447]/25 text-[#A36E15] dark:text-[#F4CF78]'
   },
   {
     icon: Award,
     title: 'Gamification élèves',
     description: 'Badges, système de niveaux et tableau personnel pour motiver les élèves au quotidien',
-    color: 'bg-pink-100 dark:bg-pink-900 text-pink-600 dark:text-pink-300'
+    color: 'bg-[#E66F51]/12 dark:bg-[#E66F51]/25 text-[#B64A33] dark:text-[#FFB29F]'
   }
 ];
 
@@ -94,10 +94,10 @@ const Features = () => {
           className="text-center mb-16"
         >
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-white mb-4">
-            Fonctionnalités Principales
+            Tous les repères, dans une seule plateforme
           </h2>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            Tout ce dont vous avez besoin pour gérer votre école efficacement
+            L’école pilote avec clarté, les parents suivent en confiance et l’élève avance mieux accompagné.
           </p>
         </motion.div>
 

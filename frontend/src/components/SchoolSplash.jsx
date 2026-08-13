@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 const MIN_MS = 1700;   // durée minimale d'affichage (laisse l'effet respirer)
 const EXIT_MS = 450;   // durée du fondu de sortie (= transition CSS)
 
-const cacheKey = (email) => `edutrack.splash.${String(email || '').trim().toLowerCase()}`;
+const cacheKey = (email) => `boussoule.splash.${String(email || '').trim().toLowerCase()}`;
 
 /** Mémorise le logo + nom d'école pour cet utilisateur (appelé par AuthContext). */
 export function cacheSplashSchool(email, school) {
@@ -60,7 +60,6 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
   }, [ready, exiting]);
 
   const showLogo = logoUrl && !logoBroken;
-  const initial = (schoolName || 'E').trim().charAt(0).toUpperCase();
 
   return (
     <div
@@ -69,10 +68,10 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
       aria-label={`Chargement de ${schoolName || 'votre école'}`}
     >
       <div className="relative flex items-center justify-center">
-        {/* Anneaux rayonnants — encre indigo, safran, menthe */}
-        <span className="et-splash-ring" style={{ borderColor: 'hsl(243 53% 52% / 0.35)' }} />
-        <span className="et-splash-ring" style={{ borderColor: 'hsl(38 92% 53% / 0.45)', animationDelay: '0.4s' }} />
-        <span className="et-splash-ring" style={{ borderColor: 'hsl(165 80% 35% / 0.35)', animationDelay: '0.8s' }} />
+        {/* Anneaux rayonnants — bleu Boussoule, or et turquoise */}
+        <span className="et-splash-ring" style={{ borderColor: 'hsl(207 59% 22% / 0.35)' }} />
+        <span className="et-splash-ring" style={{ borderColor: 'hsl(42 78% 59% / 0.48)', animationDelay: '0.4s' }} />
+        <span className="et-splash-ring" style={{ borderColor: 'hsl(173 58% 39% / 0.38)', animationDelay: '0.8s' }} />
 
         {/* Logo de l'école (re-déclenche le rebond quand le logo arrive) */}
         <div
@@ -88,12 +87,12 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
               draggable="false"
             />
           ) : (
-            <span
-              className="font-display text-5xl font-bold"
-              style={{ color: 'hsl(243 53% 52%)' }}
-            >
-              {initial}
-            </span>
+            <img
+              src="/brand/boussoule-logo.png"
+              alt="Logo Boussoule"
+              className="w-full h-full object-contain p-2"
+              draggable="false"
+            />
           )}
           <span className="et-splash-shine" aria-hidden="true" />
         </div>
@@ -101,7 +100,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
 
       <div className="et-splash-text mt-7 text-center px-6">
         <div className="font-display text-2xl font-semibold text-foreground">
-          {schoolName || 'EduTrack'}
+          {schoolName || 'Boussoule'}
         </div>
         <div className="mt-1.5 text-sm text-muted-foreground">
           {ready ? 'Bienvenue !' : 'Préparation de votre espace…'}
@@ -109,7 +108,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
       </div>
 
       <div className="absolute bottom-8 text-xs text-muted-foreground/70">
-        Propulsé par <span className="font-medium text-muted-foreground">EduTrack</span>
+        Propulsé par <span className="font-medium text-muted-foreground">Boussoule</span>
       </div>
     </div>
   );

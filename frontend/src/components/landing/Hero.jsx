@@ -7,7 +7,7 @@ const Hero = () => {
   const navigate = useNavigate();
 
   const handleWhatsAppClick = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20EduTrack', '_blank');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20Boussoule', '_blank');
   };
 
   return (
@@ -35,9 +35,9 @@ const Hero = () => {
               className="inline-flex items-center justify-center mb-6"
             >
               <img 
-                src="/logo.jpeg" 
-                alt="EduTrack Logo" 
-                className="w-24 h-24 object-contain rounded-2xl shadow-lg"
+                src="/brand/boussoule-logo.png"
+                alt="Logo Boussoule"
+                className="w-24 h-24 object-contain"
               />
             </motion.div>
 
@@ -123,7 +123,7 @@ const Hero = () => {
             >
               <img
                 src="/images/dahboard-centralise.png"
-                alt="Dashboard centralisé EduTrack"
+                alt="Dashboard centralisé Boussoule"
                 className="w-full rounded-2xl shadow-2xl border-4 border-white/60 dark:border-gray-700"
               />
               <div className="absolute -bottom-4 -right-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl px-4 py-2 flex items-center gap-2">

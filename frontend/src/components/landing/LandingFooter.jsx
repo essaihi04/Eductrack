@@ -1,30 +1,24 @@
 import { motion } from 'framer-motion';
-import { GraduationCap, MessageCircle, Mail, MapPin } from 'lucide-react';
+import { MessageCircle, Mail, MapPin } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import BrandLogo from '../BrandLogo';
 
 const LandingFooter = () => {
   const currentYear = new Date().getFullYear();
 
   const handleWhatsAppClick = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20EduTrack', '_blank');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20Boussoule', '_blank');
   };
 
   return (
-    <footer className="bg-gray-900 text-gray-300">
+    <footer className="bg-[#173A59] text-[#D8E7E4]">
       <div className="container mx-auto px-4 py-12">
         <div className="grid md:grid-cols-4 gap-8 mb-8">
           {/* Brand */}
           <div className="col-span-1">
-            <div className="flex items-center gap-2 mb-4">
-              <img 
-                src="/logo.jpeg" 
-                alt="EduTrack Logo" 
-                className="w-10 h-10 object-contain rounded-lg"
-              />
-              <span className="text-xl font-bold text-white">EduTrack</span>
-            </div>
-            <p className="text-sm text-gray-400 leading-relaxed">
-              La plateforme moderne de gestion scolaire pour transformer votre école
+            <BrandLogo className="mb-4" iconClassName="h-14 w-14" showTagline light />
+            <p className="text-sm text-[#D8E7E4]/80 leading-relaxed">
+              La plateforme qui relie l’école et la famille autour de la réussite de chaque élève.
             </p>
           </div>
 
@@ -108,10 +102,10 @@ const LandingFooter = () => {
         </div>
 
         {/* Bottom bar */}
-        <div className="border-t border-gray-800 pt-8">
+        <div className="border-t border-white/10 pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-sm text-gray-400">
-              © {currentYear} EduTrack. Tous droits réservés.
+              © {currentYear} Boussoule. Tous droits réservés.
             </p>
             <div className="flex gap-6 text-sm">
               <button onClick={handleWhatsAppClick} className="hover:text-white transition-colors">

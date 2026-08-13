@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { GraduationCap, Mail, Lock, AlertCircle } from 'lucide-react';
+import { Mail, Lock, AlertCircle, Compass } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/Card';
 import SchoolSplash, { readSplashCache } from '../components/SchoolSplash';
+import BrandLogo, { BOUSSOULE_TAGLINE } from '../components/BrandLogo';
 
 // App desktop Electron : on donne le focus au champ email dès l'arrivée sur la
 // page (ex: après déconnexion) — le focus clavier programmatique fonctionne
@@ -99,34 +100,32 @@ const Login = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center p-4">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-[#FFF7E9] via-white to-[#2A9D8F]/15 dark:from-[#111C2A] dark:via-[#173A59] dark:to-[#102C31] flex items-center justify-center p-4">
+      <div className="absolute -top-32 -right-24 h-96 w-96 rounded-full bg-[#E66F51]/15 blur-3xl" />
+      <div className="absolute -bottom-32 -left-24 h-96 w-96 rounded-full bg-[#2A9D8F]/20 blur-3xl" />
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
+        className="relative z-10 w-full max-w-md"
       >
         <div className="text-center mb-8">
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: 'spring' }}
-            className="inline-flex items-center justify-center mb-4"
+            className="inline-flex items-center justify-center mb-4 rounded-[2rem] bg-white/85 p-3 shadow-xl ring-1 ring-[#173A59]/10 backdrop-blur"
           >
-            <img 
-              src="/logo.jpeg" 
-              alt="EduTrack Logo" 
-              className="w-32 h-32 object-contain rounded-2xl shadow-lg"
-            />
+            <img src="/brand/boussoule-logo.png" alt="Logo Boussoule" className="w-32 h-32 object-contain" />
           </motion.div>
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-2">EduTrack</h1>
-          <p className="text-gray-600 dark:text-gray-400">Plateforme de suivi des élèves</p>
+          <BrandLogo className="justify-center" iconClassName="hidden" nameClassName="text-4xl" />
+          <p className="mt-2 font-semibold text-[#2A9D8F] dark:text-[#7DD3C7]">{BOUSSOULE_TAGLINE}</p>
         </div>
 
-        <Card>
+        <Card className="border-[#173A59]/10 bg-white/95 shadow-2xl backdrop-blur dark:bg-[#14273A]/95">
           <CardHeader>
-            <CardTitle>Connexion</CardTitle>
-            <CardDescription>Connectez-vous à votre compte</CardDescription>
+            <CardTitle className="flex items-center gap-2 text-[#173A59] dark:text-white"><Compass className="h-5 w-5 text-[#E66F51]" />Connexion</CardTitle>
+            <CardDescription>Retrouvez le parcours de votre établissement</CardDescription>
           </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">

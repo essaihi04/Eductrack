@@ -38,11 +38,11 @@ const CTA = () => {
   const navigate = useNavigate();
 
   const handleWhatsAppClick = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20démo%20personnalisée%20d\'EduTrack', '_blank');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20démo%20personnalisée%20de%20Boussoule', '_blank');
   };
 
   return (
-    <section className="py-20 bg-gradient-to-br from-gray-50 to-green-50 dark:from-gray-900 dark:to-emerald-950">
+    <section className="py-20 bg-gradient-to-br from-[#FFF7E9] via-white to-[#2A9D8F]/10 dark:from-gray-900 dark:to-[#173A59]">
       <div className="container mx-auto px-4">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -51,7 +51,8 @@ const CTA = () => {
           transition={{ duration: 0.6 }}
           className="max-w-4xl mx-auto"
         >
-          <div className="bg-gradient-to-br from-green-600 to-emerald-700 rounded-3xl shadow-2xl overflow-hidden">
+          <div className="relative bg-gradient-to-br from-[#173A59] via-[#1D5164] to-[#2A9D8F] rounded-3xl shadow-2xl overflow-hidden ring-1 ring-white/10">
+            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-[#E66F51]/30 blur-3xl" />
             <div className="p-12 md:p-16 text-center">
               <motion.h2
                 initial={{ opacity: 0, y: 20 }}
@@ -60,7 +61,7 @@ const CTA = () => {
                 transition={{ delay: 0.2 }}
                 className="text-4xl md:text-5xl font-bold text-white mb-6"
               >
-                Prêt à Moderniser Votre École ?
+                Prêts à avancer dans la même direction ?
               </motion.h2>
 
               <motion.p
@@ -70,7 +71,7 @@ const CTA = () => {
                 transition={{ delay: 0.3 }}
                 className="text-xl text-green-100 mb-8 max-w-2xl mx-auto"
               >
-                Pédagogie, transport scolaire GPS, gestion financière, portail parents et communication WhatsApp — toute la vie de l'école dans une seule plateforme, accessible depuis le web, Android et Windows.
+                Avec Boussoule, l’école pilote, les parents restent informés et chaque élève avance avec des repères clairs — sur le web, Android et Windows.
               </motion.p>
 
               <motion.div
@@ -82,7 +83,7 @@ const CTA = () => {
               >
                 {features.map((feature, index) => (
                   <div key={index} className="flex items-center gap-3 text-white">
-                    <CheckCircle className="w-5 h-5 text-green-300 flex-shrink-0" />
+                    <CheckCircle className="w-5 h-5 text-[#E8B447] flex-shrink-0" />
                     <span className="text-left">{feature}</span>
                   </div>
                 ))}
@@ -102,7 +103,7 @@ const CTA = () => {
                   <Button
                     onClick={() => navigate('/login')}
                     size="lg"
-                    className="w-full sm:w-auto text-lg px-10 py-6 bg-white text-green-600 hover:bg-gray-100 shadow-xl"
+                    className="w-full sm:w-auto text-lg px-10 py-6 bg-[#E66F51] text-white hover:bg-[#D75E42] shadow-xl"
                   >
                     Commencer Gratuitement
                     <ArrowRight className="ml-2 w-5 h-5" />
@@ -145,14 +146,14 @@ const CTA = () => {
                     <div className="p-5">
                       <div className="flex items-center justify-between mb-2">
                         <h3 className="text-white font-semibold text-lg">{card.title}</h3>
-                        <span className="text-xs px-2 py-1 rounded-full bg-white/20 text-green-100">{card.badge}</span>
+                        <span className="text-xs px-2 py-1 rounded-full bg-[#E8B447]/25 text-[#FFF4CF]">{card.badge}</span>
                       </div>
-                      <p className="text-green-100 text-sm mb-4">{card.subtitle}</p>
+                      <p className="text-[#D8E7E4] text-sm mb-4">{card.subtitle}</p>
                       <a
                         href={card.href}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-2 bg-white text-green-700 font-semibold px-4 py-2 rounded-lg hover:bg-green-50 transition-colors"
+                        className="inline-flex items-center gap-2 bg-white text-[#173A59] font-semibold px-4 py-2 rounded-lg hover:bg-[#FFF7E9] transition-colors"
                       >
                         <card.icon className="w-4 h-4" />
                         <Download className="w-4 h-4" />
@@ -168,7 +169,7 @@ const CTA = () => {
                 whileInView={{ opacity: 1 }}
                 viewport={{ once: true }}
                 transition={{ delay: 0.6 }}
-                className="text-green-100 text-sm mt-6"
+                className="text-[#D8E7E4] text-sm mt-6"
               >
                 Aucune carte bancaire requise • Configuration en 5 minutes
               </motion.p>
