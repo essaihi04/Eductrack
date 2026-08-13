@@ -8,6 +8,7 @@ import { dirname, join } from 'path';
 
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import timetableImportRoutes from './routes/timetableImport.routes.js';
 import studentDossierRoutes from './routes/studentDossier.routes.js';
 import teacherRoutes from './routes/teacher.routes.js';
 import studentsRoutes from './routes/students.routes.js';
@@ -104,6 +105,7 @@ app.use('/api/admin/receptionists', receptionistsRoutes);
 app.use('/api/admin/transport-managers', transportManagersRoutes);
 app.use('/api/admin/drivers', driversRoutes);
 app.use('/api/admin/dossier', studentDossierRoutes);
+app.use('/api/admin/timetable-import', timetableImportRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/students', studentsRoutes);

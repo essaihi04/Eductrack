@@ -15,6 +15,7 @@ import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
 import { generateNotesGridPdf } from '../services/notesGridPdf.js';
 import { generateNotesRecapPdf } from '../services/notesRecapPdf.js';
+import { saveClassTimetable } from '../services/timetableImport/save.js';
 
 const router = express.Router();
 
@@ -5648,56 +5649,11 @@ router.put('/classes/:classId/timetable', async (req, res) => {
       return res.status(400).json({ error: 'slots must be an array' });
     }
 
-    // Delete existing timetable for this class
-    const { error: deleteError } = await supabaseAdmin
-      .from('class_timetable')
-      .delete()
-      .eq('class_id', classId);
+    // Écriture partagée avec l'import IA (services/timetableImport/save.js) :
+    // remplacement complet des créneaux + rattachement des profs à la classe.
+    const data = await saveClassTimetable({ classId, schoolId, slots });
 
-    if (deleteError) throw deleteError;
-
-    if (slots.length === 0) {
-      return res.json([]);
-    }
-
-    // Insert new slots
-    const rows = slots.map((slot, idx) => ({
-      class_id: classId,
-      day_of_week: slot.day_of_week,
-      slot_order: slot.slot_order ?? idx + 1,
-      start_time: slot.start_time,
-      end_time: slot.end_time,
-      subject_id: slot.subject_id || null,
-      teacher_id: slot.teacher_id || null,
-      room: slot.room || null,
-      school_id: schoolId
-    }));
-
-    const { data, error: insertError } = await supabaseAdmin
-      .from('class_timetable')
-      .insert(rows)
-      .select('*, subject:subjects(id, name, code), teacher:profiles!class_timetable_teacher_id_fkey(id, first_name, last_name)');
-
-    if (insertError) throw insertError;
-
-    // Auto-assignation : tout prof placé dans l'emploi du temps est rattaché à
-    // la classe (class_teachers) s'il ne l'est pas déjà — il apparaît alors dans
-    // la fiche classe, le périmètre et le calcul des heures.
-    try {
-      const teacherIds = [...new Set(rows.map(r => r.teacher_id).filter(Boolean))];
-      if (teacherIds.length > 0) {
-        const { data: existing } = await supabaseAdmin
-          .from('class_teachers').select('teacher_id').eq('class_id', classId);
-        const have = new Set((existing || []).map(r => r.teacher_id));
-        const toAdd = teacherIds.filter(id => !have.has(id))
-          .map(teacher_id => ({ class_id: classId, teacher_id }));
-        if (toAdd.length > 0) await supabaseAdmin.from('class_teachers').insert(toAdd);
-      }
-    } catch (e) {
-      console.warn('Auto-assign class_teachers (timetable):', e.message);
-    }
-
-    res.json(data || []);
+    res.json(data);
   } catch (error) {
     console.error('Erreur timetable PUT:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

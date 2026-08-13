@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Plus, Trash2, Copy, Clock } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Copy, Clock, Sparkles } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 
 const DAYS = [
@@ -358,6 +358,13 @@ const TimetablePage = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/classes/timetable-import')}
+            className="flex items-center gap-1 px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            title="Importer depuis une image ou un PDF au lieu de saisir la grille"
+          >
+            <Sparkles className="w-4 h-4" /> Importer
+          </button>
           <select
             value={copyFromDay}
             onChange={(e) => setCopyFromDay(e.target.value)}

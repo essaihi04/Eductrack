@@ -42,6 +42,7 @@ import StudentBadges from './pages/student/StudentBadges';
 import StudentLevel from './pages/student/StudentLevel';
 import StudentGrades from './pages/student/StudentGrades';
 import TimetablePage from './pages/admin/TimetablePage';
+import TimetableImportPage from './pages/admin/TimetableImportPage';
 import StudentTimetable from './pages/student/StudentTimetable';
 import SchoolsListPage from './pages/superadmin/SchoolsListPage';
 import SchoolDetailPage from './pages/superadmin/SchoolDetailPage';
@@ -201,6 +202,7 @@ function App() {
             <Route path="classes" element={<ClassesPage />} />
             <Route path="admin/class-assignment" element={<ClassAssignmentPage />} />
             <Route path="classes/:classId/timetable" element={<TimetablePage />} />
+            <Route path="classes/timetable-import" element={<TimetableImportPage />} />
             <Route path="subjects" element={<SubjectsPage />} />
             <Route path="parents" element={<ParentsPage />} />
             <Route path="stats" element={<StatsPage />} />

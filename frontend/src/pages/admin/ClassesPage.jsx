@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save, Sparkles } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { GenderSplit, Avatar, ClassCard, DetailDrawer } from '../../components/directory/ui';
 import * as XLSX from 'xlsx';
@@ -2105,6 +2105,14 @@ const ClassesPage = () => {
             {frenchBusy ? 'Import…' : 'Noms français'}
             <input type="file" accept=".xlsx,.xls" onChange={handleFrenchNamesFile} className="hidden" disabled={frenchBusy} />
           </label>
+          <button
+            onClick={() => navigate('/classes/timetable-import')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            title="Importer les emplois du temps depuis des images ou un PDF de plusieurs pages"
+          >
+            <Sparkles className="w-4 h-4" />
+            Importer emplois du temps
+          </button>
           <button
             onClick={() => {
               if (!showForm && !formData.academicYear) {
