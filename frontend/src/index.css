@@ -478,3 +478,49 @@
 .dark .theme-school aside {
   background-color: hsl(223 27% 16%);
 }
+
+/* Landing Boussoule v2 — profondeur 3D, grille-boussole et rendu produit. */
+.boussoule-landing {
+  background:
+    radial-gradient(900px 520px at 85% 4%, hsl(12 75% 61% / 0.08), transparent 64%),
+    radial-gradient(760px 460px at 4% 16%, hsl(173 58% 39% / 0.09), transparent 62%),
+    #fff7e9;
+}
+
+.landing-compass-grid {
+  background-image:
+    linear-gradient(hsl(207 59% 22% / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(207 59% 22% / 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 50% 50%, transparent 0 23%, hsl(207 59% 22% / 0.04) 23.2% 23.5%, transparent 23.7% 100%);
+  background-size: 40px 40px, 40px 40px, 680px 680px;
+  mask-image: linear-gradient(to bottom, black, transparent 92%);
+}
+
+.landing-dark-grid {
+  background-image:
+    linear-gradient(hsl(0 0% 100% / 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(0 0% 100% / 0.04) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(circle at center, black, transparent 84%);
+}
+
+.landing-3d-stage {
+  perspective: 1400px;
+}
+
+.landing-3d-card {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boussoule-landing *,
+  .boussoule-landing *::before,
+  .boussoule-landing *::after {
+    scroll-behavior: auto !important;
+  }
+
+  .boussoule-landing .animate-pulse {
+    animation: none;
+  }
+}
