@@ -28,7 +28,7 @@ const capabilities = [
   {
     icon: UserRoundSearch,
     title: 'Dossier élève 360°',
-    description: 'Un parcours continu de la crèche au bac avec synthèse et rapport assisté par IA.',
+    description: 'Un parcours continu de la maternelle au bac : performances, qualités, points à renforcer, synthèse et rapport assisté par IA.',
     badge: 'Parcours complet',
     tone: 'teal',
     span: 'lg:col-span-1',

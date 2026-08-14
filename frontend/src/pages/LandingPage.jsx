@@ -5,11 +5,13 @@ import { useNavigate } from 'react-router-dom';
 import BrandLogo from '../components/BrandLogo';
 import LandingHero3D from '../components/landing/v2/LandingHero3D';
 import SchoolDaySimulator from '../components/landing/v2/SchoolDaySimulator';
+import HumanFollowupShowcase from '../components/landing/v2/HumanFollowupShowcase';
 import RoleExperience from '../components/landing/v2/RoleExperience';
 import CapabilitiesAndCTA from '../components/landing/v2/CapabilitiesAndCTA';
 
 const navigation = [
   { label: 'Expérience', target: 'experience' },
+  { label: 'Suivi réel', target: 'followup' },
   { label: 'Nouveautés', target: 'capabilities' },
   { label: 'Pour chacun', target: 'roles' },
   { label: 'Contact', target: 'contact' },
@@ -108,6 +110,7 @@ const LandingPage = () => {
         </div>
 
         <SchoolDaySimulator />
+        <HumanFollowupShowcase />
         <RoleExperience />
         <CapabilitiesAndCTA onRegister={() => navigate('/register')} />
       </main>
