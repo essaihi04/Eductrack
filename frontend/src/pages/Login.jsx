@@ -109,17 +109,21 @@ const Login = () => {
         transition={{ duration: 0.5 }}
         className="relative z-10 w-full max-w-md"
       >
-        <div className="text-center mb-8">
+        <div className="mb-7 text-center">
           <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.2, type: 'spring' }}
-            className="inline-flex items-center justify-center mb-4 rounded-[2rem] bg-white/85 p-3 shadow-xl ring-1 ring-[#173A59]/10 backdrop-blur"
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.15, type: 'spring', stiffness: 180, damping: 16 }}
           >
-            <img src="/brand/boussoule-logo.png" alt="Logo Boussoule" className="w-32 h-32 object-contain" />
+            <BrandLogo
+              className="justify-center gap-3 sm:gap-4"
+              iconClassName="h-20 w-20 rounded-2xl bg-white/90 p-1.5 shadow-lg ring-1 ring-[#173A59]/10 sm:h-24 sm:w-24 sm:rounded-3xl sm:p-2"
+              nameClassName="text-3xl sm:text-4xl"
+            />
           </motion.div>
-          <BrandLogo className="justify-center" iconClassName="hidden" nameClassName="text-4xl" />
-          <p className="mt-2 font-semibold text-[#2A9D8F] dark:text-[#7DD3C7]">{BOUSSOULE_TAGLINE}</p>
+          <p className="mt-3 text-sm font-semibold text-[#2A9D8F] dark:text-[#7DD3C7] sm:text-base">
+            {BOUSSOULE_TAGLINE}
+          </p>
         </div>
 
         <Card className="border-[#173A59]/10 bg-white/95 shadow-2xl backdrop-blur dark:bg-[#14273A]/95">
