@@ -33,7 +33,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
-import { MENUS, sendMenu, matchMenuOption } from './menus.js';
+import { normalizeDigits } from './textUtils.js';
+import { sendMenu, matchMenuOption, resolveMenu } from './menus.js';
+import { isCapabilityEnabled, capabilityForOption } from './capabilities.js';
+import { findCustomEntry, matchCustomEntryByKeyword } from './customEntries.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery, isMassarQuery } from './ai.js';
 import { getReceptionistByPhone, answerSchoolAI, receptionistWelcome, receptionistFooter } from './adminAi.js';
 import { detectCredentialRequest, handleCredentialRequest } from './credentials.js';
@@ -41,7 +44,7 @@ import { maybeHandleDemoParent } from './demoParent.js';
 import { handleAbsenceReply } from './absenceJustification.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
-import { sendMediaBuffer, sendImage } from '../index.js';
+import { sendMediaBuffer, sendImage, sendDocument } from '../index.js';
 import { getSocket } from '../baileysClient.js';
 import { simulateRead } from '../antiBan.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
@@ -59,6 +62,14 @@ import {
   getTeacherByPhone,
   looksLikeSlotReply,
 } from './appointments.js';
+import {
+  handleTeacherMessage,
+  sendSpaceMenu,
+  readSpaceChoice,
+  isSpaceSwitchRequest,
+  rememberSpace,
+  recallSpace,
+} from './teacher/index.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -79,6 +90,39 @@ async function sendPhotoLocalFirst(schoolId, phone, photoUrl, caption) {
   const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
   const url = photoUrl.startsWith('http') ? photoUrl : `${base}${photoUrl}`;
   return sendImage(schoolId, phone, url, caption, { urgent: true });
+}
+
+/**
+ * Envoie un contenu ajouté par l'administration : le texte, puis le fichier
+ * joint s'il y en a un. Le texte sert de légende quand il est court, sinon il
+ * part en message séparé pour ne pas être tronqué par WhatsApp.
+ */
+async function sendCustomEntry(schoolId, phone, entry) {
+  if (!entry) {
+    return sendText(schoolId, phone, `Ce contenu n'est plus disponible.`, { urgent: true });
+  }
+
+  const header = `*${entry.title}*`;
+  const body = entry.body_text ? `${header}\n━━━━━━━━━━━━━━━━━━━\n\n${entry.body_text}` : header;
+  const captionFits = entry.media_url && body.length <= 900;
+
+  if (!captionFits && (entry.body_text || !entry.media_url)) {
+    await sendText(schoolId, phone, body, { urgent: true });
+  }
+
+  if (entry.media_url) {
+    const caption = captionFits ? body : header;
+    if (entry.media_type === 'image') {
+      await sendPhotoLocalFirst(schoolId, phone, entry.media_url, caption);
+    } else {
+      await sendDocument(
+        schoolId, phone, entry.media_url,
+        entry.file_name || `${entry.title}.pdf`, caption, 'application/pdf', { urgent: true },
+      );
+    }
+  }
+
+  return sendText(schoolId, phone, `_Tapez *menu* pour revenir aux options._`, { urgent: true });
 }
 
 /**
@@ -635,22 +679,8 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Helpers : conversion chiffres arabes-indic + matching enfant
+// Helpers : matching enfant
 // ─────────────────────────────────────────────────────────────────────────
-
-const ARABIC_INDIC = '٠١٢٣٤٥٦٧٨٩';
-const EXT_ARABIC_INDIC = '۰۱۲۳۴۵۶۷۸۹';
-
-/**
- * Convertit les chiffres arabes-indic (٠-٩) et persans (۰-۹) en chiffres ASCII.
- * Ex: "١" → "1", "٢" → "2".
- */
-function normalizeDigits(text) {
-  if (!text) return '';
-  return String(text)
-    .replace(/[٠-٩]/g, (c) => ARABIC_INDIC.indexOf(c).toString())
-    .replace(/[۰-۹]/g, (c) => EXT_ARABIC_INDIC.indexOf(c).toString());
-}
 
 /**
  * Tente d'identifier un enfant à partir d'une saisie texte du parent.
@@ -740,7 +770,7 @@ async function sendChildSelectionMenu(schoolId, phone, children, parentInfo) {
 
 async function sendMainMenu(schoolId, phone, student, parentInfo) {
   State.setMenu(schoolId, phone, 'main');
-  await sendMenu(schoolId, phone, MENUS.main, {
+  await sendMenu(schoolId, phone, await resolveMenu(schoolId, 'main'), {
     studentName: `${student.first_name} ${student.last_name}`,
     schoolName: parentInfo.school_name,
   });
@@ -748,7 +778,7 @@ async function sendMainMenu(schoolId, phone, student, parentInfo) {
 
 async function sendSubMenu(schoolId, phone, menuId, student, parentInfo) {
   State.setMenu(schoolId, phone, menuId);
-  await sendMenu(schoolId, phone, MENUS[menuId], {
+  await sendMenu(schoolId, phone, await resolveMenu(schoolId, menuId), {
     studentName: `${student.first_name} ${student.last_name}`,
     schoolName: parentInfo.school_name,
   });
@@ -759,6 +789,21 @@ async function sendSubMenu(schoolId, phone, menuId, student, parentInfo) {
 // ─────────────────────────────────────────────────────────────────────────
 
 async function executeOption(option, schoolId, phone, student, parentInfo) {
+  // Contenu ajouté par l'administration (texte, image ou PDF).
+  if (typeof option.action === 'string' && option.action.startsWith('custom:')) {
+    const entry = await findCustomEntry(schoolId, option.action.slice(7));
+    return sendCustomEntry(schoolId, phone, entry);
+  }
+
+  // Garde-fou : une capacité coupée ne doit pas être atteignable, même si le
+  // parent tape un numéro mémorisé d'un ancien menu ou clique un vieux message.
+  if (option.menuId) {
+    const cap = capabilityForOption(option.menuId, option.id);
+    if (cap && !(await isCapabilityEnabled(schoolId, cap.id))) {
+      return sendText(schoolId, phone, `Cette information n'est plus disponible via WhatsApp. Contactez ${parentInfo.school_name} directement.`, { urgent: true });
+    }
+  }
+
   // Action de consultation à la demande du rapport de suivi du jour.
   if (option.action === 'report:now') {
     return sendDailyReportNow(schoolId, phone, student, parentInfo);
@@ -949,6 +994,80 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Aiguillage des numéros « professeur ET parent »
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Un même numéro peut appartenir à un professeur de l'école ET à un parent
+ * d'élève (un enseignant dont l'enfant est scolarisé sur place). Le parent
+ * étant identifié en premier dans le flux, ce professeur n'atteindrait jamais
+ * son espace enseignant. On lui fait donc choisir son espace, une fois, et le
+ * choix est mémorisé 30 jours (`rememberSpace`) pour ne pas reposer la question
+ * à chaque expiration d'état ; « espace » permet de rebasculer à tout moment.
+ *
+ * La double casquette est un cas RARE : la requête professeur n'est faite que
+ * lorsqu'elle peut changer quelque chose, et son résultat est mis en cache
+ * dans l'état (`isTeacher`) pour ne pas peser sur chaque message parent.
+ *
+ * @returns {Promise<boolean>} true si le message a été traité ici.
+ */
+async function routeDualRoleSpace({ schoolId, phone, text, parentInfo, incomingMsgId, providerMessageId }) {
+  const state = State.getState(schoolId, phone);
+  const wantsSwitch = isSpaceSwitchRequest(text);
+  const chosenSpace = state?.space || recallSpace(schoolId, phone);
+
+  // Espace parent déjà choisi, aucune bascule demandée → flux parent normal.
+  if (chosenSpace === 'parent' && !wantsSwitch) return false;
+  // Déjà vérifié : ce numéro n'est pas professeur.
+  if (state?.isTeacher === false && !state?.spacePending) return false;
+
+  const teacherProfile = await getTeacherByPhone(phone, parentInfo.school_id);
+  State.setState(schoolId, phone, { isTeacher: !!teacherProfile });
+  if (!teacherProfile) return false;
+
+  const toTeacher = async () => {
+    State.setState(schoolId, phone, { space: 'teacher', spacePending: false });
+    rememberSpace(schoolId, phone, 'teacher');
+    await handleTeacherMessage({
+      schoolId, phone, text, providerMessageId,
+      teacher: teacherProfile, dualRole: true, alreadyLogged: true,
+    });
+    await markProcessed(incomingMsgId);
+    return true;
+  };
+
+  if (wantsSwitch) {
+    await sendSpaceMenu(schoolId, phone, parentInfo.school_name);
+    await markProcessed(incomingMsgId);
+    return true;
+  }
+
+  // Réponse au menu de choix d'espace
+  if (state?.spacePending) {
+    const choice = readSpaceChoice(text);
+    if (choice === 'teacher') return toTeacher();
+    if (choice === 'parent') {
+      State.setState(schoolId, phone, { space: 'parent', spacePending: false });
+      rememberSpace(schoolId, phone, 'parent');
+      const children = await getParentChildren(parentInfo.parent_id);
+      await sendChildSelectionMenu(parentInfo.school_id, phone, children, parentInfo);
+      await markProcessed(incomingMsgId);
+      return true;
+    }
+    await sendSpaceMenu(schoolId, phone, parentInfo.school_name);
+    await markProcessed(incomingMsgId);
+    return true;
+  }
+
+  if (chosenSpace === 'teacher') return toTeacher();
+
+  // Premier message (ou état expiré) : on demande l'espace souhaité.
+  await sendSpaceMenu(schoolId, phone, parentInfo.school_name);
+  await markProcessed(incomingMsgId);
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Chatbot « Réceptionniste » — assistant statistiques de l'école
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -1052,17 +1171,21 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       console.log('[chatbot] Numéro non autorisé (média ignoré):', phone);
       return;
     }
-    // 1.bis.0 Un PROFESSEUR qui répond à une demande de rendez-vous.
-    // Son numéro n'est pas celui d'un parent : on l'identifie dans `profiles`
-    // et on lit le créneau qu'il propose (FR / arabe / darija).
+    // 1.bis.0 Un PROFESSEUR de l'école → espace enseignant WhatsApp : sa
+    // journée, ses classes, ses élèves, ses devoirs et ses contrôles, sans
+    // ouvrir l'application. Le module gère aussi, en priorité, les réponses
+    // aux demandes de rendez-vous (créneau en FR / arabe / darija).
     try {
-      const teacherHandled = await handleTeacherAppointmentMessage({ schoolId, phone, text });
-      if (teacherHandled) {
-        console.log(`[chatbot] ← professeur ${phone} (rendez-vous)`);
+      const teacherProfile = await getTeacherByPhone(phone, schoolId);
+      if (teacherProfile) {
+        console.log(`[chatbot] ← professeur ${phone} (school=${teacherProfile.school_id || schoolId})`);
+        await handleTeacherMessage({
+          schoolId, phone, text, providerMessageId: id, teacher: teacherProfile,
+        });
         return;
       }
     } catch (e) {
-      console.error('[chatbot] rendez-vous professeur:', e.message);
+      console.error('[chatbot] espace enseignant:', e.message);
     }
 
     const receptionist = await getReceptionistByPhone(phone, schoolId);
@@ -1115,6 +1238,20 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // Tracking communications : ce message entrant vaut « réponse » (et lecture)
   // pour les envois récents adressés à ce parent.
   markResponded({ parentId: parentInfo.parent_id, phone }).catch(() => {});
+
+  // 2.0 Numéro à DOUBLE CASQUETTE : professeur de l'école ET parent d'un élève.
+  // Le parent étant résolu en premier, sans cet aiguillage l'espace enseignant
+  // serait inatteignable pour ces numéros. Les médias (photo, localisation) ne
+  // concernent que l'espace parent et ne sont donc pas détournés.
+  if (!location && !image) {
+    const routed = await routeDualRoleSpace({
+      schoolId, phone, text, parentInfo, incomingMsgId: incomingMsg?.id, providerMessageId: id,
+    }).catch((e) => {
+      console.error('[chatbot] aiguillage prof/parent:', e.message);
+      return false;
+    });
+    if (routed) return;
+  }
 
   // 2.bis Localisation partagée → enregistrement dans le profil transport
   // de l'élève (home_lat/home_lng), même sans affectation bus.
@@ -1200,6 +1337,21 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       student: suppliesStudent,
       text,
     });
+    await supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .update({ category: 'general', ai_response_sent: true })
+      .eq('id', incomingMsg?.id);
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
+
+  // 3.0.quater Contenu ajouté par l'administration et déclenché par mot-clé
+  // (ex. « cantine », « uniforme »). Placé avant les documents officiels et
+  // avant l'IA : ce que l'école a écrit elle-même prime sur une réponse générée.
+  const customHit = await matchCustomEntryByKeyword(parentInfo.school_id, text)
+    .catch((e) => { console.error('[chatbot] contenu personnalisé:', e.message); return null; });
+  if (customHit) {
+    await sendCustomEntry(parentInfo.school_id, phone, customHit);
     await supabaseAdmin
       .from('whatsapp_incoming_messages')
       .update({ category: 'general', ai_response_sent: true })
@@ -1689,7 +1841,9 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       return;
     }
 
-    const menu = MENUS[state.currentMenu] || MENUS.main;
+    // Menu effectif de l'école : les données coupées par l'administration
+    // n'y figurent pas, donc leur numéro n'est plus reconnu non plus.
+    const menu = await resolveMenu(parentInfo.school_id, state.currentMenu || 'main');
     const opt = matchMenuOption(menu, text);
     if (opt) {
       await executeOption(opt, parentInfo.school_id, phone, student, parentInfo);

@@ -101,6 +101,7 @@ import ParentBulletinsPage from './pages/parent/ParentBulletinsPage';
 import ParentFinancePage from './pages/parent/ParentFinancePage';
 import ParentSignalementsPage from './pages/parent/ParentSignalementsPage';
 import ParentAppointmentsPage from './pages/parent/ParentAppointmentsPage';
+import ParentAssistantPage from './pages/parent/ParentAssistantPage';
 import TeacherAppointmentsPage from './pages/teacher/TeacherAppointmentsPage';
 import AppointmentsPage from './pages/admin/AppointmentsPage';
 import ApprovalsPage from './pages/ApprovalsPage';
@@ -271,6 +272,7 @@ function App() {
             <Route path="parent/finance" element={<ParentFinancePage />} />
             <Route path="parent/signalements" element={<ParentSignalementsPage />} />
             <Route path="parent/appointments" element={<ParentAppointmentsPage />} />
+            <Route path="parent/assistant" element={<ParentAssistantPage />} />
             <Route path="appointments" element={<AppointmentsPage />} />
             <Route path="messages/send" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />

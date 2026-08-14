@@ -1324,4 +1324,17 @@ export default {
   'ptrans.ev.absent': '⚠️ Absent(e)',
   'ptrans.ev.no_show': '⚠️ Pas venu(e)',
   'ptrans.ev.approaching': '⏰ Bus approche',
+
+  // ── Assistant parent (chatbot intégré) ────────────────────────────────
+  'passist.title': 'Assistant',
+  'passist.subtitle': 'Votre assistant scolaire',
+  'passist.greetingTitle': 'Bonjour !',
+  'passist.greetingBody': 'Je suis votre assistant. Choisissez un sujet ci-dessous, ou posez-moi directement votre question.',
+  'passist.typing': 'écrit…',
+  'passist.placeholder': 'Écrivez votre question…',
+  'passist.aiDisabled': 'Utilisez les boutons ci-dessus',
+  'passist.send': 'Envoyer',
+  'passist.disclaimer': 'Réponses basées uniquement sur les données de votre enfant.',
+  'passist.loadError': 'Impossible de charger l’assistant.',
+  'passist.sendError': 'Envoi impossible.',
 };

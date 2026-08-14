@@ -12,6 +12,19 @@ import * as A from './answers.js';
 import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/schoolCalendar.js';
 import { getKnowledgeSnippets } from './knowledge.js';
 import { buildShowcaseContext } from './showcase.js';
+import { allowedAiScopes } from './capabilities.js';
+import { customKnowledgeForAi } from './customEntries.js';
+
+/** Libellés parlants des portées, pour signaler au LLM ce qui est coupé. */
+const AI_SCOPE_LABELS = [
+  ['tracking', 'suivi de séance et commentaires des professeurs'],
+  ['grades', 'notes et moyennes'],
+  ['attendance', 'présences et absences'],
+  ['homework', 'devoirs'],
+  ['timetable', 'emploi du temps'],
+  ['bulletins', 'bulletins scolaires'],
+  ['finance', 'situation financière'],
+];
 
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
@@ -27,6 +40,7 @@ const SYSTEM_PROMPT = `Tu es l'assistant pédagogique officiel d'une école maro
 RÈGLES STRICTES :
 1. Tu réponds UNIQUEMENT sur le suivi scolaire de l'élève dont les données te sont fournies.
 2. Tu n'inventes JAMAIS de notes, devoirs, présences ou montants. Si une donnée n'est pas dans le contexte fourni, dis-le simplement.
+2bis. Si le contexte contient "sujets_non_communiques", ces sujets ont été VOLONTAIREMENT désactivés par l'établissement. Tu ne dois ni les traiter, ni prétendre que la donnée n'existe pas : réponds que cette information n'est pas communiquée par WhatsApp et invite le parent à contacter l'école. N'essaie jamais de la déduire d'un autre champ.
 3. LANGUE : Tu réponds OBLIGATOIREMENT dans la MÊME langue/écriture que la question du parent.
    - Question en arabe (ou darija écrite en arabe) → réponse 100% en arabe, AUCUN mot français.
    - Question en français → réponse en français.
@@ -174,6 +188,15 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     school: parentInfo.school_name,
   };
 
+  // Interrupteurs de l'école : une donnée coupée par l'administration ne doit
+  // JAMAIS entrer dans le contexte du LLM, sinon couper l'entrée de menu ne
+  // protège rien — le parent obtient la même information en la demandant en
+  // langage naturel. C'est le point de contrôle le plus important des trois.
+  const scopes = await allowedAiScopes(parentInfo.school_id);
+  includeFinance = includeFinance && scopes.has('finance');
+  includeBulletins = includeBulletins && scopes.has('bulletins');
+  includeTimetable = includeTimetable && scopes.has('timetable');
+
   // Les données pédagogiques ne sont chargées que si la question les concerne :
   // pour finance / emploi du temps / bulletin, les directives interdisent de
   // s'en servir → les charger ralentirait pour rien (DB + taille du prompt).
@@ -194,25 +217,25 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     { data: bulletinRows },
     { data: invoiceRows },
   ] = await Promise.all([
-    includePedagogy ? supabaseAdmin
+    includePedagogy && scopes.has('tracking') ? supabaseAdmin
       .from('session_tracking')
       .select('presence, participation, discipline, attitude, homework, comment, session:sessions(date, subjects(name))')
       .eq('student_id', student.id)
       .order('created_at', { ascending: false })
       .limit(10) : none,
-    includePedagogy ? supabaseAdmin
+    includePedagogy && scopes.has('attendance') ? supabaseAdmin
       .from('session_tracking')
       .select('presence, session:sessions(date)')
       .eq('student_id', student.id)
       .limit(500) : none,
-    includePedagogy ? supabaseAdmin
+    includePedagogy && scopes.has('homework') ? supabaseAdmin
       .from('homework')
       .select('id, title, due_date, target_type, created_by, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
       .eq('class_id', student.class_id)
       .gte('due_date', threeMonthsAgo)
       .order('due_date', { ascending: false })
       .limit(40) : none,
-    includePedagogy ? supabaseAdmin
+    includePedagogy && scopes.has('grades') ? supabaseAdmin
       .from('control_notes')
       .select('note, appreciation, controls_plan!inner(id, name, date, class_id, teacher_id)')
       .eq('student_id', student.id)
@@ -426,7 +449,33 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
       worst: Math.min(...allGrades.map((g) => g.note)),
     };
   }
+  // Les blocs ci-dessus calculent à partir de tableaux vides quand la donnée
+  // n'a pas été chargée : on retire alors carrément les clés, pour que le LLM
+  // voie une information ABSENTE et non une information « à zéro » qu'il
+  // présenterait au parent comme « aucun devoir », « aucune note ».
+  if (!scopes.has('tracking')) delete ctx.recent_tracking;
+  if (!scopes.has('homework')) {
+    delete ctx.pending_homework;
+    delete ctx.overdue_homework;
+    delete ctx.recent_homework_submitted;
+    delete ctx.homework_stats;
+  }
+  if (!scopes.has('grades')) {
+    delete ctx.recent_grades;
+    delete ctx.grades_by_subject;
+    delete ctx.grade_stats;
+  }
   } // fin includePedagogy
+
+  // Sujets explicitement coupés par l'établissement : le LLM doit répondre
+  // « non communiqué par WhatsApp », pas inventer ni prétendre que la donnée
+  // n'existe pas.
+  const restricted = AI_SCOPE_LABELS.filter(([scope]) => !scopes.has(scope)).map(([, label]) => label);
+  if (restricted.length > 0) ctx.sujets_non_communiques = restricted;
+
+  // Connaissances ajoutées par l'administration (contenus marqués « source IA »).
+  const custom = await customKnowledgeForAi(parentInfo.school_id);
+  if (custom) ctx.informations_ecole = custom;
 
   // ───── Emploi du temps — UNIQUEMENT si la question concerne le planning ─────
   if (includeTimetable) {

@@ -6,6 +6,7 @@ import { sameYear } from '../../lib/schoolYear';
 import { saveBlob } from '../../lib/download';
 import EngagementDashboard from './communication/EngagementDashboard';
 import ChatbotDocsPage from './communication/ChatbotDocsPage';
+import ChatbotAccessPage from './ChatbotAccessPage';
 import SchoolShowcasePage from './communication/SchoolShowcasePage';
 import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
@@ -13,7 +14,7 @@ import {
   Smartphone, Wifi, WifiOff, QrCode, Info, Plus, Trash2,
   Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowLeft,
   Bot, Sparkles,
-  Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2
+  Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2, Shield
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
@@ -1419,6 +1420,7 @@ const WhatsAppPage = () => {
     { key: 'dashboard', label: 'Dashboard parents', icon: BarChart3, desc: 'Qui lit, qui répond' },
     { key: 'reports', label: 'Rapports IA', icon: Bot, desc: 'Rapport complet à la demande' },
     { key: 'documents', label: 'Documents chatbot', icon: BookOpen, desc: 'Fournitures & docs généraux' },
+    { key: 'access', label: 'Accès chatbot', icon: Shield, desc: 'Ce que le chatbot communique aux parents' },
     { key: 'ecole', label: 'Vitrine école', icon: Building2, desc: 'Infos générales & photos' },
     { key: 'planning', label: 'Planifier', icon: Calendar, desc: 'Communications planifiées' },
     { key: 'connection', label: 'Connexion', icon: Smartphone, desc: 'Session WhatsApp' }
@@ -2178,6 +2180,13 @@ const WhatsAppPage = () => {
       {/* ===================== TAB: DOCUMENTS CHATBOT ===================== */}
       {activeTab === 'documents' && (
         <ChatbotDocsPage apiUrl={apiUrl} getAuthToken={getAuthToken} academicYear={year} />
+      )}
+
+      {/* ============ TAB: ACCÈS CHATBOT (données communiquées) ============ */}
+      {activeTab === 'access' && (
+        <div className="flex-1 overflow-y-auto p-5">
+          <ChatbotAccessPage />
+        </div>
       )}
 
       {/* ===================== TAB: INBOX ===================== */}

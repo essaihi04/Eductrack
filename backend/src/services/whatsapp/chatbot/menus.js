@@ -15,6 +15,8 @@ import { getSocket, phoneToJid } from '../baileysClient.js';
 import { sendText } from '../index.js';
 import * as cloud from '../cloudApi.js';
 import { simulateTyping, waitHumanDelay, recordSent, checkAllowed } from '../antiBan.js';
+import { capabilityForOption, isCapabilityEnabled } from './capabilities.js';
+import { customOptionsForMenu } from './customEntries.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // MENUS
@@ -102,6 +104,41 @@ export const MENUS = {
   schoollife: SCHOOL_LIFE_MENU,
   account: ACCOUNT_MENU,
 };
+
+// ─────────────────────────────────────────────────────────────────────────
+// Menu effectif d'une école
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Construit le menu réellement présenté à un parent :
+ *  - les options dont la capacité est coupée sont retirées ;
+ *  - les contenus ajoutés par l'administration sont insérés avant le retour.
+ *
+ * Les menus déclarés plus haut restent le référentiel immuable ; on n'en
+ * renvoie qu'une copie, jamais une version modifiée en place.
+ */
+export async function resolveMenu(schoolId, menuId) {
+  const base = MENUS[menuId] || MENUS.main;
+
+  const kept = [];
+  for (const opt of base.options) {
+    // L'option de retour n'est jamais gouvernée par une capacité.
+    if (opt.id === '0') continue;
+    const cap = capabilityForOption(base.id, opt.id);
+    if (cap && !(await isCapabilityEnabled(schoolId, cap.id))) continue;
+    // `menuId` permet au dispatcher de revérifier la capacité au moment de
+    // l'exécution, sans avoir à retrouver de quel menu vient l'option.
+    kept.push({ ...opt, menuId: base.id });
+  }
+
+  const custom = await customOptionsForMenu(schoolId, base.id);
+  const back = base.options.find((o) => o.id === '0');
+
+  return {
+    ...base,
+    options: [...kept, ...custom, ...(back ? [back] : [])],
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Formatage texte du menu (toujours envoyé, fallback universel)

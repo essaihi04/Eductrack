@@ -53,6 +53,7 @@ import {
   Search,
   BarChart2,
   AlertTriangle,
+  Bot,
   Home as HomeIcon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -194,6 +195,7 @@ const Sidebar = () => {
     if (profile?.role === 'parent') {
       return [
         { icon: Users2, label: t('pnav.children'), path: '/parent' },
+        { icon: Bot, label: t('passist.title'), path: '/parent/assistant' },
         { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
         { icon: Bell, label: t('pnav.notifications'), path: '/parent/notifications' },
         { icon: FileText, label: t('pnav.bulletins'), path: '/parent/bulletins' },

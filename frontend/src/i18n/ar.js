@@ -1323,4 +1323,17 @@ export default {
   'ptrans.ev.absent': '⚠️ غائب',
   'ptrans.ev.no_show': '⚠️ لم يحضر',
   'ptrans.ev.approaching': '⏰ الحافلة تقترب',
+
+  // ── مساعد ولي الأمر ───────────────────────────────────────────────────
+  'passist.title': 'المساعد',
+  'passist.subtitle': 'مساعدك المدرسي',
+  'passist.greetingTitle': 'مرحبا !',
+  'passist.greetingBody': 'أنا مساعدك. اختر موضوعا من الأسفل، أو اطرح سؤالك مباشرة.',
+  'passist.typing': 'يكتب…',
+  'passist.placeholder': 'اكتب سؤالك…',
+  'passist.aiDisabled': 'استعمل الأزرار أعلاه',
+  'passist.send': 'إرسال',
+  'passist.disclaimer': 'الأجوبة مبنية فقط على معطيات ابنك أو ابنتك.',
+  'passist.loadError': 'تعذر تحميل المساعد.',
+  'passist.sendError': 'تعذر الإرسال.',
 };
