@@ -134,16 +134,18 @@ const parseMassarTuteur = (workbook) => {
 };
 
 // Parse le format générique (modèle Élève / Parent / Téléphone / Relation).
+// Une colonne « Classe » facultative permet de mettre PLUSIEURS classes dans un
+// seul fichier : l'appelant regroupe alors les lignes par classe.
 // Retourne { rows } ou null si l'en-tête n'est pas reconnu.
 const parseGenericParents = (workbook) => {
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
   const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-  let headerRowIndex = -1, colStudentName = -1, colParentName = -1, colPhone = -1, colRelationship = -1;
+  let headerRowIndex = -1, colStudentName = -1, colParentName = -1, colPhone = -1, colRelationship = -1, colClass = -1;
   for (let i = 0; i < Math.min(rawData.length, 20); i++) {
     const row = rawData[i];
     if (!row) continue;
-    let tmpStudent = -1, tmpParent = -1, tmpPhone = -1, tmpRelation = -1;
+    let tmpStudent = -1, tmpParent = -1, tmpPhone = -1, tmpRelation = -1, tmpClass = -1;
     for (let j = 0; j < row.length; j++) {
       const raw = String(row[j] || '').trim();
       const cell = raw.toLowerCase();
@@ -152,6 +154,7 @@ const parseGenericParents = (workbook) => {
       if (cell === 'nom complet parent') { tmpParent = j; continue; }
       if (cell === 'téléphone' || cell === 'telephone') { tmpPhone = j; continue; }
       if (cell.startsWith('relation')) { tmpRelation = j; continue; }
+      if (tmpClass === -1 && (cell === 'classe' || cell === 'class')) { tmpClass = j; continue; }
       if (tmpRelation === -1 && (cell.includes('relation') || cell.includes('lien') || cell.includes('صلة'))) {
         tmpRelation = j;
       } else if (tmpPhone === -1 && (cell.includes('téléphone') || cell.includes('telephone') || cell.includes('phone') || cell.includes('هاتف') || cell.includes('whatsapp'))) {
@@ -163,7 +166,7 @@ const parseGenericParents = (workbook) => {
       }
     }
     if (tmpStudent !== -1 && tmpParent !== -1 && tmpPhone !== -1) {
-      headerRowIndex = i; colStudentName = tmpStudent; colParentName = tmpParent; colPhone = tmpPhone; colRelationship = tmpRelation;
+      headerRowIndex = i; colStudentName = tmpStudent; colParentName = tmpParent; colPhone = tmpPhone; colRelationship = tmpRelation; colClass = tmpClass;
       break;
     }
   }
@@ -177,8 +180,9 @@ const parseGenericParents = (workbook) => {
     const parentName = String(row[colParentName] || '').trim();
     const phone = String(row[colPhone] || '').trim();
     const relationship = colRelationship !== -1 ? String(row[colRelationship] || '').trim() : '';
+    const className = colClass !== -1 ? String(row[colClass] || '').trim() : '';
     if (studentName && parentName && phone) {
-      rows.push({ student_full_name: studentName, parent_full_name: parentName, phone_1: phone, relationship: relationship || undefined });
+      rows.push({ student_full_name: studentName, parent_full_name: parentName, phone_1: phone, relationship: relationship || undefined, _className: className || undefined });
     }
   }
   return rows.length ? { rows } : null;
@@ -365,6 +369,8 @@ const ParentsPage = () => {
   // importFiles: [{ key, fileName, className, classId, rows, source, result, error }]
   const [importFiles, setImportFiles] = useState([]);
   const [importing, setImporting] = useState(false);
+  // Créer aussi les parents dont aucun élève n'a été retrouvé (compte sans enfant).
+  const [createUnmatched, setCreateUnmatched] = useState(false);
   const [importProgress, setImportProgress] = useState(null); // { done, total } pendant le commit
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -628,6 +634,23 @@ const ParentsPage = () => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     const norm = s => String(s || '').trim().toLowerCase();
+    // Clé de comparaison des noms de classe : « 1APG-1 », « 1apg 1 », « 1_APG1 »
+    // désignent la même classe.
+    const clsKey = s => norm(s).replace(/[^a-z0-9]/g, '');
+    const findClassByName = (name) => {
+      const k = clsKey(name);
+      return k ? classes.find(c => clsKey(c.name) === k) || null : null;
+    };
+    // Classe déduite du nom de fichier : « PARENTS_1APG-1.xlsx » → classe 1APG-1.
+    const classFromFileName = (fileName) => {
+      const base = fileName.replace(/\.(xlsx|xls|csv)$/i, '');
+      const candidates = [base, base.replace(/^\s*(parents?|eleves?|élèves?)[\s_-]*/i, '')];
+      for (const cand of candidates) {
+        const found = findClassByName(cand);
+        if (found) return found;
+      }
+      return null;
+    };
     const parsedList = [];
     for (const file of files) {
       const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -638,7 +661,7 @@ const ParentsPage = () => {
         // 1) Format officiel Massar « Tuteur » (auto-détection de la classe).
         const massar = parseMassarTuteur(workbook);
         if (massar && massar.rows.length > 0) {
-          const match = massar.className ? classes.find(c => norm(c.name) === norm(massar.className)) : null;
+          const match = massar.className ? findClassByName(massar.className) : null;
           parsedList.push({ key, fileName: file.name, className: massar.className || null, classId: match ? match.id : '', rows: massar.rows, source: 'massar', result: null, error: null });
           continue;
         }
@@ -651,9 +674,37 @@ const ParentsPage = () => {
         }
 
         // 3) Modèle générique (Élève / Parent / Téléphone / Relation).
+        //    La classe est déduite automatiquement (colonne « Classe » du fichier,
+        //    sinon nom du fichier) pour éviter de la choisir fichier par fichier.
         const generic = parseGenericParents(workbook);
         if (generic) {
-          parsedList.push({ key, fileName: file.name, className: null, classId: '', rows: generic.rows, source: 'generic', result: null, error: null });
+          // a) Colonne « Classe » renseignée → un bloc par classe, même si le
+          //    fichier couvre toute l'école.
+          const byClass = new Map();
+          for (const r of generic.rows) {
+            const cls = r._className || '';
+            if (!byClass.has(cls)) byClass.set(cls, []);
+            byClass.get(cls).push(r);
+          }
+          const named = [...byClass.keys()].filter(Boolean);
+          if (named.length > 0 && byClass.size === named.length) {
+            for (const cls of named) {
+              const match = findClassByName(cls);
+              parsedList.push({
+                key: `${key}-${cls}`, fileName: `${file.name} — ${cls}`, className: cls,
+                classId: match ? match.id : '', rows: byClass.get(cls),
+                source: 'generic', result: null, error: null
+              });
+            }
+            continue;
+          }
+          // b) Sinon : classe déduite du nom du fichier (ex. PARENTS_1APG-1.xlsx).
+          const guessed = classFromFileName(file.name);
+          parsedList.push({
+            key, fileName: file.name, className: guessed ? guessed.name : null,
+            classId: guessed ? guessed.id : '', rows: generic.rows,
+            source: 'generic', result: null, error: null
+          });
           continue;
         }
 
@@ -726,14 +777,24 @@ const ParentsPage = () => {
       alert(dryRun ? 'Sélectionnez une classe pour au moins un fichier.' : 'Vérifiez d\'abord les correspondances.');
       return;
     }
-    if (!dryRun && !confirm('Confirmer l\'import ? Les parents seront créés et associés aux élèves.')) return;
+    if (!dryRun && !confirm(
+      'Confirmer l\'import ? Les parents seront créés et associés aux élèves.' +
+      (createUnmatched ? '\n\nLes parents dont l\'élève n\'a pas été trouvé seront aussi créés, sans enfant rattaché.' : '')
+    )) return;
     setImporting(true);
     try {
       const token = await getToken();
       const postChunk = (f, rows, isDry) => fetch(`${apiUrl}/api/admin/parents/import`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(f.global ? { global: true, rows, dryRun: isDry, academic_year: year } : { class_id: f.classId, rows, dryRun: isDry, academic_year: year })
+        body: JSON.stringify({
+          ...(f.global ? { global: true } : { class_id: f.classId }),
+          rows,
+          dryRun: isDry,
+          academic_year: year,
+          // Créer aussi les parents dont aucun élève n'a été retrouvé (sans lien).
+          createUnmatched
+        })
       });
 
       // Envoi d'un lot avec relance automatique (réseau / 5xx / timeout) → fiabilité.
@@ -774,7 +835,7 @@ const ParentsPage = () => {
       const commitFiles = ready; // déjà filtrés (vérifiés + prêts)
       const total = commitFiles.reduce((s, f) => s + f.rows.length, 0);
       setImportProgress({ done: 0, total });
-      let totalCommits = 0, totalMassar = 0, totalCreated = 0, totalReused = 0, failedChunks = 0;
+      let totalCommits = 0, totalMassar = 0, totalCreated = 0, totalReused = 0, failedChunks = 0, totalUnlinked = 0;
       const resultByKey = {};
       for (const f of commitFiles) {
         const agg = { dryRun: false, results: [], commitsCount: 0, massarBackfilled: 0 };
@@ -787,6 +848,7 @@ const ParentsPage = () => {
             agg.massarBackfilled += data.massarBackfilled || 0;
             totalCreated += data.parentsCreated || 0;
             totalReused += data.parentsReused || 0;
+            totalUnlinked += data.unlinkedParents || 0;
           } else {
             agg.error = error || 'Erreur';
             failedChunks++;
@@ -802,6 +864,7 @@ const ParentsPage = () => {
       alert(
         `Import terminé : ${totalCommits} association(s) créée(s).\n` +
         `• ${totalCreated} compte(s) parent créé(s), ${totalReused} réutilisé(s) (même numéro = même compte).` +
+        (totalUnlinked > 0 ? `\n• ${totalUnlinked} parent(s) créé(s) SANS enfant rattaché (élève non trouvé) — à rattacher depuis leur fiche.` : '') +
         (totalMassar > 0 ? `\n• ${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : '') +
         (failedChunks > 0 ? `\n⚠ ${failedChunks} lot(s) en échec — relancez l'import pour les terminer (les associations déjà créées ne seront pas dupliquées).` : '')
       );
@@ -1177,7 +1240,10 @@ const ParentsPage = () => {
                 className="w-full px-3 py-2 border rounded-lg bg-background"
               />
               {importFiles.length > 0 && (
-                <p className="text-xs text-muted-foreground mt-1">{importFiles.length} fichier(s) chargé(s) — vous pouvez en ajouter d'autres.</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {importFiles.length} fichier(s) chargé(s) — vous pouvez en ajouter d'autres. La classe est détectée
+                  automatiquement (colonne « Classe » ou nom du fichier) et tout s'importe en une seule fois.
+                </p>
               )}
             </div>
 
@@ -1358,6 +1424,8 @@ const ParentsPage = () => {
             {importFiles.some(f => !f.error) && (() => {
               const ready = importFiles.filter(f => isFileReady(f));
               const totalMatched = importFiles.reduce((s, f) => s + (f.result?.results?.filter(r => r.matchStatus === 'matched').length || 0), 0);
+              // Lignes sans élève retrouvé : créables en parents « sans enfant ».
+              const totalNotFound = importFiles.reduce((s, f) => s + (f.result?.results?.filter(r => r.matchStatus === 'not_found').length || 0), 0);
               const anyDry = importFiles.some(f => f.result?.dryRun);
               const anyCommitted = importFiles.some(f => f.result && f.result.commitsCount != null && !f.result.dryRun);
               return (
@@ -1377,6 +1445,33 @@ const ParentsPage = () => {
                       </div>
                     </div>
                   )}
+                  {/* Fichiers restés sans classe : ils seraient ignorés par l'import. */}
+                  {importFiles.some(f => !f.error && !f.global && !f.classId) && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      {importFiles.filter(f => !f.error && !f.global && !f.classId).length} fichier(s) sans classe —
+                      sélectionnez-la ci-dessus, sinon ils seront ignorés. Astuce : nommez le fichier comme la classe
+                      (ex. <strong>1APG-1.xlsx</strong>) ou ajoutez une colonne <strong>Classe</strong>, la détection est automatique.
+                    </p>
+                  )}
+
+                  {/* Parents dont l'élève n'a pas été retrouvé : on peut quand même
+                      créer le compte (sans enfant), à rattacher plus tard. */}
+                  <label className="flex items-start gap-2 text-sm p-2.5 rounded-lg bg-blue-50 border border-blue-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createUnmatched}
+                      onChange={e => setCreateUnmatched(e.target.checked)}
+                      disabled={importing}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium">Créer aussi les parents sans élève trouvé</span>
+                      {totalNotFound > 0 && <span className="text-blue-700"> ({totalNotFound} ligne{totalNotFound > 1 ? 's' : ''})</span>}
+                      <span className="block text-xs text-muted-foreground">
+                        Le compte parent et ses numéros sont créés sans enfant rattaché — vous ferez le lien depuis sa fiche.
+                      </span>
+                    </span>
+                  </label>
                   <div className="flex flex-wrap gap-2">
                     <button
                       onClick={handleImportDryRun}
@@ -1385,13 +1480,15 @@ const ParentsPage = () => {
                     >
                       {importing && !importProgress ? 'Vérification...' : `Vérifier les correspondances (${ready.length} fichier${ready.length > 1 ? 's' : ''})`}
                     </button>
-                    {anyDry && !anyCommitted && totalMatched > 0 && (
+                    {anyDry && !anyCommitted && (totalMatched > 0 || (createUnmatched && totalNotFound > 0)) && (
                       <button
                         onClick={handleImportCommit}
                         disabled={importing}
                         className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                       >
-                        {importProgress ? 'Import en cours...' : `Confirmer l'import (${totalMatched} parent(s))`}
+                        {importProgress
+                          ? 'Import en cours...'
+                          : `Confirmer l'import (${totalMatched} parent(s)${createUnmatched && totalNotFound > 0 ? ` + ${totalNotFound} sans enfant` : ''})`}
                       </button>
                     )}
                     <button

@@ -650,10 +650,12 @@ router.get('/parents', async (req, res) => {
 
     // Année active fournie → seuls les parents ayant au moins un enfant inscrit
     // (RI/NI) cette année-là (même règle que les listes élèves / la finance).
+    // EXCEPTION : les parents SANS AUCUN enfant rattaché restent visibles — ce ne
+    // sont pas des familles non réinscrites mais des contacts importés à rattacher.
     step = 'yearScope';
     const activeIds = await activeStudentIdSet(getSchoolId(req), req.query.academic_year);
     const scoped = activeIds
-      ? response.filter(p => p.children.some(c => activeIds.has(c.id)))
+      ? response.filter(p => p.children.length === 0 || p.children.some(c => activeIds.has(c.id)))
       : response;
 
     res.json(scoped);
@@ -1403,12 +1405,13 @@ router.delete('/parents/:parentId/contacts/:contactId', async (req, res) => {
 });
 
 // Import parents (JSON) - dryRun + commit
-// Body attendu: { class_id, rows: [{ student_full_name, parent_full_name, phone_1, relationship? }], dryRun?: boolean }
+// Body attendu: { class_id, rows: [{ student_full_name, parent_full_name, phone_1, relationship? }], dryRun?: boolean, createUnmatched?: boolean }
+// createUnmatched : crée aussi les parents dont aucun élève n'a été retrouvé (sans lien).
 // Mode global (liste KoolSchool) : { global: true, rows, dryRun } — match par code Massar
 // sur TOUS les élèves de l'école, sans class_id.
 router.post('/parents/import', async (req, res) => {
   try {
-    const { class_id, rows, dryRun, global } = req.body;
+    const { class_id, rows, dryRun, global, createUnmatched } = req.body;
     const isGlobal = global === true;
     if (!isGlobal && !class_id) return res.status(400).json({ error: 'class_id requis' });
     if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'rows requis' });
@@ -1531,33 +1534,18 @@ router.post('/parents/import', async (req, res) => {
     let massarBackfilled = 0;
     let parentsCreated = 0;
     let parentsReused = 0;
-    for (const r of results) {
-      if (r.matchStatus !== 'matched' || !r.student?.id) continue;
 
-      // GARDER LE CODE MASSAR PRÉEXISTANT : on ne remplit la colonne que si elle est
-      // vide, et on privilégie TOUJOURS le code propre à l'élève (présent dans son
-      // email = son identité Massar d'origine) plutôt que celui du fichier, qui peut
-      // diverger. On n'écrase jamais un code déjà renseigné.
-      const rowMassar = String(r.row.massar_code || '').trim().toUpperCase();
-      const currentMassar = String(r.student.massar_code || '').trim().toUpperCase();
-      const emailMassar = String(r.student.email || '').split('@')[0].trim().toUpperCase();
-      // Code à inscrire si la colonne est vide : email (préexistant) sinon fichier.
-      const codeToSet = emailMassar || rowMassar;
-      if (!currentMassar && codeToSet) {
-        const { error: massarUpdateError } = await supabaseAdmin
-          .from('profiles')
-          .update({ massar_code: codeToSet })
-          .eq('id', r.student.id);
-        if (massarUpdateError) throw massarUpdateError;
-        massarBackfilled++;
-      }
-
+    // Crée (ou réutilise) le compte parent d'une ligne + tous ses numéros.
+    // Renvoie { parentId, primary, contacts } ou null si la ligne n'a aucun
+    // numéro exploitable. Utilisé par les lignes appariées ET, quand
+    // `createUnmatched` est demandé, par les lignes sans élève trouvé.
+    const upsertParentFromRow = async (row) => {
       // UN SEUL parent (la famille) par élève, avec TOUS les numéros (père + mère
       // + tuteur) rattachés comme contacts. Si la ligne ne fournit pas `contacts`
       // (ancien format / modèle générique), on retombe sur le numéro unique.
-      const rawContacts = Array.isArray(r.row.contacts) && r.row.contacts.length
-        ? r.row.contacts
-        : [{ phone: r.row.phone_1, name: r.row.parent_full_name, relationship: r.row.relationship }];
+      const rawContacts = Array.isArray(row.contacts) && row.contacts.length
+        ? row.contacts
+        : [{ phone: row.phone_1, name: row.parent_full_name, relationship: row.relationship }];
 
       // Normalisation + dédup des numéros, en conservant nom + libellé (Père/Mère).
       const seenPhones = new Set();
@@ -1568,11 +1556,11 @@ router.post('/parents/import', async (req, res) => {
         seenPhones.add(phone);
         contacts.push({
           phone,
-          name: c.name || r.row.parent_full_name,
+          name: c.name || row.parent_full_name,
           relationship: c.relationship || null
         });
       }
-      if (contacts.length === 0) continue;
+      if (contacts.length === 0) return null;
 
       // Contact principal = 1er (père si présent) → nom + numéro du compte parent.
       const primary = contacts[0];
@@ -1623,6 +1611,34 @@ router.post('/parents/import', async (req, res) => {
         if (upsertContactError) throw upsertContactError;
       }
 
+      return { parentId, primary, contacts };
+    };
+
+    for (const r of results) {
+      if (r.matchStatus !== 'matched' || !r.student?.id) continue;
+
+      // GARDER LE CODE MASSAR PRÉEXISTANT : on ne remplit la colonne que si elle est
+      // vide, et on privilégie TOUJOURS le code propre à l'élève (présent dans son
+      // email = son identité Massar d'origine) plutôt que celui du fichier, qui peut
+      // diverger. On n'écrase jamais un code déjà renseigné.
+      const rowMassar = String(r.row.massar_code || '').trim().toUpperCase();
+      const currentMassar = String(r.student.massar_code || '').trim().toUpperCase();
+      const emailMassar = String(r.student.email || '').split('@')[0].trim().toUpperCase();
+      // Code à inscrire si la colonne est vide : email (préexistant) sinon fichier.
+      const codeToSet = emailMassar || rowMassar;
+      if (!currentMassar && codeToSet) {
+        const { error: massarUpdateError } = await supabaseAdmin
+          .from('profiles')
+          .update({ massar_code: codeToSet })
+          .eq('id', r.student.id);
+        if (massarUpdateError) throw massarUpdateError;
+        massarBackfilled++;
+      }
+
+      const upserted = await upsertParentFromRow(r.row);
+      if (!upserted) continue; // aucun numéro exploitable
+      const { parentId, primary, contacts } = upserted;
+
       // Upsert link
       const { error: upsertLinkError } = await supabaseAdmin
         .from('parent_students')
@@ -1643,7 +1659,22 @@ router.post('/parents/import', async (req, res) => {
       commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }
 
-    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled, parentsCreated, parentsReused });
+    // PARENTS SANS ÉLÈVE : sur demande explicite (createUnmatched), les lignes dont
+    // aucun élève n'a été retrouvé créent quand même le compte parent + ses numéros,
+    // sans lien parent↔élève. Le parent apparaît alors dans l'annuaire « 0 enfant »
+    // et peut être rattaché plus tard à la main. Les lignes ambiguës sont exclues :
+    // l'élève existe, c'est le bon qu'il faut choisir dans l'aperçu.
+    let unlinkedParents = 0;
+    if (createUnmatched === true) {
+      for (const r of results) {
+        if (r.matchStatus !== 'not_found') continue;
+        const upserted = await upsertParentFromRow(r.row);
+        if (!upserted) continue;
+        unlinkedParents++;
+      }
+    }
+
+    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled, parentsCreated, parentsReused, unlinkedParents });
   } catch (error) {
     console.error('Erreur import parents:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
