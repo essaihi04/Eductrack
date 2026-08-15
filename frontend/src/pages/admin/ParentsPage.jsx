@@ -843,6 +843,10 @@ const ParentsPage = () => {
       // Lignes « sans élève trouvé » : nouveau compte vs rattachement à un
       // compte existant (numéro déjà connu) — deux issues à ne pas confondre.
       let unlinkedCreated = 0, unlinkedMerged = 0, failedRows = 0;
+      // Lignes refusées par la base (cause remontée par le serveur), à afficher
+      // telles quelles : c'est ce qui permet de corriger le fichier.
+      let rowErrorsCount = 0;
+      const rowErrors = [];
       const resultByKey = {};
       for (const f of commitFiles) {
         const agg = { dryRun: false, results: [], commitsCount: 0, massarBackfilled: 0 };
@@ -857,6 +861,8 @@ const ParentsPage = () => {
             totalReused += data.parentsReused || 0;
             unlinkedCreated += data.unlinkedCreated ?? data.unlinkedParents ?? 0;
             unlinkedMerged += data.unlinkedMerged || 0;
+            rowErrorsCount += data.rowErrorsCount || 0;
+            if (Array.isArray(data.rowErrors)) rowErrors.push(...data.rowErrors);
           } else {
             agg.error = error || 'Erreur';
             failedChunks++;
@@ -876,7 +882,12 @@ const ParentsPage = () => {
         (unlinkedCreated > 0 ? `\n• ${unlinkedCreated} parent(s) créé(s) SANS enfant rattaché — filtre « Sans élève rattaché » pour les retrouver.` : '') +
         (unlinkedMerged > 0 ? `\n• ${unlinkedMerged} ligne(s) sans élève trouvé ont rejoint un compte existant (numéro déjà connu, souvent le parent d'un frère ou d'une sœur) — rien à rattacher.` : '') +
         (totalMassar > 0 ? `\n• ${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : '') +
-        (failedChunks > 0 ? `\n⚠ ${failedChunks} lot(s) en échec, soit ${failedRows} ligne(s) non traitées — rechargez le même fichier et relancez l'import pour les terminer (aucun doublon : les associations déjà créées sont réutilisées).` : '')
+        (failedChunks > 0 ? `\n⚠ ${failedChunks} lot(s) en échec, soit ${failedRows} ligne(s) non traitées — rechargez le même fichier et relancez l'import pour les terminer (aucun doublon : les associations déjà créées sont réutilisées).` : '') +
+        (rowErrorsCount > 0
+          ? `\n\n⚠ ${rowErrorsCount} ligne(s) refusée(s) par la base :\n` +
+            rowErrors.slice(0, 8).map(e => `  • ${e.label} : ${e.error}`).join('\n') +
+            (rowErrorsCount > 8 ? `\n  … et ${rowErrorsCount - 8} autre(s).` : '')
+          : '')
       );
     } finally {
       setImporting(false);

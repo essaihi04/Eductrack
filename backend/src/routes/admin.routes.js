@@ -1615,49 +1615,71 @@ router.post('/parents/import', async (req, res) => {
       return { parentId, primary, contacts, isNew };
     };
 
+    // Erreurs ligne à ligne : une seule ligne fautive ne doit PAS faire tomber le
+    // lot entier. Avant, la moindre exception remontait au catch de la route → les
+    // 20 lignes du lot étaient perdues et le rejeu échouait exactement pareil.
+    const rowErrors = [];
+    const failRow = (label, e) => {
+      const message = e?.message || e?.details || String(e);
+      rowErrors.push({ label, error: message });
+      console.error(`Import parents — ligne « ${label} » ignorée :`, e);
+    };
+
     for (const r of results) {
       if (r.matchStatus !== 'matched' || !r.student?.id) continue;
+      const rowLabel = `${r.student.last_name || ''} ${r.student.first_name || ''}`.trim() || r.row?.student_full_name || '?';
+      try {
+        // GARDER LE CODE MASSAR PRÉEXISTANT : on ne remplit la colonne que si elle est
+        // vide, et on privilégie TOUJOURS le code propre à l'élève (présent dans son
+        // email = son identité Massar d'origine) plutôt que celui du fichier, qui peut
+        // diverger. On n'écrase jamais un code déjà renseigné.
+        const rowMassar = String(r.row.massar_code || '').trim().toUpperCase();
+        const currentMassar = String(r.student.massar_code || '').trim().toUpperCase();
+        const emailMassar = String(r.student.email || '').split('@')[0].trim().toUpperCase();
+        // Code à inscrire si la colonne est vide : email (préexistant) sinon fichier.
+        const codeToSet = emailMassar || rowMassar;
+        if (!currentMassar && codeToSet) {
+          const { error: massarUpdateError } = await supabaseAdmin
+            .from('profiles')
+            .update({ massar_code: codeToSet })
+            .eq('id', r.student.id);
+          // Un code Massar en doublon (contrainte d'unicité) ne doit pas empêcher
+          // le rattachement du parent : on note et on continue.
+          if (massarUpdateError) failRow(`${rowLabel} (code Massar)`, massarUpdateError);
+          else massarBackfilled++;
+        }
 
-      // GARDER LE CODE MASSAR PRÉEXISTANT : on ne remplit la colonne que si elle est
-      // vide, et on privilégie TOUJOURS le code propre à l'élève (présent dans son
-      // email = son identité Massar d'origine) plutôt que celui du fichier, qui peut
-      // diverger. On n'écrase jamais un code déjà renseigné.
-      const rowMassar = String(r.row.massar_code || '').trim().toUpperCase();
-      const currentMassar = String(r.student.massar_code || '').trim().toUpperCase();
-      const emailMassar = String(r.student.email || '').split('@')[0].trim().toUpperCase();
-      // Code à inscrire si la colonne est vide : email (préexistant) sinon fichier.
-      const codeToSet = emailMassar || rowMassar;
-      if (!currentMassar && codeToSet) {
-        const { error: massarUpdateError } = await supabaseAdmin
-          .from('profiles')
-          .update({ massar_code: codeToSet })
-          .eq('id', r.student.id);
-        if (massarUpdateError) throw massarUpdateError;
-        massarBackfilled++;
+        const upserted = await upsertParentFromRow(r.row);
+        if (!upserted) continue; // aucun numéro exploitable
+        const { parentId, primary, contacts } = upserted;
+
+        // Upsert link
+        const { error: upsertLinkError } = await supabaseAdmin
+          .from('parent_students')
+          .upsert(
+            {
+              parent_id: parentId,
+              student_id: r.student.id,
+              relationship: primary.relationship || null
+            },
+            { onConflict: 'parent_id,student_id' }
+          );
+        if (upsertLinkError) throw upsertLinkError;
+
+        // Inscrire l'élève à l'année active s'il en est un (classe de l'année active),
+        // pour que le parent importé apparaisse sur la page Parents. Pas de fuite.
+        // Une inscription en échec ne doit pas annuler le lien parent↔élève.
+        try {
+          await ensureEnrollmentIfCurrentYear(getSchoolId(req), r.student.id, r.student.class_id, req.body.academic_year, req.user?.id);
+        } catch (e) {
+          failRow(`${rowLabel} (inscription année)`, e);
+        }
+
+        commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
+      } catch (e) {
+        r.commitError = e?.message || String(e);
+        failRow(rowLabel, e);
       }
-
-      const upserted = await upsertParentFromRow(r.row);
-      if (!upserted) continue; // aucun numéro exploitable
-      const { parentId, primary, contacts } = upserted;
-
-      // Upsert link
-      const { error: upsertLinkError } = await supabaseAdmin
-        .from('parent_students')
-        .upsert(
-          {
-            parent_id: parentId,
-            student_id: r.student.id,
-            relationship: primary.relationship || null
-          },
-          { onConflict: 'parent_id,student_id' }
-        );
-      if (upsertLinkError) throw upsertLinkError;
-
-      // Inscrire l'élève à l'année active s'il en est un (classe de l'année active),
-      // pour que le parent importé apparaisse sur la page Parents. Pas de fuite.
-      await ensureEnrollmentIfCurrentYear(getSchoolId(req), r.student.id, r.student.class_id, req.body.academic_year, req.user?.id);
-
-      commits.push({ parent_id: parentId, student_id: r.student.id, contacts: contacts.length });
     }
 
     // PARENTS SANS ÉLÈVE : sur demande explicite (createUnmatched), les lignes dont
@@ -1675,14 +1697,26 @@ router.post('/parents/import', async (req, res) => {
     if (createUnmatched === true) {
       for (const r of results) {
         if (r.matchStatus !== 'not_found') continue;
-        const upserted = await upsertParentFromRow(r.row);
-        if (!upserted) continue;
-        if (upserted.isNew) unlinkedCreated++; else unlinkedMerged++;
+        try {
+          const upserted = await upsertParentFromRow(r.row);
+          if (!upserted) continue;
+          if (upserted.isNew) unlinkedCreated++; else unlinkedMerged++;
+        } catch (e) {
+          r.commitError = e?.message || String(e);
+          failRow(r.row?.parent_full_name || r.row?.student_full_name || '?', e);
+        }
       }
     }
     const unlinkedParents = unlinkedCreated + unlinkedMerged; // compat. ancien champ
 
-    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled, parentsCreated, parentsReused, unlinkedParents, unlinkedCreated, unlinkedMerged });
+    res.json({
+      dryRun: false, results, commitsCount: commits.length, massarBackfilled,
+      parentsCreated, parentsReused, unlinkedParents, unlinkedCreated, unlinkedMerged,
+      // Lignes ignorées avec leur cause, pour affichage direct dans l'écran d'import
+      // (plus besoin d'aller lire les logs du serveur pour comprendre un échec).
+      rowErrorsCount: rowErrors.length,
+      rowErrors: rowErrors.slice(0, 20)
+    });
   } catch (error) {
     console.error('Erreur import parents:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
