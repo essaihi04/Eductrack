@@ -1575,7 +1575,8 @@ router.post('/parents/import', async (req, res) => {
       if (existingContactError) throw existingContactError;
 
       let parentId = existingContacts?.[0]?.parent_id;
-      if (!parentId) {
+      const isNew = !parentId;
+      if (isNew) {
         const parent = await createParentProfile({
           email: null,
           firstName: parentName.firstName,
@@ -1611,7 +1612,7 @@ router.post('/parents/import', async (req, res) => {
         if (upsertContactError) throw upsertContactError;
       }
 
-      return { parentId, primary, contacts };
+      return { parentId, primary, contacts, isNew };
     };
 
     for (const r of results) {
@@ -1664,17 +1665,24 @@ router.post('/parents/import', async (req, res) => {
     // sans lien parent↔élève. Le parent apparaît alors dans l'annuaire « 0 enfant »
     // et peut être rattaché plus tard à la main. Les lignes ambiguës sont exclues :
     // l'élève existe, c'est le bon qu'il faut choisir dans l'aperçu.
-    let unlinkedParents = 0;
+    // Deux issues très différentes, à ne pas confondre dans le bilan :
+    //  • unlinkedCreated : nouveau compte, réellement sans enfant → à rattacher ;
+    //  • unlinkedMerged  : le numéro était déjà connu → la ligne a rejoint un
+    //    compte existant (souvent le parent d'un frère ou d'une sœur), qui garde
+    //    ses enfants. Rien à rattacher, et aucun doublon créé.
+    let unlinkedCreated = 0;
+    let unlinkedMerged = 0;
     if (createUnmatched === true) {
       for (const r of results) {
         if (r.matchStatus !== 'not_found') continue;
         const upserted = await upsertParentFromRow(r.row);
         if (!upserted) continue;
-        unlinkedParents++;
+        if (upserted.isNew) unlinkedCreated++; else unlinkedMerged++;
       }
     }
+    const unlinkedParents = unlinkedCreated + unlinkedMerged; // compat. ancien champ
 
-    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled, parentsCreated, parentsReused, unlinkedParents });
+    res.json({ dryRun: false, results, commitsCount: commits.length, massarBackfilled, parentsCreated, parentsReused, unlinkedParents, unlinkedCreated, unlinkedMerged });
   } catch (error) {
     console.error('Erreur import parents:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

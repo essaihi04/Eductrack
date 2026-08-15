@@ -837,7 +837,10 @@ const ParentsPage = () => {
       const commitFiles = ready; // déjà filtrés (vérifiés + prêts)
       const total = commitFiles.reduce((s, f) => s + f.rows.length, 0);
       setImportProgress({ done: 0, total });
-      let totalCommits = 0, totalMassar = 0, totalCreated = 0, totalReused = 0, failedChunks = 0, totalUnlinked = 0;
+      let totalCommits = 0, totalMassar = 0, totalCreated = 0, totalReused = 0, failedChunks = 0;
+      // Lignes « sans élève trouvé » : nouveau compte vs rattachement à un
+      // compte existant (numéro déjà connu) — deux issues à ne pas confondre.
+      let unlinkedCreated = 0, unlinkedMerged = 0, failedRows = 0;
       const resultByKey = {};
       for (const f of commitFiles) {
         const agg = { dryRun: false, results: [], commitsCount: 0, massarBackfilled: 0 };
@@ -850,10 +853,12 @@ const ParentsPage = () => {
             agg.massarBackfilled += data.massarBackfilled || 0;
             totalCreated += data.parentsCreated || 0;
             totalReused += data.parentsReused || 0;
-            totalUnlinked += data.unlinkedParents || 0;
+            unlinkedCreated += data.unlinkedCreated ?? data.unlinkedParents ?? 0;
+            unlinkedMerged += data.unlinkedMerged || 0;
           } else {
             agg.error = error || 'Erreur';
             failedChunks++;
+            failedRows += chunk.length;
           }
           setImportProgress(p => (p ? { ...p, done: p.done + chunk.length } : p));
         }
@@ -866,9 +871,10 @@ const ParentsPage = () => {
       alert(
         `Import terminé : ${totalCommits} association(s) créée(s).\n` +
         `• ${totalCreated} compte(s) parent créé(s), ${totalReused} réutilisé(s) (même numéro = même compte).` +
-        (totalUnlinked > 0 ? `\n• ${totalUnlinked} parent(s) créé(s) SANS enfant rattaché (élève non trouvé) — à rattacher depuis leur fiche.` : '') +
+        (unlinkedCreated > 0 ? `\n• ${unlinkedCreated} parent(s) créé(s) SANS enfant rattaché — filtre « Sans élève rattaché » pour les retrouver.` : '') +
+        (unlinkedMerged > 0 ? `\n• ${unlinkedMerged} ligne(s) sans élève trouvé ont rejoint un compte existant (numéro déjà connu, souvent le parent d'un frère ou d'une sœur) — rien à rattacher.` : '') +
         (totalMassar > 0 ? `\n• ${totalMassar} code(s) Massar renseigné(s) sur les élèves.` : '') +
-        (failedChunks > 0 ? `\n⚠ ${failedChunks} lot(s) en échec — relancez l'import pour les terminer (les associations déjà créées ne seront pas dupliquées).` : '')
+        (failedChunks > 0 ? `\n⚠ ${failedChunks} lot(s) en échec, soit ${failedRows} ligne(s) non traitées — rechargez le même fichier et relancez l'import pour les terminer (aucun doublon : les associations déjà créées sont réutilisées).` : '')
       );
     } finally {
       setImporting(false);
