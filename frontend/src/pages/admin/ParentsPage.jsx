@@ -331,6 +331,8 @@ const ParentsPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('');
   const [filterFiliere, setFilterFiliere] = useState('');
+  // Rattachement : '' = tous, 'without' = parents sans aucun élève, 'with' = avec enfant(s)
+  const [filterLink, setFilterLink] = useState('');
 
   // Create parent form
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -984,11 +986,18 @@ const ParentsPage = () => {
     });
   };
 
-  // Tout sélectionner / tout désélectionner (sur les parents actuellement filtrés)
+  // Tout sélectionner / tout désélectionner (sur les parents actuellement filtrés).
+  // On AJOUTE ou RETIRE les parents affichés au lieu de remplacer la sélection :
+  // on peut ainsi cumuler plusieurs filtres successifs (ex. deux classes) sans
+  // perdre ce qui a été coché avant.
   const toggleSelectAll = () => {
     const visibleIds = filteredParents.map(p => p.id);
     const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedParents.has(id));
-    setSelectedParents(allSelected ? new Set() : new Set(visibleIds));
+    setSelectedParents(prev => {
+      const n = new Set(prev);
+      visibleIds.forEach(id => (allSelected ? n.delete(id) : n.add(id)));
+      return n;
+    });
   };
 
   // Suppression groupée des parents sélectionnés
@@ -1026,8 +1035,12 @@ const ParentsPage = () => {
 
     const matchClass = !filterClass || (p.children || []).some(c => c.class?.name === filterClass);
     const matchFiliere = !filterFiliere || (p.children || []).some(c => c.class?.filiere === filterFiliere);
+    // Parents sans élève : comptes importés (ou créés à la main) sans lien
+    // parent↔élève, à rattacher. Les filtres classe/filière n'ont alors pas de sens.
+    const childCount = (p.children || []).length;
+    const matchLink = !filterLink || (filterLink === 'without' ? childCount === 0 : childCount > 0);
 
-    return matchSearch && matchClass && matchFiliere;
+    return matchSearch && matchLink && (filterLink === 'without' || (matchClass && matchFiliere));
   });
 
   // Options de classes : TOUTES les classes (pas seulement celles ayant déjà un parent),
@@ -1039,6 +1052,13 @@ const ParentsPage = () => {
   // Options de filières présentes dans l'école (classes ayant une filière renseignée).
   const filiereOptions = [...new Set(classes.map(c => c?.filiere).filter(Boolean))]
     .sort((a, b) => filiereLabel(a).localeCompare(filiereLabel(b)));
+
+  // Tous les parents actuellement affichés (donc filtrés) sont-ils sélectionnés ?
+  const allFilteredSelected = filteredParents.length > 0 && filteredParents.every(p => selectedParents.has(p.id));
+
+  // Parents sans aucun élève rattaché, sur la TOTALITÉ des parents (le compteur
+  // doit rester stable quand on filtre, c'est lui qui alimente le filtre dédié).
+  const parentsWithoutChild = parents.filter(p => (p.children || []).length === 0).length;
 
   // Répartition des parents (filtrés) par nombre d'enfants : 1 / 2 / 3 / 4+.
   const childrenDistribution = filteredParents.reduce((acc, p) => {
@@ -1113,9 +1133,9 @@ const ParentsPage = () => {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200"
               >
                 <CheckCheck className="w-4 h-4" />
-                {filteredParents.length > 0 && filteredParents.every(p => selectedParents.has(p.id))
-                  ? 'Tout désélectionner'
-                  : 'Tout sélectionner'}
+                {allFilteredSelected
+                  ? `Tout désélectionner (${filteredParents.length})`
+                  : `Tout sélectionner (${filteredParents.length})`}
               </button>
               <button
                 onClick={() => handleBulkSend('selected')}
@@ -1534,13 +1554,29 @@ const ParentsPage = () => {
           <select
             value={filterClass}
             onChange={e => setFilterClass(e.target.value)}
-            className="px-3 py-1.5 text-sm border rounded-lg bg-background"
+            disabled={filterLink === 'without'}
+            className="px-3 py-1.5 text-sm border rounded-lg bg-background disabled:opacity-50"
           >
             <option value="">Toutes les classes</option>
             {classOptions.map(c => (
               <option key={c.id} value={c.name}>{c.name}{c.level ? ` · ${c.level}` : ''}</option>
             ))}
           </select>
+        )}
+        {/* Rattachement à un élève — isole les parents importés « sans enfant ». */}
+        <select
+          value={filterLink}
+          onChange={e => setFilterLink(e.target.value)}
+          className="px-3 py-1.5 text-sm border rounded-lg bg-background"
+        >
+          <option value="">Tous les parents</option>
+          <option value="without">Sans élève rattaché ({parentsWithoutChild})</option>
+          <option value="with">Avec au moins un enfant</option>
+        </select>
+        {filterLink === 'without' && (
+          <span className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
+            Comptes à rattacher — ouvrez la fiche puis « Associer un élève ».
+          </span>
         )}
       </div>
 
@@ -1578,14 +1614,51 @@ const ParentsPage = () => {
                 </div>
               ))}
             </div>
-            {childrenDistribution.zero > 0 && (
-              <p className="text-xs text-muted-foreground">
-                + {childrenDistribution.zero} parent(s) sans enfant associé (non comptés dans la répartition).
-              </p>
+            {parentsWithoutChild > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterLink(filterLink === 'without' ? '' : 'without')}
+                className="text-xs text-left underline decoration-dotted underline-offset-2 text-muted-foreground hover:text-foreground"
+              >
+                {filterLink === 'without'
+                  ? `← Retirer le filtre (${parentsWithoutChild} parent(s) sans élève affiché(s))`
+                  : `+ ${parentsWithoutChild} parent(s) sans enfant associé (non comptés dans la répartition) — cliquer pour les afficher`}
+              </button>
             )}
           </div>
         );
       })()}
+
+      {/* Sélection multiple : case « tout sélectionner » au ras de la liste, pour
+          ne pas avoir à la chercher parmi les boutons de l'en-tête. Elle porte sur
+          les parents AFFICHÉS — combinée au filtre « sans élève rattaché », elle
+          permet d'agir en masse sur ces seuls comptes. */}
+      {bulkMode && filteredParents.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 px-3 py-2 rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">
+          <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleSelectAll}
+              className="w-4 h-4"
+            />
+            Tout sélectionner ({filteredParents.length} parent{filteredParents.length > 1 ? 's' : ''} affiché{filteredParents.length > 1 ? 's' : ''})
+          </label>
+          <span className="text-xs text-muted-foreground">
+            {selectedParents.size} sélectionné(s)
+            {(filterLink || filterClass || filterFiliere || searchTerm) ? ' — la sélection suit les filtres en cours' : ''}
+          </span>
+          {selectedParents.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedParents(new Set())}
+              className="text-xs underline text-muted-foreground hover:text-foreground"
+            >
+              Vider la sélection
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Parents List */}
       {filteredParents.length === 0 ? (
