@@ -306,15 +306,37 @@ const createParentProfile = async ({ email, firstName, lastName, phone, schoolId
 
   // Passe par le même chemin que les élèves (bypass RPC si activé) → pas de rate limit
   // lors d'un import massif de parents.
-  const { data: authData, error: authError } = await createAuthUserOnce({
-    email: finalEmail,
-    password,
-    firstName: firstName || 'Parent',
-    lastName: lastName || '',
-    role: 'parent'
-  });
+  // L'email auto est construit sur le NOM : deux familles homonymes (ZAKI ABDELALI
+  // et zaki ayoub…) produisaient la même adresse → « duplicate key value violates
+  // unique constraint users_email_partial_key » et la ligne était perdue. On
+  // suffixe et on réessaie, comme le fait déjà createStudentAuthUser.
+  let authData = null;
+  const maxEmailAttempts = 5;
+  // Base figée avant la boucle : on suffixe toujours la même racine, sans rogner
+  // un nom qui se terminerait légitimement par un chiffre.
+  const [baseLocal, baseDomain] = finalEmail.split('@');
+  for (let attempt = 0; ; attempt++) {
+    const { data, error } = await createAuthUserOnce({
+      email: finalEmail,
+      password,
+      firstName: firstName || 'Parent',
+      lastName: lastName || '',
+      role: 'parent'
+    });
+    if (!error) { authData = data; break; }
 
-  if (authError) throw authError;
+    const msg = String(error.message || error.msg || error);
+    const code = error.code || error.status || '';
+    const emailTaken =
+      msg.includes('already') || msg.includes('exists') || msg.includes('duplicate') ||
+      msg.includes('registered') || msg.includes('users_email_partial_key') ||
+      code === 'email_exists' || code === 'user_already_exists' || code === '23505' || code === 422;
+    // Un email FOURNI par l'appelant ne doit pas être renommé en douce.
+    if (!emailTaken || !usedAutoEmail || attempt >= maxEmailAttempts) throw error;
+
+    finalEmail = `${baseLocal}${attempt + 2}@${baseDomain}`;
+    console.log(`[Import parents] Email déjà pris, nouvel essai avec ${finalEmail}`);
+  }
 
   const { data: parent, error: parentError } = await supabaseAdmin
     .from('profiles')
