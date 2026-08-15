@@ -333,7 +333,7 @@ const Sidebar = () => {
         dir === 'rtl' ? 'right-0' : 'left-0'
       )}
     >
-      <div className="p-6 border-b border-border">
+      <div className="px-6 py-4 border-b border-border">
         {profile?.school?.logo_url && profile?.role !== 'super_admin' ? (
           <div className="flex flex-col items-center gap-2">
             {isSchoolAdmin ? (
@@ -345,7 +345,7 @@ const Sidebar = () => {
                 <img
                   src={resolveLogoUrl(profile.school)}
                   alt={profile.school.name}
-                  className="w-full max-h-14 object-contain"
+                  className="w-full h-24 object-contain"
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
                 <span className="absolute inset-0 hidden group-hover:flex items-center justify-center bg-black/40 rounded-lg">
@@ -356,7 +356,7 @@ const Sidebar = () => {
               <img
                 src={resolveLogoUrl(profile.school)}
                 alt={profile.school.name}
-                className="w-full max-h-14 object-contain"
+                className="w-full h-24 object-contain"
                 onError={(e) => { e.target.style.display = 'none'; }}
               />
             )}
