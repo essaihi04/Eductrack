@@ -364,6 +364,8 @@ const ParentsPage = () => {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedParents, setSelectedParents] = useState(new Set());
   const [bulkSending, setBulkSending] = useState(false);
+  // Progression de la suppression groupée : { done, total, ok, ko }
+  const [bulkProgress, setBulkProgress] = useState(null);
 
   // Import (multi-fichiers : 1 par classe)
   const [showImport, setShowImport] = useState(false);
@@ -1012,6 +1014,9 @@ const ParentsPage = () => {
     if (ids.length === 0) { alert('Sélectionnez au moins un parent'); return; }
     if (!confirm(`Supprimer ${ids.length} parent(s) et toutes leurs associations ? Cette action est irréversible.`)) return;
     setBulkSending(true);
+    // Suppression une par une (une requête par parent) : sur plusieurs centaines
+    // de comptes l'écran restait figé plusieurs minutes sans le moindre retour.
+    setBulkProgress({ done: 0, total: ids.length, ok: 0, ko: 0 });
     let ok = 0, ko = 0;
     try {
       const token = await getToken();
@@ -1023,6 +1028,7 @@ const ParentsPage = () => {
           });
           if (res.ok) ok++; else ko++;
         } catch { ko++; }
+        setBulkProgress(p => (p ? { ...p, done: p.done + 1, ok, ko } : p));
       }
       alert(`${ok} parent(s) supprimé(s)${ko > 0 ? `, ${ko} échec(s)` : ''}`);
       setBulkMode(false);
@@ -1030,6 +1036,7 @@ const ParentsPage = () => {
       await fetchData();
     } finally {
       setBulkSending(false);
+      setBulkProgress(null);
     }
   };
 
@@ -1157,7 +1164,9 @@ const ParentsPage = () => {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
                 <Trash2 className="w-4 h-4" />
-                {bulkSending ? '...' : `Supprimer (${selectedParents.size})`}
+                {bulkProgress
+                  ? `Suppression… ${bulkProgress.done}/${bulkProgress.total}`
+                  : bulkSending ? '...' : `Supprimer (${selectedParents.size})`}
               </button>
             </>
           )}
@@ -1639,6 +1648,25 @@ const ParentsPage = () => {
           ne pas avoir à la chercher parmi les boutons de l'en-tête. Elle porte sur
           les parents AFFICHÉS — combinée au filtre « sans élève rattaché », elle
           permet d'agir en masse sur ces seuls comptes. */}
+      {bulkProgress && (
+        <div className="space-y-1 px-3 py-2 rounded-lg border bg-card">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Suppression en cours… {bulkProgress.done}/{bulkProgress.total}</span>
+            <span>
+              {bulkProgress.ko > 0 ? `${bulkProgress.ko} échec(s) · ` : ''}
+              {Math.round((bulkProgress.done / Math.max(bulkProgress.total, 1)) * 100)}%
+            </span>
+          </div>
+          <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-red-600 transition-all duration-300"
+              style={{ width: `${Math.round((bulkProgress.done / Math.max(bulkProgress.total, 1)) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">Ne fermez pas la page tant que la suppression n'est pas terminée.</p>
+        </div>
+      )}
+
       {bulkMode && filteredParents.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 px-3 py-2 rounded-lg border bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">
           <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
