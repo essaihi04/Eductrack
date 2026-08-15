@@ -16,22 +16,13 @@ export default defineConfig({
     sourcemap: process.env.VITE_SOURCEMAP === 'true',
     rollupOptions: {
       output: {
-        // Découpage des grosses dépendances : réduit le pic mémoire du build et
-        // évite un bundle principal de plusieurs Mo rechargé à chaque déploiement.
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return;
-          if (id.includes('jspdf')) return 'jspdf';
-          if (id.includes('exceljs')) return 'exceljs';
-          if (id.includes('xlsx')) return 'xlsx';
-          if (id.includes('pdfjs-dist')) return 'pdfjs';
-          if (id.includes('html2canvas')) return 'html2canvas';
-          if (id.includes('recharts') || id.includes('d3-')) return 'charts';
-          if (id.includes('leaflet')) return 'leaflet';
-          if (id.includes('framer-motion')) return 'motion';
-          if (id.includes('@supabase')) return 'supabase';
-          if (id.includes('lucide-react')) return 'icons';
-          if (id.includes('react-router')) return 'router';
-          if (id.includes('/react-dom/') || id.includes('/react/') || id.includes('/scheduler/')) return 'react';
+        // NE PAS découper les bibliothèques liées à React (recharts/d3, leaflet,
+        // framer-motion, supabase, router…) : leurs dépendances croisées créent
+        // des cycles entre chunks et l'app plante au chargement avec
+        // « Cannot access 'X' before initialization ». Seules les libs feuilles,
+        // déjà chargées à la demande, sont isolées.
+        manualChunks: {
+          'jspdf': ['jspdf', 'jspdf-autotable']
         }
       }
     }
