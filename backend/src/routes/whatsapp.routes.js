@@ -642,7 +642,11 @@ router.post('/send', async (req, res) => {
 
   } catch (error) {
     console.error('Erreur envoi WhatsApp:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    // La réponse est déjà partie avant la boucle d'envoi (envoi en arrière-plan) :
+    // sans ce garde, une erreur pendant la boucle faisait lever ERR_HTTP_HEADERS_SENT
+    // ici même → rejet non géré → Node tue le process, donc PM2 redémarre et TOUS
+    // les envois en cours sont perdus. Même garde que /send-direct.
+    if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
