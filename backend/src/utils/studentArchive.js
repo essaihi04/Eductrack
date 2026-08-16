@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { yearVariants } from './enrollmentScope.js';
+import { invalidateProfileCache } from './authToken.js';
 
 // Année scolaire courante (format slash). Sept→déc = année en cours,
 // janv→août = année précédente. Même règle que les routes admin.
@@ -146,6 +147,9 @@ export const archiveStudent = async ({ studentId, academicYear = null, userId = 
     .update({ archived_at: new Date().toISOString(), class_id: null })
     .eq('id', studentId);
   if (error) throw isMissingColumn(error) ? missingMigrationError() : error;
+  // Le profil est en cache côté middleware : sans ça, un élève archivé
+  // garderait son accès jusqu'à expiration du cache.
+  invalidateProfileCache(studentId);
 };
 
 // Restaure un élève archivé : archived_at effacé, classe et inscription (NI)
@@ -179,5 +183,6 @@ export const restoreStudent = async ({ studentId, academicYear = null }) => {
     .update({ archived_at: null, ...(classId ? { class_id: classId } : {}) })
     .eq('id', studentId);
   if (error) throw isMissingColumn(error) ? missingMigrationError() : error;
+  invalidateProfileCache(studentId);
   return { classId };
 };

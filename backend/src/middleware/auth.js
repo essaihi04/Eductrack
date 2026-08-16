@@ -1,28 +1,61 @@
 import { supabase, supabaseAdmin } from '../config/supabase.js';
+import {
+  verifyAccessTokenLocally, localVerificationEnabled,
+  getCachedProfile, setCachedProfile,
+} from '../utils/authToken.js';
+
+let warnedNoSecret = false;
 
 export const authenticate = async (req, res, next) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '') || req.query?.token;
-    
+
     if (!token) {
       return res.status(401).json({ error: 'Token manquant' });
     }
 
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    // 1. Vérification locale de la signature : pas d'appel réseau au service
+    // Auth, qui était le poste le plus coûteux et le plus limité en débit de
+    // toute l'API (une fois par requête, pour chaque utilisateur connecté).
+    let user = null;
+    const local = verifyAccessTokenLocally(token);
 
-    if (error || !user) {
-      return res.status(401).json({ error: 'Token invalide' });
+    if (local?.expired) {
+      return res.status(401).json({ error: 'Session expirée' });
+    }
+    if (local?.user) {
+      user = local.user;
+    } else {
+      // Repli : secret non configuré, ou jeton que l'on ne sait pas vérifier
+      // sur place (algorithme asymétrique). Comportement d'avant, intact.
+      if (!localVerificationEnabled() && !warnedNoSecret) {
+        warnedNoSecret = true;
+        console.warn('[auth] SUPABASE_JWT_SECRET absent — vérification distante à chaque requête. Voir .env.example.');
+      }
+      const { data, error } = await supabase.auth.getUser(token);
+      if (error || !data?.user) {
+        return res.status(401).json({ error: 'Token invalide' });
+      }
+      user = data.user;
     }
 
-    // Récupérer le profil utilisateur avec son rôle (utiliser supabaseAdmin pour contourner RLS)
-    const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+    // 2. Profil applicatif (rôle, school_id…) : il ne vient PAS du jeton, il
+    // vit en base. Cache court pour ne pas le relire à chaque requête — voir
+    // utils/authToken.js pour la contrepartie sur les changements de rôle.
+    let profile = getCachedProfile(user.id);
 
-    if (profileError) {
-      return res.status(500).json({ error: 'Erreur lors de la récupération du profil' });
+    if (!profile) {
+      const { data, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError) {
+        return res.status(500).json({ error: 'Erreur lors de la récupération du profil' });
+      }
+      profile = data;
+      setCachedProfile(user.id, profile);
     }
 
     req.user = { ...user, ...profile };

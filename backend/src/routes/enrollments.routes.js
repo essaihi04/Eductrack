@@ -4,6 +4,7 @@ import { authenticate, requireSchoolAdmin, requireSchoolAdminOrFinance } from '.
 import { nextLevel, isTerminalLevel } from '../utils/levelProgression.js';
 import { yearVariants } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
+import { invalidateProfileCache } from '../utils/authToken.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -657,6 +658,8 @@ router.post('/reinscribe', requireSchoolAdminOrFinance, async (req, res) => {
       .update({ school_id: activeSchool, class_id: classId, level: targetLevel })
       .eq('id', student_id);
     if (updErr) throw updErr;
+    // school_id est mis en cache côté middleware (périmètre d'accès).
+    invalidateProfileCache(student_id);
 
     // 5) Inscription pour l'année cible dans l'école active.
     const { error: enrErr } = await supabaseAdmin
@@ -773,6 +776,7 @@ router.post('/cross-school/reinscribe-level', requireSchoolAdminOrFinance, async
         .update({ school_id: activeSchool, class_id: null, level: targetLevel })
         .eq('id', s.id);
       if (updErr) { errors.push({ student_id: s.id, error: updErr.message }); continue; }
+      invalidateProfileCache(s.id);
       const { error: enrErr } = await supabaseAdmin
         .from('student_enrollments')
         .upsert({

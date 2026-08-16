@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { supabaseAdmin } from '../config/supabase.js';
+import { invalidateProfileCache } from '../utils/authToken.js';
 import { authenticate, requireSuperAdmin } from '../middleware/auth.js';
 import { uploadBuffer, removeObject, BUCKET_PUBLIC, normalizeLogoToPng } from '../utils/storage.js';
 
@@ -443,6 +444,10 @@ router.delete('/schools/:schoolId/admins/:userId', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Le rôle est en cache côté middleware : sans ça, la rétrogradation
+    // mettrait jusqu'à PROFILE_CACHE_TTL_MS à s'appliquer.
+    invalidateProfileCache(userId);
 
     await supabaseAdmin.from('audit_log').insert({
       user_id: req.user.id,
