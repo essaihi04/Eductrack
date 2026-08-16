@@ -51,6 +51,8 @@ import approvalRoutes from './routes/approval.routes.js';
 import enrollmentsRoutes from './routes/enrollments.routes.js';
 import inscriptionsRoutes from './routes/inscriptions.routes.js';
 import { startInvoiceScheduler } from './services/invoiceScheduler.js';
+import { startJobRunner, registerJobHandler } from './services/jobs/index.js';
+import { runBulkSend, WHATSAPP_BULK_SEND } from './services/whatsapp/bulkSend.js';
 import { bootstrapAllSessions } from './services/whatsapp/index.js';
 import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
 
@@ -159,6 +161,11 @@ app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   startCommunicationScheduler();
   startInvoiceScheduler();
+
+  // File de travaux persistante : reprend au démarrage les jobs interrompus par
+  // l'arrêt précédent (déploiement, crash) au lieu de les perdre.
+  registerJobHandler(WHATSAPP_BULK_SEND, runBulkSend);
+  startJobRunner();
 
   // Reconnecte automatiquement toutes les sessions WhatsApp Baileys
   // pour les écoles déjà appairées (auth state présent sur disque).

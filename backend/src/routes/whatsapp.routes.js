@@ -4,7 +4,7 @@ import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.j
 import { generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
 import {
-  sendText, sendImage, sendDocument, sendMediaBuffer,
+  sendText, sendMediaBuffer,
   startSession, logoutSession, getStatus, getQrDataUrl,
   requestPairingCode,
   getStats as getAntiBanStats,
@@ -16,6 +16,9 @@ import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendPushToUser } from '../services/webPush.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
+import { isSessionReady, sendUnified } from '../services/whatsapp/sendHelpers.js';
+import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.js';
+import { enqueueJob } from '../services/jobs/index.js';
 
 const router = express.Router();
 
@@ -113,22 +116,8 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
 // Vérifie qu'une session WhatsApp est prête pour une école.
 // Cloud API : prête dès que l'école est mappée (provider='cloud' + phone_number_id).
 // Baileys : prête si le socket est connecté.
-const isSessionReady = async (schoolId) => {
-  if (!schoolId) return false;
-  if (getStatus(schoolId).connected) return true;
-  return await cloud.isCloudSchool(schoolId);
-};
-
-// Helper d'envoi unifié (texte / image / document)
-async function sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName }) {
-  if (messageType === 'image' && mediaUrl) {
-    return sendImage(schoolId, phone, mediaUrl, message || '');
-  }
-  if (messageType === 'document' && mediaUrl) {
-    return sendDocument(schoolId, phone, mediaUrl, fileName || 'document.pdf', message || '');
-  }
-  return sendText(schoolId, phone, message || '');
-}
+// isSessionReady / sendUnified vivent désormais dans services/whatsapp/sendHelpers.js :
+// le job d'envoi de masse en a besoin aussi (voir import en tête de fichier).
 
 // ==================== RECIPIENTS ====================
 
@@ -511,11 +500,10 @@ router.post('/send', async (req, res) => {
       status: 'pending'
     }));
 
-    const { data: insertedRecipients } = await supabaseAdmin
+    const { error: recipientsError } = await supabaseAdmin
       .from('whatsapp_message_recipients')
-      .insert(recipientRecords)
-      .select('id, parent_id, phone_e164');
-    const recipientRowId = new Map((insertedRecipients || []).map(r => [`${r.parent_id || ''}|${r.phone_e164 || ''}`, r.id]));
+      .insert(recipientRecords);
+    if (recipientsError) throw recipientsError;
 
     // Vérifie session Baileys/Cloud (seulement si le canal WhatsApp est demandé)
     if (wantWa && !(await isSessionReady(schoolId))) {
@@ -523,122 +511,38 @@ router.post('/send', async (req, res) => {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Connectez le numéro de votre école depuis l\'onglet Connexion, ou choisissez le canal Application.' });
     }
 
-    // Nom de l'école pour le titre des notifications in-app
-    let schoolName = 'votre école';
-    if (wantPush && schoolId) {
-      const { data: school } = await supabaseAdmin.from('schools').select('name').eq('id', schoolId).maybeSingle();
-      if (school?.name) schoolName = school.name;
+    // L'envoi part en job persistant : il survit à un redémarrage (déploiement,
+    // crash) et REPREND là où il s'était arrêté, au lieu de vivre en mémoire du
+    // process et d'être perdu. Le job ne transporte que messageId — tout le
+    // reste se relit depuis whatsapp_messages / _recipients.
+    let queued = true;
+    try {
+      await enqueueJob({
+        type: WHATSAPP_BULK_SEND,
+        payload: { message_id: msgLog.id },
+        schoolId,
+        createdBy: req.user.id,
+      });
+    } catch (queueError) {
+      // Table jobs absente (ADD_JOBS_QUEUE.sql pas encore exécuté) : on garde le
+      // comportement d'avant plutôt que de bloquer l'envoi.
+      queued = false;
+      console.warn('[whatsapp] file indisponible, envoi en direct :', queueError.message);
     }
 
-    // Répond immédiatement, envoi en arrière-plan
     res.json({
       success: true,
       messageId: msgLog.id,
       totalRecipients: recipients.length,
-      status: 'sending'
+      status: 'sending',
+      queued,
     });
 
-    // Background: envoi séquentiel — canal app (notification + push) puis
-    // WhatsApp via Baileys/Cloud (anti-ban intégré).
-    let sentCount = 0;
-    let failedCount = 0;
-
-    // Corps de la notification in-app (le média est joint en lien cliquable)
-    const notifTitle = `📣 ${schoolName}`;
-    let notifBody = message || (messageType === 'image' ? '📷 Image' : '📎 Document');
-    if (mediaUrl) notifBody += `\n📎 ${fileName || 'Pièce jointe'} : ${mediaUrl}`;
-
-    // Un même numéro partagé par 2 parents ne reçoit qu'UN WhatsApp,
-    // mais chaque parent garde sa notification in-app.
-    const waSentPhones = new Set();
-
-    for (const recipient of recipients) {
-      const rowId = recipientRowId.get(`${recipient.parent_id || ''}|${recipient.phone_e164 || ''}`);
-      const patch = {};
-      let waOk = false;
-      let appOk = false;
-      let errorMsg = null;
-
-      // 1. Canal app : notification in-app (lisible même sans push) + push
-      if (wantPush && recipient.parent_id) {
-        try {
-          const { data: notif, error: notifErr } = await supabaseAdmin
-            .from('notifications')
-            .insert({
-              user_id: recipient.parent_id,
-              type: 'message',
-              title: notifTitle,
-              message: notifBody,
-              data: { hub_message_id: msgLog.id, media_url: mediaUrl || null, file_name: fileName || null, message_type: messageType }
-            })
-            .select('id')
-            .single();
-          if (notifErr) throw notifErr;
-          patch.notification_id = notif.id;
-          appOk = true;
-          const pushRes = await sendPushToUser(recipient.parent_id, {
-            title: notifTitle,
-            body: (message || notifBody).slice(0, 140),
-            url: '/parent/notifications',
-            tag: `comm-msg-${msgLog.id}`,
-            // Pièce jointe image → grande image dans la notification (sinon logo école)
-            image: messageType === 'image' && mediaUrl ? mediaUrl : undefined
-          });
-          patch.push_status = pushRes.sent > 0 ? 'sent' : 'no_subscription';
-        } catch (pushErr) {
-          patch.push_status = 'failed';
-          errorMsg = `App: ${pushErr.message || 'erreur'}`;
-        }
-      }
-
-      // 2. Canal WhatsApp
-      if (wantWa && recipient.phone_e164) {
-        if (waSentPhones.has(recipient.phone_e164)) {
-          waOk = true; // déjà envoyé à ce numéro (parents partageant un téléphone)
-        } else {
-          try {
-            const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message, mediaUrl, fileName });
-            if (result.success) {
-              waOk = true;
-              waSentPhones.add(recipient.phone_e164);
-              patch.provider_msg_id = String(result.data?.msgId || '');
-            } else {
-              errorMsg = [errorMsg, result.message || 'Erreur WhatsApp'].filter(Boolean).join(' | ');
-            }
-          } catch (sendErr) {
-            errorMsg = [errorMsg, sendErr.message || 'Erreur réseau'].filter(Boolean).join(' | ');
-          }
-        }
-      }
-
-      const reached = waOk || appOk;
-      if (reached) sentCount++; else failedCount++;
-      patch.status = reached ? 'sent' : 'failed';
-      if (reached) patch.sent_at = new Date().toISOString();
-      if (errorMsg) patch.error_message = errorMsg;
-
-      if (rowId) {
-        await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', rowId);
-      }
-
-      // Update progress
-      await supabaseAdmin
-        .from('whatsapp_messages')
-        .update({ sent_count: sentCount, failed_count: failedCount, updated_at: new Date().toISOString() })
-        .eq('id', msgLog.id);
-      // Pas besoin de waitWasenderInterval : sendText/sendImage intègrent déjà le délai humain anti-ban.
+    if (!queued) {
+      runBulkSend({ message_id: msgLog.id }).catch((e) =>
+        console.error('[whatsapp] envoi direct en échec :', e.message)
+      );
     }
-
-    // Final status
-    await supabaseAdmin
-      .from('whatsapp_messages')
-      .update({
-        status: failedCount === recipients.length ? 'failed' : 'completed',
-        sent_count: sentCount,
-        failed_count: failedCount,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', msgLog.id);
 
   } catch (error) {
     console.error('Erreur envoi WhatsApp:', error);
