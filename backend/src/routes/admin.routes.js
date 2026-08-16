@@ -5783,6 +5783,20 @@ router.post('/students/import', async (req, res) => {
       return res.status(400).json({ error: 'Données invalides' });
     }
 
+    // Recherche groupée des élèves déjà présents : UNE requête par lot d'emails
+    // au lieu d'un SELECT par ligne du fichier. Un import de 300 élèves faisait
+    // 300 allers-retours Supabase en série avant même de créer quoi que ce soit.
+    const importEmails = students.map((s) => s.email).filter(Boolean);
+    const existingRows = await selectByIdsInChunks(
+      (chunk) => supabaseAdmin
+        .from('profiles')
+        .select('id, email, first_name, last_name')
+        .eq('role', 'student')
+        .in('email', chunk),
+      importEmails
+    );
+    const existingByEmail = new Map(existingRows.map((r) => [r.email, r]));
+
     // Mode prévisualisation : on détecte seulement les nouveaux vs déjà présents,
     // sans rien créer. Sert à afficher un récapitulatif avant l'import réel.
     if (dryRun) {
@@ -5790,12 +5804,7 @@ router.post('/students/import', async (req, res) => {
       const previewExisting = [];
       for (const student of students) {
         const { email, firstName, lastName } = student;
-        const { data: existingProfile } = await supabaseAdmin
-          .from('profiles')
-          .select('id, email, first_name, last_name')
-          .eq('email', email)
-          .eq('role', 'student')
-          .single();
+        const existingProfile = existingByEmail.get(email);
         if (existingProfile) {
           previewExisting.push(existingProfile);
         } else {
@@ -5818,6 +5827,15 @@ router.post('/students/import', async (req, res) => {
     const createdStudents = [];
     const existingStudents = [];
     const errors = [];
+    // Écritures accumulées puis envoyées par lots après la boucle : une requête
+    // par lot au lieu d'une par élève.
+    const pendingUpdates = [];
+    const pendingInserts = [];
+    // Doublons DANS le fichier : avant, le SELECT par ligne voyait l'élève créé
+    // quelques lignes plus haut. Avec la recherche groupée (faite une seule fois
+    // au début), il faut mémoriser nous-mêmes ce qui vient d'être créé, sinon la
+    // 2e ligne recréerait un compte avec un email suffixé.
+    const seenInFile = new Map();
 
     for (let i = 0; i < students.length; i++) {
       const student = students[i];
@@ -5826,13 +5844,7 @@ router.post('/students/import', async (req, res) => {
       // Position de l'élève dans le fichier (1-based) = ordre d'affichage verrouillé.
       const importOrder = i + 1;
 
-      // Vérifier si l'élève existe déjà
-      const { data: existingProfile } = await supabaseAdmin
-        .from('profiles')
-        .select('id, email, first_name, last_name')
-        .eq('email', email)
-        .eq('role', 'student')
-        .single();
+      const existingProfile = existingByEmail.get(email);
 
       if (existingProfile) {
         console.log(`[Import] Élève existant: ${email}`);
@@ -5841,14 +5853,18 @@ router.post('/students/import', async (req, res) => {
         // rattacher à la classe cible (import « élèves dans cette classe »).
         const existingPatch = { import_order: importOrder };
         if (classId) existingPatch.class_id = classId;
-        await supabaseAdmin
-          .from('profiles')
-          .update(existingPatch)
-          .eq('id', existingProfile.id);
+        pendingUpdates.push({ id: existingProfile.id, patch: existingPatch });
         existingStudents.push({
           ...existingProfile,
           password: '********' // Masquer le mot de passe pour les élèves existants
         });
+        continue;
+      }
+
+      const duplicateInFile = seenInFile.get(email);
+      if (duplicateInFile) {
+        console.log(`[Import] Ligne en double dans le fichier: ${email}`);
+        existingStudents.push({ ...duplicateInFile, password: '********' });
         continue;
       }
 
@@ -5872,35 +5888,71 @@ router.post('/students/import', async (req, res) => {
         continue;
       }
 
-      // Créer le profil
-      const { data: profile, error: profileError } = await supabaseAdmin
-        .from('profiles')
-        .insert({
-          id: authData.user.id,
-          email: finalEmail,
-          first_name: firstName,
-          last_name: lastName,
-          role: 'student',
-          class_id: classId || null,
-          school_id: getSchoolId(req),
-          massar_code: massarCode || null,
-          import_order: importOrder
-        })
-        .select()
-        .single();
+      // Profil mis en file : inséré par lot après la boucle.
+      const profileRow = {
+        id: authData.user.id,
+        email: finalEmail,
+        first_name: firstName,
+        last_name: lastName,
+        role: 'student',
+        class_id: classId || null,
+        school_id: getSchoolId(req),
+        massar_code: massarCode || null,
+        import_order: importOrder
+      };
+      pendingInserts.push({ row: profileRow, password, originalEmail: email });
+      seenInFile.set(email, {
+        id: profileRow.id,
+        email: finalEmail,
+        first_name: firstName,
+        last_name: lastName
+      });
+    }
 
-      if (profileError) {
-        console.error(`[Import] Erreur création profil ${email}:`, profileError);
-        errors.push({ email, reason: profileError.message });
+    // Mises à jour des élèves déjà présents : 20 en parallèle au lieu d'une
+    // requête bloquante par élève (un réimport, cas le plus fréquent, ne touche
+    // que ce chemin).
+    for (const part of chunkArray(pendingUpdates, 20)) {
+      await Promise.all(part.map(({ id, patch }) =>
+        supabaseAdmin.from('profiles').update(patch).eq('id', id)));
+    }
+
+    // Insertion des nouveaux profils par lots. Un INSERT groupé est tout-ou-rien :
+    // si le lot échoue, on le rejoue ligne par ligne pour n'écarter que la ligne
+    // fautive — même garantie qu'avant, en bien moins de requêtes.
+    for (const part of chunkArray(pendingInserts, 50)) {
+      const { data: inserted, error: batchError } = await supabaseAdmin
+        .from('profiles')
+        .insert(part.map((p) => p.row))
+        .select();
+
+      if (!batchError) {
+        const insertedById = new Map((inserted || []).map((p) => [p.id, p]));
+        for (const p of part) {
+          const profile = insertedById.get(p.row.id);
+          if (!profile) continue;
+          // Ajouter le mot de passe au profil pour l'affichage
+          createdStudents.push({ ...profile, password: p.password, originalEmail: p.originalEmail });
+        }
         continue;
       }
 
-      // Ajouter le mot de passe au profil pour l'affichage
-      createdStudents.push({
-        ...profile,
-        password,
-        originalEmail: email
-      });
+      console.error('[Import] Lot de profils refusé, reprise ligne par ligne:', batchError.message);
+      for (const p of part) {
+        const { data: profile, error: profileError } = await supabaseAdmin
+          .from('profiles')
+          .insert(p.row)
+          .select()
+          .single();
+
+        if (profileError) {
+          console.error(`[Import] Erreur création profil ${p.originalEmail}:`, profileError);
+          errors.push({ email: p.originalEmail, reason: profileError.message });
+          continue;
+        }
+
+        createdStudents.push({ ...profile, password: p.password, originalEmail: p.originalEmail });
+      }
     }
 
     // Inscriptions de l'année active (student_enrollments) — INDISPENSABLE :
@@ -5917,11 +5969,17 @@ router.post('/students/import', async (req, res) => {
       const importedIds = [...createdStudents, ...existingStudents]
         .map(s => s.id).filter(Boolean);
       if (importedIds.length) {
-        const { data: existingEnrolls } = await supabaseAdmin
-          .from('student_enrollments')
-          .select('student_id')
-          .eq('academic_year', enrollYear)
-          .in('student_id', importedIds);
+        // Par lots : au-delà de ~200 UUID le .in() dépasse la limite d'URL et
+        // renvoie une liste vide sans erreur visible → toEnroll contiendrait TOUS
+        // les élèves et l'upsert écraserait les statuts déjà posés (RI, NR).
+        const existingEnrolls = await selectByIdsInChunks(
+          (chunk) => supabaseAdmin
+            .from('student_enrollments')
+            .select('student_id')
+            .eq('academic_year', enrollYear)
+            .in('student_id', chunk),
+          importedIds
+        );
         const alreadyEnrolled = new Set((existingEnrolls || []).map(e => e.student_id));
         const toEnroll = importedIds
           .filter(id => !alreadyEnrolled.has(id))
