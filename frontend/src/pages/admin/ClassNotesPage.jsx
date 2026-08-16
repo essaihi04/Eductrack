@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { saveBlob } from '../../lib/download';
 import { ClipboardList, RefreshCw, FileDown, Save, X, Users, AlertTriangle, Pencil, Upload, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { useYear } from '../../contexts/YearContext';
+import { sameYear } from '../../lib/schoolYear';
 
 // Motifs des colonnes de notes Massar (contrôles + activité intégrée)
 const MASSAR_GRADE_PATTERNS = [
@@ -156,6 +158,7 @@ const LEVEL = {
 const noteColor = (n) => n == null ? 'text-gray-400' : n >= 15 ? 'text-green-700' : n >= 10 ? 'text-amber-600' : 'text-red-600';
 
 const ClassNotesPage = () => {
+  const { year } = useYear();
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const getToken = async () => {
     const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
@@ -174,6 +177,10 @@ const ClassNotesPage = () => {
   const [editRows, setEditRows] = useState([]);     // notes éditables
   const [savingEdit, setSavingEdit] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const activeClasses = useMemo(
+    () => classes.filter((item) => !item.academic_year || sameYear(item.academic_year, year)),
+    [classes, year],
+  );
 
   // Import Massar (notes de contrôle continu) — multi-fichiers
   const [massarFiles, setMassarFiles] = useState([]); // [{ fileName, className, subjectArabic, semester, gradeCols, rows, error }]
@@ -198,6 +205,14 @@ const ClassNotesPage = () => {
       } catch (e) { console.error(e); }
     })();
   }, []);
+
+  useEffect(() => {
+    if (selectedClass && !activeClasses.some((item) => item.id === selectedClass)) {
+      setSelectedClass('');
+      return;
+    }
+    if (!selectedClass && activeClasses.length > 0) setSelectedClass(activeClasses[0].id);
+  }, [activeClasses, selectedClass]);
 
   const loadOverview = useCallback(async () => {
     if (!selectedClass) { setOverview(null); return; }
@@ -280,7 +295,7 @@ const ClassNotesPage = () => {
           continue;
         }
         parsed.push({ fileName: file.name, ...p, subjectId: guessSubjectId(p.subjectArabic, subjects) });
-      } catch (err) {
+      } catch {
         parsed.push({ fileName: file.name, error: 'Erreur de lecture du fichier' });
       }
     }
@@ -345,7 +360,7 @@ const ClassNotesPage = () => {
           <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)}
             className="border rounded-lg px-3 py-2 text-sm min-w-[240px]">
             <option value="">— Choisir une classe —</option>
-            {classes.map(c => (
+            {activeClasses.map(c => (
               <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level}${c.filiere ? '/' + c.filiere : ''})` : ''}</option>
             ))}
           </select>

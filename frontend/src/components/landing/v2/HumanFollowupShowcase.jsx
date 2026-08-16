@@ -160,7 +160,7 @@ const ParentChatbot = () => {
         <div>
           <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-xs font-extrabold uppercase tracking-[0.14em] text-[#BDE8E2] ring-1 ring-white/10">
             <Bot className="h-4 w-4" />
-            Assistant parent Boussoule
+            Assistant parent Bousole
           </span>
           <h3 className="mt-5 text-3xl font-black leading-tight tracking-[-0.035em] sm:text-4xl">Le parent pose sa question. Le téléphone lui répond clairement.</h3>
           <p className="mt-5 text-base font-medium leading-7 text-white/60 sm:text-lg">Devoirs, présence ou accompagnement personnalisé : le chatbot retrouve l’information autorisée et répond dans un langage simple, en français ou en arabe.</p>
@@ -193,7 +193,7 @@ const ParentChatbot = () => {
               <div className="flex items-center gap-3">
                 <span className="grid h-10 w-10 place-items-center rounded-full bg-[#2A9D8F] text-sm font-black">B</span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-black">Boussoule · École Al Manar</p>
+                  <p className="truncate text-sm font-black">Bousole · École Al Manar</p>
                   <p className="text-[10px] font-semibold text-white/60">Assistant parent · disponible</p>
                 </div>
                 <MessageCircle className="h-5 w-5 text-white/70" />
@@ -209,7 +209,7 @@ const ParentChatbot = () => {
                     <div className="mt-1 flex justify-end gap-0.5 text-[9px] text-[#2A9D8F]"><Check className="h-3 w-3" /><Check className="-ml-1.5 h-3 w-3" /></div>
                   </div>
                   <div className="max-w-[92%] rounded-2xl rounded-tl-sm bg-white p-3 text-[12px] font-semibold leading-5 text-[#173A59] shadow-sm">
-                    <span className="mb-1.5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#2A9D8F]"><Sparkles className="h-3 w-3" /> Boussoule répond</span>
+                    <span className="mb-1.5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.1em] text-[#2A9D8F]"><Sparkles className="h-3 w-3" /> Bousole répond</span>
                     {scenario.answer}
                     <p className="mt-2 border-t border-[#173A59]/10 pt-2 text-[9px] font-bold leading-4 text-[#173A59]/40">{scenario.detail}</p>
                   </div>
@@ -322,7 +322,7 @@ const HumanFollowupShowcase = () => (
           Le suivi humain, rendu visible
         </div>
         <h2 className="mt-5 text-3xl font-black tracking-[-0.035em] text-[#173A59] sm:text-5xl">On ne suit pas des cases. On accompagne des parcours.</h2>
-        <p className="mt-5 text-lg font-medium leading-8 text-[#173A59]/60">Boussoule relie ce qui se passe en classe, les questions de la famille et l’évolution personnelle de chaque élève.</p>
+        <p className="mt-5 text-lg font-medium leading-8 text-[#173A59]/60">Bousole relie ce qui se passe en classe, les questions de la famille et l’évolution personnelle de chaque élève.</p>
       </div>
 
       <div className="mt-16">

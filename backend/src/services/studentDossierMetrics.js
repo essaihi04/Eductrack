@@ -13,8 +13,10 @@ export const isBehaviorIncident = (row = {}) => {
   const attitude = String(row.attitude || '').toLowerCase();
   return row.sleeping === true
     || row.phone_use === true
-    || ['distrait', 'poor'].includes(discipline)
-    || ['bavarre', 'perturbateur', 'disruptive'].includes(attitude);
+    // « distrait » est un niveau de suivi pédagogique par séance, pas un
+    // incident disciplinaire. Le compter gonflait artificiellement le dossier.
+    || discipline === 'poor'
+    || ['bavarre', 'bavard', 'perturbateur', 'disruptive'].includes(attitude);
 };
 
 export const aggregateAttendanceByYear = (rows = []) => {

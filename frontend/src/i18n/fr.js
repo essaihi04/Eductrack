@@ -1253,7 +1253,7 @@ export default {
   'pnotif.push.hide': 'Masquer',
   'pnotif.push.unsupportedIOS': '🔔 Pour recevoir les notifications de l’école directement sur ce téléphone, ajoutez l’application à votre écran d’accueil (Partager → « Sur l’écran d’accueil »), puis rouvrez-la.',
   'pnotif.push.unsupportedOther': '🔔 Pour recevoir les notifications de l’école directement sur ce téléphone, utilisez un navigateur récent (Chrome, Edge, Firefox) ou installez l’application.',
-  'pnotif.push.failedNative': 'Notifications non activées. Autorisez-les dans les réglages du téléphone (Applications → Boussoule → Notifications), puis réessayez.',
+  'pnotif.push.failedNative': 'Notifications non activées. Autorisez-les dans les réglages du téléphone (Applications → Bousole → Notifications), puis réessayez.',
   'pnotif.push.failedWeb': 'Notifications non activées. Autorisez-les dans les réglages du navigateur, puis réessayez.',
   'pnotif.push.error': 'Erreur : {{msg}}',
   'pnotif.push.cannotEnable': 'activation impossible',

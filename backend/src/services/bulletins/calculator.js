@@ -15,6 +15,7 @@
 
 import { supabaseAdmin } from '../../config/supabase.js';
 import { getDefaultYearBounds } from './schoolCalendar.js';
+import { canonicalSubject, collapseControlsBySlot, resolveControls } from '../controlSubjects.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -97,15 +98,21 @@ export const getCoefficients = async (schoolId, level, filiere) => {
     .eq('filiere', filiere || null);
 
   const map = new Map();
-  (globalCoefs || []).forEach(c => map.set(c.subject_name.trim(), {
-    coefficient: Number(c.coefficient),
-    display_order: c.display_order
-  }));
+  (globalCoefs || []).forEach(c => {
+    const subject = canonicalSubject(c.subject_name);
+    map.set(subject.label, {
+      coefficient: Number(c.coefficient),
+      display_order: c.display_order
+    });
+  });
   // Les overrides école écrasent les globaux
-  (schoolCoefs || []).forEach(c => map.set(c.subject_name.trim(), {
-    coefficient: Number(c.coefficient),
-    display_order: c.display_order
-  }));
+  (schoolCoefs || []).forEach(c => {
+    const subject = canonicalSubject(c.subject_name);
+    map.set(subject.label, {
+      coefficient: Number(c.coefficient),
+      display_order: c.display_order
+    });
+  });
   return map;
 };
 
@@ -145,17 +152,30 @@ export const computeStudentBulletin = async ({
     .lte('date', end)
     .neq('status', 'cancelled');
 
-  const controlsArr = controls || [];
-  const controlIds = controlsArr.map(c => c.id);
-
-  // Matières référencées directement par les contrôles (source officielle).
-  const subjectIds = [...new Set(controlsArr.map(c => c.subject_id).filter(Boolean))];
-  const subjectById = new Map();
-  if (subjectIds.length) {
-    const { data: subjRows } = await supabaseAdmin
-      .from('subjects').select('id, name').in('id', subjectIds);
-    (subjRows || []).forEach(s => subjectById.set(s.id, { id: s.id, name: s.name }));
+  const controlsRaw = controls || [];
+  const teacherIds = [...new Set(controlsRaw.map((control) => control.teacher_id).filter(Boolean))];
+  let teacherSubjects = [];
+  if (teacherIds.length) {
+    const { data } = await supabaseAdmin
+      .from('teacher_subjects')
+      .select('teacher_id, subject_id')
+      .in('teacher_id', teacherIds);
+    teacherSubjects = data || [];
   }
+
+  const subjectIds = [...new Set([
+    ...controlsRaw.map((control) => control.subject_id),
+    ...teacherSubjects.map((row) => row.subject_id),
+  ].filter(Boolean))];
+  let subjectRows = [];
+  if (subjectIds.length) {
+    const { data } = await supabaseAdmin
+      .from('subjects').select('id, name, code').in('id', subjectIds);
+    subjectRows = data || [];
+  }
+
+  const controlsArr = resolveControls(controlsRaw, subjectRows, teacherSubjects);
+  const controlIds = controlsArr.map(c => c.id);
 
   // 4. Notes de l'élève sur ces contrôles
   let notes = [];
@@ -168,17 +188,18 @@ export const computeStudentBulletin = async ({
     notes = data || [];
   }
 
-  // 5. Grouper par matière. Les anciens contrôles sans subject_id restent en
-  // base, mais sont exclus des moyennes : un professeur peut enseigner
-  // plusieurs matières, donc sa matière ne doit jamais être devinée.
+  // 5. Grouper par matière. Les anciens contrôles sans subject_id sont récupérés
+  // seulement lorsque leur professeur possède une unique matière.
   // Structure : { subjectName: { subject_id, controls: [], activities: [] } }
   const buckets = {};
   const noteByControl = new Map((notes || []).map(n => [n.control_id, Number(n.note)]));
+  const noteCounts = new Map((notes || []).map((note) => [note.control_id, 1]));
+  const effectiveControls = collapseControlsBySlot(controlsArr, noteCounts);
 
-  for (const ctrl of controlsArr) {
-    const subj = ctrl.subject_id ? subjectById.get(ctrl.subject_id) : null;
-    if (!subj || !subj.name) continue;
-    const key = subj.name.trim();
+  for (const ctrl of effectiveControls) {
+    const subj = ctrl.resolved_subject;
+    if (!subj || !subj.label) continue;
+    const key = subj.label.trim();
     if (!buckets[key]) {
       buckets[key] = { subject_id: subj.id, subject_name: key, controls: [], activities: [], controlsDetail: [], activitiesDetail: [] };
     }

@@ -159,7 +159,7 @@ const Benefits = () => {
             >
               <img
                 src={roleImages[benefitsData[activeTab].role]}
-                alt={`Boussoule - ${benefitsData[activeTab].role}`}
+                alt={`Bousole - ${benefitsData[activeTab].role}`}
                 className="w-full h-72 object-cover object-top"
               />
               <div className="bg-white dark:bg-gray-800 px-4 py-3 text-center">

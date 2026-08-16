@@ -32,7 +32,7 @@ const LandingPage = () => {
   };
 
   const openWhatsApp = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20découvrir%20Boussoule%20pour%20mon%20école', '_blank', 'noopener,noreferrer');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20découvrir%20Bousole%20pour%20mon%20école', '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -45,7 +45,7 @@ const LandingPage = () => {
         className="fixed inset-x-0 top-0 z-50 border-b border-[#173A59]/10 bg-[#FFF7E9]/95 shadow-[0_8px_30px_rgba(23,58,89,0.05)] backdrop-blur-xl"
       >
         <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Revenir en haut de la page Boussoule" className="shrink-0">
+          <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Revenir en haut de la page Bousole" className="shrink-0">
             <BrandLogo iconClassName="h-11 w-11" nameClassName="text-lg sm:text-xl" showTagline taglineClassName="hidden lg:block" />
           </button>
 

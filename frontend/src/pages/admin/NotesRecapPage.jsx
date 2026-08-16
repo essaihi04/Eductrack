@@ -7,6 +7,8 @@ import {
 import { Card, CardContent } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
 import { saveBlob, openBlob } from '../../lib/download';
+import { useYear } from '../../contexts/YearContext';
+import { sameYear } from '../../lib/schoolYear';
 
 // ── Récap des notes par contrôle ────────────────────────────────────────────
 // Onglet dédié : on choisit une CLASSE, un SEMESTRE et un CONTRÔLE (contrôle 1,
@@ -31,6 +33,7 @@ const noteClass = (v) => {
 };
 
 export default function NotesRecapPage() {
+  const { year } = useYear();
   const [params, setParams] = useSearchParams();
   const [classes, setClasses] = useState([]);
   const [classId, setClassId] = useState(params.get('class') || '');
@@ -42,6 +45,10 @@ export default function NotesRecapPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');     // 'print' | 'pdf'
   const [showEmpty, setShowEmpty] = useState(false); // matières sans note saisie
+  const activeClasses = useMemo(
+    () => classes.filter((cls) => !cls.academic_year || sameYear(cls.academic_year, year)),
+    [classes, year],
+  );
 
   const authHeaders = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -71,6 +78,14 @@ export default function NotesRecapPage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (classId && !activeClasses.some((cls) => cls.id === classId)) {
+      setClassId('');
+      return;
+    }
+    if (!classId && activeClasses.length > 0) setClassId(activeClasses[0].id);
+  }, [activeClasses, classId]);
 
   // L'URL garde la sélection (lien partageable / retour depuis la saisie)
   useEffect(() => {
@@ -223,7 +238,7 @@ export default function NotesRecapPage() {
                 className="px-3 py-2 border border-border rounded-lg bg-background min-w-[220px]"
               >
                 <option value="">— choisir —</option>
-                {classes.map((c) => (
+                {activeClasses.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}{c.level ? ` (${c.level})` : ''}{c.academic_year ? ` — ${c.academic_year}` : ''}
                   </option>

@@ -1,11 +1,11 @@
-// Service worker — Boussoule push notifications
+// Service worker — Bousole push notifications
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch { data = { title: 'Boussoule', body: event.data ? event.data.text() : '' }; }
-  const title = data.title || 'Boussoule';
+  try { data = event.data ? event.data.json() : {}; } catch { data = { title: 'Bousole', body: event.data ? event.data.text() : '' }; }
+  const title = data.title || 'Bousole';
   const options = {
     body: data.body || '',
     icon: data.icon || '/icon-192.png',

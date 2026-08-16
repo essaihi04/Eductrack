@@ -458,7 +458,7 @@ const ReportsPage = () => {
     try { matrix = await financeApi.getAnnualMatrix(year); }
     catch (e) { alert('Impossible de charger le tableau annuel : ' + e.message); return; }
     const wb = new ExcelJS.Workbook();
-    wb.creator = 'Boussoule';
+    wb.creator = 'Bousole';
     wb.created = new Date();
     addPrevisionnelSheet(wb, year, matrix);
     buildReportSheets(wb);

@@ -1,7 +1,7 @@
 import { cn } from '../lib/utils';
 
 export const BOUSSOULE_LOGO = '/brand/boussoule-logo.png';
-export const BOUSSOULE_NAME = 'Boussoule';
+export const BOUSSOULE_NAME = 'Bousole';
 export const BOUSSOULE_TAGLINE = 'Ensemble, guidons chaque élève';
 
 const BrandLogo = ({
@@ -15,7 +15,7 @@ const BrandLogo = ({
   <div className={cn('inline-flex items-center gap-3', className)}>
     <img
       src={BOUSSOULE_LOGO}
-      alt="Logo Boussoule"
+      alt="Logo Bousole"
       className={cn('shrink-0 object-contain', iconClassName)}
       draggable="false"
     />

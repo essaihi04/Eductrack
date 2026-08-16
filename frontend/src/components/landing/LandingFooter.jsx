@@ -7,7 +7,7 @@ const LandingFooter = () => {
   const currentYear = new Date().getFullYear();
 
   const handleWhatsAppClick = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20Boussoule', '_blank');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20Bousole', '_blank');
   };
 
   return (
@@ -105,7 +105,7 @@ const LandingFooter = () => {
         <div className="border-t border-white/10 pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <p className="text-sm text-gray-400">
-              © {currentYear} Boussoule. Tous droits réservés.
+              © {currentYear} Bousole. Tous droits réservés.
             </p>
             <div className="flex gap-6 text-sm">
               <button onClick={handleWhatsAppClick} className="hover:text-white transition-colors">

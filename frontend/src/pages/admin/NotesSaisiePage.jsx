@@ -8,6 +8,7 @@ import { Card, CardContent } from '../../components/ui/Card';
 import { saveBlob } from '../../lib/download';
 import { useYear } from '../../contexts/YearContext';
 import { sameYear } from '../../lib/schoolYear';
+import { dedupeSubjects } from '../../lib/subjectAliases';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -66,6 +67,7 @@ export default function NotesSaisiePage() {
     () => classes.filter((cls) => !cls.academic_year || sameYear(cls.academic_year, year)),
     [classes, year],
   );
+  const availableSubjects = useMemo(() => dedupeSubjects(subjects), [subjects]);
 
   const selectClass = (nextClassId) => {
     setClassId(nextClassId);
@@ -114,8 +116,18 @@ export default function NotesSaisiePage() {
     }
     if (classId && !activeClasses.some((cls) => cls.id === classId)) {
       setClassId('');
+      return;
     }
+    if (!classId && activeClasses.length > 0) setClassId(activeClasses[0].id);
   }, [activeClasses, classId, requestedClassId]);
+
+  // La page affiche immédiatement une grille utile : la première matière est
+  // choisie automatiquement, tout en laissant l'utilisateur changer de choix.
+  useEffect(() => {
+    if (classId && !subjectId && availableSubjects.length > 0) {
+      setSubjectId(availableSubjects[0].id);
+    }
+  }, [availableSubjects, classId, subjectId]);
 
   const loadGrid = async (cId = classId, sId = subjectId, sem = semester) => {
     if (!cId || !sId || !sem) { setGrid(null); return; }
@@ -222,7 +234,7 @@ export default function NotesSaisiePage() {
       }
       const blob = await res.blob();
       const cls = classes.find(c => c.id === classId)?.name || 'classe';
-      const subj = subjects.find(s => s.id === subjectId)?.name || 'matiere';
+      const subj = availableSubjects.find(s => s.id === subjectId)?.display_name || 'matiere';
       await saveBlob(blob, `notes_${cls}_${subj}_S${semester}_${pdfMode === 'filled' ? 'remplie' : 'vide'}.pdf`);
     } catch (e) { setError(e.message); }
     finally { setPdfBusy(''); }
@@ -384,7 +396,7 @@ export default function NotesSaisiePage() {
               <select value={subjectId} onChange={e => setSubjectId(e.target.value)}
                 className="px-3 py-2 border border-border rounded-lg bg-background min-w-[180px]">
                 <option value="">— choisir —</option>
-                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {availableSubjects.map(s => <option key={s.id} value={s.id}>{s.display_name}</option>)}
               </select>
             </div>
             <div>

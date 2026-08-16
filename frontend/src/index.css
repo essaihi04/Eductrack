@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Identité « Alliance famille-école » — Boussoule.
+   Identité « Alliance famille-école » — Bousole.
    Bleu nuit (confiance) + corail (proximité) + or (réussite) + turquoise
    (accompagnement) sur un fond crème chaleureux.
    - :root         → parents / élèves (dominante menthe, chaleureuse)
@@ -192,7 +192,7 @@
     /* Chiffres tabulaires : colonnes de montants et de notes alignées. */
     font-variant-numeric: tabular-nums;
   }
-  /* Nunito Sans : ronde, claire et rassurante, signature de Boussoule. */
+  /* Nunito Sans : ronde, claire et rassurante, signature de Bousole. */
   h1, h2, h3, .font-display {
     font-family: 'Nunito Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
     font-weight: 800;
@@ -273,7 +273,7 @@
 
 /* ─────────────────────────────────────────────────────────────────────────
    Splash école + plateforme — connexion et rechargement de page.
-   Le logo surgit avec un rebond élastique dans les couleurs Boussoule.
+   Le logo surgit avec un rebond élastique dans les couleurs Bousole.
    ───────────────────────────────────────────────────────────────────────── */
 .et-splash-bg {
   background-color: hsl(38 100% 96%);
@@ -479,7 +479,7 @@
   background-color: hsl(223 27% 16%);
 }
 
-/* Landing Boussoule v2 — profondeur 3D, grille-boussole et rendu produit. */
+/* Landing Bousole v2 — profondeur 3D, grille-boussole et rendu produit. */
 .boussoule-landing {
   background:
     radial-gradient(900px 520px at 85% 4%, hsl(12 75% 61% / 0.08), transparent 64%),

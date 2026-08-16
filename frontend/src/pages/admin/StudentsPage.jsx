@@ -1392,7 +1392,7 @@ L'administration de ${schoolName}`;
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
                   >
                     <option value="">Sélectionner une classe</option>
-                    {classes.map(c => (
+                    {activeYearClasses.map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -1460,7 +1460,7 @@ L'administration de ${schoolName}`;
             >
               <option value="">Toutes les classes</option>
               <option value="unassigned">Non assignés</option>
-              {classes.map(cls => (
+              {activeYearClasses.map(cls => (
                 <option key={cls.id} value={cls.id}>{cls.name}</option>
               ))}
             </select>
@@ -1726,7 +1726,7 @@ L'administration de ${schoolName}`;
                       <Label>Classe</Label>
                       <select className={inputCls} value={formData.classId} onChange={setF('classId')}>
                         <option value="">Sélectionner une classe (optionnel)</option>
-                        {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                        {activeYearClasses.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
                       </select>
                     </div>
                     <div>

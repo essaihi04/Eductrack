@@ -7,7 +7,7 @@ const Hero = () => {
   const navigate = useNavigate();
 
   const handleWhatsAppClick = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20Boussoule', '_blank');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20en%20savoir%20plus%20sur%20Bousole', '_blank');
   };
 
   return (
@@ -36,7 +36,7 @@ const Hero = () => {
             >
               <img 
                 src="/brand/boussoule-logo.png"
-                alt="Logo Boussoule"
+                alt="Logo Bousole"
                 className="w-24 h-24 object-contain"
               />
             </motion.div>
@@ -123,7 +123,7 @@ const Hero = () => {
             >
               <img
                 src="/images/dahboard-centralise.png"
-                alt="Dashboard centralisé Boussoule"
+                alt="Dashboard centralisé Bousole"
                 className="w-full rounded-2xl shadow-2xl border-4 border-white/60 dark:border-gray-700"
               />
               <div className="absolute -bottom-4 -right-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl px-4 py-2 flex items-center gap-2">

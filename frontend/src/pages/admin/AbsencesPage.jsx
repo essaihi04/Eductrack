@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { UserX, Search, Download, RefreshCw, Check, X, Phone, Calendar, MessageCircle, Eye } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { openBlob } from '../../lib/download';
+import { useYear } from '../../contexts/YearContext';
+import { schoolYearDateRange } from '../../lib/schoolYear';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
@@ -14,6 +16,7 @@ const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
 const FILTERS = [
+  { key: 'year', label: 'Année scolaire' },
   { key: 'day', label: 'Jour' },
   { key: 'week', label: 'Semaine' },
   { key: 'month', label: 'Mois' },
@@ -34,10 +37,12 @@ const Badge = ({ ok, yes = 'Oui', no = 'Non' }) => (
 );
 
 export default function AbsencesPage() {
-  const [filter, setFilter] = useState('day');
+  const { year } = useYear();
+  const initialSchoolRange = schoolYearDateRange(year);
+  const [filter, setFilter] = useState('year');
   const [anchor, setAnchor] = useState(iso(new Date()));       // date de référence (jour/semaine/mois)
-  const [periodStart, setPeriodStart] = useState(iso(new Date()));
-  const [periodEnd, setPeriodEnd] = useState(iso(new Date()));
+  const [periodStart, setPeriodStart] = useState(initialSchoolRange.start);
+  const [periodEnd, setPeriodEnd] = useState(initialSchoolRange.end);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -47,11 +52,18 @@ export default function AbsencesPage() {
 
   const range = useCallback(() => {
     const d = new Date(anchor + 'T00:00:00');
+    if (filter === 'year') return schoolYearDateRange(year);
     if (filter === 'day') return { start: anchor, end: anchor };
     if (filter === 'week') return { start: iso(startOfWeek(d)), end: iso(endOfWeek(d)) };
     if (filter === 'month') return { start: iso(startOfMonth(d)), end: iso(endOfMonth(d)) };
     return { start: periodStart, end: periodEnd };
-  }, [filter, anchor, periodStart, periodEnd]);
+  }, [filter, anchor, periodStart, periodEnd, year]);
+
+  useEffect(() => {
+    const next = schoolYearDateRange(year);
+    setPeriodStart(next.start);
+    setPeriodEnd(next.end);
+  }, [year]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,7 +153,11 @@ export default function AbsencesPage() {
             </button>
           ))}
         </div>
-        {filter !== 'period' ? (
+        {filter === 'year' ? (
+          <div className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-medium">
+            <Calendar className="w-4 h-4" /> {year}
+          </div>
+        ) : filter !== 'period' ? (
           <div className="flex items-center gap-1.5 text-sm">
             <Calendar className="w-4 h-4 text-gray-400" />
             <input type="date" value={anchor} onChange={e => setAnchor(e.target.value)} className="border border-gray-300 rounded-lg px-2 py-1.5" />

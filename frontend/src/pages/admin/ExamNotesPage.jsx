@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { GraduationCap, Download, Upload, Save, RefreshCw, Info } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { useYear } from '../../contexts/YearContext';
+import { sameYear } from '../../lib/schoolYear';
 
 // Libellés des types d'examen
 const EXAM_TYPES = {
@@ -61,13 +63,8 @@ const findHeaderRow = (rows) => {
   return 0;
 };
 
-const defaultYear = () => {
-  const now = new Date();
-  const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-  return `${y}/${y + 1}`;
-};
-
 const ExamNotesPage = () => {
+  const { year } = useYear();
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const getToken = async () => {
     const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
@@ -77,7 +74,7 @@ const ExamNotesPage = () => {
   const [classes, setClasses] = useState([]);
   const [examLevels, setExamLevels] = useState({});
   const [selectedClass, setSelectedClass] = useState('');
-  const [academicYear, setAcademicYear] = useState(defaultYear());
+  const [academicYear, setAcademicYear] = useState(year);
   const [examType, setExamType] = useState('');
   const [scenario, setScenario] = useState('real');
 
@@ -90,6 +87,10 @@ const ExamNotesPage = () => {
   const [importSubject, setImportSubject] = useState(''); // matière cible pour un fichier Massar par matière
 
   const cls = useMemo(() => classes.find(c => c.id === selectedClass), [classes, selectedClass]);
+  const activeClasses = useMemo(
+    () => classes.filter((item) => !item.academic_year || sameYear(item.academic_year, academicYear)),
+    [academicYear, classes],
+  );
   const availableExamTypes = useMemo(() => {
     if (!cls) return [];
     return examLevels[cls.level]?.exams || [];
@@ -109,6 +110,16 @@ const ExamNotesPage = () => {
       } catch (e) { console.error(e); }
     })();
   }, []);
+
+  useEffect(() => {
+    setAcademicYear(year);
+  }, [year]);
+
+  useEffect(() => {
+    if (selectedClass && !activeClasses.some((item) => item.id === selectedClass)) {
+      setSelectedClass('');
+    }
+  }, [activeClasses, selectedClass]);
 
   // Quand la classe change → reset type d'examen au 1er disponible
   useEffect(() => {
@@ -336,7 +347,7 @@ const ExamNotesPage = () => {
               <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)}
                 className="border rounded-lg px-3 py-2 text-sm min-w-[200px]">
                 <option value="">— Choisir —</option>
-                {classes.map(c => (
+                {activeClasses.map(c => (
                   <option key={c.id} value={c.id}>{c.name} {c.level ? `(${c.level}${c.filiere ? '/' + c.filiere : ''})` : ''}</option>
                 ))}
               </select>

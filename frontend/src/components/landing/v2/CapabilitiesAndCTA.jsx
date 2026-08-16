@@ -92,7 +92,7 @@ const tones = {
 
 const CapabilitiesAndCTA = ({ onRegister }) => {
   const openWhatsApp = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20démo%20personnalisée%20de%20Boussoule%20pour%20mon%20école', '_blank', 'noopener,noreferrer');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20démo%20personnalisée%20de%20Bousole%20pour%20mon%20école', '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -104,7 +104,7 @@ const CapabilitiesAndCTA = ({ onRegister }) => {
             <div>
               <div className="inline-flex items-center gap-2 rounded-full bg-[#E66F51]/10 px-4 py-2 text-sm font-extrabold text-[#B84D36]">
                 <Sparkles className="h-4 w-4" />
-                Boussoule aujourd’hui
+                Bousole aujourd’hui
               </div>
               <h2 className="mt-5 text-3xl font-black tracking-[-0.035em] text-[#173A59] sm:text-5xl">Bien plus qu’un suivi scolaire.</h2>
             </div>
@@ -144,7 +144,7 @@ const CapabilitiesAndCTA = ({ onRegister }) => {
             <div className="flex flex-col justify-center p-7 sm:p-10 lg:p-12">
               <span className="text-xs font-extrabold uppercase tracking-[0.18em] text-[#2A9D8F]">Une technologie qui reste humaine</span>
               <h3 className="mt-3 text-2xl font-black tracking-[-0.025em] text-[#173A59] sm:text-3xl">L’IA prépare. L’équipe vérifie. L’école décide.</h3>
-              <p className="mt-4 text-base font-medium leading-7 text-[#173A59]/60">Boussoule automatise les tâches répétitives sans enlever le contrôle aux équipes : chaque import, suggestion ou rapport reste vérifiable avant utilisation.</p>
+              <p className="mt-4 text-base font-medium leading-7 text-[#173A59]/60">Bousole automatise les tâches répétitives sans enlever le contrôle aux équipes : chaque import, suggestion ou rapport reste vérifiable avant utilisation.</p>
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 {['Contrôle humain conservé', 'Données par établissement', 'Historique des actions', 'Expérience multi-rôles'].map((item) => (
                   <span key={item} className="flex items-center gap-2 text-sm font-bold text-[#173A59]/70"><Check className="h-4 w-4 text-[#2A9D8F]" />{item}</span>
@@ -189,7 +189,7 @@ const CapabilitiesAndCTA = ({ onRegister }) => {
       <footer className="border-t border-[#173A59]/10 bg-[#FFF7E9] py-10">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 px-4 text-center sm:px-6 md:flex-row md:text-left lg:px-8">
           <BrandLogo iconClassName="h-11 w-11" showTagline />
-          <p className="text-sm font-semibold text-[#173A59]/50">© {new Date().getFullYear()} Boussoule · Ensemble, guidons chaque élève.</p>
+          <p className="text-sm font-semibold text-[#173A59]/50">© {new Date().getFullYear()} Bousole · Ensemble, guidons chaque élève.</p>
           <button type="button" onClick={openWhatsApp} className="inline-flex items-center gap-2 text-sm font-extrabold text-[#2A9D8F] transition hover:text-[#173A59]"><MessageCircle className="h-4 w-4" />Parler à l’équipe</button>
         </div>
       </footer>

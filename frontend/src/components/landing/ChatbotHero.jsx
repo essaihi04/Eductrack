@@ -185,7 +185,7 @@ const ChatbotHero = () => {
             </h1>
 
             <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300 mb-8 leading-relaxed">
-              Boussoule réunit la direction, les professeurs et les familles autour
+              Bousole réunit la direction, les professeurs et les familles autour
               d’informations claires : absences, devoirs, notes, comportement, emploi
               du temps et transport. Chacun sait où en est l’élève et comment l’accompagner.
             </p>
@@ -221,7 +221,7 @@ const ChatbotHero = () => {
               </motion.div>
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Button
-                  onClick={() => window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20d%C3%A9mo%20de%20Boussoule', '_blank')}
+                  onClick={() => window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20d%C3%A9mo%20de%20Bousole', '_blank')}
                   variant="outline"
                   size="lg"
                   className="w-full sm:w-auto text-base px-7 py-6 border-2 border-[#2A9D8F] text-[#247F76] dark:text-[#7DD3C7] hover:bg-[#2A9D8F]/10"

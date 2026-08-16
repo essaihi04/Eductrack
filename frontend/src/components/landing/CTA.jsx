@@ -38,7 +38,7 @@ const CTA = () => {
   const navigate = useNavigate();
 
   const handleWhatsAppClick = () => {
-    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20démo%20personnalisée%20de%20Boussoule', '_blank');
+    window.open('https://wa.me/212641998700?text=Bonjour,%20je%20souhaite%20une%20démo%20personnalisée%20de%20Bousole', '_blank');
   };
 
   return (
@@ -71,7 +71,7 @@ const CTA = () => {
                 transition={{ delay: 0.3 }}
                 className="text-xl text-green-100 mb-8 max-w-2xl mx-auto"
               >
-                Avec Boussoule, l’école pilote, les parents restent informés et chaque élève avance avec des repères clairs — sur le web, Android et Windows.
+                Avec Bousole, l’école pilote, les parents restent informés et chaque élève avance avec des repères clairs — sur le web, Android et Windows.
               </motion.p>
 
               <motion.div

@@ -26,8 +26,18 @@ export const sameYear = (a, b) => {
 
 // Première année (entier) d'une chaîne "YYYY/YYYY" ou "YYYY-YYYY".
 export const firstYearOf = (year) => {
-  const a = parseInt(String(year).split(/[/\-]/)[0], 10);
+  const a = parseInt(String(year).split(/[/-]/)[0], 10);
   return Number.isNaN(a) ? null : a;
+};
+
+// Bornes calendaires complètes d'une année scolaire (septembre → août).
+export const schoolYearDateRange = (year) => {
+  const first = firstYearOf(year);
+  if (first === null) {
+    const fallback = firstYearOf(defaultYear());
+    return { start: `${fallback}-09-01`, end: `${fallback + 1}-08-31` };
+  }
+  return { start: `${first}-09-01`, end: `${first + 1}-08-31` };
 };
 
 // Année suivante au format slash.

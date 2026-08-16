@@ -85,7 +85,7 @@ const YearSelectionPage = () => {
           {school?.logo_url
             ? <img src={school.logo_url} alt="" className="w-9 h-9 rounded-lg object-cover" />
             : <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center"><GraduationCap className="w-5 h-5 text-primary" /></div>}
-          <span className="font-bold text-lg">{school?.name || 'Boussoule'}</span>
+          <span className="font-bold text-lg">{school?.name || 'Bousole'}</span>
         </div>
         <div className="flex items-center gap-3">
           <SchoolSwitcher />

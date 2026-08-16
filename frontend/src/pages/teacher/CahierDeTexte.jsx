@@ -1,12 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { useI18n } from '../../i18n';
 import { saveBlob } from '../../lib/download';
 import { FileText, Download, Calendar, BookOpen, Pencil, Check, ChevronDown } from 'lucide-react';
 import { loadLogoForPdf, addLogoToPdf } from '../../lib/schoolLogo';
+import { sameYear } from '../../lib/schoolYear';
+import { dedupeSubjects } from '../../lib/subjectAliases';
 
 const CahierDeTexte = () => {
   const { profile } = useAuth();
+  const { year } = useYear();
   const { t, lang } = useI18n();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
@@ -65,10 +69,11 @@ const CahierDeTexte = () => {
           const classesData = await classesRes.json();
           const subjectsData = await subjectsRes.json();
           const teachersData = await teachersRes.json();
-          const cls = Array.isArray(classesData) ? classesData : [];
+          const cls = (Array.isArray(classesData) ? classesData : [])
+            .filter((item) => !item.academic_year || sameYear(item.academic_year, year));
           setClasses(cls);
           setSelectedClasses(cls.map(c => c.id));
-          setSubjects(Array.isArray(subjectsData) ? subjectsData : []);
+          setSubjects(dedupeSubjects(Array.isArray(subjectsData) ? subjectsData : []));
           setTeachers(Array.isArray(teachersData) ? teachersData : []);
         } else {
           const [classesRes, subjectsRes] = await Promise.all([
@@ -77,8 +82,9 @@ const CahierDeTexte = () => {
           ]);
           const classesData = await classesRes.json();
           const subjectsData = await subjectsRes.json();
-          const cls = Array.isArray(classesData) ? classesData : [];
-          const subs = Array.isArray(subjectsData) ? subjectsData : [];
+          const cls = (Array.isArray(classesData) ? classesData : [])
+            .filter((item) => !item.academic_year || sameYear(item.academic_year, year));
+          const subs = dedupeSubjects(Array.isArray(subjectsData) ? subjectsData : []);
           setClasses(cls);
           setSelectedClasses(cls.map(c => c.id));
           setSubjects(subs);
@@ -91,7 +97,7 @@ const CahierDeTexte = () => {
       }
     };
     loadFilters();
-  }, [apiUrl, isAdmin]);
+  }, [apiUrl, isAdmin, year]);
 
   const toggleClass = (classId) => {
     setSelectedClasses(prev =>
@@ -473,7 +479,7 @@ const CahierDeTexte = () => {
             >
               {isAdmin && <option value="">{t('cdt.allSubjects')}</option>}
               {subjects.map(sub => (
-                <option key={sub.id} value={sub.id}>{sub.name}</option>
+                <option key={sub.id} value={sub.id}>{sub.display_name || sub.name}</option>
               ))}
             </select>
           </div>

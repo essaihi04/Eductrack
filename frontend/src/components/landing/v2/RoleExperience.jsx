@@ -81,7 +81,7 @@ const RoleExperience = () => {
               Une plateforme, quatre expériences
             </div>
             <h2 className="mt-5 text-3xl font-black tracking-[-0.035em] sm:text-5xl">Chacun voit ce qui compte pour lui.</h2>
-            <p className="mt-5 max-w-2xl text-lg font-medium leading-8 text-white/60">Boussoule ne montre pas la même complexité à tout le monde. Chaque rôle reçoit un parcours clair, avec les bons repères et les bonnes actions.</p>
+            <p className="mt-5 max-w-2xl text-lg font-medium leading-8 text-white/60">Bousole ne montre pas la même complexité à tout le monde. Chaque rôle reçoit un parcours clair, avec les bons repères et les bonnes actions.</p>
           </div>
 
           <div className="grid w-full grid-cols-2 gap-2 rounded-2xl bg-white/5 p-1.5 ring-1 ring-white/10 sm:flex sm:w-auto sm:max-w-full sm:overflow-x-auto">
@@ -139,7 +139,7 @@ const RoleExperience = () => {
                 ))}
               </div>
               <button type="button" onClick={() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' })} className="group mt-7 inline-flex items-center gap-2 text-sm font-extrabold text-[#F9D780] transition hover:text-white">
-                Voir Boussoule pour {activeRole === 'school' ? 'mon établissement' : activeRole === 'parent' ? 'les familles' : activeRole === 'student' ? 'les élèves' : 'les enseignants'}
+                Voir Bousole pour {activeRole === 'school' ? 'mon établissement' : activeRole === 'parent' ? 'les familles' : activeRole === 'student' ? 'les élèves' : 'les enseignants'}
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </button>
             </Motion.div>

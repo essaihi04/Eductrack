@@ -16,6 +16,13 @@ import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/o
 import { generateNotesGridPdf } from '../services/notesGridPdf.js';
 import { generateNotesRecapPdf } from '../services/notesRecapPdf.js';
 import { saveClassTimetable } from '../services/timetableImport/save.js';
+import {
+  canonicalSubject,
+  collapseControlsBySlot,
+  notesForStudents,
+  recapIdentity,
+  resolveControls,
+} from '../services/controlSubjects.js';
 
 const router = express.Router();
 
@@ -8811,6 +8818,59 @@ const assertClassInScope = async (req, classId) => {
   return { cls };
 };
 
+// Contexte partagé par tous les écrans de notes. Il permet de rattacher les
+// anciens contrôles sans subject_id uniquement quand l'affectation du professeur
+// est non ambiguë, et de regrouper les alias comme PC / Physique-Chimie.
+const resolveControlSubjectsFromDb = async (controls = [], extraSubjectIds = []) => {
+  const teacherIds = [...new Set(controls.map((c) => c.teacher_id).filter(Boolean))];
+  let teacherSubjects = [];
+  if (teacherIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from('teacher_subjects')
+      .select('teacher_id, subject_id')
+      .in('teacher_id', teacherIds);
+    if (error) throw error;
+    teacherSubjects = data || [];
+  }
+
+  const subjectIds = [...new Set([
+    ...controls.map((c) => c.subject_id),
+    ...teacherSubjects.map((row) => row.subject_id),
+    ...extraSubjectIds,
+  ].filter(Boolean))];
+  let subjects = [];
+  if (subjectIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from('subjects')
+      .select('id, name, code')
+      .in('id', subjectIds);
+    if (error) throw error;
+    subjects = data || [];
+  }
+
+  const resolved = resolveControls(controls, subjects, teacherSubjects);
+
+  // Rattrapage sûr et idempotent : une visite d'un écran pédagogique répare
+  // progressivement les contrôles historiques dont la matière est certaine.
+  const bySubject = new Map();
+  resolved.forEach((control) => {
+    if (control.subject_id || !control.resolved_subject?.id) return;
+    if (!bySubject.has(control.resolved_subject.id)) bySubject.set(control.resolved_subject.id, []);
+    bySubject.get(control.resolved_subject.id).push(control.id);
+    control.subject_id = control.resolved_subject.id;
+  });
+  for (const [subjectId, ids] of bySubject.entries()) {
+    const { error } = await supabaseAdmin
+      .from('controls_plan')
+      .update({ subject_id: subjectId })
+      .in('id', ids)
+      .is('subject_id', null);
+    if (error) console.warn('[Admin] backfill control subject:', error.message);
+  }
+
+  return { controls: resolved, subjects, teacherSubjects };
+};
+
 // GET /classes/:classId/controls-overview — synthèse des contrôles d'une classe
 router.get('/classes/:classId/controls-overview', async (req, res) => {
   try {
@@ -8824,51 +8884,45 @@ router.get('/classes/:classId/controls-overview', async (req, res) => {
     const totalStudents = (students || []).length;
 
     // Contrôles de la classe
-    const { data: controls } = await supabaseAdmin
+    const { data: controlsRaw } = await supabaseAdmin
       .from('controls_plan')
-      .select('id, name, date, start_time, kind, teacher_id, subject_id')
+      .select('id, name, date, start_time, kind, teacher_id, subject_id, semester, official_key')
       .eq('class_id', classId)
       .order('date', { ascending: false });
+    const { controls } = await resolveControlSubjectsFromDb(controlsRaw || []);
     const controlIds = (controls || []).map(c => c.id);
 
     // Notes de tous ces contrôles (1 requête)
     let notesByControl = {};
     if (controlIds.length) {
       const { data: notes } = await supabaseAdmin
-        .from('control_notes').select('control_id, note').in('control_id', controlIds);
-      (notes || []).forEach(n => {
+        .from('control_notes').select('control_id, student_id, note').in('control_id', controlIds);
+      const currentStudentIds = new Set((students || []).map((student) => student.id));
+      notesForStudents(notes || [], currentStudentIds).forEach(n => {
         (notesByControl[n.control_id] = notesByControl[n.control_id] || []).push(Number(n.note));
       });
     }
 
-    // Matière + nom du prof (1 requête chacune)
+    // Nom du professeur créateur du contrôle.
     const teacherIds = [...new Set((controls || []).map(c => c.teacher_id).filter(Boolean))];
-    const subjByTeacher = {}, nameByTeacher = {};
+    const nameByTeacher = {};
     if (teacherIds.length) {
-      const { data: ts } = await supabaseAdmin
-        .from('teacher_subjects').select('teacher_id, subjects(name)').in('teacher_id', teacherIds);
-      (ts || []).forEach(t => { if (!subjByTeacher[t.teacher_id]) subjByTeacher[t.teacher_id] = t.subjects?.name || ''; });
       const { data: profs } = await supabaseAdmin
         .from('profiles').select('id, first_name, last_name').in('id', teacherIds);
       (profs || []).forEach(p => { nameByTeacher[p.id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
     }
 
-    // Matière explicite des contrôles (prioritaire sur la déduction via le prof)
-    const ovSubjectIds = [...new Set((controls || []).map(c => c.subject_id).filter(Boolean))];
-    const subjById = {};
-    if (ovSubjectIds.length) {
-      const { data: subjRows } = await supabaseAdmin
-        .from('subjects').select('id, name').in('id', ovSubjectIds);
-      (subjRows || []).forEach(s => { subjById[s.id] = s.name; });
-    }
-
-    const overview = (controls || []).map(c => {
+    const overviewNoteCounts = new Map(Object.entries(notesByControl).map(([id, values]) => [id, values.length]));
+    const effectiveControls = collapseControlsBySlot(controls || [], overviewNoteCounts);
+    const overview = effectiveControls.map(c => {
       const vals = (notesByControl[c.id] || []).filter(v => !isNaN(v));
       const noted = vals.length;
       const avg = noted ? Math.round((vals.reduce((a, b) => a + b, 0) / noted) * 100) / 100 : null;
       return {
-        id: c.id, name: c.name, date: c.date, start_time: c.start_time, kind: c.kind,
-        subject: (c.subject_id && subjById[c.subject_id]) || subjByTeacher[c.teacher_id] || '—',
+        id: c.id,
+        name: c.official_key ? c.name : recapIdentity(c).label,
+        date: c.date, start_time: c.start_time, kind: c.kind,
+        subject: c.resolved_subject?.label || '—',
         teacher: nameByTeacher[c.teacher_id] || '—',
         totalStudents, notedStudents: noted, missing: Math.max(0, totalStudents - noted),
         average: avg,
@@ -9003,32 +9057,32 @@ router.get('/notes/grid', async (req, res) => {
         .from('controls_plan')
         .select('id, name, date, status, subject_id, teacher_id, published, published_at, semester, control_type, official_key')
         .eq('class_id', class_id)
-        .eq('subject_id', subject_id)
         .neq('status', 'cancelled')
         .order('date', { ascending: true });
       if (error && /semester|control_type|official_key/i.test(error.message || '')) {
         hasOfficialCols = false;
         ({ data, error } = await supabaseAdmin
-          .from('controls_plan')
-          .select('id, name, date, status, subject_id, teacher_id, published, published_at')
-          .eq('class_id', class_id)
-          .eq('subject_id', subject_id)
-          .neq('status', 'cancelled')
-          .order('date', { ascending: true }));
+            .from('controls_plan')
+            .select('id, name, date, status, subject_id, teacher_id, published, published_at')
+            .eq('class_id', class_id)
+            .neq('status', 'cancelled')
+            .order('date', { ascending: true }));
       }
       if (error && /published/i.test(error.message || '')) {
         hasOfficialCols = false;
         ({ data, error } = await supabaseAdmin
-          .from('controls_plan')
-          .select('id, name, date, status, subject_id, teacher_id')
-          .eq('class_id', class_id)
-          .eq('subject_id', subject_id)
-          .neq('status', 'cancelled')
-          .order('date', { ascending: true }));
+            .from('controls_plan')
+            .select('id, name, date, status, subject_id, teacher_id')
+            .eq('class_id', class_id)
+            .neq('status', 'cancelled')
+            .order('date', { ascending: true }));
         data = (data || []).map(c => ({ ...c, published: c.status === 'completed', published_at: null }));
       }
       if (error) throw error;
-      controls = data || [];
+      const context = await resolveControlSubjectsFromDb(data || [], [subject_id]);
+      const selectedSubject = context.subjects.find((subject) => subject.id === subject_id);
+      const selectedKey = canonicalSubject(selectedSubject || {}).key;
+      controls = context.controls.filter((control) => control.resolved_subject?.key === selectedKey);
     }
 
     // Filtre semestre (colonne si présente, sinon déduction par la date)
@@ -9043,7 +9097,7 @@ router.get('/notes/grid', async (req, res) => {
     if (sem && hasOfficialCols) {
       bounds = await semesterBoundsForClass(check.cls, sem);
       const templates = officialControlsForLevel(check.cls.level, sem);
-      const byKey = new Map(controls.filter(c => c.official_key).map(c => [c.official_key, c]));
+      const byKey = new Map(controls.map(c => [recapIdentity(c).key, c]));
 
       // Nettoyage : contrôles officiels HORS catalogue du niveau (fards
       // « unifiés » de l'ancien modèle, 3ᵉ fard ou activités au primaire…),
@@ -9065,7 +9119,7 @@ router.get('/notes/grid', async (req, res) => {
       // Renommage doux : aligne le libellé des officiels existants sur le catalogue
       for (const t of templates) {
         const existing = byKey.get(t.key);
-        if (existing && existing.name !== t.name) {
+        if (existing?.official_key && existing.name !== t.name) {
           await supabaseAdmin.from('controls_plan').update({ name: t.name }).eq('id', existing.id);
           existing.name = t.name;
         }
@@ -9102,6 +9156,13 @@ router.get('/notes/grid', async (req, res) => {
     // Plus rien à proposer manuellement : les officiels sont auto-créés.
     const officialMissing = [];
 
+    // Les lignes insérées ci-dessus rejoignent le même contexte canonique que
+    // les contrôles historiques avant le calcul des colonnes finales.
+    const finalContext = await resolveControlSubjectsFromDb(controls, [subject_id]);
+    const finalSelected = finalContext.subjects.find((subject) => subject.id === subject_id);
+    const finalSubjectKey = canonicalSubject(finalSelected || {}).key;
+    controls = finalContext.controls.filter((control) => control.resolved_subject?.key === finalSubjectKey);
+
     // Noms des profs (créateur du contrôle)
     const teacherIds = [...new Set(controls.map(c => c.teacher_id).filter(Boolean))];
     const nameByTeacher = {};
@@ -9121,8 +9182,13 @@ router.get('/notes/grid', async (req, res) => {
         .from('control_notes')
         .select('control_id, student_id, note, appreciation')
         .in('control_id', controlIds);
-      notes = data || [];
+      notes = notesForStudents(data || [], new Set((students || []).map((student) => student.id)));
     }
+    const noteCounts = new Map();
+    notes.forEach((note) => noteCounts.set(note.control_id, (noteCounts.get(note.control_id) || 0) + 1));
+    controls = collapseControlsBySlot(controls, noteCounts);
+    const displayedControlIds = new Set(controls.map((control) => control.id));
+    notes = notes.filter((note) => displayedControlIds.has(note.control_id));
 
     res.json({
       class: check.cls,
@@ -9134,6 +9200,7 @@ router.get('/notes/grid', async (req, res) => {
       students: students || [],
       controls: controls.map(c => ({
         ...c,
+        name: c.official_key ? c.name : recapIdentity(c).label,
         teacher_name: nameByTeacher[c.teacher_id]?.name || null,
         // Saisi par un prof (à valider) ou créé par l'administration
         from_teacher: nameByTeacher[c.teacher_id]?.role === 'teacher',
@@ -9223,22 +9290,25 @@ router.get('/notes/grid-pdf', async (req, res) => {
     // Contrôles du semestre (mêmes replis de colonnes que /notes/grid)
     let { data: controls, error: ctrlErr } = await supabaseAdmin
       .from('controls_plan')
-      .select('id, name, date, status, semester, official_key')
+      .select('id, name, date, status, subject_id, teacher_id, semester, official_key')
       .eq('class_id', class_id)
-      .eq('subject_id', subject_id)
       .neq('status', 'cancelled')
       .order('date', { ascending: true });
     if (ctrlErr && /semester|official_key/i.test(ctrlErr.message || '')) {
       ({ data: controls, error: ctrlErr } = await supabaseAdmin
         .from('controls_plan')
-        .select('id, name, date, status')
+        .select('id, name, date, status, subject_id, teacher_id')
         .eq('class_id', class_id)
-        .eq('subject_id', subject_id)
         .neq('status', 'cancelled')
         .order('date', { ascending: true }));
     }
     if (ctrlErr) throw ctrlErr;
-    controls = (controls || []).filter(c => controlSemester(c) === sem);
+    const subjectContext = await resolveControlSubjectsFromDb(controls || [], [subject_id]);
+    const selectedSubject = subjectContext.subjects.find((subject) => subject.id === subject_id);
+    const selectedKey = canonicalSubject(selectedSubject || {}).key;
+    controls = subjectContext.controls.filter((control) => (
+      control.resolved_subject?.key === selectedKey && controlSemester(control) === sem
+    ));
 
     // Filtre de colonnes (sélection faite dans la grille)
     if (controlsParam) {
@@ -9246,15 +9316,28 @@ router.get('/notes/grid-pdf', async (req, res) => {
       if (wanted.size) controls = controls.filter(c => wanted.has(c.id));
     }
 
-    // Notes (mode rempli uniquement)
-    let notes = [];
-    if (filled && controls.length) {
+    // Les notes servent aussi à choisir la bonne colonne quand un ancien
+    // contrôle et son contrôle officiel occupent le même emplacement. On les
+    // charge donc même pour la grille vide, puis on ne les transmet au PDF
+    // que dans le mode rempli.
+    let allNotes = [];
+    if (controls.length) {
       const { data } = await supabaseAdmin
         .from('control_notes')
         .select('control_id, student_id, note')
         .in('control_id', controls.map(c => c.id));
-      notes = data || [];
+      allNotes = notesForStudents(data || [], new Set((students || []).map((student) => student.id)));
     }
+    const noteCounts = new Map();
+    allNotes.forEach((note) => noteCounts.set(note.control_id, (noteCounts.get(note.control_id) || 0) + 1));
+    controls = collapseControlsBySlot(controls, noteCounts).map((control) => ({
+      ...control,
+      name: control.official_key ? control.name : recapIdentity(control).label,
+    }));
+    const displayedControlIds = new Set(controls.map((control) => control.id));
+    const notes = filled
+      ? allNotes.filter((note) => displayedControlIds.has(note.control_id))
+      : [];
 
     // Matière + école (nom, logo)
     const { data: subj } = await supabaseAdmin
@@ -9273,7 +9356,7 @@ router.get('/notes/grid-pdf', async (req, res) => {
       logoBuffer,
       className: check.cls.name || '',
       level: check.cls.level || '',
-      subjectName: subj?.name || '',
+      subjectName: canonicalSubject(subj || {}).label || subj?.name || '',
       semester: sem,
       academicYear: check.cls.academic_year || currentSchoolYear(),
       students: students || [],
@@ -9304,7 +9387,6 @@ router.get('/notes/grid-pdf', async (req, res) => {
 //  dans le récap du contrôle 3.
 // ════════════════════════════════════════════════════════════════════════
 
-const recapGroupKey = (c) => c.official_key || `name:${String(c.name || '').trim().toLowerCase()}`;
 // Rang d'affichage d'un groupe officiel : fard 1, 2, 3 puis activités.
 const recapKeyRank = (key) => {
   const m = /^s[12]_(f(\d)|act)$/.exec(key || '');
@@ -9325,21 +9407,22 @@ const loadRecapData = async (cls, sem) => {
   // Contrôles de la classe, toutes matières (mêmes replis de colonnes que la grille)
   let { data: controls, error } = await supabaseAdmin
     .from('controls_plan')
-    .select('id, name, date, status, subject_id, semester, official_key, published')
+    .select('id, name, date, status, teacher_id, subject_id, semester, official_key, published')
     .eq('class_id', cls.id)
     .neq('status', 'cancelled')
     .order('date', { ascending: true });
   if (error && /semester|official_key|published/i.test(error.message || '')) {
     ({ data: controls, error } = await supabaseAdmin
       .from('controls_plan')
-      .select('id, name, date, status, subject_id')
+      .select('id, name, date, status, teacher_id, subject_id')
       .eq('class_id', cls.id)
       .neq('status', 'cancelled')
       .order('date', { ascending: true }));
     controls = (controls || []).map(c => ({ ...c, published: c.status === 'completed' }));
   }
   if (error) throw error;
-  controls = (controls || []).filter(c => c.subject_id && controlSemester(c) === sem);
+  const subjectContext = await resolveControlSubjectsFromDb(controls || []);
+  controls = subjectContext.controls.filter(c => c.resolved_subject && controlSemester(c) === sem);
 
   // Notes de tous ces contrôles. Deux pièges cumulés ici : la longueur d'URL
   // (lots d'ids) ET le plafond de 1000 lignes par réponse PostgREST — une
@@ -9358,18 +9441,11 @@ const loadRecapData = async (cls, sem) => {
         if (!data || data.length < 1000) break;
       }
     }
-    notes = notes.filter(n => n.note !== null && n.note !== '');
+    const currentStudentIds = new Set((students || []).map((student) => student.id));
+    notes = notesForStudents(notes, currentStudentIds).filter(n => n.note !== null && n.note !== '');
   }
   const noteCount = {};
   notes.forEach(n => { noteCount[n.control_id] = (noteCount[n.control_id] || 0) + 1; });
-
-  // Noms des matières
-  const subjectIds = [...new Set(controls.map(c => c.subject_id))];
-  const nameBySubject = {};
-  if (subjectIds.length) {
-    const { data: subs } = await supabaseAdmin.from('subjects').select('id, name').in('id', subjectIds);
-    (subs || []).forEach(s => { nameBySubject[s.id] = s.name; });
-  }
 
   // Coefficients de l'établissement pour ce niveau (par NOM de matière, comme
   // les bulletins). Absents → moyenne simple.
@@ -9383,11 +9459,12 @@ const loadRecapData = async (cls, sem) => {
     const { data: coefs } = await q;
     (coefs || []).forEach(c => {
       // Un coefficient propre à l'école prime sur le coefficient global.
-      const prev = coefByName[c.subject_name];
-      if (!prev || (c.school_id && !prev.school_id)) coefByName[c.subject_name] = c;
+      const key = canonicalSubject(c.subject_name).key;
+      const prev = coefByName[key];
+      if (!prev || (c.school_id && !prev.school_id)) coefByName[key] = c;
     });
   }
-  const coefOf = (subjectName) => Number(coefByName[subjectName]?.coefficient) || 1;
+  const coefOf = (subjectName) => Number(coefByName[canonicalSubject(subjectName).key]?.coefficient) || 1;
 
   // Regroupement par rang de contrôle. On garde TOUS les contrôles existants,
   // avec le nombre de notes de chacun : c'est l'appelant qui décide de masquer
@@ -9395,14 +9472,15 @@ const loadRecapData = async (cls, sem) => {
   // quand la saisie est en cours).
   const groups = new Map();
   for (const c of controls) {
-    const key = recapGroupKey(c);
-    if (!groups.has(key)) groups.set(key, { key, label: c.name, date_min: c.date, columns: [] });
+    const identity = recapIdentity(c);
+    const key = identity.key;
+    if (!groups.has(key)) groups.set(key, { key, label: identity.label, date_min: c.date, columns: [] });
     const g = groups.get(key);
     if (c.date && (!g.date_min || String(c.date) < String(g.date_min))) g.date_min = c.date;
-    const subjectName = nameBySubject[c.subject_id] || '—';
+    const subjectName = c.resolved_subject?.label || '—';
     g.columns.push({
       control_id: c.id,
-      subject_id: c.subject_id,
+      subject_id: c.resolved_subject?.id || c.subject_id,
       subject_name: subjectName,
       coefficient: coefOf(subjectName),
       date: c.date,
@@ -9413,7 +9491,17 @@ const loadRecapData = async (cls, sem) => {
 
   const list = [...groups.values()]
     .map(g => {
-      const columns = g.columns.sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name), 'fr'));
+      const bySubject = new Map();
+      g.columns.forEach((column) => {
+        const key = canonicalSubject(column.subject_name).key;
+        const previous = bySubject.get(key);
+        if (!previous || column.note_count > previous.note_count
+          || (column.note_count === previous.note_count && column.published && !previous.published)) {
+          bySubject.set(key, column);
+        }
+      });
+      const columns = [...bySubject.values()]
+        .sort((a, b) => String(a.subject_name).localeCompare(String(b.subject_name), 'fr'));
       const ids = new Set(columns.map(col => col.control_id));
       return {
         ...g,

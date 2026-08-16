@@ -5,6 +5,7 @@ import {
   aggregateAttendanceByYear,
   normalizeOfficialControlNotes,
 } from '../services/studentDossierMetrics.js';
+import { resolveControls } from '../services/controlSubjects.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dossier élève 360° — toutes les données d'un élève de la crèche au bac,
@@ -112,7 +113,7 @@ async function collectDossier(req, student) {
   try {
     const { data: notes } = await supabaseAdmin
       .from('control_notes')
-      .select('note, appreciation, created_at, control:controls_plan!inner(date, name, class_id, subject_id, subject:subjects(name))')
+      .select('note, appreciation, created_at, control:controls_plan!inner(id, date, name, class_id, teacher_id, subject_id, subject:subjects(name))')
       .eq('student_id', id);
     const classIds = [...new Set((notes || []).map((n) => n.control?.class_id).filter(Boolean))];
     const classMap = {};
@@ -121,7 +122,41 @@ async function collectDossier(req, student) {
         .from('classes').select('id, name, academic_year').in('id', classIds);
       (cls || []).forEach((c) => { classMap[c.id] = c; });
     }
-    const normalized = normalizeOfficialControlNotes(notes || [], classMap);
+    const controlsRaw = [...new Map((notes || [])
+      .filter((note) => note.control?.id)
+      .map((note) => [note.control.id, note.control])).values()];
+    const teacherIds = [...new Set(controlsRaw.map((control) => control.teacher_id).filter(Boolean))];
+    let teacherSubjects = [];
+    if (teacherIds.length) {
+      const { data } = await supabaseAdmin
+        .from('teacher_subjects')
+        .select('teacher_id, subject_id')
+        .in('teacher_id', teacherIds);
+      teacherSubjects = data || [];
+    }
+    const subjectIds = [...new Set([
+      ...controlsRaw.map((control) => control.subject_id),
+      ...teacherSubjects.map((row) => row.subject_id),
+    ].filter(Boolean))];
+    let subjects = [];
+    if (subjectIds.length) {
+      const { data } = await supabaseAdmin
+        .from('subjects').select('id, name, code').in('id', subjectIds);
+      subjects = data || [];
+    }
+    const resolvedById = new Map(resolveControls(controlsRaw, subjects, teacherSubjects)
+      .map((control) => [control.id, control.resolved_subject]));
+    const enrichedNotes = (notes || []).map((note) => {
+      const subject = resolvedById.get(note.control?.id);
+      return {
+        ...note,
+        control: {
+          ...note.control,
+          subject: subject ? { name: subject.label } : null,
+        },
+      };
+    });
+    const normalized = normalizeOfficialControlNotes(enrichedNotes, classMap);
     dossier.controls = normalized.controls;
     dossier.data_quality.unclassified_control_notes = normalized.unclassifiedControlNotes;
   } catch { dossier.controls = []; }

@@ -68,7 +68,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
       aria-label={`Chargement de ${schoolName || 'votre école'}`}
     >
       <div className="relative flex items-center justify-center">
-        {/* Anneaux rayonnants — bleu Boussoule, or et turquoise */}
+        {/* Anneaux rayonnants — bleu Bousole, or et turquoise */}
         <span className="et-splash-ring" style={{ borderColor: 'hsl(207 59% 22% / 0.35)' }} />
         <span className="et-splash-ring" style={{ borderColor: 'hsl(42 78% 59% / 0.48)', animationDelay: '0.4s' }} />
         <span className="et-splash-ring" style={{ borderColor: 'hsl(173 58% 39% / 0.38)', animationDelay: '0.8s' }} />
@@ -89,7 +89,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
           ) : (
             <img
               src="/brand/boussoule-logo.png"
-              alt="Logo Boussoule"
+              alt="Logo Bousole"
               className="w-full h-full object-contain p-2"
               draggable="false"
             />
@@ -100,7 +100,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
 
       <div className="et-splash-text mt-7 text-center px-6">
         <div className="font-display text-2xl font-semibold text-foreground">
-          {schoolName || 'Boussoule'}
+          {schoolName || 'Bousole'}
         </div>
         <div className="mt-1.5 text-sm text-muted-foreground">
           {ready ? 'Bienvenue !' : 'Préparation de votre espace…'}
@@ -108,7 +108,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
       </div>
 
       <div className="absolute bottom-8 text-xs text-muted-foreground/70">
-        Propulsé par <span className="font-medium text-muted-foreground">Boussoule</span>
+        Propulsé par <span className="font-medium text-muted-foreground">Bousole</span>
       </div>
     </div>
   );

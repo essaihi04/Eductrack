@@ -74,7 +74,7 @@ const BrowserChrome = ({ label, children }) => (
 );
 
 const ImportSimulation = () => (
-  <BrowserChrome label="Boussoule · Import emploi du temps">
+  <BrowserChrome label="Bousole · Import emploi du temps">
     <div className="grid gap-4 p-4 sm:p-6 lg:grid-cols-[0.72fr_1.28fr]">
       <div className="rounded-2xl border-2 border-dashed border-[#E66F51]/25 bg-[#E66F51]/5 p-4">
         <div className="grid h-11 w-11 place-items-center rounded-xl bg-white text-[#E66F51] shadow-sm">
@@ -136,7 +136,7 @@ const ClassSimulation = () => {
   ];
 
   return (
-    <BrowserChrome label="Boussoule · Suivi rapide · 3A">
+    <BrowserChrome label="Bousole · Suivi rapide · 3A">
       <div className="p-4 sm:p-6">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
           <div>
@@ -189,7 +189,7 @@ const DirectionSimulation = () => {
   ];
 
   return (
-    <BrowserChrome label="Boussoule · Tableau de bord direction">
+    <BrowserChrome label="Bousole · Tableau de bord direction">
       <div className="p-4 sm:p-6">
         <div className="grid gap-3 sm:grid-cols-3">
           {metrics.map(({ label, value, icon: Icon, color }, index) => (
@@ -234,7 +234,7 @@ const DirectionSimulation = () => {
 };
 
 const FamilySimulation = () => (
-  <BrowserChrome label="Boussoule · Famille El Amrani">
+  <BrowserChrome label="Bousole · Famille El Amrani">
     <div className="grid gap-4 bg-[#F8F1E5] p-4 sm:p-6 md:grid-cols-[0.9fr_1.1fr]">
       <div className="rounded-[1.6rem] bg-[#0E3D37] p-3 text-white shadow-xl">
         <div className="flex items-center gap-3 border-b border-white/10 px-1 pb-3">
@@ -295,7 +295,7 @@ const SchoolDaySimulator = () => {
             Simulation interactive
           </div>
           <h2 className="mt-5 text-3xl font-black tracking-[-0.035em] text-[#173A59] sm:text-5xl">Une journée d’école, enfin fluide.</h2>
-          <p className="mt-5 text-lg font-medium leading-8 text-[#173A59]/60">Choisissez un moment de la journée et découvrez ce que chaque utilisateur vit réellement dans Boussoule.</p>
+          <p className="mt-5 text-lg font-medium leading-8 text-[#173A59]/60">Choisissez un moment de la journée et découvrez ce que chaque utilisateur vit réellement dans Bousole.</p>
         </div>
 
         <div className="mt-14 grid items-start gap-8 lg:grid-cols-[0.38fr_0.62fr] lg:gap-12">

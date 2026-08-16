@@ -45,7 +45,7 @@ const LandingHero3D = ({ onStart, onRegister }) => (
         </h1>
 
         <p className="mt-7 max-w-2xl text-lg font-medium leading-8 text-[#173A59]/70 sm:text-xl">
-          Boussoule relie la direction, les familles, les élèves et les professeurs dans une seule expérience : pédagogie, communication, finance, transport et vie scolaire avancent dans le même sens.
+          Bousole relie la direction, les familles, les élèves et les professeurs dans une seule expérience : pédagogie, communication, finance, transport et vie scolaire avancent dans le même sens.
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -55,7 +55,7 @@ const LandingHero3D = ({ onStart, onRegister }) => (
             className="group inline-flex items-center justify-center gap-2 rounded-2xl bg-[#173A59] px-6 py-3.5 text-base font-extrabold text-white shadow-[0_16px_40px_rgba(23,58,89,0.24)] transition hover:-translate-y-0.5 hover:bg-[#214F74]"
           >
             <Play className="h-4 w-4 fill-current" />
-            Vivre une journée avec Boussoule
+            Vivre une journée avec Bousole
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
           </button>
           <button
@@ -90,7 +90,7 @@ const LandingHero3D = ({ onStart, onRegister }) => (
         >
           <img
             src="/images/landing-v2/hero-school-ecosystem.webp"
-            alt="Écosystème scolaire Boussoule représenté en miniature 3D"
+            alt="Écosystème scolaire Bousole représenté en miniature 3D"
             className="aspect-[1.82/1] w-full rounded-[1.7rem] object-cover"
             loading="eager"
           />
