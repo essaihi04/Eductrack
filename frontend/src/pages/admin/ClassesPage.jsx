@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save, Sparkles } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Plus, Trash2, ChevronDown, ChevronUp, Upload, Download, Edit2, School, GraduationCap, BookOpen, FolderOpen, X, Check, Calendar, FileSpreadsheet, Send, CreditCard, ListChecks, Save, Sparkles, FileText, Shuffle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { GenderSplit, Avatar, ClassCard, DetailDrawer } from '../../components/directory/ui';
 import * as XLSX from 'xlsx';
@@ -240,6 +240,8 @@ const Sparkline = ({ points = [], dir = 'flat', width = 46, height = 16 }) => {
 
 const ClassesPage = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedClassId = searchParams.get('class');
   const { profile } = useAuth();
   const { year } = useYear();
   const [classes, setClasses] = useState([]);
@@ -260,7 +262,7 @@ const ClassesPage = () => {
   const [classStudentsLoading, setClassStudentsLoading] = useState(false);
   // Stats par élève (absences, performance, courbe 7j, matière faible), clé = id élève
   const [classStudentStats, setClassStudentStats] = useState({});
-  const [deletingClassId, setDeletingClassId] = useState(null);
+  const [, setDeletingClassId] = useState(null);
   const [deleteStatus, setDeleteStatus] = useState({ type: '', message: '' });
   const [editingClassId, setEditingClassId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -289,7 +291,7 @@ const ClassesPage = () => {
   const [massarBusy, setMassarBusy] = useState(false);
   const [frenchBusy, setFrenchBusy] = useState(false); // import noms français (ListEleveFR)
   const [massarCoverage, setMassarCoverage] = useState({});
-  const [quickSendingClassId, setQuickSendingClassId] = useState(null);
+  const [, setQuickSendingClassId] = useState(null);
   const [fixMassarNames, setFixMassarNames] = useState(true);
 
   // Édition manuelle des codes Massar d'une classe
@@ -299,6 +301,23 @@ const ClassesPage = () => {
   const [massarEditSaving, setMassarEditSaving] = useState(false);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+  // Une classe possède maintenant une URL partageable. Cela permet de revenir
+  // exactement dans la même classe après avoir consulté la fiche d'un élève.
+  const openClassWorkspace = (classId) => {
+    setExpandedClass(classId);
+    const next = new URLSearchParams(searchParams);
+    next.set('class', classId);
+    setSearchParams(next, { replace: true });
+  };
+
+  const closeClassWorkspace = () => {
+    setExpandedClass(null);
+    setEditingClassId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('class');
+    setSearchParams(next, { replace: true });
+  };
 
   const getMassarToken = async () => {
     const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
@@ -565,6 +584,13 @@ const ClassesPage = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!requestedClassId || classes.length === 0) return;
+    if (classes.some((cls) => cls.id === requestedClassId)) {
+      setExpandedClass(requestedClassId);
+    }
+  }, [classes, requestedClassId]);
 
   // Charge les élèves de la classe + leurs stats quand on ouvre son tiroir.
   useEffect(() => {
@@ -1776,8 +1802,6 @@ const ClassesPage = () => {
 
   // Render a single class card
   const renderClassCard = (cls) => {
-    const isExpanded = expandedClass === cls.id;
-    const isEditing = editingClassId === cls.id;
     const studentCount = cls.student_count ?? cls.studentCount ?? 0;
 
     return (
@@ -1796,7 +1820,7 @@ const ClassesPage = () => {
             subject: p.subject || p.subjects?.name,
           };
         })}
-        onClick={() => setExpandedClass(cls.id)}
+        onClick={() => openClassWorkspace(cls.id)}
         actions={[
           { icon: CreditCard, label: massarCoverage[cls.id]?.withSecret > 0 ? 'Réimporter les codes Massar' : 'Importer les codes Massar', tone: 'purple', onClick: () => openMassarModalForClass(cls) },
           { icon: ListChecks, label: 'Voir / modifier les codes Massar', tone: 'purple', onClick: () => openMassarEditForClass(cls) },
@@ -1804,7 +1828,7 @@ const ClassesPage = () => {
             ? [{ icon: Send, label: 'Envoyer les codes Massar (WhatsApp)', tone: 'purple', onClick: () => quickSendMassar(cls) }]
             : []),
           { icon: Calendar, label: 'Emploi du temps', tone: 'blue', onClick: () => navigate(`/classes/${cls.id}/timetable`) },
-          { icon: Edit2, label: 'Modifier', tone: 'blue', onClick: () => { openEditClass(cls); setExpandedClass(cls.id); } },
+          { icon: Edit2, label: 'Modifier', tone: 'blue', onClick: () => { openEditClass(cls); openClassWorkspace(cls.id); } },
           { icon: Trash2, label: 'Supprimer', tone: 'red', onClick: () => deleteClass(cls.id) },
         ]}
       />
@@ -1826,6 +1850,32 @@ const ClassesPage = () => {
     if (ranked[2]) medalById[ranked[2].id] = { bg: '#B87333', fg: '#ffffff', label: '3e' };     // cuivre
     return (
       <div className="space-y-4">
+        {/* Accès directs : les tâches principales restent attachées à la classe. */}
+        <div className="rounded-xl border bg-muted/30 p-3">
+          <div className="mb-2">
+            <p className="text-sm font-semibold">Espace de la classe</p>
+            <p className="text-xs text-muted-foreground">Toutes les fonctions principales, sans perdre cette classe.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => navigate(`/classes/${cls.id}/timetable`)}
+              className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left text-sm hover:bg-accent">
+              <Calendar className="h-4 w-4 text-blue-600" /> Emploi du temps
+            </button>
+            <button type="button" onClick={() => navigate(`/admin/notes-saisie?class=${cls.id}`)}
+              className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left text-sm hover:bg-accent">
+              <ListChecks className="h-4 w-4 text-violet-600" /> Saisir les notes
+            </button>
+            <button type="button" onClick={() => navigate(`/admin/bulletins?class=${cls.id}`)}
+              className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left text-sm hover:bg-accent">
+              <FileText className="h-4 w-4 text-emerald-600" /> Bulletins
+            </button>
+            <button type="button" onClick={() => navigate('/admin/class-assignment')}
+              className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left text-sm hover:bg-accent">
+              <Shuffle className="h-4 w-4 text-amber-600" /> Répartition
+            </button>
+          </div>
+        </div>
+
         {/* Edit form */}
         {isEditing && (
           <div className="border rounded-lg px-3 py-2 bg-blue-50/50 dark:bg-blue-950/20">
@@ -1950,7 +2000,7 @@ const ClassesPage = () => {
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => navigate(`/students?student=${s.id}`)}
+                      onClick={() => navigate(`/students?student=${s.id}&fromClass=${cls.id}`)}
                       className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-accent transition-colors ${rowTint}`}
                       title="Voir / modifier la fiche de l'élève"
                     >
@@ -1989,7 +2039,7 @@ const ClassesPage = () => {
                 </div>
               )}
               <p className="text-[11px] text-muted-foreground mt-2">
-                Cliquez sur un élève pour ouvrir sa fiche et la modifier (page Élèves).
+                Cliquez sur un élève pour ouvrir son espace complet. Le retour vous ramènera ici.
               </p>
             </div>
 
@@ -2035,7 +2085,7 @@ const ClassesPage = () => {
       {/* Drawer de gestion d'une classe */}
       <DetailDrawer
         open={!!expandedClass}
-        onClose={() => { setExpandedClass(null); setEditingClassId(null); }}
+        onClose={closeClassWorkspace}
         title={activeClass?.name || ''}
         width={520}
       >

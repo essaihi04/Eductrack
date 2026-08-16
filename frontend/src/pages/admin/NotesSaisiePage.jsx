@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClipboardList, RefreshCw, Save, Plus, Trash2, X, Check, Eye, EyeOff,
   AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { saveBlob } from '../../lib/download';
+import { useYear } from '../../contexts/YearContext';
+import { sameYear } from '../../lib/schoolYear';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -34,6 +36,9 @@ const badgeFor = (c) => {
 
 export default function NotesSaisiePage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedClassId = searchParams.get('class');
+  const { year } = useYear();
   const [classes, setClasses] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [classId, setClassId] = useState('');
@@ -55,6 +60,21 @@ export default function NotesSaisiePage() {
   // kind : simile (examen blanc) | custom (contrôle supplémentaire libre)
   const [newControl, setNewControl] = useState({ kind: 'custom', name: '', date: new Date().toISOString().split('T')[0] });
 
+  // Une seule année scolaire est visible à la fois. Les anciennes/futures
+  // classes ne peuvent plus être choisies par erreur dans la saisie courante.
+  const activeClasses = useMemo(
+    () => classes.filter((cls) => !cls.academic_year || sameYear(cls.academic_year, year)),
+    [classes, year],
+  );
+
+  const selectClass = (nextClassId) => {
+    setClassId(nextClassId);
+    const next = new URLSearchParams(searchParams);
+    if (nextClassId) next.set('class', nextClassId);
+    else next.delete('class');
+    setSearchParams(next, { replace: true });
+  };
+
   const authHeaders = async () => {
     const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
     return { 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' };
@@ -71,7 +91,10 @@ export default function NotesSaisiePage() {
   useEffect(() => {
     (async () => {
       try {
-        const [cls, subj] = await Promise.all([api('/api/admin/classes'), api('/api/admin/subjects')]);
+        const [cls, subj] = await Promise.all([
+          api(`/api/admin/classes?academic_year=${encodeURIComponent(year)}`),
+          api('/api/admin/subjects'),
+        ]);
         setClasses(Array.isArray(cls) ? cls : []);
         setSubjects(Array.isArray(subj) ? subj : (subj.subjects || []));
       } catch (e) { setError(e.message); }
@@ -82,7 +105,17 @@ export default function NotesSaisiePage() {
       } catch { setSemester(1); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [year]);
+
+  useEffect(() => {
+    if (requestedClassId && activeClasses.some((cls) => cls.id === requestedClassId)) {
+      setClassId(requestedClassId);
+      return;
+    }
+    if (classId && !activeClasses.some((cls) => cls.id === classId)) {
+      setClassId('');
+    }
+  }, [activeClasses, classId, requestedClassId]);
 
   const loadGrid = async (cId = classId, sId = subjectId, sem = semester) => {
     if (!cId || !sId || !sem) { setGrid(null); return; }
@@ -101,7 +134,8 @@ export default function NotesSaisiePage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { loadGrid(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [classId, subjectId, semester]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadGrid(); }, [classId, subjectId, semester]);
 
   const setCell = (controlId, studentId, value) => {
     // Accepte vide, virgule ou point ; borne 0–20 à l'enregistrement
@@ -337,10 +371,10 @@ export default function NotesSaisiePage() {
               <label className="block text-xs font-medium text-muted-foreground mb-1">
                 <GraduationCap className="w-3.5 h-3.5 inline mr-1" />Classe
               </label>
-              <select value={classId} onChange={e => setClassId(e.target.value)}
+              <select value={classId} onChange={e => selectClass(e.target.value)}
                 className="px-3 py-2 border border-border rounded-lg bg-background min-w-[180px]">
                 <option value="">— choisir —</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
+                {activeClasses.map(c => <option key={c.id} value={c.id}>{c.name}{c.level ? ` (${c.level})` : ''}</option>)}
               </select>
             </div>
             <div>

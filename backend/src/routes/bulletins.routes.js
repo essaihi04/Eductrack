@@ -1135,8 +1135,10 @@ router.get('/student-notes/:studentId', requireSchoolAdmin, async (req, res) => 
       .eq('student_id', studentId)
       .gte('date', start)
       .lte('date', end);
-    const attendance = { absent: 0, late: 0, excused: 0 };
-    (att || []).forEach(a => { if (attendance[a.status] != null) attendance[a.status] += 1; });
+    const legacyAttendance = { absent: 0, late: 0, excused: 0 };
+    (att || []).forEach(a => {
+      if (legacyAttendance[a.status] != null) legacyAttendance[a.status] += 1;
+    });
 
     // Suivi rapide en classe (session_tracking) : présence aux séances,
     // participation, vigilance, attitude, téléphone, somnolence, devoirs,
@@ -1147,6 +1149,16 @@ router.get('/student-notes/:studentId', requireSchoolAdmin, async (req, res) => 
     } catch (e) {
       console.warn('[Bulletins] student-notes tracking:', e.message);
     }
+    // Source officielle d'assiduité : session_tracking, identique au dossier
+    // élève et à la liste des absences. La table attendance ne sert que de
+    // repli pour les établissements n'ayant pas encore de suivi de séance.
+    const attendance = tracking?.sessions_tracked > 0
+      ? {
+          absent: tracking.presence?.absent || 0,
+          late: tracking.presence?.late || 0,
+          excused: tracking.presence?.excused || 0,
+        }
+      : legacyAttendance;
 
     const lines = result.lines.map(l => ({
       ...l,

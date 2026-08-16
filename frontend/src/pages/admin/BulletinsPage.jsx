@@ -1,9 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FileText, RefreshCw, Send, Eye, CheckCircle, Download, Printer, MessageCircle } from 'lucide-react';
 import { openPdfUrl } from '../../lib/download';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { sameYear } from '../../lib/schoolYear';
 
 const BulletinsPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedClassId = searchParams.get('class');
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [academicYear, setAcademicYear] = useState('');
@@ -17,7 +21,20 @@ const BulletinsPage = () => {
   const [publishing, setPublishing] = useState(false);
   const [sendingWA, setSendingWA] = useState(false);
   const [msg, setMsg] = useState('');
-  const [genResult, setGenResult] = useState(null);
+  const [, setGenResult] = useState(null);
+
+  const activeClasses = useMemo(
+    () => classes.filter((cls) => !academicYear || !cls.academic_year || sameYear(cls.academic_year, academicYear)),
+    [academicYear, classes],
+  );
+
+  const selectClass = (nextClassId) => {
+    setSelectedClass(nextClassId);
+    const next = new URLSearchParams(searchParams);
+    if (nextClassId) next.set('class', nextClassId);
+    else next.delete('class');
+    setSearchParams(next, { replace: true });
+  };
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const getToken = async () => {
@@ -33,10 +50,19 @@ const BulletinsPage = () => {
 
   useEffect(() => {
     setAcademicYear(defaultYear());
-    fetchClasses();
     fetchCurrentSemester();
     fetchYears();
   }, []);
+
+  useEffect(() => {
+    if (requestedClassId && activeClasses.some((cls) => cls.id === requestedClassId)) {
+      setSelectedClass(requestedClassId);
+      return;
+    }
+    if (selectedClass && !activeClasses.some((cls) => cls.id === selectedClass)) {
+      setSelectedClass('');
+    }
+  }, [activeClasses, requestedClassId, selectedClass]);
 
   // Liste des années (archives + en cours)
   const fetchYears = async () => {
@@ -68,15 +94,20 @@ const BulletinsPage = () => {
     } catch (e) { console.error(e); }
   };
 
-  const fetchClasses = async () => {
+  const fetchClasses = useCallback(async (yearValue = academicYear) => {
     try {
       const token = await getToken();
-      const res = await fetch(`${apiUrl}/api/admin/classes`, {
+      const query = yearValue ? `?academic_year=${encodeURIComponent(yearValue)}` : '';
+      const res = await fetch(`${apiUrl}/api/admin/classes${query}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) setClasses(await res.json());
     } catch (e) { console.error(e); }
-  };
+  }, [academicYear, apiUrl]);
+
+  useEffect(() => {
+    if (academicYear) fetchClasses(academicYear);
+  }, [academicYear, fetchClasses]);
 
   const fetchBulletins = useCallback(async () => {
     if (!selectedClass || !academicYear) return;
@@ -90,7 +121,7 @@ const BulletinsPage = () => {
       if (res.ok) setBulletins(await res.json());
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedClass, academicYear, semester]);
+  }, [selectedClass, academicYear, semester, apiUrl]);
 
   useEffect(() => { fetchBulletins(); }, [fetchBulletins]);
 
@@ -199,10 +230,10 @@ const BulletinsPage = () => {
           <div className="flex flex-wrap gap-4 items-end">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Classe</label>
-              <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)}
+              <select value={selectedClass} onChange={e => selectClass(e.target.value)}
                 className="border rounded-lg px-3 py-2 text-sm min-w-[200px]">
                 <option value="">— Choisir —</option>
-                {classes.map(c => <option key={c.id} value={c.id}>{c.name} ({c.level})</option>)}
+                {activeClasses.map(c => <option key={c.id} value={c.id}>{c.name} ({c.level})</option>)}
               </select>
             </div>
             <div>

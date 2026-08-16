@@ -8,8 +8,7 @@
 // Sources des données :
 //   - controls_plan (kind = 'control' | 'activity') : épreuves planifiées
 //   - control_notes : notes des élèves
-//   - teacher_subjects : permet de déduire la matière (controls_plan n'a pas
-//     subject_id ; on utilise le teacher_id pour retrouver la matière)
+//   - controls_plan.subject_id : rattachement obligatoire à la matière
 //   - subject_coefficients : coefficients par niveau / filière / matière
 //   - school_year_config : bornes des semestres
 // ============================================================================
@@ -111,25 +110,6 @@ export const getCoefficients = async (schoolId, level, filiere) => {
 };
 
 /**
- * Récupère la matière enseignée par un professeur (1er match).
- * controls_plan n'a pas de subject_id → on infère via teacher_subjects.
- */
-const getTeacherSubjectsMap = async (teacherIds) => {
-  if (!teacherIds.length) return new Map();
-  const { data } = await supabaseAdmin
-    .from('teacher_subjects')
-    .select('teacher_id, subjects(id, name)')
-    .in('teacher_id', teacherIds);
-  const map = new Map();
-  (data || []).forEach(row => {
-    if (!map.has(row.teacher_id)) {
-      map.set(row.teacher_id, { id: row.subjects?.id, name: row.subjects?.name });
-    }
-  });
-  return map;
-};
-
-/**
  * Calcule les lignes du bulletin pour UN élève.
  * Retourne :
  *   { lines: [{ subject_id, subject_name, controls_avg, activities_avg, note_20, coefficient, weighted_note }],
@@ -159,17 +139,16 @@ export const computeStudentBulletin = async ({
   // 3. Tous les controls_plan de la classe sur la période
   const { data: controls } = await supabaseAdmin
     .from('controls_plan')
-    .select('id, name, date, teacher_id, kind, subject_id')
+    .select('id, name, date, teacher_id, kind, subject_id, status')
     .eq('class_id', classId)
     .gte('date', start)
-    .lte('date', end);
+    .lte('date', end)
+    .neq('status', 'cancelled');
 
   const controlsArr = controls || [];
   const controlIds = controlsArr.map(c => c.id);
-  const teacherIds = [...new Set(controlsArr.map(c => c.teacher_id).filter(Boolean))];
 
-  // Matières référencées directement par les contrôles (correspondance fiable,
-  // prioritaire sur la déduction via le professeur).
+  // Matières référencées directement par les contrôles (source officielle).
   const subjectIds = [...new Set(controlsArr.map(c => c.subject_id).filter(Boolean))];
   const subjectById = new Map();
   if (subjectIds.length) {
@@ -189,17 +168,15 @@ export const computeStudentBulletin = async ({
     notes = data || [];
   }
 
-  // 5. Mapping teacher → subject
-  const teacherSubjMap = await getTeacherSubjectsMap(teacherIds);
-
-  // 6. Grouper par matière
+  // 5. Grouper par matière. Les anciens contrôles sans subject_id restent en
+  // base, mais sont exclus des moyennes : un professeur peut enseigner
+  // plusieurs matières, donc sa matière ne doit jamais être devinée.
   // Structure : { subjectName: { subject_id, controls: [], activities: [] } }
   const buckets = {};
   const noteByControl = new Map((notes || []).map(n => [n.control_id, Number(n.note)]));
 
   for (const ctrl of controlsArr) {
-    // Priorité : matière explicite du contrôle ; repli : matière déduite du prof.
-    const subj = (ctrl.subject_id && subjectById.get(ctrl.subject_id)) || teacherSubjMap.get(ctrl.teacher_id);
+    const subj = ctrl.subject_id ? subjectById.get(ctrl.subject_id) : null;
     if (!subj || !subj.name) continue;
     const key = subj.name.trim();
     if (!buckets[key]) {

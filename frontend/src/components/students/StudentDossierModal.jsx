@@ -300,12 +300,31 @@ export default function StudentDossierModal({ student, onClose }) {
         avg: bulByYear[e.academic_year] ? bulByYear[e.academic_year].sum / bulByYear[e.academic_year].n : null,
         status: e.status, external: false,
       })),
-    ].sort((a, b) => yearKey(a.year).localeCompare(yearKey(b.year)));
+    ];
+    const currentYear = data.current_class?.academic_year;
+    if (currentYear && !timeline.some((item) => !item.external && item.year === currentYear)) {
+      timeline.push({
+        id: `current-${data.current_class.id}`,
+        year: currentYear,
+        level: data.current_class.level,
+        place: data.current_class.name,
+        avg: bulByYear[currentYear] ? bulByYear[currentYear].sum / bulByYear[currentYear].n : null,
+        status: 'current',
+        external: false,
+      });
+    }
+    timeline.sort((a, b) => yearKey(a.year).localeCompare(yearKey(b.year)));
+
+    const trackedYears = new Set([
+      ...timeline.map((item) => item.year),
+      ...generalCurve.map((item) => item.year),
+      ...att.map(([year]) => year),
+    ].filter(Boolean)).size;
 
     return {
       generalCurve, subjectCurve, subjects, subjAvg, trend, overall,
       strengths: subjAvg.slice(0, 3), weaknesses: [...subjAvg].reverse().slice(0, 3),
-      attendance: att, totalAbs, totalInc, timeline,
+      attendance: att, totalAbs, totalInc, timeline, trackedYears,
     };
   }, [data]);
 
@@ -435,6 +454,12 @@ export default function StudentDossierModal({ student, onClose }) {
                 Certaines sections nécessitent la migration <code className="font-mono">ADD_STUDENT_DOSSIER.sql</code> (à exécuter dans Supabase).
               </p>
             )}
+            {(data?.data_quality?.unclassified_control_notes || 0) > 0 && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                {data.data_quality.unclassified_control_notes} ancienne(s) note(s) sans matière ont été exclues des moyennes officielles. Elles restent conservées en base.
+              </p>
+            )}
             {error && (
               <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex items-center gap-1.5">
                 <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
@@ -486,7 +511,7 @@ function SyntheseTab({ data, analysis }) {
           icon={<TrendIcon className={`w-4 h-4 ${trendColor}`} />}
         />
         <Stat label="Absences cumulées" value={analysis.totalAbs} />
-        <Stat label="Années suivies" value={analysis.timeline.length} />
+        <Stat label="Années suivies" value={analysis.trackedYears} />
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">

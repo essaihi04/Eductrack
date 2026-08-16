@@ -33,51 +33,54 @@ export const ADMIN_DOMAINS = [
     roles: ALL_ADMIN,
     groups: [
       {
-        key: 'suivi',
-        label: 'Suivi',
+        key: 'classes',
+        label: 'Classes',
         items: [
-          { label: 'Élèves', path: '/students', icon: Users, roles: ALL_ADMIN },
-          { label: 'Professeurs', path: '/teachers', icon: UserCircle, roles: ALL_ADMIN },
-          { label: 'Suivi des profs', path: '/teacher-tracking', icon: TrendingUp, roles: ALL_ADMIN },
-          { label: 'Élèves absents', path: '/absences', icon: UserX, roles: ALL_ADMIN },
           { label: 'Classes', path: '/classes', icon: GraduationCap, roles: ALL_ADMIN },
           { label: 'Répartition', path: '/admin/class-assignment', icon: Shuffle, roles: ALL_ADMIN },
-          { label: 'Réinscription', path: '/admin/reinscription', icon: UserCheck, roles: NON_MANAGER },
-          { label: 'Matières', path: '/subjects', icon: BookOpen, roles: ALL_ADMIN },
-          { label: 'Parents', path: '/parents', icon: Users2, roles: ALL_ADMIN },
+          { label: 'Suivi de séance', path: '/teacher/rapide', icon: Calendar, roles: PEDAGO },
+          { label: 'Dashboard classes', path: '/teacher/dashboard', icon: BarChart3, roles: PEDAGO },
         ],
       },
       {
-        // La direction pédagogique peut faire le suivi "comme un prof" :
-        // enregistrer une séance, suivre les élèves, signaler les absences —
-        // utile quand un prof n'a pas fait son travail.
-        key: 'terrain',
-        label: 'Suivi séance',
+        key: 'eleves',
+        label: 'Élèves',
         items: [
-          { label: 'Suivi de séance', path: '/teacher/rapide', icon: Calendar, roles: PEDAGO },
-          { label: 'Dashboard classes', path: '/teacher/dashboard', icon: BarChart3, roles: PEDAGO },
-          { label: 'Devoirs', path: '/teacher/devoirs', icon: FileText, roles: PEDAGO },
+          { label: 'Tous les élèves', path: '/students', icon: Users, roles: ALL_ADMIN },
+          { label: 'Absences', path: '/absences', icon: UserX, roles: ALL_ADMIN },
+          { label: 'Comportement', path: '/behavior', icon: BarChart3, roles: ALL_ADMIN },
+          { label: 'Parents', path: '/parents', icon: Users2, roles: ALL_ADMIN },
+          { label: 'Réinscription', path: '/admin/reinscription', icon: UserCheck, roles: NON_MANAGER },
+        ],
+      },
+      {
+        key: 'equipe',
+        label: 'Équipe',
+        items: [
+          { label: 'Professeurs', path: '/teachers', icon: UserCircle, roles: ALL_ADMIN },
+          { label: 'Suivi des profs', path: '/teacher-tracking', icon: TrendingUp, roles: ALL_ADMIN },
         ],
       },
       {
         key: 'evaluation',
-        label: 'Évaluation',
+        label: 'Évaluations',
         items: [
           { label: 'Saisie des notes', path: '/admin/notes-saisie', icon: ClipboardList, roles: ALL_ADMIN },
           { label: 'Récap par contrôle', path: '/admin/notes-recap', icon: ListChecks, roles: ALL_ADMIN },
           { label: 'Bulletins', path: '/admin/bulletins', icon: FileText, roles: ALL_ADMIN },
-          { label: 'Coefficients', path: '/admin/coefficients', icon: BookOpen, roles: ALL_ADMIN },
           { label: "Notes d'examens", path: '/admin/exam-notes', icon: GraduationCap, roles: ALL_ADMIN },
           { label: 'Notes des profs', path: '/admin/class-notes', icon: ClipboardList, roles: ALL_ADMIN },
           { label: 'Cahier de texte', path: '/cahier-de-texte', icon: FileText, roles: ALL_ADMIN },
+          { label: 'Devoirs', path: '/teacher/devoirs', icon: FileText, roles: PEDAGO },
         ],
       },
       {
-        key: 'pilotage',
-        label: 'Pilotage',
+        key: 'organisation',
+        label: 'Organisation',
         items: [
+          { label: 'Matières', path: '/subjects', icon: BookOpen, roles: ALL_ADMIN },
+          { label: 'Coefficients', path: '/admin/coefficients', icon: BookOpen, roles: ALL_ADMIN },
           { label: 'Approbations', path: '/approvals', icon: ShieldCheck, roles: ALL_ADMIN },
-          { label: 'Comportement', path: '/behavior', icon: BarChart3, roles: ALL_ADMIN },
           { label: 'Config. année', path: '/admin/school-year-config', icon: Calendar, roles: ALL_ADMIN },
         ],
       },

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { printHtmlDocument } from '../../lib/download';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, Search, Check, RotateCcw, GraduationCap, Archive, ArchiveRestore, FolderOpen } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Copy, CheckSquare, Square, RefreshCw, MessageCircle, Send, UserPlus, X, AlertTriangle, Users, FileText, Download, Camera, Printer, MapPin, MapPinOff, ArrowRightLeft, ArrowLeft, Search, Check, RotateCcw, GraduationCap, Archive, ArchiveRestore, FolderOpen } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import {
   CardGrid, StudentCard, StudentRow, StatusPill, GridListToggle,
@@ -21,9 +21,9 @@ import ReinscriptionFlow from '../../components/students/ReinscriptionFlow';
 import MoroccanCityInput from '../../components/ui/MoroccanCityInput';
 
 const StudentsPage = () => {
-  const { profile, availableSchools } = useAuth();
+  const navigate = useNavigate();
+  const { profile } = useAuth();
   const { year } = useYear();
-  const isMultiSchool = (availableSchools?.length || 0) > 1;
   const isAdmin = profile?.role === 'admin' || profile?.role === 'school_admin' || profile?.role === 'pedagogical_director' || profile?.role === 'pedagogical_manager';
   const [students, setStudents] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -57,6 +57,8 @@ const StudentsPage = () => {
   const [notesStudent, setNotesStudent] = useState(null); // fenêtre « Notes d'élève »
   const [dossierStudent, setDossierStudent] = useState(null); // dossier 360° crèche→bac
   const [searchParams, setSearchParams] = useSearchParams();
+  const requestedStudentId = searchParams.get('student');
+  const sourceClassId = searchParams.get('fromClass');
   const [filters, setFilters] = useState({
     className: '',
     level: '',
@@ -120,17 +122,33 @@ const StudentsPage = () => {
   const [sendingCredentials, setSendingCredentials] = useState(false);
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const sourceClass = classes.find((cls) => cls.id === sourceClassId) || null;
+
+  const closeStudentWorkspace = () => {
+    setActiveStudent(null);
+    if (sourceClassId) {
+      navigate(`/classes?class=${sourceClassId}`);
+    }
+  };
+
+  const openNotesWorkspace = (student) => {
+    setActiveStudent(null);
+    setNotesStudent(student);
+  };
+
+  const openDossierWorkspace = (student) => {
+    setActiveStudent(null);
+    setDossierStudent(student);
+  };
+
+  const closeStudentOverlay = (setter) => {
+    setter(null);
+    if (sourceClassId) navigate(`/classes?class=${sourceClassId}`);
+  };
 
   // L'élève a-t-il une localisation domicile (captée via le chatbot WhatsApp
   // ou saisie à la main) ? Utilisée par le transport.
   const hasLocation = (s) => s?.home_lat != null && s?.home_lng != null;
-
-  const togglePasswordVisibility = (studentId) => {
-    setVisiblePasswords(prev => ({
-      ...prev,
-      [studentId]: !prev[studentId]
-    }));
-  };
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -410,18 +428,18 @@ const StudentsPage = () => {
     if (isAdmin) refreshActiveIds();
   }, [year, isAdmin]);
 
-  // Interconnexion avec la page Classes : ?student=<id> ouvre directement la fiche
-  // de l'élève (et nettoie l'URL ensuite pour ne pas la rouvrir au prochain rendu).
+  // Interconnexion avec la page Classes : ?student=<id>&fromClass=<id> ouvre la
+  // fiche et conserve la classe d'origine afin d'y revenir en un clic.
   useEffect(() => {
-    const targetId = searchParams.get('student');
-    if (!targetId || students.length === 0) return;
-    const found = students.find(s => s.id === targetId);
+    if (!requestedStudentId || students.length === 0) return;
+    const found = students.find(s => s.id === requestedStudentId);
     if (found) {
       setActiveStudent(found);
-      searchParams.delete('student');
-      setSearchParams(searchParams, { replace: true });
+      const next = new URLSearchParams(searchParams);
+      next.delete('student');
+      setSearchParams(next, { replace: true });
     }
-  }, [students, searchParams]);
+  }, [students, requestedStudentId, searchParams, setSearchParams]);
 
   const fetchData = async () => {
     try {
@@ -731,7 +749,7 @@ const StudentsPage = () => {
     const yesNo = (b) => `<span class="opt ${b === true ? 'on' : ''}">Oui</span> <span class="opt ${b === false ? 'on' : ''}">Non</span>`;
     const checkbox = (on) => `<span class="cb">${on ? '☑' : '☐'}</span>`;
 
-    const parentBlock = (p, idx) => `
+    const parentBlock = (p) => `
       <div class="party">
         <div class="row"><div class="lbl">Nom : <b>${val(p?.last_name)}</b></div><div class="lbl ar" dir="rtl">الاسم العائلي</div></div>
         <div class="row"><div class="lbl">Prénom : <b>${val(p?.first_name)}</b></div><div class="lbl ar" dir="rtl">الاسم الشخصي</div></div>
@@ -1491,7 +1509,7 @@ L'administration de ${schoolName}`;
                 ) : (
                   <Square className="w-4 h-4 text-gray-400" />
                 )}
-                {isAllSelected() ? 'Désélect.' : 'Tout'}
+                {isAllSelected() ? 'Tout désélectionner' : 'Sélectionner tout'}
                 <span className="text-gray-500 font-normal">({selectedStudents.size}/{getFilteredStudents().length})</span>
               </button>
             )}
@@ -1950,8 +1968,8 @@ L'administration de ${schoolName}`;
                                 onToggleSelect={() => toggleStudentSelection(student.id)}
                                 onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
                                 actions={isCandidate ? [] : [
-                                  { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => setNotesStudent(student) },
-                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => setDossierStudent(student) },
+                                  { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => openNotesWorkspace(student) },
+                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => openDossierWorkspace(student) },
                                 ]}
                               />
                             </div>
@@ -1979,8 +1997,8 @@ L'administration de ${schoolName}`;
                               onToggleSelect={() => toggleStudentSelection(student.id)}
                               onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
                               actions={isCandidate ? [] : [
-                                { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => setNotesStudent(student) },
-                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => setDossierStudent(student) },
+                                { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => openNotesWorkspace(student) },
+                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => openDossierWorkspace(student) },
                               ]}
                             />
                           </div>
@@ -1998,11 +2016,22 @@ L'administration de ${schoolName}`;
       {/* Fiche élève (drawer master-detail) */}
       <DetailDrawer
         open={!!activeStudent}
-        onClose={() => setActiveStudent(null)}
+        onClose={closeStudentWorkspace}
         title={activeStudent ? `${activeStudent.first_name} ${activeStudent.last_name}` : ''}
       >
         {activeStudent && (
           <div className="space-y-4">
+            {sourceClassId && (
+              <button
+                type="button"
+                onClick={() => navigate(`/classes?class=${sourceClassId}`)}
+                className="w-full flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-left text-sm font-medium text-primary hover:bg-primary/10"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Retour à {sourceClass?.name || 'la classe'}
+              </button>
+            )}
+
             <div className="flex flex-col items-center text-center gap-2">
               <Avatar name={`${activeStudent.first_name} ${activeStudent.last_name}`} src={activeStudent.avatar_url} size="lg" gender={activeStudent.gender || ''} />
               <div className="font-medium">{activeStudent.first_name} {activeStudent.last_name}</div>
@@ -2035,12 +2064,20 @@ L'administration de ${schoolName}`;
               <FieldRow label="Email" value={activeStudent.email} />
             </div>
 
-            <button
-              onClick={() => setNotesStudent(activeStudent)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
-            >
-              <GraduationCap className="w-4 h-4" /> Notes de l'élève (bulletin)
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => openDossierWorkspace(activeStudent)}
+                className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                <FolderOpen className="w-4 h-4" /> Dossier complet
+              </button>
+              <button
+                onClick={() => openNotesWorkspace(activeStudent)}
+                className="flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
+              >
+                <GraduationCap className="w-4 h-4" /> Notes
+              </button>
+            </div>
 
             {isAdmin && (
               <button
@@ -2068,78 +2105,84 @@ L'administration de ${schoolName}`;
               <Download className="w-4 h-4" /> Télécharger la fiche d'inscription
             </button>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-gray-700 block">Mot de passe</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type={visiblePasswords[`pwd_${activeStudent.id}`] ? 'text' : 'password'}
-                  value={activeStudent.password || ''}
-                  readOnly
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
-                />
-                <button
-                  onClick={() => setVisiblePasswords((prev) => ({ ...prev, [`pwd_${activeStudent.id}`]: !prev[`pwd_${activeStudent.id}`] }))}
-                  className="p-2 hover:bg-blue-100 rounded"
-                  title={visiblePasswords[`pwd_${activeStudent.id}`] ? 'Masquer' : 'Afficher'}
-                >
-                  {visiblePasswords[`pwd_${activeStudent.id}`] ? <EyeOff className="w-4 h-4 text-blue-600" /> : <Eye className="w-4 h-4 text-blue-600" />}
-                </button>
-                <button onClick={() => copyToClipboard(activeStudent.password || '')} className="p-2 hover:bg-blue-100 rounded" title="Copier">
-                  <Copy className="w-4 h-4 text-blue-600" />
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2 pt-1">
+            {isAdmin && (
               <button
-                onClick={() => sendCredentialsToParent(activeStudent)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                onClick={() => openParentModal([activeStudent])}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
               >
-                <MessageCircle className="w-4 h-4" /> Envoyer au parent via WhatsApp
+                <UserPlus className="w-4 h-4" /> {activeStudent.parents?.length ? 'Ajouter un autre parent' : 'Ajouter les parents'}
               </button>
-              {isAdmin && (
+            )}
+
+            <details className="rounded-lg border border-border bg-muted/20">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground">
+                Administration et accès
+              </summary>
+              <div className="space-y-3 border-t border-border p-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-700 block">Mot de passe</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type={visiblePasswords[`pwd_${activeStudent.id}`] ? 'text' : 'password'}
+                      value={activeStudent.password || ''}
+                      readOnly
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded bg-white text-sm"
+                    />
+                    <button
+                      onClick={() => setVisiblePasswords((prev) => ({ ...prev, [`pwd_${activeStudent.id}`]: !prev[`pwd_${activeStudent.id}`] }))}
+                      className="p-2 hover:bg-blue-100 rounded"
+                      title={visiblePasswords[`pwd_${activeStudent.id}`] ? 'Masquer' : 'Afficher'}
+                    >
+                      {visiblePasswords[`pwd_${activeStudent.id}`] ? <EyeOff className="w-4 h-4 text-blue-600" /> : <Eye className="w-4 h-4 text-blue-600" />}
+                    </button>
+                    <button onClick={() => copyToClipboard(activeStudent.password || '')} className="p-2 hover:bg-blue-100 rounded" title="Copier">
+                      <Copy className="w-4 h-4 text-blue-600" />
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => openParentModal([activeStudent])}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
+                  onClick={() => sendCredentialsToParent(activeStudent)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
-                  <UserPlus className="w-4 h-4" /> {activeStudent.parents?.length ? 'Ajouter un autre parent' : 'Ajouter les parents'}
+                  <MessageCircle className="w-4 h-4" /> Envoyer les accès au parent
                 </button>
-              )}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => resetPassword(activeStudent.id)}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" /> Réinitialiser
-                </button>
-                {isAdmin && (
+
+                <div className="flex gap-2">
                   <button
-                    onClick={() => { deleteStudent(activeStudent.id); setActiveStudent(null); }}
-                    title="L'élève est archivé (conservé, restaurable), pas détruit"
-                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+                    onClick={() => resetPassword(activeStudent.id)}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition-colors"
                   >
-                    <Archive className="w-4 h-4" /> Archiver
+                    <RefreshCw className="w-4 h-4" /> Réinitialiser
                   </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => { deleteStudent(activeStudent.id); setActiveStudent(null); }}
+                      title="L'élève est archivé (conservé, restaurable), pas détruit"
+                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      <Archive className="w-4 h-4" /> Archiver
+                    </button>
+                  )}
+                </div>
+
+                {isAdmin && studentYearStatus(activeStudent) === 'active' && (
+                  <div className="pt-2 mt-1 border-t border-border">
+                    <button
+                      onClick={() => undoReinscription(activeStudent)}
+                      disabled={undoingReinscribe}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                      {undoingReinscribe ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                      {undoingReinscribe ? 'Annulation…' : 'Annuler la réinscription'}
+                    </button>
+                    <p className="text-[11px] text-gray-400 mt-1.5 text-center">
+                      Supprime l'inscription {year} et remet l'élève dans sa classe et son niveau précédents.
+                    </p>
+                  </div>
                 )}
               </div>
-
-              {/* Annuler la réinscription : remet l'élève dans son état initial */}
-              {isAdmin && studentYearStatus(activeStudent) === 'active' && (
-                <div className="pt-2 mt-1 border-t border-border">
-                  <button
-                    onClick={() => undoReinscription(activeStudent)}
-                    disabled={undoingReinscribe}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
-                  >
-                    {undoingReinscribe ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                    {undoingReinscribe ? 'Annulation…' : 'Annuler la réinscription'}
-                  </button>
-                  <p className="text-[11px] text-gray-400 mt-1.5 text-center">
-                    Supprime l'inscription {year} et remet l'élève dans sa classe et son niveau précédents.
-                  </p>
-                </div>
-              )}
-            </div>
+            </details>
           </div>
         )}
       </DetailDrawer>
@@ -2150,14 +2193,14 @@ L'administration de ${schoolName}`;
           student={notesStudent}
           classLabel={classes.find((c) => c.id === notesStudent.class_id)?.name || ''}
           activeYear={toDashYear(year)}
-          onClose={() => setNotesStudent(null)}
+          onClose={() => closeStudentOverlay(setNotesStudent)}
           onOpenDossier={(s) => { setNotesStudent(null); setDossierStudent(s); }}
         />
       )}
 
       {/* Dossier élève 360° (crèche → bac) */}
       {dossierStudent && (
-        <StudentDossierModal student={dossierStudent} onClose={() => setDossierStudent(null)} />
+        <StudentDossierModal student={dossierStudent} onClose={() => closeStudentOverlay(setDossierStudent)} />
       )}
 
       {/* Modale d'ajout de parents */}

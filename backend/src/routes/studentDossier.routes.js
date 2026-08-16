@@ -1,6 +1,10 @@
 import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
+import {
+  aggregateAttendanceByYear,
+  normalizeOfficialControlNotes,
+} from '../services/studentDossierMetrics.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dossier élève 360° — toutes les données d'un élève de la crèche au bac,
@@ -20,14 +24,6 @@ const getSchoolId = (req) => (req.user.role === 'super_admin' ? null : req.user.
 const applySchool = (query, req, column = 'school_id') => {
   const sid = getSchoolId(req);
   return sid ? query.eq(column, sid) : query;
-};
-
-// Année scolaire (format slash) d'une date : sept→déc = année en cours.
-const yearOfDate = (d) => {
-  const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return null;
-  const y = dt.getMonth() >= 8 ? dt.getFullYear() : dt.getFullYear() - 1;
-  return `${y}/${y + 1}`;
 };
 
 // Vérifie que l'élève appartient à l'école du demandeur. Renvoie le profil ou
@@ -60,7 +56,10 @@ const getDeepseek = async () => {
 // rapport IA (mêmes chiffres, jamais ceux du client).
 async function collectDossier(req, student) {
   const id = student.id;
-  const dossier = { missing_tables: [] };
+  const dossier = {
+    missing_tables: [],
+    data_quality: { unclassified_control_notes: 0 },
+  };
 
   // Parents (nom, téléphone, profession, situation) — contexte familial de base.
   try {
@@ -113,7 +112,7 @@ async function collectDossier(req, student) {
   try {
     const { data: notes } = await supabaseAdmin
       .from('control_notes')
-      .select('note, appreciation, created_at, control:controls_plan!inner(date, name, class_id, subject:subjects(name))')
+      .select('note, appreciation, created_at, control:controls_plan!inner(date, name, class_id, subject_id, subject:subjects(name))')
       .eq('student_id', id);
     const classIds = [...new Set((notes || []).map((n) => n.control?.class_id).filter(Boolean))];
     const classMap = {};
@@ -122,17 +121,9 @@ async function collectDossier(req, student) {
         .from('classes').select('id, name, academic_year').in('id', classIds);
       (cls || []).forEach((c) => { classMap[c.id] = c; });
     }
-    dossier.controls = (notes || [])
-      .filter((n) => n.note != null)
-      .map((n) => ({
-        note: Number(n.note),
-        appreciation: n.appreciation || null,
-        date: n.control?.date || null,
-        subject: n.control?.subject?.name || n.control?.name || null,
-        class_name: classMap[n.control?.class_id]?.name || null,
-        academic_year: classMap[n.control?.class_id]?.academic_year || yearOfDate(n.control?.date),
-      }))
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const normalized = normalizeOfficialControlNotes(notes || [], classMap);
+    dossier.controls = normalized.controls;
+    dossier.data_quality.unclassified_control_notes = normalized.unclassifiedControlNotes;
   } catch { dossier.controls = []; }
 
   // Examens de certification (national / régional / local, réels et blancs).
@@ -152,30 +143,14 @@ async function collectDossier(req, student) {
     for (let from = 0; ; from += PAGE) {
       const { data: page, error } = await supabaseAdmin
         .from('session_tracking')
-        .select('presence, mini_eval, participation, homework, sleeping, phone_use, sessions!inner(date)')
+        .select('presence, mini_eval, participation, homework, discipline, attitude, sleeping, phone_use, sessions!inner(date)')
         .eq('student_id', id)
         .range(from, from + PAGE - 1);
       if (error) throw error;
       if (page && page.length) rows.push(...page);
       if (!page || page.length < PAGE) break;
     }
-    const byYear = {};
-    for (const r of rows) {
-      const y = yearOfDate(r.sessions?.date);
-      if (!y) continue;
-      const s = byYear[y] || (byYear[y] = { sessions: 0, absences: 0, incidents: 0, evalSum: 0, evalN: 0 });
-      s.sessions++;
-      if (r.presence === 'absent') s.absences++;
-      if (r.sleeping === true || r.phone_use === true || r.homework === false || r.participation === 'faible') s.incidents++;
-      const ev = parseFloat(r.mini_eval);
-      if (!Number.isNaN(ev)) { s.evalSum += ev; s.evalN++; }
-    }
-    dossier.attendance = Object.fromEntries(Object.entries(byYear).map(([y, s]) => [y, {
-      sessions: s.sessions,
-      absences: s.absences,
-      incidents: s.incidents,
-      performance: s.evalN ? Math.round((s.evalSum / s.evalN) * 5) : null,
-    }]));
+    dossier.attendance = aggregateAttendanceByYear(rows);
   } catch { dossier.attendance = {}; }
 
   // Sections du dossier (nouvelles tables) — tolérantes à la migration absente.

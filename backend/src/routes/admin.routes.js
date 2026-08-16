@@ -3543,6 +3543,15 @@ router.get('/classes', async (req, res) => {
       .from('classes')
       .select('*, teacher:profiles!classes_teacher_id_fkey(first_name, last_name)');
     query = applySchoolFilter(query, req);
+    const academicYear = String(req.query.academic_year || '').trim();
+    if (academicYear) {
+      const variants = [...new Set([
+        academicYear,
+        academicYear.replace('/', '-'),
+        academicYear.replace('-', '/'),
+      ])];
+      query = query.in('academic_year', variants);
+    }
     // Filtre de scope pour pedagogical_manager
     const scopedClsIds = await getScopedClassIds(req);
     if (scopedClsIds !== null) {
@@ -6306,12 +6315,28 @@ router.get('/teachers/tracking-dashboard', async (req, res) => {
 // Construit la liste des absences agrégées par élève + jour sur une période.
 // Réutilisé par la route JSON GET /absences et par l'export PDF backend.
 // Retourne un tableau d'absences (vide si aucune ou scope pédagogique vide).
-async function collectAbsencesList(req, start, end) {
-    const schoolId = getSchoolId(req);
+async function getAbsenceClassScope(req) {
+  const schoolId = getSchoolId(req);
+  const scopedIds = await getScopedClassIds(req); // null = toute l'école
+  if (!schoolId) return scopedIds;
 
-    // Scope pédagogique (responsable = ses classes ; autres = toute l'école)
-    const scopedIds = await getScopedClassIds(req); // null = pas de restriction
-    if (scopedIds !== null && scopedIds.length === 0) {
+  const { data: schoolClasses, error } = await supabaseAdmin
+    .from('classes')
+    .select('id')
+    .eq('school_id', schoolId);
+  if (error) throw error;
+
+  const schoolClassIds = (schoolClasses || []).map((cls) => cls.id);
+  if (scopedIds === null) return schoolClassIds;
+  const schoolClassSet = new Set(schoolClassIds);
+  return scopedIds.filter((id) => schoolClassSet.has(id));
+}
+
+async function collectAbsencesList(req, start, end) {
+    // Le périmètre est basé sur la classe, source fiable y compris pour les
+    // anciennes séances dont sessions.school_id n'avait pas encore été rempli.
+    const allowedClassIds = await getAbsenceClassScope(req);
+    if (allowedClassIds !== null && allowedClassIds.length === 0) {
       return [];
     }
 
@@ -6322,8 +6347,7 @@ async function collectAbsencesList(req, start, end) {
       .eq('presence', 'absent')
       .gte('sessions.date', start)
       .lte('sessions.date', end);
-    if (schoolId) q = q.eq('sessions.school_id', schoolId);
-    if (scopedIds !== null) q = q.in('sessions.class_id', scopedIds);
+    if (allowedClassIds !== null) q = q.in('sessions.class_id', allowedClassIds);
     const { data: rows, error } = await q;
     if (error) throw error;
     const absent = rows || [];
@@ -6345,7 +6369,10 @@ async function collectAbsencesList(req, start, end) {
     (studentsRaw || []).forEach(s => { studentById[s.id] = s; });
 
     // Classes (nom + niveau) résolues séparément.
-    const classIds = [...new Set((studentsRaw || []).map(s => s.class_id).filter(Boolean))];
+    const classIds = [...new Set([
+      ...(studentsRaw || []).map(s => s.class_id),
+      ...absent.map(r => r.sessions?.class_id),
+    ].filter(Boolean))];
     const classById = {};
     if (classIds.length > 0) {
       const { data: classesRaw } = await supabaseAdmin
@@ -6380,7 +6407,7 @@ async function collectAbsencesList(req, start, end) {
       const key = `${r.student_id}_${date}`;
       if (!map.has(key)) {
         const stu = studentById[r.student_id] || {};
-        const cls = classById[stu.class_id] || {};
+        const cls = classById[r.sessions?.class_id] || classById[stu.class_id] || {};
         map.set(key, {
           key,
           date,
@@ -6489,16 +6516,14 @@ router.patch('/absences', async (req, res) => {
     }
 
     // Sécurité : ne modifier que des absences du périmètre de l'utilisateur.
-    const schoolId = getSchoolId(req);
-    const scopedIds = await getScopedClassIds(req);
+    const allowedClassIds = await getAbsenceClassScope(req);
     let checkQ = supabaseAdmin
       .from('session_tracking')
       .select('id, sessions!inner(class_id, school_id)')
       .in('id', tracking_ids);
-    if (schoolId) checkQ = checkQ.eq('sessions.school_id', schoolId);
-    if (scopedIds !== null) {
-      if (scopedIds.length === 0) return res.status(403).json({ error: 'Accès refusé' });
-      checkQ = checkQ.in('sessions.class_id', scopedIds);
+    if (allowedClassIds !== null) {
+      if (allowedClassIds.length === 0) return res.status(403).json({ error: 'Accès refusé' });
+      checkQ = checkQ.in('sessions.class_id', allowedClassIds);
     }
     const { data: allowed } = await checkQ;
     const allowedIds = (allowed || []).map(r => r.id);
