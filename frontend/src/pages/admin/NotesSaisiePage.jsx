@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClipboardList, RefreshCw, Save, Plus, Trash2, X, Check, Eye, EyeOff,
-  AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter, History,
+  AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { saveBlob } from '../../lib/download';
@@ -55,7 +55,7 @@ export default function NotesSaisiePage() {
   const [busyControl, setBusyControl] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
-  const [historyStudent, setHistoryStudent] = useState(null);
+  const [editedCells, setEditedCells] = useState(new Set());
 
   const [addOpen, setAddOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(''); // 'blank' | 'filled' pendant le téléchargement
@@ -137,13 +137,13 @@ export default function NotesSaisiePage() {
     try {
       const data = await api(`/api/admin/notes/grid?class_id=${cId}&subject_id=${sId}&semester=${sem}`);
       setGrid(data);
-      setHistoryStudent(null);
       setVisibleIds(null); // nouveau chargement → toutes les colonnes affichées
       // Initialiser les cellules depuis les notes existantes
       const c = {};
       (data.notes || []).forEach(n => { c[`${n.control_id}_${n.student_id}`] = String(n.note ?? ''); });
       setCells(c);
       setDirty(false);
+      setEditedCells(new Set());
     } catch (e) { setError(e.message); setGrid(null); }
     finally { setLoading(false); }
   };
@@ -152,9 +152,12 @@ export default function NotesSaisiePage() {
   useEffect(() => { loadGrid(); }, [classId, subjectId, semester]);
 
   const setCell = (controlId, studentId, value) => {
+    const key = `${controlId}_${studentId}`;
+    if (convertedCellKeys.has(key)) return;
     // Accepte vide, virgule ou point ; borne 0–20 à l'enregistrement
     if (value !== '' && !/^\d{0,2}([.,]\d{0,2})?$/.test(value)) return;
-    setCells(prev => ({ ...prev, [`${controlId}_${studentId}`]: value }));
+    setCells(prev => ({ ...prev, [key]: value }));
+    setEditedCells(prev => new Set(prev).add(key));
     setDirty(true);
   };
 
@@ -196,40 +199,41 @@ export default function NotesSaisiePage() {
     return map;
   }, [grid, displayedControls, cells]);
 
-  // Notes de la même année/matière/semestre saisies avant une nouvelle
-  // répartition. Elles restent en lecture seule sur leur contrôle d'origine :
-  // les recopier dans la grille courante créerait des doublons dans le dossier.
-  const inheritedByStudent = useMemo(() => {
-    const byStudent = {};
-    (grid?.inherited_notes || []).forEach((note) => {
-      (byStudent[note.student_id] || (byStudent[note.student_id] = [])).push(note);
-    });
-    return byStudent;
-  }, [grid]);
+  // Les notes retrouvées après une répartition sont placées directement dans
+  // leurs colonnes de contrôle. Elles restent en lecture seule sur le contrôle
+  // source afin qu'un simple enregistrement ne crée jamais de doublon.
+  const convertedCellKeys = useMemo(() => new Set(
+    (grid?.notes || [])
+      .filter((note) => note.converted)
+      .map((note) => `${note.control_id}_${note.student_id}`),
+  ), [grid]);
 
-  const inheritedAverage = (studentId) => {
-    const values = (inheritedByStudent[studentId] || [])
-      .map((note) => Number(note.note))
-      .filter(Number.isFinite);
-    return values.length
-      ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
-      : null;
-  };
+  const convertedCountByControl = useMemo(() => {
+    const counts = {};
+    (grid?.notes || []).forEach((note) => {
+      if (note.converted) counts[note.control_id] = (counts[note.control_id] || 0) + 1;
+    });
+    return counts;
+  }, [grid]);
 
   const saveAll = async () => {
     if (!grid) return;
     setSaving(true);
     setError(''); setInfo('');
     try {
-      for (const c of grid.controls) {
-        const notes = grid.students.map(s => ({
-          student_id: s.id,
-          note: cells[`${c.id}_${s.id}`] ?? '',
-        }));
+      for (const c of grid.controls.filter(control => !control.converted)) {
+        const notes = grid.students
+          .filter(s => editedCells.has(`${c.id}_${s.id}`))
+          .map(s => ({
+            student_id: s.id,
+            note: cells[`${c.id}_${s.id}`] ?? '',
+          }));
+        if (!notes.length) continue;
         await api(`/api/admin/controls/${c.id}/notes`, { method: 'PUT', body: JSON.stringify({ notes }) });
       }
       setInfo('Notes enregistrées.');
       setDirty(false);
+      setEditedCells(new Set());
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   };
@@ -442,6 +446,11 @@ export default function NotesSaisiePage() {
             {grid && (
               <div className="text-sm text-muted-foreground pb-2">
                 {grid.students.length} élève(s) · {filterActive ? `${displayedControls.length}/${grid.controls.length}` : grid.controls.length} contrôle(s)
+                {grid.converted_notes_count > 0 && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-xs font-medium">
+                    {grid.converted_notes_count} note(s) reprise(s) dans les contrôles
+                  </span>
+                )}
                 {pendingCount > 0 && (
                   <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-medium">
                     <AlertTriangle className="w-3 h-3" /> {pendingCount} à valider
@@ -494,18 +503,6 @@ export default function NotesSaisiePage() {
       {error && <p className="text-sm font-medium text-red-600">{error}</p>}
       {info && <p className="text-sm font-medium text-green-700">{info}</p>}
 
-      {!loading && (grid?.inherited_notes || []).length > 0 && (
-        <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          <History className="w-5 h-5 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-semibold">{grid.inherited_notes.length} note(s) conservée(s) avant la répartition</p>
-            <p className="text-xs text-sky-700 mt-0.5">
-              Elles restent associées aux élèves et à leurs contrôles d’origine. Utilisez « Historique » sur une ligne pour les consulter.
-            </p>
-          </div>
-        </div>
-      )}
-
       {loading && <div className="flex justify-center p-10"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
 
       {!loading && classId && subjectId && grid && (
@@ -519,7 +516,6 @@ export default function NotesSaisiePage() {
                   <thead>
                     <tr className="bg-muted/50 text-left">
                       <th className="px-3 py-2 sticky left-0 bg-muted/50 z-10 min-w-[180px]">Élève</th>
-                      <th className="px-3 py-2 text-center min-w-[145px]">Avant répartition</th>
                       {displayedControls.map((c) => (
                         <th key={c.id} className="px-2 py-2 text-center min-w-[110px] align-top">
                           <div className="font-semibold">{c.name}</div>
@@ -528,8 +524,18 @@ export default function NotesSaisiePage() {
                               {badgeFor(c).label}
                             </span>
                           )}
+                          {c.converted && (
+                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-sky-100 text-sky-700">
+                              Repris après répartition
+                            </span>
+                          )}
+                          {convertedCountByControl[c.id] > 0 && (
+                            <div className="mt-1 text-[10px] font-medium text-sky-700">
+                              {convertedCountByControl[c.id]} note(s) reprise(s)
+                            </div>
+                          )}
                           <div className="flex items-center justify-center gap-1 mt-1">
-                            {c.published ? (
+                            {c.converted ? null : c.published ? (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-medium">
                                 <Check className="w-3 h-3" /> Publié
                               </span>
@@ -538,22 +544,22 @@ export default function NotesSaisiePage() {
                                 À valider
                               </span>
                             )}
-                            <button
+                            {!c.converted && <button
                               onClick={() => togglePublish(c)}
                               disabled={busyControl === c.id}
                               title={c.published ? 'Dépublier (masquer aux élèves/parents)' : 'Valider & publier (visible élèves/parents)'}
                               className="p-1 rounded hover:bg-accent disabled:opacity-50"
                             >
                               {c.published ? <EyeOff className="w-3.5 h-3.5 text-gray-500" /> : <Eye className="w-3.5 h-3.5 text-indigo-600" />}
-                            </button>
-                            <button
+                            </button>}
+                            {!c.converted && <button
                               onClick={() => deleteControl(c)}
                               disabled={busyControl === c.id}
                               title="Supprimer ce contrôle"
                               className="p-1 rounded hover:bg-red-50"
                             >
                               <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                            </button>
+                            </button>}
                           </div>
                         </th>
                       ))}
@@ -567,23 +573,11 @@ export default function NotesSaisiePage() {
                           <span className="text-xs text-muted-foreground mr-2">{s.import_order ?? idx + 1}</span>
                           <span className="font-medium">{s.last_name} {s.first_name}</span>
                         </td>
-                        <td className="px-2 py-1.5 text-center">
-                          {(inheritedByStudent[s.id] || []).length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => setHistoryStudent(s)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 text-xs font-medium"
-                              title="Voir les notes conservées sur les contrôles de l’ancienne classe"
-                            >
-                              <History className="w-3.5 h-3.5" />
-                              {(inheritedByStudent[s.id] || []).length} note(s) · Moy. {inheritedAverage(s.id)}
-                            </button>
-                          ) : <span className="text-xs text-muted-foreground">—</span>}
-                        </td>
                         {displayedControls.map(c => {
                           const key = `${c.id}_${s.id}`;
                           const v = cells[key] ?? '';
                           const n = parseNote(v);
+                          const converted = convertedCellKeys.has(key);
                           return (
                             <td key={c.id} className="px-1 py-1 text-center">
                               <input
@@ -591,8 +585,11 @@ export default function NotesSaisiePage() {
                                 inputMode="decimal"
                                 value={v}
                                 onChange={e => setCell(c.id, s.id, e.target.value)}
+                                disabled={converted || c.converted}
+                                title={converted ? 'Note reprise dans ce contrôle après la répartition de classe' : undefined}
                                 className={`w-16 px-1 py-1 text-center border rounded ${
-                                  n === null ? 'border-border bg-background'
+                                  converted ? 'border-sky-200 bg-sky-50 text-sky-800 font-semibold cursor-default'
+                                  : n === null ? 'border-border bg-background'
                                   : n < 10 ? 'border-red-200 bg-red-50 text-red-700 font-medium'
                                   : 'border-green-200 bg-green-50 text-green-800 font-medium'
                                 }`}
@@ -618,45 +615,6 @@ export default function NotesSaisiePage() {
         <p className="text-center text-muted-foreground py-10">
           Sélectionnez une <strong>classe</strong> et une <strong>matière</strong> pour afficher la grille de notes.
         </p>
-      )}
-
-      {/* Historique élève : données conservées sur les contrôles d'origine. */}
-      {historyStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setHistoryStudent(null)}>
-          <div className="bg-card rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3 p-5 border-b border-border">
-              <div>
-                <h3 className="font-semibold flex items-center gap-2">
-                  <History className="w-5 h-5 text-sky-600" /> Notes conservées de {historyStudent.last_name} {historyStudent.first_name}
-                </h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Même année scolaire, matière et semestre · moyenne {inheritedAverage(historyStudent.id)}
-                </p>
-              </div>
-              <button onClick={() => setHistoryStudent(null)} className="p-1.5 hover:bg-accent rounded-lg" aria-label="Fermer">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="overflow-y-auto p-5 space-y-2">
-              {(inheritedByStudent[historyStudent.id] || []).map((note, index) => (
-                <div key={`${note.source_control_id}_${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-border p-3">
-                  <div>
-                    <p className="font-medium text-sm">{note.control_name}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {note.source_class_name}{note.control_date ? ` · ${note.control_date}` : ''}
-                    </p>
-                    {note.appreciation && <p className="text-xs text-gray-600 mt-1">{note.appreciation}</p>}
-                  </div>
-                  <span className={`self-center min-w-[52px] text-center px-2 py-1 rounded-lg font-bold ${
-                    Number(note.note) < 10 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'
-                  }`}>
-                    {note.note}/20
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Modale : ajouter un contrôle (officiel / similé / personnalisé) */}

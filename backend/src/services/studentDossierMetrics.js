@@ -112,3 +112,78 @@ export const selectInheritedControlNotes = ({
     return [{ note, control, sourceClass }];
   });
 };
+
+// Intègre les notes retrouvées après une répartition directement dans les
+// colonnes de la grille. Un rang existant (S2 contrôle 1, par exemple) utilise
+// la colonne officielle actuelle ; un ancien rang absent du nouveau catalogue
+// devient une colonne virtuelle « reprise ». Les valeurs restent en lecture
+// seule sur leur contrôle source, donc aucune copie ni duplication en base.
+export const mergeInheritedNotesIntoGrid = ({
+  controls = [],
+  notes = [],
+  inheritedNotes = [],
+  classId,
+  subjectId,
+  semester,
+} = {}) => {
+  const mergedControls = [...controls];
+  const mergedNotes = [...notes];
+  const controlBySlot = new Map();
+  controls.forEach((control) => {
+    if (control.grid_slot_key && !controlBySlot.has(control.grid_slot_key)) {
+      controlBySlot.set(control.grid_slot_key, control);
+    }
+  });
+  const currentCells = new Set(notes.map((note) => `${note.control_id}_${note.student_id}`));
+  const syntheticBySlot = new Map();
+
+  for (const inherited of inheritedNotes) {
+    if (!inherited.slot_key) continue;
+    let targetControl = controlBySlot.get(inherited.slot_key);
+    if (!targetControl) {
+      targetControl = syntheticBySlot.get(inherited.slot_key);
+      if (!targetControl) {
+        targetControl = {
+          id: `converted:${classId}:${subjectId}:${semester || 'all'}:${inherited.slot_key}`,
+          name: inherited.control_name,
+          date: inherited.control_date,
+          semester: inherited.semester,
+          grid_slot_key: inherited.slot_key,
+          converted: true,
+          published: true,
+          control_type: 'converted',
+          official_key: null,
+        };
+        syntheticBySlot.set(inherited.slot_key, targetControl);
+        mergedControls.push(targetControl);
+      }
+    }
+    const cellKey = `${targetControl.id}_${inherited.student_id}`;
+    if (currentCells.has(cellKey)) continue;
+    currentCells.add(cellKey);
+    mergedNotes.push({
+      control_id: targetControl.id,
+      student_id: inherited.student_id,
+      note: inherited.note,
+      appreciation: inherited.appreciation || null,
+      converted: true,
+      source_control_id: inherited.source_control_id,
+      source_class_name: inherited.source_class_name,
+    });
+  }
+
+  const slotOrder = (control) => {
+    const key = String(control.grid_slot_key || '');
+    const numbered = key.match(/_f(\d+)$/);
+    if (numbered) return Number(numbered[1]);
+    if (key.endsWith('_act')) return 90;
+    return 50;
+  };
+  mergedControls.sort((a, b) => slotOrder(a) - slotOrder(b)
+    || String(a.date || '').localeCompare(String(b.date || '')));
+  return {
+    controls: mergedControls,
+    notes: mergedNotes,
+    convertedNotesCount: mergedNotes.filter((note) => note.converted).length,
+  };
+};

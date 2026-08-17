@@ -15,7 +15,7 @@ import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
 import { generateNotesGridPdf } from '../services/notesGridPdf.js';
 import { generateNotesRecapPdf } from '../services/notesRecapPdf.js';
-import { selectInheritedControlNotes } from '../services/studentDossierMetrics.js';
+import { mergeInheritedNotesIntoGrid, selectInheritedControlNotes } from '../services/studentDossierMetrics.js';
 import { saveClassTimetable } from '../services/timetableImport/save.js';
 import {
   canonicalSubject,
@@ -9341,12 +9341,22 @@ router.get('/notes/grid', async (req, res) => {
           control_date: control.date || null,
           semester: controlSemester(control),
           official_key: control.official_key || null,
+          slot_key: recapIdentity(control).key,
           source_class_id: sourceClass.id,
           source_class_name: sourceClass.name,
         });
       }
       inheritedNotes.sort((a, b) => String(a.control_date).localeCompare(String(b.control_date)));
     }
+
+    const mergedGrid = mergeInheritedNotesIntoGrid({
+      controls: controls.map((control) => ({ ...control, grid_slot_key: recapIdentity(control).key })),
+      notes,
+      inheritedNotes,
+      classId: class_id,
+      subjectId: subject_id,
+      semester: sem,
+    });
 
     res.json({
       class: check.cls,
@@ -9356,15 +9366,15 @@ router.get('/notes/grid', async (req, res) => {
       official_missing: officialMissing,
       simile_name: SIMILE_NAME,
       students,
-      controls: controls.map(c => ({
+      controls: mergedGrid.controls.map(c => ({
         ...c,
-        name: c.official_key ? c.name : recapIdentity(c).label,
+        name: c.converted ? c.name : (c.official_key ? c.name : recapIdentity(c).label),
         teacher_name: nameByTeacher[c.teacher_id]?.name || null,
         // Saisi par un prof (à valider) ou créé par l'administration
         from_teacher: nameByTeacher[c.teacher_id]?.role === 'teacher',
       })),
-      notes,
-      inherited_notes: inheritedNotes,
+      notes: mergedGrid.notes,
+      converted_notes_count: mergedGrid.convertedNotesCount,
     });
   } catch (e) {
     console.error('[Admin] notes grid error:', e.message);
