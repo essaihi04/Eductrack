@@ -19,6 +19,7 @@ import {
   notifyArrivedAtSchool,
   checkProximityAndNotify
 } from '../services/transportNotifications.js';
+import { activeEnrollmentMap } from '../utils/enrollmentScope.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -32,6 +33,7 @@ const getSchoolId = (req) => {
 router.get('/buses', requireTransportAccess, async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
+    const enrollmentMap = await activeEnrollmentMap(schoolId, req.query.academic_year);
     let q = supabaseAdmin
       .from('buses')
       .select('*, driver:profiles!buses_driver_id_fkey(id, first_name, last_name, phone), manager:profiles!buses_transport_manager_id_fkey(id, first_name, last_name)')
@@ -45,8 +47,10 @@ router.get('/buses', requireTransportAccess, async (req, res) => {
     let counts = {};
     if (ids.length > 0) {
       const { data: ass } = await supabaseAdmin
-        .from('bus_assignments').select('bus_id').in('bus_id', ids).eq('active', true);
-      counts = (ass || []).reduce((acc, a) => { acc[a.bus_id] = (acc[a.bus_id] || 0) + 1; return acc; }, {});
+        .from('bus_assignments').select('bus_id, student_id').in('bus_id', ids).eq('active', true);
+      counts = (ass || [])
+        .filter((assignment) => !enrollmentMap || enrollmentMap.has(assignment.student_id))
+        .reduce((acc, a) => { acc[a.bus_id] = (acc[a.bus_id] || 0) + 1; return acc; }, {});
     }
     res.json({ buses: (data || []).map(b => ({ ...b, students_count: counts[b.id] || 0 })) });
   } catch (e) {
@@ -114,7 +118,16 @@ router.get('/buses/:id/students', requireDriverOrTransportAccess, async (req, re
       .eq('bus_id', id)
       .order('pickup_order', { ascending: true });
     if (error) throw error;
-    res.json({ assignments: assigns || [] });
+    const enrollmentMap = await activeEnrollmentMap(getSchoolId(req), req.query.academic_year);
+    const assignments = (assigns || [])
+      .filter((assignment) => !enrollmentMap || enrollmentMap.has(assignment.student?.id))
+      .map((assignment) => {
+        const enrollment = enrollmentMap?.get(assignment.student?.id);
+        return enrollment
+          ? { ...assignment, student: { ...assignment.student, class_id: enrollment.class_id, classes: enrollment.class } }
+          : assignment;
+      });
+    res.json({ assignments });
   } catch (e) {
     console.error('Erreur bus students:', e);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -667,15 +680,26 @@ router.get('/history', requireTransportAccess, async (req, res) => {
 router.get('/students/available', requireTransportAccess, async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
+    const enrollmentMap = await activeEnrollmentMap(schoolId, req.query.academic_year);
     let q = supabaseAdmin
       .from('profiles')
       .select('id, first_name, last_name, phone, class_id, home_address, home_lat, home_lng, classes!fk_profiles_class(name)')
       .eq('role', 'student')
       .order('last_name');
     if (schoolId) q = q.eq('school_id', schoolId);
+    if (enrollmentMap) {
+      const activeIds = [...enrollmentMap.keys()];
+      if (activeIds.length === 0) return res.json({ students: [] });
+      q = q.in('id', activeIds);
+    }
     const { data, error } = await q;
     if (error) throw error;
-    res.json({ students: data || [] });
+    res.json({ students: (data || []).map((student) => {
+      const enrollment = enrollmentMap?.get(student.id);
+      return enrollment
+        ? { ...student, class_id: enrollment.class_id, classes: enrollment.class }
+        : student;
+    }) });
   } catch (e) {
     console.error('Erreur students available:', e);
     res.status(500).json({ error: 'Erreur serveur' });

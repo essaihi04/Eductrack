@@ -12,7 +12,7 @@ import {
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
-import { activeStudentIdSet } from '../utils/enrollmentScope.js';
+import { activeEnrollmentMap, activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendPushToUser } from '../services/webPush.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
@@ -2062,6 +2062,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
 router.get('/daily-reports/students', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
+    const enrollmentMap = await activeEnrollmentMap(schoolId, req.query.academic_year);
     let query = supabaseAdmin
       .from('profiles')
       .select('id, first_name, last_name, class_id, classes!fk_profiles_class(name)')
@@ -2072,14 +2073,25 @@ router.get('/daily-reports/students', async (req, res) => {
 
     // Filtre de scope pour pedagogical_manager
     const scopedIds = await getScopedClassIds(req);
-    if (scopedIds !== null) {
+    if (enrollmentMap) {
+      const allowedStudentIds = [...enrollmentMap.entries()]
+        .filter(([, enrollment]) => scopedIds === null || scopedIds.includes(enrollment.class_id))
+        .map(([studentId]) => studentId);
+      if (allowedStudentIds.length === 0) return res.json([]);
+      query = query.in('id', allowedStudentIds);
+    } else if (scopedIds !== null) {
       if (scopedIds.length === 0) return res.json([]);
       query = query.in('class_id', scopedIds);
     }
 
     const { data, error } = await query;
     if (error) throw error;
-    res.json(data || []);
+    res.json((data || []).map((student) => {
+      const enrollment = enrollmentMap?.get(student.id);
+      return enrollment
+        ? { ...student, class_id: enrollment.class_id, classes: enrollment.class }
+        : student;
+    }));
   } catch (error) {
     console.error('Erreur students:', error);
     res.status(500).json({ error: 'Erreur serveur' });

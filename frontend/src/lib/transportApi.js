@@ -24,19 +24,19 @@ async function request(path, { method = 'GET', body, query } = {}) {
 
 export const transportApi = {
   // Bus
-  listBuses: () => request('/api/transport/buses'),
+  listBuses: (academicYear) => request('/api/transport/buses', { query: { academic_year: academicYear } }),
   createBus: (data) => request('/api/transport/buses', { method: 'POST', body: data }),
   updateBus: (id, data) => request(`/api/transport/buses/${id}`, { method: 'PUT', body: data }),
   deleteBus: (id) => request(`/api/transport/buses/${id}`, { method: 'DELETE' }),
   // Assignations
-  listBusStudents: (busId) => request(`/api/transport/buses/${busId}/students`),
+  listBusStudents: (busId, academicYear) => request(`/api/transport/buses/${busId}/students`, { query: { academic_year: academicYear } }),
   assignStudent: (busId, body) => request(`/api/transport/buses/${busId}/students`, { method: 'POST', body }),
   updateAssignment: (id, body) => request(`/api/transport/assignments/${id}`, { method: 'PUT', body }),
   reorderAssignments: (busId, items) => request(`/api/transport/buses/${busId}/assignments/order`, { method: 'PUT', body: { items } }),
   removeAssignment: (id) => request(`/api/transport/assignments/${id}`, { method: 'DELETE' }),
   updateStudentHome: (studentId, body) => request(`/api/transport/students/${studentId}/home`, { method: 'PUT', body }),
   updateStudentHomeByDriver: (studentId, body) => request(`/api/transport/students/${studentId}/home/by-driver`, { method: 'PUT', body }),
-  listAvailableStudents: () => request('/api/transport/students/available'),
+  listAvailableStudents: (academicYear) => request('/api/transport/students/available', { query: { academic_year: academicYear } }),
   // Trajets
   todayTrips: () => request('/api/transport/trips/today'),
   startTrip: (body) => request('/api/transport/trips/start', { method: 'POST', body }),

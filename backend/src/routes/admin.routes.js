@@ -6347,17 +6347,26 @@ async function collectAbsencesList(req, start, end) {
       return [];
     }
 
-    // 1. Enregistrements « absent » sur la période
-    let q = supabaseAdmin
-      .from('session_tracking')
-      .select('id, student_id, presence, absence_notified, seen_by_parent, seen_at, justified, justification_comment, justification_source, sessions!inner(id, date, class_id, start_time, end_time, school_id, subjects(name))')
-      .eq('presence', 'absent')
-      .gte('sessions.date', start)
-      .lte('sessions.date', end);
-    if (allowedClassIds !== null) q = q.in('sessions.class_id', allowedClassIds);
-    const { data: rows, error } = await q;
-    if (error) throw error;
-    const absent = rows || [];
+    // 1. Enregistrements « absent » sur la période. PostgREST plafonne une
+    // réponse à 1 000 lignes : on pagine avant l'agrégation, sinon la liste
+    // annuelle est tronquée silencieusement.
+    const absent = [];
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      let q = supabaseAdmin
+        .from('session_tracking')
+        .select('id, student_id, presence, absence_notified, seen_by_parent, seen_at, justified, justification_comment, justification_source, sessions!inner(id, date, class_id, start_time, end_time, school_id, subjects(name))')
+        .eq('presence', 'absent')
+        .gte('sessions.date', start)
+        .lte('sessions.date', end)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (allowedClassIds !== null) q = q.in('sessions.class_id', allowedClassIds);
+      const { data: rows, error } = await q;
+      if (error) throw error;
+      absent.push(...(rows || []));
+      if (!rows || rows.length < PAGE) break;
+    }
     if (absent.length === 0) return [];
 
     // 2. Élèves concernés (photo + classe) — requêtes séparées pour éviter toute
@@ -6464,7 +6473,22 @@ router.get('/absences', async (req, res) => {
     const start = req.query.start || today;
     const end = req.query.end || today;
     const absences = await collectAbsencesList(req, start, end);
-    res.json({ period: { start, end }, absences });
+    const normalize = (value) => String(value || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const search = normalize(req.query.search).trim();
+    const filtered = search
+      ? absences.filter((row) => normalize(`${row.student_name} ${row.class_name}`).includes(search))
+      : absences;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(20, Number.parseInt(req.query.limit, 10) || 80));
+    const offset = (page - 1) * limit;
+    res.json({
+      period: { start, end },
+      page,
+      limit,
+      total: filtered.length,
+      absences: filtered.slice(offset, offset + limit),
+    });
   } catch (e) {
     console.error('Erreur liste absences:', e);
     res.status(500).json({ error: 'Erreur serveur' });

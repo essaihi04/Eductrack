@@ -1247,13 +1247,15 @@ const WhatsAppPage = () => {
   const fetchReportStudents = useCallback(async () => {
     try {
       const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/students`, {
+      const params = new URLSearchParams();
+      if (year) params.set('academic_year', year);
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/daily-reports/students?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       setReportStudents(Array.isArray(data) ? data : []);
     } catch (error) { console.error('Erreur students:', error); setReportStudents([]); }
-  }, [apiUrl]);
+  }, [apiUrl, year]);
 
   useEffect(() => {
     if (activeTab === 'reports') {

@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart2, Plus, Trash2, X, Send, CheckCircle2, Lock } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { schoolLifeApi, fetchClasses } from '../../lib/schoolLifeApi';
 
 const SondagesPage = () => {
   const { profile } = useAuth();
+  const { year } = useYear();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
   const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
@@ -23,7 +25,16 @@ const SondagesPage = () => {
     try { setPolls(await schoolLifeApi.listPolls()); } catch (e) { console.error(e); }
     setLoading(false);
   };
-  useEffect(() => { load(); if (canManage) fetchClasses().then(setClasses); }, []);
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!canManage) return;
+    fetchClasses(year).then((rows) => {
+      setClasses(rows);
+      setForm((current) => rows.some((cls) => cls.id === current.class_id)
+        ? current
+        : { ...current, class_id: '' });
+    });
+  }, [canManage, year]);
 
   const submit = async (e) => {
     e.preventDefault();

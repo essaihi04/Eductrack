@@ -36,6 +36,47 @@ export const activeStudentIdSet = async (schoolId, academicYear) => {
   }
 };
 
+// Inscription active de chaque élève pour une année, avec LA classe de cette
+// inscription. `profiles.class_id` représente la classe la plus récemment
+// préparée et peut déjà pointer vers l'année suivante ; il ne doit donc pas
+// servir à afficher un roster historique ou l'année actuellement sélectionnée.
+//
+// Renvoie null sans année ou si la table n'est pas disponible afin de garder
+// les anciens replis des écrans concernés.
+export const activeEnrollmentMap = async (schoolId, academicYear) => {
+  if (!academicYear) return null;
+  try {
+    const variants = yearVariants(academicYear);
+    let q = supabaseAdmin
+      .from('student_enrollments')
+      .select('student_id, class_id, status')
+      .in('academic_year', variants.length ? variants : [academicYear])
+      .neq('status', 'NR');
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { data: enrollments, error } = await q;
+    if (error) return null;
+
+    const classIds = [...new Set((enrollments || []).map((row) => row.class_id).filter(Boolean))];
+    let classById = new Map();
+    if (classIds.length) {
+      const { data: classes, error: classesError } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, level, filiere, academic_year')
+        .in('id', classIds);
+      if (classesError) return null;
+      classById = new Map((classes || []).map((cls) => [cls.id, cls]));
+    }
+
+    return new Map((enrollments || []).map((row) => [row.student_id, {
+      class_id: row.class_id || null,
+      class: row.class_id ? (classById.get(row.class_id) || null) : null,
+      status: row.status,
+    }]));
+  } catch {
+    return null;
+  }
+};
+
 // Deux chaînes désignent-elles la même année scolaire, quel que soit le format
 // (slash/tiret) ? Compare les chiffres seuls ("2026/2027" == "2026-2027").
 export const sameSchoolYear = (a, b) => {

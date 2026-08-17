@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Bus, Plus, Trash2, Edit2, X, Users, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { transportApi, driversApi, transportManagersApi } from '../../lib/transportApi';
+import { useYear } from '../../contexts/YearContext';
 
 export default function BusesPage() {
+  const { year } = useYear();
   const [buses, setBuses] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [managers, setManagers] = useState([]);
@@ -12,12 +14,11 @@ export default function BusesPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ plate_number: '', model: '', capacity: 30, driver_id: '', transport_manager_id: '', color: '#f59e0b', status: 'active', notes: '' });
 
-  useEffect(() => { load(); }, []);
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [b, d, m] = await Promise.all([
-        transportApi.listBuses(),
+        transportApi.listBuses(year),
         driversApi.list().catch(() => ({ drivers: [] })),
         transportManagersApi.list().catch(() => ({ managers: [] }))
       ]);
@@ -26,7 +27,8 @@ export default function BusesPage() {
       setManagers(m.managers || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  };
+  }, [year]);
+  useEffect(() => { load(); }, [load]);
 
   const save = async () => {
     try {

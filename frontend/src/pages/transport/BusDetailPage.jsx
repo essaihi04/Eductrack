@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, MoveUp, MoveDown, MapPin, X, Search } from 'lucide-react';
 import { transportApi } from '../../lib/transportApi';
 import HomeMapPicker from '../../components/transport/HomeMapPicker';
+import { useYear } from '../../contexts/YearContext';
 
 export default function BusDetailPage() {
   const { id } = useParams();
+  const { year } = useYear();
   const [assignments, setAssignments] = useState([]);
   const [available, setAvailable] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -13,20 +15,20 @@ export default function BusDetailPage() {
   const [search, setSearch] = useState('');
   const [editingHome, setEditingHome] = useState(null); // student object
 
-  useEffect(() => { load(); }, [id]);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [a, s] = await Promise.all([
-        transportApi.listBusStudents(id),
-        transportApi.listAvailableStudents()
+        transportApi.listBusStudents(id, year),
+        transportApi.listAvailableStudents(year)
       ]);
       setAssignments(a.assignments || []);
       setAvailable(s.students || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  };
+  }, [id, year]);
+
+  useEffect(() => { load(); }, [load]);
 
   const assign = async (student) => {
     try {

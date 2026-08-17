@@ -1,6 +1,7 @@
 // API client pour le module Vie scolaire (parascolaire, maternelle, objets
 // perdus, sondages, signalements).
 import { supabase } from './supabase';
+import { sameYear } from './schoolYear';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -95,12 +96,20 @@ export const schoolLifeApi = {
 
 // Liste des classes (pour les formulaires).
 // Admin -> toutes les classes de l'école ; prof -> ses classes assignées.
-export const fetchClasses = async () => {
+export const fetchClasses = async (academicYear) => {
   const auth = { headers: { Authorization: `Bearer ${await token()}` } };
+  const scope = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    return academicYear
+      ? list.filter((cls) => !cls.academic_year || sameYear(cls.academic_year, academicYear))
+      : list;
+  };
   // 1) Essai endpoint admin (toutes les classes)
   try {
-    const res = await fetch(`${API_URL}/api/admin/classes`, auth);
-    if (res.ok) return await res.json();
+    const params = new URLSearchParams();
+    if (academicYear) params.set('academic_year', academicYear);
+    const res = await fetch(`${API_URL}/api/admin/classes?${params}`, auth);
+    if (res.ok) return scope(await res.json());
   } catch {
     /* on tente le repli ci-dessous */
   }
@@ -109,7 +118,7 @@ export const fetchClasses = async () => {
     const res = await fetch(`${API_URL}/api/teacher/my-classes`, auth);
     if (res.ok) {
       const data = await res.json();
-      return Array.isArray(data) ? data : (data.classes || []);
+      return scope(Array.isArray(data) ? data : (data.classes || []));
     }
   } catch {
     /* ignore */

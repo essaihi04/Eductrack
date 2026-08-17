@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, Plus, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { schoolLifeApi, fetchClasses } from '../../lib/schoolLifeApi';
 
 const CATEGORIES = [
@@ -28,6 +29,7 @@ const lbl = (arr, v) => arr.find((x) => x.value === v) || {};
 
 const SignalementsPage = () => {
   const { profile } = useAuth();
+  const { year } = useYear();
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
   const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
   const [items, setItems] = useState([]);
@@ -45,7 +47,14 @@ const SignalementsPage = () => {
     setLoading(false);
   };
   useEffect(() => { load(); }, [filter]);
-  useEffect(() => { fetchClasses().then(setClasses); }, []);
+  useEffect(() => {
+    fetchClasses(year).then((rows) => {
+      setClasses(rows);
+      setForm((current) => rows.some((cls) => cls.id === current.class_id)
+        ? current
+        : { ...current, class_id: '', related_students: [] });
+    });
+  }, [year]);
 
   // Charge les élèves de la classe choisie (pour cibler des élèves précis)
   useEffect(() => {

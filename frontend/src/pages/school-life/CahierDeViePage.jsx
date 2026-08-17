@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Image as ImageIcon, Plus, Trash2, Calendar, Send, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useYear } from '../../contexts/YearContext';
 import { schoolLifeApi, fetchClasses, mediaUrl } from '../../lib/schoolLifeApi';
 
 const CahierDeViePage = () => {
   const { profile } = useAuth();
+  const { year } = useYear();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
   const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
@@ -29,8 +31,16 @@ const CahierDeViePage = () => {
 
   useEffect(() => {
     load();
-    if (canManage) fetchClasses().then(setClasses);
   }, []);
+  useEffect(() => {
+    if (!canManage) return;
+    fetchClasses(year).then((rows) => {
+      setClasses(rows);
+      setForm((current) => rows.some((cls) => cls.id === current.class_id)
+        ? current
+        : { ...current, class_id: '' });
+    });
+  }, [canManage, year]);
 
   const submit = async (e) => {
     e.preventDefault();

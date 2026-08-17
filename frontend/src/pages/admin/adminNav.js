@@ -95,32 +95,22 @@ export const ADMIN_DOMAINS = [
     roles: ALL_ADMIN,
     groups: [
       {
-        key: 'envoyer',
-        label: 'Envoyer',
+        // Un seul espace de travail : plus de rangée « groupe » au-dessus des
+        // actions. Le parcours suit l'ordre réel écrire → suivre → automatiser.
+        key: 'communication',
+        label: 'Communication',
         items: [
-          { label: 'Parents', path: '/communication/send', icon: Send, roles: ALL_ADMIN },
-          { label: 'Professeurs', path: '/communication/teachers', icon: UserCircle, roles: ALL_ADMIN },
+          { label: 'Écrire aux parents', path: '/communication/send', icon: Send, roles: ALL_ADMIN },
+          { label: 'Écrire aux profs', path: '/communication/teachers', icon: UserCircle, roles: ALL_ADMIN },
           { label: 'Planifier', path: '/communication/planning', icon: Calendar, roles: ALL_ADMIN },
-        ],
-      },
-      {
-        key: 'suivi',
-        label: 'Suivi & engagement',
-        items: [
-          { label: 'Dashboard parents', path: '/communication/dashboard', icon: BarChart3, roles: ALL_ADMIN },
-          { label: 'Boîte de réception', path: '/communication/inbox', icon: Inbox, roles: ALL_ADMIN },
-          { label: 'Rendez-vous parents', path: '/appointments', icon: CalendarClock, roles: ALL_ADMIN },
-        ],
-      },
-      {
-        key: 'canaux',
-        label: 'Automatisation & canaux',
-        items: [
+          { label: 'Réception', path: '/communication/inbox', icon: Inbox, roles: ALL_ADMIN },
+          { label: 'Engagement', path: '/communication/dashboard', icon: BarChart3, roles: ALL_ADMIN },
+          { label: 'Rendez-vous', path: '/appointments', icon: CalendarClock, roles: ALL_ADMIN },
           { label: 'Rapports IA', path: '/communication/reports', icon: Bot, roles: ALL_ADMIN },
-          { label: 'Documents chatbot', path: '/communication/documents', icon: BookOpen, roles: ALL_ADMIN },
+          { label: 'Base chatbot', path: '/communication/documents', icon: BookOpen, roles: ALL_ADMIN },
           { label: 'Accès chatbot', path: '/communication/access', icon: Shield, roles: ALL_ADMIN },
           { label: 'Vitrine école', path: '/communication/ecole', icon: Building2, roles: ALL_ADMIN },
-          { label: 'Connexion WhatsApp', path: '/communication/connection', icon: Smartphone, roles: ALL_ADMIN },
+          { label: 'WhatsApp', path: '/communication/connection', icon: Smartphone, roles: ALL_ADMIN },
         ],
       },
     ],
@@ -139,6 +129,8 @@ export const ADMIN_DOMAINS = [
           { label: 'Suivi en direct', path: '/transport/live', icon: MapPin, roles: NON_MANAGER },
           { label: 'Bus & élèves', path: '/transport/buses', icon: Bus, roles: NON_MANAGER },
           { label: 'Chauffeurs', path: '/transport/drivers', icon: UserCircle, roles: NON_MANAGER },
+          { label: 'Responsables', path: '/transport/managers', icon: UserCog, roles: FULL },
+          { label: 'Statistiques', path: '/transport/stats', icon: BarChart3, roles: NON_MANAGER },
         ],
       },
     ],
@@ -172,11 +164,12 @@ export const ADMIN_DOMAINS = [
         key: 'equipe',
         label: 'Équipe & outils',
         items: [
-          { label: 'Resp. financiers', path: '/admin/finance-managers', icon: UserCog, roles: FULL },
           { label: 'Direct. pédagogiques', path: '/admin/pedagogical-directors', icon: UserCog, roles: FULL },
           { label: 'Resp. pédagogiques', path: '/admin/pedagogical-managers', icon: UserCog, roles: NON_MANAGER },
-          { label: 'Resp. transport', path: '/transport/managers', icon: UserCog, roles: FULL },
           { label: 'Réceptionniste (chatbot)', path: '/admin/receptionists', icon: Bot, roles: FULL },
+          // Conservé, mais placé en dernier : l'entrée « Administration » ne
+          // dépose plus l'utilisateur dans la partie financière par défaut.
+          { label: 'Resp. financiers', path: '/admin/finance-managers', icon: UserCog, roles: FULL },
         ],
       },
     ],

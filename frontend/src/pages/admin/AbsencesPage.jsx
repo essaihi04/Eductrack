@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { UserX, Search, Download, RefreshCw, Check, X, Phone, Calendar, MessageCircle, Eye } from 'lucide-react';
+import { UserX, Search, Download, RefreshCw, Check, X, Phone, Calendar } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { openBlob } from '../../lib/download';
 import { useYear } from '../../contexts/YearContext';
 import { schoolYearDateRange } from '../../lib/schoolYear';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const PAGE_SIZE = 80;
 const resolveAvatar = (u) => !u ? null : (u.startsWith('http') ? u : `${apiUrl}${u.startsWith('/') ? '' : '/'}${u}`);
 
 // --- Helpers de période -----------------------------------------------------
@@ -46,6 +47,9 @@ export default function AbsencesPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [editing, setEditing] = useState(null); // key en cours d'édition
   const [draft, setDraft] = useState({});
   const [exporting, setExporting] = useState(false);
@@ -65,27 +69,42 @@ export default function AbsencesPage() {
     setPeriodEnd(next.end);
   }, [year]);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter, anchor, periodStart, periodEnd, year, debouncedSearch]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const { start, end } = range();
-      const res = await fetch(`${apiUrl}/api/admin/absences?start=${start}&end=${end}`, {
+      const params = new URLSearchParams({
+        start,
+        end,
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      const res = await fetch(`${apiUrl}/api/admin/absences?${params.toString()}`, {
         headers: { Authorization: `Bearer ${session?.access_token}` },
       });
+      if (!res.ok) throw new Error('Échec du chargement des absences');
       const data = await res.json();
       setRows(Array.isArray(data.absences) ? data.absences : []);
-    } catch (e) { console.error(e); setRows([]); }
+      setTotal(Number(data.total) || 0);
+    } catch (e) { console.error(e); setRows([]); setTotal(0); }
     finally { setLoading(false); }
-  }, [range]);
+  }, [range, page, debouncedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = rows.filter(r => {
-    if (!search.trim()) return true;
-    const q = search.trim().toLowerCase();
-    return r.student_name.toLowerCase().includes(q) || (r.class_name || '').toLowerCase().includes(q);
-  });
+  const filtered = rows;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const startEdit = (r) => {
     setEditing(r.key);
@@ -106,7 +125,7 @@ export default function AbsencesPage() {
         }),
       });
       if (!res.ok) throw new Error('Échec');
-      setRows(rows.map(x => x.key === r.key ? { ...x, ...draft, justification_source: 'manual' } : x));
+      setRows(current => current.map(x => x.key === r.key ? { ...x, ...draft, justification_source: 'manual' } : x));
       setEditing(null);
     } catch (e) { alert('Erreur: ' + e.message); }
   };
@@ -177,7 +196,9 @@ export default function AbsencesPage() {
         <button onClick={load} className="p-2 rounded-lg hover:bg-gray-100" title="Actualiser"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
       </div>
 
-      <p className="text-sm text-gray-500">{filtered.length} absence(s)</p>
+      <p className="text-sm text-gray-500">
+        {total} absence(s){total > PAGE_SIZE ? ` · page ${page} sur ${totalPages}` : ''}
+      </p>
 
       {loading ? (
         <div className="flex justify-center py-16"><RefreshCw className="w-8 h-8 animate-spin text-red-500" /></div>
@@ -187,8 +208,9 @@ export default function AbsencesPage() {
           <p className="text-gray-600">Aucune absence sur cette période</p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
-          <table className="w-full text-sm">
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+            <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 text-left text-gray-600">
                 <th className="px-3 py-2 font-semibold">Élève</th>
@@ -279,7 +301,29 @@ export default function AbsencesPage() {
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setPage(current => Math.max(1, current - 1))}
+                disabled={page <= 1 || loading}
+                className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium disabled:opacity-40"
+              >
+                ← Précédent
+              </button>
+              <span className="text-sm text-gray-500">Page {page} sur {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setPage(current => Math.min(totalPages, current + 1))}
+                disabled={page >= totalPages || loading}
+                className="px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium disabled:opacity-40"
+              >
+                Suivant →
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
