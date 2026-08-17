@@ -9283,8 +9283,9 @@ router.get('/notes/grid', async (req, res) => {
       for (let from = 0; ; from += PAGE) {
         const { data, error } = await supabaseAdmin
           .from('control_notes')
-          .select('control_id, student_id, note, appreciation')
+          .select('id, control_id, student_id, note, appreciation')
           .in('student_id', studentIds)
+          .order('id', { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;
         historicalRows.push(...(data || []));

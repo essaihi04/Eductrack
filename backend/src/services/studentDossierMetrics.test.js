@@ -5,6 +5,7 @@ import {
   aggregateAttendanceByYear,
   isBehaviorIncident,
   normalizeOfficialControlNotes,
+  selectInheritedControlNotes,
 } from './studentDossierMetrics.js';
 import {
   canonicalSubject,
@@ -102,4 +103,32 @@ test('une colonne historique notée remplace son doublon officiel vide', () => {
   ];
   const collapsed = collapseControlsBySlot(controls, new Map([['legacy', 20]]));
   assert.deepEqual(collapsed.map((control) => control.id), ['legacy']);
+});
+
+test('les notes suivent l’élève après une nouvelle répartition de classe', () => {
+  const result = selectInheritedControlNotes({
+    notes: [
+      { control_id: 'old-math', student_id: 'student-1', note: 15 },
+      { control_id: 'old-fr', student_id: 'student-1', note: 12 },
+      { control_id: 'previous-year', student_id: 'student-1', note: 18 },
+      { control_id: 'current-math', student_id: 'student-1', note: 14 },
+    ],
+    controls: [
+      { id: 'old-math', class_id: 'demo', resolved_subject: { key: 'mathematiques' }, resolved_semester: 1 },
+      { id: 'old-fr', class_id: 'demo', resolved_subject: { key: 'francais' }, resolved_semester: 1 },
+      { id: 'previous-year', class_id: 'old-year', resolved_subject: { key: 'mathematiques' }, resolved_semester: 1 },
+      { id: 'current-math', class_id: 'test-1', resolved_subject: { key: 'mathematiques' }, resolved_semester: 1 },
+    ],
+    classes: [
+      { id: 'demo', school_id: 'school', academic_year: '2025/2026' },
+      { id: 'old-year', school_id: 'school', academic_year: '2024/2025' },
+    ],
+    currentClassId: 'test-1',
+    currentSchoolId: 'school',
+    academicYear: '2025-2026',
+    subjectKey: 'mathematiques',
+    semester: 1,
+  });
+
+  assert.deepEqual(result.map(({ note }) => note.control_id), ['old-math']);
 });

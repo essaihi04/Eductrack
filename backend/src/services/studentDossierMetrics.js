@@ -79,3 +79,36 @@ export const normalizeOfficialControlNotes = (notes = [], classMap = {}) => {
   controls.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   return { controls, unclassifiedControlNotes };
 };
+
+// Une répartition de classe ne doit jamais faire disparaître les notes d'un
+// élève. Sélectionne les notes portées par des contrôles d'une autre classe,
+// uniquement dans le même contexte pédagogique (école, année, matière,
+// semestre). Le contrôle et la classe source restent intacts : aucun doublon.
+export const selectInheritedControlNotes = ({
+  notes = [],
+  controls = [],
+  classes = [],
+  currentClassId,
+  currentSchoolId,
+  academicYear,
+  subjectKey,
+  semester,
+} = {}) => {
+  const normalizeYear = (value) => String(value || '').replace(/\D/g, '');
+  const yearKey = normalizeYear(academicYear);
+  const controlById = new Map(controls.map((control) => [control.id, control]));
+  const classById = new Map(classes.map((cls) => [cls.id, cls]));
+
+  return notes.flatMap((note) => {
+    if (note.note === null || note.note === '' || Number.isNaN(Number(note.note))) return [];
+    const control = controlById.get(note.control_id);
+    if (!control || !control.class_id || control.class_id === currentClassId) return [];
+    const sourceClass = classById.get(control.class_id);
+    if (!sourceClass) return [];
+    if (currentSchoolId && sourceClass.school_id !== currentSchoolId) return [];
+    if (!yearKey || normalizeYear(sourceClass.academic_year) !== yearKey) return [];
+    if (!control.resolved_subject || control.resolved_subject.key !== subjectKey) return [];
+    if (semester && Number(control.resolved_semester) !== Number(semester)) return [];
+    return [{ note, control, sourceClass }];
+  });
+};

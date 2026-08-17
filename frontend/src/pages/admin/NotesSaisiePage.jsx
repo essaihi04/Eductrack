@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClipboardList, RefreshCw, Save, Plus, Trash2, X, Check, Eye, EyeOff,
-  AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter,
+  AlertTriangle, GraduationCap, BookOpen, CalendarRange, FileDown, Filter, History,
 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/Card';
 import { saveBlob } from '../../lib/download';
@@ -55,6 +55,7 @@ export default function NotesSaisiePage() {
   const [busyControl, setBusyControl] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [historyStudent, setHistoryStudent] = useState(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(''); // 'blank' | 'filled' pendant le téléchargement
@@ -136,6 +137,7 @@ export default function NotesSaisiePage() {
     try {
       const data = await api(`/api/admin/notes/grid?class_id=${cId}&subject_id=${sId}&semester=${sem}`);
       setGrid(data);
+      setHistoryStudent(null);
       setVisibleIds(null); // nouveau chargement → toutes les colonnes affichées
       // Initialiser les cellules depuis les notes existantes
       const c = {};
@@ -193,6 +195,26 @@ export default function NotesSaisiePage() {
     });
     return map;
   }, [grid, displayedControls, cells]);
+
+  // Notes de la même année/matière/semestre saisies avant une nouvelle
+  // répartition. Elles restent en lecture seule sur leur contrôle d'origine :
+  // les recopier dans la grille courante créerait des doublons dans le dossier.
+  const inheritedByStudent = useMemo(() => {
+    const byStudent = {};
+    (grid?.inherited_notes || []).forEach((note) => {
+      (byStudent[note.student_id] || (byStudent[note.student_id] = [])).push(note);
+    });
+    return byStudent;
+  }, [grid]);
+
+  const inheritedAverage = (studentId) => {
+    const values = (inheritedByStudent[studentId] || [])
+      .map((note) => Number(note.note))
+      .filter(Number.isFinite);
+    return values.length
+      ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
+      : null;
+  };
 
   const saveAll = async () => {
     if (!grid) return;
@@ -472,6 +494,18 @@ export default function NotesSaisiePage() {
       {error && <p className="text-sm font-medium text-red-600">{error}</p>}
       {info && <p className="text-sm font-medium text-green-700">{info}</p>}
 
+      {!loading && (grid?.inherited_notes || []).length > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          <History className="w-5 h-5 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">{grid.inherited_notes.length} note(s) conservée(s) avant la répartition</p>
+            <p className="text-xs text-sky-700 mt-0.5">
+              Elles restent associées aux élèves et à leurs contrôles d’origine. Utilisez « Historique » sur une ligne pour les consulter.
+            </p>
+          </div>
+        </div>
+      )}
+
       {loading && <div className="flex justify-center p-10"><RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" /></div>}
 
       {!loading && classId && subjectId && grid && (
@@ -485,6 +519,7 @@ export default function NotesSaisiePage() {
                   <thead>
                     <tr className="bg-muted/50 text-left">
                       <th className="px-3 py-2 sticky left-0 bg-muted/50 z-10 min-w-[180px]">Élève</th>
+                      <th className="px-3 py-2 text-center min-w-[145px]">Avant répartition</th>
                       {displayedControls.map((c) => (
                         <th key={c.id} className="px-2 py-2 text-center min-w-[110px] align-top">
                           <div className="font-semibold">{c.name}</div>
@@ -522,7 +557,7 @@ export default function NotesSaisiePage() {
                           </div>
                         </th>
                       ))}
-                      <th className="px-3 py-2 text-center bg-primary/10 min-w-[70px]">Moy</th>
+                      <th className="px-3 py-2 text-center bg-primary/10 min-w-[90px]">Moy. actuelle</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -531,6 +566,19 @@ export default function NotesSaisiePage() {
                         <td className="px-3 py-1.5 sticky left-0 bg-card z-10">
                           <span className="text-xs text-muted-foreground mr-2">{s.import_order ?? idx + 1}</span>
                           <span className="font-medium">{s.last_name} {s.first_name}</span>
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          {(inheritedByStudent[s.id] || []).length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setHistoryStudent(s)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100 text-xs font-medium"
+                              title="Voir les notes conservées sur les contrôles de l’ancienne classe"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                              {(inheritedByStudent[s.id] || []).length} note(s) · Moy. {inheritedAverage(s.id)}
+                            </button>
+                          ) : <span className="text-xs text-muted-foreground">—</span>}
                         </td>
                         {displayedControls.map(c => {
                           const key = `${c.id}_${s.id}`;
@@ -570,6 +618,45 @@ export default function NotesSaisiePage() {
         <p className="text-center text-muted-foreground py-10">
           Sélectionnez une <strong>classe</strong> et une <strong>matière</strong> pour afficher la grille de notes.
         </p>
+      )}
+
+      {/* Historique élève : données conservées sur les contrôles d'origine. */}
+      {historyStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setHistoryStudent(null)}>
+          <div className="bg-card rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 p-5 border-b border-border">
+              <div>
+                <h3 className="font-semibold flex items-center gap-2">
+                  <History className="w-5 h-5 text-sky-600" /> Notes conservées de {historyStudent.last_name} {historyStudent.first_name}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Même année scolaire, matière et semestre · moyenne {inheritedAverage(historyStudent.id)}
+                </p>
+              </div>
+              <button onClick={() => setHistoryStudent(null)} className="p-1.5 hover:bg-accent rounded-lg" aria-label="Fermer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5 space-y-2">
+              {(inheritedByStudent[historyStudent.id] || []).map((note, index) => (
+                <div key={`${note.source_control_id}_${index}`} className="grid grid-cols-[1fr_auto] gap-3 rounded-lg border border-border p-3">
+                  <div>
+                    <p className="font-medium text-sm">{note.control_name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {note.source_class_name}{note.control_date ? ` · ${note.control_date}` : ''}
+                    </p>
+                    {note.appreciation && <p className="text-xs text-gray-600 mt-1">{note.appreciation}</p>}
+                  </div>
+                  <span className={`self-center min-w-[52px] text-center px-2 py-1 rounded-lg font-bold ${
+                    Number(note.note) < 10 ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'
+                  }`}>
+                    {note.note}/20
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modale : ajouter un contrôle (officiel / similé / personnalisé) */}
