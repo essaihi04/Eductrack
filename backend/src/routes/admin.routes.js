@@ -7,7 +7,7 @@ import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE, BUCKET_PUBLIC, normalizeLogoToPng } from '../utils/storage.js';
 import { mapStudentOptionalFields } from '../utils/studentFields.js';
-import { activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear, sameSchoolYear } from '../utils/enrollmentScope.js';
+import { activeEnrollmentMap, activeStudentIdSet, yearVariants, ensureEnrollmentIfCurrentYear, sameSchoolYear } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
 import { archiveStudent, restoreStudent } from '../utils/studentArchive.js';
 import { fetchSchoolLogoBuffer } from '../services/schoolLogo.js';
@@ -15,6 +15,7 @@ import { generateAbsencesListPdf } from '../services/absencesListPdf.js';
 import { officialControlsForLevel, suggestedDate, SIMILE_NAME } from '../utils/officialControls.js';
 import { generateNotesGridPdf } from '../services/notesGridPdf.js';
 import { generateNotesRecapPdf } from '../services/notesRecapPdf.js';
+import { selectInheritedControlNotes } from '../services/studentDossierMetrics.js';
 import { saveClassTimetable } from '../services/timetableImport/save.js';
 import {
   canonicalSubject,
@@ -8028,19 +8029,46 @@ router.get('/dashboard/class-ranking', async (req, res) => {
 router.get('/dashboard/timetable-today', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+
+    // Jour affiché : ?date=YYYY-MM-DD, sinon aujourd'hui (comportement d'origine).
+    // « La journée » ne peut pas vouloir dire « aujourd'hui » : hors période
+    // scolaire la page serait vide et passerait pour cassée.
+    const requestedDate = req.query.date;
+    if (requestedDate && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+      return res.status(400).json({ error: 'Format de date attendu : YYYY-MM-DD' });
+    }
+    // Composantes LOCALES, pas toISOString() : en UTC+1, entre minuit et 1h du
+    // matin, toISOString() renvoie la veille et la page affichait le mauvais jour.
+    const localDateStr = (d) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayStr = requestedDate || localDateStr(new Date());
+
+    const [yy, mm, dd] = todayStr.split('-').map(Number);
+    const target = new Date(yy, mm - 1, dd);
+    if (Number.isNaN(target.getTime())) {
+      return res.status(400).json({ error: 'Date invalide' });
+    }
     // JS: 0=Sunday, class_timetable stores day names as strings
-    const jsDow = today.getDay();
+    const jsDow = target.getDay();
     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const dbDow = dayNames[jsDow];
+
+    // Dernier jour contenant réellement des séances : sert au front à proposer
+    // un jour utile quand celui demandé est vide.
+    let lastActiveDate = null;
+    {
+      let q = supabaseAdmin.from('sessions').select('date').order('date', { ascending: false }).limit(1);
+      if (schoolId) q = q.eq('school_id', schoolId);
+      const { data } = await q;
+      lastActiveDate = data?.[0]?.date || null;
+    }
 
     // 1. Get all classes
     let classesQ = supabaseAdmin.from('classes').select('id, name, level, school_type, filiere');
     if (schoolId) classesQ = classesQ.eq('school_id', schoolId);
     const { data: classes } = await classesQ;
 
-    if (!classes?.length) return res.json({ date: todayStr, dayOfWeek: dbDow, slots: [], classes: [], sessions: [] });
+    if (!classes?.length) return res.json({ date: todayStr, dayOfWeek: dbDow, slots: [], classes: [], classesWithoutTimetable: [], lastActiveDate, sessions: [] });
 
     const classIds = classes.map(c => c.id);
 
@@ -8144,7 +8172,7 @@ router.get('/dashboard/timetable-today', async (req, res) => {
     });
 
     // 7. Build per-class summary
-    const classSummaries = classes.map(cls => {
+    const classSummariesAll = classes.map(cls => {
       const classSlots = enrichedSlots.filter(s => s.class_id === cls.id);
       const trackedSlots = classSlots.filter(s => s.tracked);
       const untrackedSlots = classSlots.filter(s => !s.tracked);
@@ -8161,7 +8189,17 @@ router.get('/dashboard/timetable-today', async (req, res) => {
         avgHealth,
         slots: classSlots
       };
-    }).filter(c => c.totalSlots > 0); // Only classes with timetable today
+    });
+
+    // Classes SANS créneau ce jour-là. Elles étaient purement écartées, ce qui
+    // donnait l'impression que l'outil ne voyait pas ces classes : avec 8 classes
+    // sur 133 pourvues d'un emploi du temps, c'est l'écrasante majorité. Le front
+    // les affiche comme un état explicite, avec l'action pour saisir l'horaire.
+    const classesWithoutTimetable = classSummariesAll
+      .filter(c => c.totalSlots === 0)
+      .map(({ slots, ...rest }) => rest);
+
+    const classSummaries = classSummariesAll.filter(c => c.totalSlots > 0);
 
     // 8. Get unique time slots for the grid header
     const timeSlots = [...new Map(
@@ -8179,12 +8217,15 @@ router.get('/dashboard/timetable-today', async (req, res) => {
       dayLabel: { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' }[dbDow] || dbDow,
       timeSlots,
       classes: classSummaries,
+      classesWithoutTimetable,
+      lastActiveDate,
       globalStats: {
         totalSlots: enrichedSlots.length,
         trackedSlots: allTracked.length,
         untrackedSlots: enrichedSlots.length - allTracked.length,
         globalHealth,
         classesWithTimetable: classSummaries.length,
+        classesWithoutTimetable: classesWithoutTimetable.length,
         classesFullyTracked: classSummaries.filter(c => c.untrackedCount === 0 && c.totalSlots > 0).length
       }
     });
@@ -9061,14 +9102,30 @@ router.get('/notes/grid', async (req, res) => {
     if (check.error) return res.status(check.error).json({ error: check.message });
     const sem = semester ? (Number(semester) === 2 ? 2 : 1) : null;
 
-    // Élèves de la classe — ordre verrouillé sur le fichier Massar (import_order)
-    const { data: students } = await supabaseAdmin
-      .from('profiles')
-      .select('id, first_name, last_name, massar_code, avatar_url, import_order')
-      .eq('class_id', class_id)
-      .eq('role', 'student')
-      .order('import_order', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: true });
+    // Élèves de la classe pour CETTE année. `profiles.class_id` peut déjà
+    // pointer vers une nouvelle répartition ou l'année suivante ; l'inscription
+    // annuelle est la source de vérité du roster affiché.
+    const enrollmentMap = await activeEnrollmentMap(check.cls.school_id, check.cls.academic_year);
+    const enrolledStudentIds = enrollmentMap
+      ? [...enrollmentMap.entries()]
+        .filter(([, enrollment]) => enrollment.class_id === class_id)
+        .map(([studentId]) => studentId)
+      : null;
+    let students = [];
+    if (enrolledStudentIds === null || enrolledStudentIds.length > 0) {
+      let studentsQuery = supabaseAdmin
+        .from('profiles')
+        .select('id, first_name, last_name, massar_code, avatar_url, import_order')
+        .eq('role', 'student');
+      studentsQuery = enrolledStudentIds === null
+        ? studentsQuery.eq('class_id', class_id)
+        : studentsQuery.in('id', enrolledStudentIds);
+      const { data, error: studentsError } = await studentsQuery
+        .order('import_order', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+      if (studentsError) throw studentsError;
+      students = data || [];
+    }
 
     // Contrôles de la classe pour CETTE matière. Les colonnes published /
     // semester / control_type peuvent ne pas exister si les migrations
@@ -9214,6 +9271,82 @@ router.get('/notes/grid', async (req, res) => {
     const displayedControlIds = new Set(controls.map((control) => control.id));
     notes = notes.filter((note) => displayedControlIds.has(note.control_id));
 
+    // Notes conservées AVANT une répartition de classe. La note appartient à
+    // l'élève (`control_notes.student_id`) : on la restitue même si son contrôle
+    // appartient encore à l'ancienne classe. On limite volontairement à la
+    // même année, matière et semestre afin de ne pas mélanger les promotions.
+    const inheritedNotes = [];
+    const studentIds = students.map((student) => student.id);
+    if (studentIds.length) {
+      const historicalRows = [];
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabaseAdmin
+          .from('control_notes')
+          .select('control_id, student_id, note, appreciation')
+          .in('student_id', studentIds)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        historicalRows.push(...(data || []));
+        if (!data || data.length < PAGE) break;
+      }
+
+      const historicalControlIds = [...new Set(historicalRows
+        .map((note) => note.control_id)
+        .filter((id) => id && !displayedControlIds.has(id)))];
+      const historicalControls = [];
+      for (const part of chunkArray(historicalControlIds, 100)) {
+        const { data, error } = await supabaseAdmin
+          .from('controls_plan')
+          .select('id, class_id, name, date, subject_id, teacher_id, semester, official_key')
+          .in('id', part);
+        if (error) throw error;
+        historicalControls.push(...(data || []));
+      }
+
+      const sourceClassIds = [...new Set(historicalControls.map((control) => control.class_id).filter(Boolean))];
+      let sourceClasses = [];
+      if (sourceClassIds.length) {
+        const { data, error } = await supabaseAdmin
+          .from('classes')
+          .select('id, name, academic_year, school_id')
+          .in('id', sourceClassIds);
+        if (error) throw error;
+        sourceClasses = data || [];
+      }
+      const historicalContext = await resolveControlSubjectsFromDb(historicalControls, [subject_id]);
+      const historicalControlsWithSemester = historicalContext.controls.map((control) => ({
+        ...control,
+        resolved_semester: controlSemester(control),
+      }));
+
+      const selectedHistory = selectInheritedControlNotes({
+        notes: historicalRows.filter((note) => !displayedControlIds.has(note.control_id)),
+        controls: historicalControlsWithSemester,
+        classes: sourceClasses,
+        currentClassId: class_id,
+        currentSchoolId: check.cls.school_id,
+        academicYear: check.cls.academic_year,
+        subjectKey: finalSubjectKey,
+        semester: sem,
+      });
+      for (const { note, control, sourceClass } of selectedHistory) {
+        inheritedNotes.push({
+          student_id: note.student_id,
+          note: Number(note.note),
+          appreciation: note.appreciation || null,
+          source_control_id: control.id,
+          control_name: control.official_key ? control.name : recapIdentity(control).label,
+          control_date: control.date || null,
+          semester: controlSemester(control),
+          official_key: control.official_key || null,
+          source_class_id: sourceClass.id,
+          source_class_name: sourceClass.name,
+        });
+      }
+      inheritedNotes.sort((a, b) => String(a.control_date).localeCompare(String(b.control_date)));
+    }
+
     res.json({
       class: check.cls,
       semester: sem,
@@ -9221,7 +9354,7 @@ router.get('/notes/grid', async (req, res) => {
       has_official_cols: hasOfficialCols,
       official_missing: officialMissing,
       simile_name: SIMILE_NAME,
-      students: students || [],
+      students,
       controls: controls.map(c => ({
         ...c,
         name: c.official_key ? c.name : recapIdentity(c).label,
@@ -9230,6 +9363,7 @@ router.get('/notes/grid', async (req, res) => {
         from_teacher: nameByTeacher[c.teacher_id]?.role === 'teacher',
       })),
       notes,
+      inherited_notes: inheritedNotes,
     });
   } catch (e) {
     console.error('[Admin] notes grid error:', e.message);

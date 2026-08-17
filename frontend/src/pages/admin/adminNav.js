@@ -36,6 +36,7 @@ export const ADMIN_DOMAINS = [
         key: 'classes',
         label: 'Classes',
         items: [
+          { label: 'Journée', path: '/admin/journee', icon: CalendarClock, roles: ALL_ADMIN },
           { label: 'Classes', path: '/classes', icon: GraduationCap, roles: ALL_ADMIN },
           { label: 'Répartition', path: '/admin/class-assignment', icon: Shuffle, roles: ALL_ADMIN },
           { label: 'Suivi de séance', path: '/teacher/rapide', icon: Calendar, roles: PEDAGO },
