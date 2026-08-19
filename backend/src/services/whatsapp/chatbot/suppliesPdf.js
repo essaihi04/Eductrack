@@ -18,7 +18,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import { fetchSchoolLogoBuffer, drawSchoolLogo } from '../../schoolLogo.js';
 import {
   registerArabicFont, isArabicDominant,
-  drawMixedParagraph, mixedParagraphHeight, mixedTextWidth,
+  drawMixedParagraph, mixedParagraphHeight,
 } from './pdfText.js';
 
 // Palette « Encre & Safran » (thème de l'application)
@@ -248,24 +248,24 @@ export function buildSuppliesPdfBuffer({ school = {}, logoBuffer = null, section
       };
       const ensureSpace = (needed) => { if (y + needed > bottomLimit) newPage(); };
 
-      // ───── Titre + badge de niveau ─────
-      doc.fillColor(INK);
-      y += drawMixedParagraph(doc, docTitle, {
-        x: PAGE_MARGIN, y, width: contentW, size: 22, align, rtl,
-      }) + 10;
+      // ───── Niveau en grand titre ─────
+      // Le parent cherche d'abord « c'est bien la liste de mon enfant ? ».
+      // Le niveau est donc le titre dominant ; « Fournitures scolaires » passe
+      // en surtitre discret au-dessus, et le trait safran souligne l'ensemble.
+      doc.fillColor(SLATE);
+      y += drawMixedParagraph(doc, docTitle.toUpperCase(), {
+        x: PAGE_MARGIN, y, width: contentW, size: 10, align, rtl,
+      }) + 4;
 
-      const badgeText = L.level(levelLabel);
-      // Largeur mesurée segment par segment (un libellé arabe est plus large que
-      // ce que mesurerait la police latine → le texte débordait de la pastille).
-      const badgeW = Math.min(contentW, mixedTextWidth(doc, badgeText, { size: 11 }) + 32);
-      const badgeH = mixedParagraphHeight(doc, badgeText, { width: badgeW - 32, size: 11 }) + 14;
-      const badgeX = rtl ? contentRight - badgeW : PAGE_MARGIN;
-      card(doc, badgeX, y, badgeW, badgeH, { fill: SAFRAN_SOFT, stroke: SAFRAN, radius: badgeH / 2 });
-      doc.fillColor('#92400E');
-      drawMixedParagraph(doc, badgeText, {
-        x: badgeX + 16, y: y + 7, width: badgeW - 32, size: 11, align, rtl,
-      });
-      y += badgeH + 12;
+      doc.fillColor(INDIGO);
+      y += drawMixedParagraph(doc, levelLabel, {
+        x: PAGE_MARGIN, y, width: contentW, size: 24, align, rtl,
+      }) + 8;
+
+      // Filet safran calé sur le début de lecture (droite en arabe).
+      const ruleW = Math.min(120, contentW);
+      doc.rect(rtl ? contentRight - ruleW : PAGE_MARGIN, y, ruleW, 3).fill(SAFRAN);
+      y += 3 + 12;
 
       doc.fillColor(SLATE);
       y += drawMixedParagraph(doc, L.subtitle, {
