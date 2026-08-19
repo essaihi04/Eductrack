@@ -143,7 +143,7 @@ test('les notes reprises remplissent les colonnes actuelles et créent le rang m
     notes: [{ control_id: 'new-f1', student_id: 'already-current', note: 17 }],
     inheritedNotes: [
       { student_id: 'moved', note: 14, slot_key: 's2_f1', source_control_id: 'old-f1', control_name: 'Contrôle 1', control_date: '2026-03-01' },
-      { student_id: 'moved', note: 16, slot_key: 's2_f3', source_control_id: 'old-f3', control_name: 'Contrôle 3', control_date: '2026-06-20' },
+      { student_id: 'moved', note: 16, slot_key: 's2_f3', source_control_id: 'old-f3', teacher_id: 'teacher-old', control_name: 'Contrôle 3', control_date: '2026-06-20' },
     ],
     classId: 'new-class',
     subjectId: 'math',
@@ -152,6 +152,8 @@ test('les notes reprises remplissent les colonnes actuelles et créent le rang m
 
   assert.equal(merged.convertedNotesCount, 2);
   assert.equal(merged.notes.find(note => note.student_id === 'moved' && note.note === 14).control_id, 'new-f1');
-  assert.equal(merged.controls.some(control => control.converted && control.grid_slot_key === 's2_f3'), true);
+  const convertedControl = merged.controls.find(control => control.converted && control.grid_slot_key === 's2_f3');
+  assert.equal(convertedControl?.source_control_id, 'old-f3');
+  assert.equal(convertedControl?.teacher_id, 'teacher-old');
   assert.deepEqual(merged.controls.map(control => control.grid_slot_key), ['s2_f1', 's2_f2', 's2_f3']);
 });

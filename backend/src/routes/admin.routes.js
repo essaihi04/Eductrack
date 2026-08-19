@@ -8943,33 +8943,27 @@ router.get('/classes/:classId/controls-overview', async (req, res) => {
     const check = await assertClassInScope(req, classId);
     if (check.error) return res.status(check.error).json({ error: check.message });
 
-    // Élèves de la classe
-    const { data: students } = await supabaseAdmin
-      .from('profiles').select('id').eq('class_id', classId).eq('role', 'student');
-    const totalStudents = (students || []).length;
-
-    // Contrôles de la classe
-    const { data: controlsRaw } = await supabaseAdmin
-      .from('controls_plan')
-      .select('id, name, date, start_time, kind, teacher_id, subject_id, semester, official_key')
-      .eq('class_id', classId)
-      .order('date', { ascending: false });
-    const { controls } = await resolveControlSubjectsFromDb(controlsRaw || []);
-    const controlIds = (controls || []).map(c => c.id);
-
-    // Notes de tous ces contrôles (1 requête)
-    let notesByControl = {};
-    if (controlIds.length) {
-      const { data: notes } = await supabaseAdmin
-        .from('control_notes').select('control_id, student_id, note').in('control_id', controlIds);
-      const currentStudentIds = new Set((students || []).map((student) => student.id));
-      notesForStudents(notes || [], currentStudentIds).forEach(n => {
-        (notesByControl[n.control_id] = notesByControl[n.control_id] || []).push(Number(n.note));
-      });
-    }
+    // La synthèse reprend exactement les mêmes colonnes que la saisie et le
+    // récapitulatif. Ainsi, un changement de répartition ne remet pas les
+    // cartes des contrôles à zéro.
+    const semesterData = [
+      await loadRecapData(check.cls, 1),
+      await loadRecapData(check.cls, 2),
+    ];
+    const students = semesterData[0].students.length
+      ? semesterData[0].students
+      : semesterData[1].students;
+    const totalStudents = students.length;
+    const cards = semesterData.flatMap(({ groups }, index) => groups.flatMap((group) =>
+      group.columns.map((column) => ({
+        ...column,
+        semester: index + 1,
+        group_label: group.label,
+        notes: group.notes.filter((note) => note.control_id === column.control_id),
+      }))));
 
     // Nom du professeur créateur du contrôle.
-    const teacherIds = [...new Set((controls || []).map(c => c.teacher_id).filter(Boolean))];
+    const teacherIds = [...new Set(cards.map(c => c.teacher_id).filter(Boolean))];
     const nameByTeacher = {};
     if (teacherIds.length) {
       const { data: profs } = await supabaseAdmin
@@ -8977,22 +8971,23 @@ router.get('/classes/:classId/controls-overview', async (req, res) => {
       (profs || []).forEach(p => { nameByTeacher[p.id] = `${p.first_name || ''} ${p.last_name || ''}`.trim(); });
     }
 
-    const overviewNoteCounts = new Map(Object.entries(notesByControl).map(([id, values]) => [id, values.length]));
-    const effectiveControls = collapseControlsBySlot(controls || [], overviewNoteCounts);
-    const overview = effectiveControls.map(c => {
-      const vals = (notesByControl[c.id] || []).filter(v => !isNaN(v));
+    const overview = cards.map(c => {
+      const vals = c.notes.map((note) => Number(note.note)).filter(v => !isNaN(v));
       const noted = vals.length;
       const avg = noted ? Math.round((vals.reduce((a, b) => a + b, 0) / noted) * 100) / 100 : null;
       return {
-        id: c.id,
-        name: c.official_key ? c.name : recapIdentity(c).label,
+        id: c.control_id,
+        name: c.group_label,
         date: c.date, start_time: c.start_time, kind: c.kind,
-        subject: c.resolved_subject?.label || '—',
+        semester: c.semester,
+        subject: c.subject_name || '—',
         teacher: nameByTeacher[c.teacher_id] || '—',
         totalStudents, notedStudents: noted, missing: Math.max(0, totalStudents - noted),
         average: avg,
+        converted: !!c.converted,
+        convertedNoteCount: c.converted_note_count || 0,
       };
-    });
+    }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 
     res.json({ class: check.cls, totalStudents, controls: overview });
   } catch (e) {
@@ -9007,6 +9002,54 @@ router.get('/controls/:controlId/notes-detail', async (req, res) => {
     const { controlId } = req.params;
     const { collectControlReportData, buildControlRows } =
       await import('../services/bulletins/controlReportPdf.js');
+
+    // Depuis « Notes des profs », class_id demande la vue logique de la classe
+    // actuelle : les notes de l'ancienne répartition remplissent les contrôles
+    // actuels, comme dans la grille de saisie et le récapitulatif.
+    if (req.query.class_id) {
+      const check = await assertClassInScope(req, req.query.class_id);
+      if (check.error) return res.status(check.error).json({ error: check.message });
+      const merged = await findMergedControlData(check.cls, controlId);
+      if (!merged) return res.status(404).json({ error: 'Contrôle introuvable dans cette classe' });
+
+      const physicalControlId = String(controlId).startsWith('converted:')
+        ? merged.column.source_control_id
+        : controlId;
+      const sourceData = physicalControlId
+        ? await collectControlReportData(physicalControlId, null)
+        : null;
+      const notesByStudent = new Map(merged.notes.map((note) => [note.student_id, note]));
+      const trackingByStudent = sourceData?.trackingByStudent || new Map();
+      const rows = buildControlRows({
+        students: merged.students,
+        notesByStudent,
+        trackingByStudent,
+      }).map((row) => {
+        const note = notesByStudent.get(row.student_id);
+        return {
+          ...row,
+          converted: !!note?.converted,
+          source_control_id: note?.source_control_id || null,
+          source_class_name: note?.source_class_name || null,
+        };
+      });
+      const control = {
+        ...(sourceData?.control || {}),
+        id: controlId,
+        class_id: check.cls.id,
+        name: merged.group.label,
+        date: merged.column.date,
+        converted: !!merged.column.converted,
+      };
+      return res.json({
+        control,
+        subject: merged.column.subject_name,
+        class: check.cls,
+        hasTracking: (trackingByStudent.size || 0) > 0,
+        editable: !merged.column.converted,
+        rows,
+      });
+    }
 
     const data = await collectControlReportData(controlId, null); // null = rôle privilégié
     if (!data) return res.status(404).json({ error: 'Contrôle introuvable' });
@@ -9024,6 +9067,52 @@ router.get('/controls/:controlId/notes-detail', async (req, res) => {
     });
   } catch (e) {
     console.error('[Admin] notes-detail error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /controls/:controlId/notes-report-pdf?class_id=… — PDF de la vue
+// logique actuelle, avec les notes reprises après une répartition.
+router.get('/controls/:controlId/notes-report-pdf', async (req, res) => {
+  try {
+    const { controlId } = req.params;
+    if (!req.query.class_id) return res.status(400).json({ error: 'class_id requis' });
+    const check = await assertClassInScope(req, req.query.class_id);
+    if (check.error) return res.status(check.error).json({ error: check.message });
+    const merged = await findMergedControlData(check.cls, controlId);
+    if (!merged) return res.status(404).json({ error: 'Contrôle introuvable dans cette classe' });
+
+    const { collectControlReportData, generateControlReportPdf } =
+      await import('../services/bulletins/controlReportPdf.js');
+    const physicalControlId = String(controlId).startsWith('converted:')
+      ? merged.column.source_control_id
+      : controlId;
+    const sourceData = physicalControlId
+      ? await collectControlReportData(physicalControlId, null)
+      : null;
+    const notesByStudent = new Map(merged.notes.map((note) => [note.student_id, note]));
+    const control = {
+      ...(sourceData?.control || {}),
+      id: controlId,
+      class_id: check.cls.id,
+      name: merged.group.label,
+      date: merged.column.date,
+    };
+    const buffer = await generateControlReportPdf({
+      control,
+      cls: check.cls,
+      subjectName: merged.column.subject_name,
+      students: merged.students,
+      notesByStudent,
+      trackingByStudent: sourceData?.trackingByStudent || new Map(),
+      establishment: sourceData?.establishment || {},
+    });
+    const safe = (value) => String(value || 'controle').replace(/[^a-zA-Z0-9._-]+/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="rapport_${safe(check.cls.name)}_${safe(merged.group.key)}.pdf"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error('[Admin] merged notes report error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -9564,26 +9653,40 @@ const recapKeyRank = (key) => {
 };
 
 // Charge tout ce qu'il faut pour les récaps d'une classe × semestre.
-const loadRecapData = async (cls, sem) => {
-  const { data: students } = await supabaseAdmin
-    .from('profiles')
-    .select('id, first_name, last_name, massar_code, import_order')
-    .eq('class_id', cls.id)
-    .eq('role', 'student')
-    .order('import_order', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true });
+export const loadRecapData = async (cls, sem) => {
+  const enrollmentMap = await activeEnrollmentMap(cls.school_id, cls.academic_year);
+  const enrolledStudentIds = enrollmentMap
+    ? [...enrollmentMap.entries()]
+      .filter(([, enrollment]) => enrollment.class_id === cls.id)
+      .map(([studentId]) => studentId)
+    : null;
+  let students = [];
+  if (enrolledStudentIds === null || enrolledStudentIds.length > 0) {
+    let studentsQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code, import_order')
+      .eq('role', 'student');
+    studentsQuery = enrolledStudentIds === null
+      ? studentsQuery.eq('class_id', cls.id)
+      : studentsQuery.in('id', enrolledStudentIds);
+    const { data, error: studentsError } = await studentsQuery
+      .order('import_order', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+    if (studentsError) throw studentsError;
+    students = data || [];
+  }
 
   // Contrôles de la classe, toutes matières (mêmes replis de colonnes que la grille)
   let { data: controls, error } = await supabaseAdmin
     .from('controls_plan')
-    .select('id, name, date, status, teacher_id, subject_id, semester, official_key, published')
+    .select('id, name, date, start_time, kind, status, teacher_id, subject_id, semester, official_key, published')
     .eq('class_id', cls.id)
     .neq('status', 'cancelled')
     .order('date', { ascending: true });
   if (error && /semester|official_key|published/i.test(error.message || '')) {
     ({ data: controls, error } = await supabaseAdmin
       .from('controls_plan')
-      .select('id, name, date, status, teacher_id, subject_id')
+      .select('id, name, date, start_time, kind, status, teacher_id, subject_id')
       .eq('class_id', cls.id)
       .neq('status', 'cancelled')
       .order('date', { ascending: true }));
@@ -9613,8 +9716,121 @@ const loadRecapData = async (cls, sem) => {
     const currentStudentIds = new Set((students || []).map((student) => student.id));
     notes = notesForStudents(notes, currentStudentIds).filter(n => n.note !== null && n.note !== '');
   }
+
+  // Même règle que la grille de saisie : après une nouvelle répartition, les
+  // notes de l'élève remplissent directement le rang et la matière du récap
+  // actuel. Les anciens contrôles ne deviennent pas une rubrique séparée.
+  const studentIds = students.map((student) => student.id);
+  if (studentIds.length) {
+    const allStudentNotes = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error: historyError } = await supabaseAdmin
+        .from('control_notes')
+        .select('id, control_id, student_id, note, appreciation')
+        .in('student_id', studentIds)
+        .order('id', { ascending: true })
+        .range(from, from + 999);
+      if (historyError) throw historyError;
+      allStudentNotes.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+
+    const currentControlIds = new Set(controls.map((control) => control.id));
+    const historicalControlIds = [...new Set(allStudentNotes
+      .map((note) => note.control_id)
+      .filter((id) => id && !currentControlIds.has(id)))];
+    const historicalControls = [];
+    for (const part of chunkArray(historicalControlIds, 100)) {
+      const { data, error: historyControlError } = await supabaseAdmin
+        .from('controls_plan')
+        .select('id, class_id, name, date, start_time, kind, subject_id, teacher_id, semester, official_key, published')
+        .in('id', part);
+      if (historyControlError) throw historyControlError;
+      historicalControls.push(...(data || []));
+    }
+
+    const sourceClassIds = [...new Set(historicalControls.map((control) => control.class_id).filter(Boolean))];
+    let sourceClasses = [];
+    if (sourceClassIds.length) {
+      const { data, error: sourceClassError } = await supabaseAdmin
+        .from('classes')
+        .select('id, name, academic_year, school_id')
+        .in('id', sourceClassIds);
+      if (sourceClassError) throw sourceClassError;
+      sourceClasses = data || [];
+    }
+
+    const historicalContext = await resolveControlSubjectsFromDb(historicalControls);
+    const historicalControlsWithSemester = historicalContext.controls.map((control) => ({
+      ...control,
+      resolved_semester: controlSemester(control),
+    }));
+    const subjectKeys = new Set([
+      ...controls.map((control) => control.resolved_subject?.key),
+      ...historicalControlsWithSemester.map((control) => control.resolved_subject?.key),
+    ].filter(Boolean));
+    const mergedControls = [];
+    const mergedNotes = [];
+
+    for (const subjectKey of subjectKeys) {
+      const subjectControls = controls.filter((control) => control.resolved_subject?.key === subjectKey);
+      const subjectControlIds = new Set(subjectControls.map((control) => control.id));
+      const subjectNotes = notes.filter((note) => subjectControlIds.has(note.control_id));
+      const selectedHistory = selectInheritedControlNotes({
+        notes: allStudentNotes.filter((note) => !currentControlIds.has(note.control_id)),
+        controls: historicalControlsWithSemester,
+        classes: sourceClasses,
+        currentClassId: cls.id,
+        currentSchoolId: cls.school_id,
+        academicYear: cls.academic_year,
+        subjectKey,
+        semester: sem,
+      });
+      const subjectInfo = subjectControls[0]?.resolved_subject
+        || selectedHistory[0]?.control?.resolved_subject;
+      if (!subjectInfo) continue;
+      const inheritedNotes = selectedHistory.map(({ note, control, sourceClass }) => ({
+        student_id: note.student_id,
+        note: note.note,
+        appreciation: note.appreciation || null,
+        source_control_id: control.id,
+        source_class_name: sourceClass.name,
+        control_name: control.official_key ? control.name : recapIdentity(control).label,
+        control_date: control.date,
+        start_time: control.start_time || null,
+        kind: control.kind || 'control',
+        teacher_id: control.teacher_id || null,
+        semester: controlSemester(control),
+        slot_key: recapIdentity(control).key,
+      }));
+      const merged = mergeInheritedNotesIntoGrid({
+        controls: subjectControls.map((control) => ({
+          ...control,
+          grid_slot_key: recapIdentity(control).key,
+        })),
+        notes: subjectNotes,
+        inheritedNotes,
+        classId: cls.id,
+        subjectId: subjectInfo.id || subjectKey,
+        semester: sem,
+      });
+      mergedControls.push(...merged.controls.map((control) => control.converted ? {
+        ...control,
+        subject_id: subjectInfo.id || null,
+        resolved_subject: subjectInfo,
+      } : control));
+      mergedNotes.push(...merged.notes);
+    }
+    controls = mergedControls;
+    notes = mergedNotes;
+  }
+
   const noteCount = {};
   notes.forEach(n => { noteCount[n.control_id] = (noteCount[n.control_id] || 0) + 1; });
+  const convertedNoteCount = {};
+  notes.forEach(n => {
+    if (n.converted) convertedNoteCount[n.control_id] = (convertedNoteCount[n.control_id] || 0) + 1;
+  });
 
   // Coefficients de l'établissement pour ce niveau (par NOM de matière, comme
   // les bulletins). Absents → moyenne simple.
@@ -9653,8 +9869,14 @@ const loadRecapData = async (cls, sem) => {
       subject_name: subjectName,
       coefficient: coefOf(subjectName),
       date: c.date,
+      start_time: c.start_time || null,
+      kind: c.kind || 'control',
+      teacher_id: c.teacher_id || null,
       published: !!c.published,
       note_count: noteCount[c.id] || 0,
+      converted_note_count: convertedNoteCount[c.id] || 0,
+      converted: !!c.converted,
+      source_control_id: c.source_control_id || null,
     });
   }
 
@@ -9687,6 +9909,27 @@ const loadRecapData = async (cls, sem) => {
       || String(a.date_min || '').localeCompare(String(b.date_min || '')));
 
   return { students: students || [], groups: list };
+};
+
+// Retrouve une colonne logique telle qu'elle est réellement présentée dans la
+// classe actuelle. Cette fonction alimente le détail et le PDF de « Notes des
+// profs », y compris pour une colonne virtuelle reprise après répartition.
+export const findMergedControlData = async (cls, controlId) => {
+  for (const semester of [1, 2]) {
+    const data = await loadRecapData(cls, semester);
+    for (const group of data.groups) {
+      const column = group.columns.find((item) => item.control_id === controlId);
+      if (!column) continue;
+      return {
+        semester,
+        students: data.students,
+        group,
+        column,
+        notes: group.notes.filter((note) => note.control_id === controlId),
+      };
+    }
+  }
+  return null;
 };
 
 // GET /notes/recap?class_id&semester — récaps disponibles + données d'affichage

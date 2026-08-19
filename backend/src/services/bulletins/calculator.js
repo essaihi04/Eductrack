@@ -16,6 +16,7 @@
 import { supabaseAdmin } from '../../config/supabase.js';
 import { getDefaultYearBounds } from './schoolCalendar.js';
 import { canonicalSubject, collapseControlsBySlot, resolveControls } from '../controlSubjects.js';
+import { activeEnrollmentMap, sameSchoolYear } from '../../utils/enrollmentScope.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -135,7 +136,7 @@ export const computeStudentBulletin = async ({
   // 1. Classe + niveau/filière
   const { data: cls } = await supabaseAdmin
     .from('classes')
-    .select('id, name, level, filiere, school_id')
+    .select('id, name, level, filiere, school_id, academic_year')
     .eq('id', classId)
     .single();
   if (!cls) throw new Error('Classe introuvable');
@@ -143,16 +144,68 @@ export const computeStudentBulletin = async ({
   // 2. Bornes de la période (semestre, ou bornes annuelles si _bounds fourni)
   const { start, end } = _bounds || await getSemesterBounds(schoolId, academicYear, semester);
 
-  // 3. Tous les controls_plan de la classe sur la période
-  const { data: controls } = await supabaseAdmin
+  // 3. Contrôles actuels de la classe sur la période.
+  const { data: currentControls } = await supabaseAdmin
     .from('controls_plan')
-    .select('id, name, date, teacher_id, kind, subject_id, status')
+    .select('id, class_id, name, date, teacher_id, kind, subject_id, status, semester, official_key')
     .eq('class_id', classId)
     .gte('date', start)
     .lte('date', end)
     .neq('status', 'cancelled');
 
-  const controlsRaw = controls || [];
+  // La note appartient à l'élève. On récupère donc aussi ses notes portées par
+  // un contrôle de son ancienne classe, dans la même école et la même année.
+  // Les contrôles actuels vides restent présents pour conserver un bulletin
+  // complet ; collapseControlsBySlot choisira la version réellement notée.
+  const allStudentNotes = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('control_notes')
+      .select('id, control_id, note, appreciation')
+      .eq('student_id', studentId)
+      .order('id', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw error;
+    allStudentNotes.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const currentControlIds = new Set((currentControls || []).map((control) => control.id));
+  const historicalControlIds = [...new Set(allStudentNotes
+    .map((note) => note.control_id)
+    .filter((id) => id && !currentControlIds.has(id)))];
+  const historicalControls = [];
+  for (let i = 0; i < historicalControlIds.length; i += 100) {
+    const { data, error } = await supabaseAdmin
+      .from('controls_plan')
+      .select('id, class_id, name, date, teacher_id, kind, subject_id, status, semester, official_key')
+      .in('id', historicalControlIds.slice(i, i + 100))
+      .gte('date', start)
+      .lte('date', end)
+      .neq('status', 'cancelled');
+    if (error) throw error;
+    historicalControls.push(...(data || []));
+  }
+  const sourceClassIds = [...new Set(historicalControls.map((control) => control.class_id).filter(Boolean))];
+  let sourceClasses = [];
+  if (sourceClassIds.length) {
+    const { data, error } = await supabaseAdmin
+      .from('classes')
+      .select('id, school_id, academic_year')
+      .in('id', sourceClassIds);
+    if (error) throw error;
+    sourceClasses = data || [];
+  }
+  const allowedSourceClassIds = new Set(sourceClasses
+    .filter((sourceClass) => (!schoolId || sourceClass.school_id === schoolId)
+      && sameSchoolYear(sourceClass.academic_year, academicYear || cls.academic_year))
+    .map((sourceClass) => sourceClass.id));
+  const acceptedHistoricalControls = historicalControls
+    .filter((control) => allowedSourceClassIds.has(control.class_id));
+  const acceptedIds = new Set([
+    ...(currentControls || []).map((control) => control.id),
+    ...acceptedHistoricalControls.map((control) => control.id),
+  ]);
+  const controlsRaw = [...(currentControls || []), ...acceptedHistoricalControls];
   const teacherIds = [...new Set(controlsRaw.map((control) => control.teacher_id).filter(Boolean))];
   let teacherSubjects = [];
   if (teacherIds.length) {
@@ -175,18 +228,9 @@ export const computeStudentBulletin = async ({
   }
 
   const controlsArr = resolveControls(controlsRaw, subjectRows, teacherSubjects);
-  const controlIds = controlsArr.map(c => c.id);
-
-  // 4. Notes de l'élève sur ces contrôles
-  let notes = [];
-  if (controlIds.length > 0) {
-    const { data } = await supabaseAdmin
-      .from('control_notes')
-      .select('control_id, note, appreciation')
-      .eq('student_id', studentId)
-      .in('control_id', controlIds);
-    notes = data || [];
-  }
+  // 4. Notes de l'élève sur les contrôles acceptés, quelle que soit la classe
+  // source de la même année scolaire.
+  const notes = allStudentNotes.filter((note) => acceptedIds.has(note.control_id));
 
   // 5. Grouper par matière. Les anciens contrôles sans subject_id sont récupérés
   // seulement lorsque leur professeur possède une unique matière.
@@ -317,14 +361,29 @@ export const computeStudentBulletin = async ({
  *              subjectRankings: Map<subjectName, Map<studentId, rank>> }
  */
 export const computeClassBulletins = async ({ classId, schoolId, academicYear, semester }) => {
-  // 1. Tous les élèves de la classe
-  const { data: students } = await supabaseAdmin
-    .from('profiles')
-    .select('id, first_name, last_name, massar_code')
-    .eq('class_id', classId)
-    .eq('role', 'student');
+  // 1. Effectif de cette classe pour l'année demandée. Le profil peut déjà
+  // pointer vers une autre répartition ou l'année suivante.
+  const enrollmentMap = await activeEnrollmentMap(schoolId, academicYear);
+  const enrolledStudentIds = enrollmentMap
+    ? [...enrollmentMap.entries()]
+      .filter(([, enrollment]) => enrollment.class_id === classId)
+      .map(([studentId]) => studentId)
+    : null;
+  let students = [];
+  if (enrolledStudentIds === null || enrolledStudentIds.length > 0) {
+    let studentsQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, massar_code')
+      .eq('role', 'student');
+    studentsQuery = enrolledStudentIds === null
+      ? studentsQuery.eq('class_id', classId)
+      : studentsQuery.in('id', enrolledStudentIds);
+    const { data, error } = await studentsQuery;
+    if (error) throw error;
+    students = data || [];
+  }
 
-  if (!students || students.length === 0) return { classBulletins: [] };
+  if (students.length === 0) return { classBulletins: [] };
 
   // 2. Calcul individuel pour chaque élève (boucle séquentielle = simple ; OK
   //    pour 30 élèves)

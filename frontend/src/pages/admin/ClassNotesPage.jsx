@@ -235,7 +235,7 @@ const ClassNotesPage = () => {
     setMsg('');
     try {
       const token = await getToken();
-      const res = await fetch(`${apiUrl}/api/admin/controls/${controlId}/notes-detail`, {
+      const res = await fetch(`${apiUrl}/api/admin/controls/${encodeURIComponent(controlId)}/notes-detail?class_id=${encodeURIComponent(selectedClass)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -250,7 +250,9 @@ const ClassNotesPage = () => {
     setSavingEdit(true); setMsg('');
     try {
       const token = await getToken();
-      const notes = editRows.map(r => ({ student_id: r.student_id, note: r._note }));
+      const notes = editRows
+        .filter(r => !r.converted)
+        .map(r => ({ student_id: r.student_id, note: r._note }));
       const res = await fetch(`${apiUrl}/api/admin/controls/${editCtrl.control.id}/notes`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -269,7 +271,7 @@ const ClassNotesPage = () => {
     setExporting(true);
     try {
       const token = await getToken();
-      const res = await fetch(`${apiUrl}/api/controls-plan/${controlId}/report-pdf`, {
+      const res = await fetch(`${apiUrl}/api/admin/controls/${encodeURIComponent(controlId)}/notes-report-pdf?class_id=${encodeURIComponent(selectedClass)}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Erreur ${res.status}`);
@@ -529,6 +531,11 @@ const ClassNotesPage = () => {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-gray-800 truncate">{c.name}</span>
                     {c.kind === 'activity' && <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">Activité</span>}
+                    {(c.converted || c.convertedNoteCount > 0) && (
+                      <span className="text-xs px-2 py-0.5 bg-sky-100 text-sky-700 rounded-full">
+                        Repris après répartition
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {c.subject} • {c.teacher} • {c.date ? new Date(c.date).toLocaleDateString('fr-FR') : '—'}
@@ -610,7 +617,10 @@ const ClassNotesPage = () => {
                         <td className="px-2 py-1.5 text-center">
                           <input type="number" min="0" max="20" step="0.25" value={r._note}
                             onChange={e => setEditRows(prev => prev.map((x, j) => j === i ? { ...x, _note: e.target.value } : x))}
-                            className="w-20 border rounded px-2 py-1 text-center text-sm" placeholder="—" />
+                            disabled={r.converted}
+                            title={r.converted ? `Note reprise${r.source_class_name ? ` depuis ${r.source_class_name}` : ''}` : ''}
+                            className={`w-20 border rounded px-2 py-1 text-center text-sm ${r.converted ? 'bg-sky-50 text-sky-800 cursor-not-allowed' : ''}`}
+                            placeholder="—" />
                         </td>
                         <td className="px-2 py-1.5">
                           <span className="inline-flex items-center gap-1.5">
@@ -626,11 +636,17 @@ const ClassNotesPage = () => {
             </div>
 
             <div className="flex items-center justify-between p-4 border-t">
-              <p className="text-xs text-gray-400">Modifier une note écrase celle du professeur. Effacer le champ supprime la note.</p>
-              <button onClick={saveEdit} disabled={savingEdit}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 disabled:opacity-50">
-                <Save className="w-4 h-4" /> {savingEdit ? 'Enregistrement…' : 'Enregistrer'}
-              </button>
+              <p className="text-xs text-gray-400">
+                {editRows.some(row => row.converted)
+                  ? 'Les notes bleues sont reprises de l’ancienne répartition et restent liées à leur contrôle d’origine.'
+                  : 'Modifier une note écrase celle du professeur. Effacer le champ supprime la note.'}
+              </p>
+              {editCtrl.editable !== false && (
+                <button onClick={saveEdit} disabled={savingEdit}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium inline-flex items-center gap-2 disabled:opacity-50">
+                  <Save className="w-4 h-4" /> {savingEdit ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -217,6 +217,8 @@ const BulletinsPage = () => {
   const draftCount = bulletins.filter(b => b.status === 'draft').length;
   const publishedCount = bulletins.filter(b => b.status === 'published').length;
   const sentCount = bulletins.filter(b => b.status === 'sent').length;
+  const allAveragesMissing = bulletins.length > 0
+    && bulletins.every(b => b.general_average == null);
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -288,7 +290,7 @@ const BulletinsPage = () => {
           <button onClick={handleGenerate} disabled={generating}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
             {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-            {generating ? 'Génération...' : 'Générer les bulletins'}
+            {generating ? 'Génération...' : bulletins.length ? 'Recalculer les bulletins' : 'Générer les bulletins'}
           </button>
           <button onClick={handlePublish} disabled={publishing || draftCount === 0}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
@@ -298,6 +300,13 @@ const BulletinsPage = () => {
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
             <MessageCircle className="w-4 h-4" /> Envoyer WhatsApp ({publishedCount})
           </button>
+        </div>
+      )}
+
+      {allAveragesMissing && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Ces bulletins ont été calculés avant la nouvelle répartition. Cliquez sur
+          <strong> Recalculer les bulletins</strong> pour reprendre les notes liées aux élèves.
         </div>
       )}
 
