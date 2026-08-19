@@ -58,3 +58,6 @@ keystore.properties
 
 # Donnees de migration self-host (dumps DB + fichiers Storage) - JAMAIS dans git
 migration-selfhost/data/
+
+# Sorties generees par les scripts (regenerables)
+output/
