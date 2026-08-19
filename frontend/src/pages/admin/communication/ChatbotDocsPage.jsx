@@ -269,6 +269,36 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
     }
   };
 
+  /**
+   * Supprime UN niveau détecté, sans toucher au reste du document.
+   * Utile quand l'analyse a inventé un niveau (une ligne d'article prise pour
+   * un titre) ou quand l'école ne veut pas diffuser ce niveau : réimporter tout
+   * le PDF pour retirer une seule section serait disproportionné.
+   */
+  const handleDeleteSection = async (doc, section) => {
+    if (!window.confirm(
+      `Supprimer le niveau « ${section.level_label} » de ce document ?\n\n`
+      + "Le chatbot ne proposera plus ce niveau. Les autres niveaux sont conservés.",
+    )) return;
+    setBusyId(section.id);
+    try {
+      const res = await fetch(`${apiUrl}/api/admin/chatbot-docs/sections/${section.id}`, {
+        method: 'DELETE', headers: await authHeaders(),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Suppression impossible');
+      // Retrait local immédiat : pas de rechargement complet de la liste.
+      setSections((s) => ({
+        ...s,
+        [doc.id]: (s[doc.id] || []).filter((x) => x.id !== section.id),
+      }));
+      setMessage({ type: 'success', text: `Niveau « ${section.level_label} » supprimé.` });
+    } catch (e) {
+      setMessage({ type: 'error', text: e.message });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handlePreview = async (section) => {
     try {
       const res = await fetch(`${apiUrl}/api/admin/chatbot-docs/sections/${section.id}/pdf`, {
@@ -569,12 +599,22 @@ export default function ChatbotDocsPage({ apiUrl, getAuthToken, academicYear }) 
                                   {section.content?.notes?.length ? ` • ${section.content.notes.length} consigne(s)` : ''}
                                 </p>
                               </div>
-                              <button
-                                onClick={() => handlePreview(section)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 flex-shrink-0"
-                              >
-                                <Eye className="w-3.5 h-3.5" /> Aperçu du PDF parent
-                              </button>
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <button
+                                  onClick={() => handlePreview(section)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50"
+                                >
+                                  <Eye className="w-3.5 h-3.5" /> Aperçu du PDF parent
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteSection(doc, section)}
+                                  disabled={busyId === section.id}
+                                  title="Supprimer ce niveau"
+                                  className="p-1.5 rounded-md border border-gray-300 bg-white text-red-500 hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </div>
                           ))
                         )}

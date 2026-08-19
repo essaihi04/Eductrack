@@ -285,6 +285,64 @@ async function structureWithLLM(text) {
 }
 
 /**
+ * Code de niveau d'une ligne, UNIQUEMENT si elle en est le titre.
+ *
+ * levelCodeFromLabel() est volontairement permissif : il sert à comprendre le
+ * message d'un parent, où « ce2 » peut apparaître n'importe où. Appliqué au
+ * découpage d'un document, il transformait « Calculator CE2 (deuxième
+ * édition) » — un article — en titre de niveau. On exige donc que le libellé
+ * de niveau OUVRE la ligne.
+ *
+ * @returns {string|null}
+ */
+function headingLevelCode(line) {
+  const raw = String(line || '').trim().replace(/^[-–—•*\s]+/, '');
+  if (!raw || raw.length > 80) return null;
+  const t = normalizeText(raw);
+  if (!t) return null;
+  const startsWith = (needle) => needle && (t === needle || t.startsWith(`${needle} `));
+  const direct = LEVEL_ORDER.find((code) => startsWith(normalizeText(code)));
+  if (direct) return direct;
+  const hit = NORMALIZED_ALIASES.find((a) => startsWith(a.alias));
+  return hit ? hit.code : null;
+}
+
+/**
+ * Découpe le texte en blocs, un par niveau, sur les lignes de titre.
+ * Sert à traiter le document niveau par niveau au lieu d'un seul appel LLM.
+ *
+ * @returns {Array<{code: string, label: string, text: string}>}
+ */
+function splitBlocksByLevel(text) {
+  const lines = String(text || '').split('\n');
+  const blocks = [];
+  let current = null;
+  for (const line of lines) {
+    const code = headingLevelCode(line);
+    if (code) {
+      current = { code, label: line.trim(), lines: [] };
+      blocks.push(current);
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  const usable = blocks
+    .map((b) => ({ code: b.code, label: b.label, text: `${b.label}\n${b.lines.join('\n')}` }))
+    .filter((b) => b.text.replace(/\s/g, '').length > 40);
+
+  // Un même niveau peut apparaître plusieurs fois : sommaire en tête de
+  // document, page « niveaux non couverts » en fin, rappel en pied de page.
+  // Ces occurrences ne portent pas la liste, seulement le titre. On ne garde
+  // donc, pour chaque niveau, que le bloc le plus fourni.
+  const byCode = new Map();
+  for (const b of usable) {
+    const kept = byCode.get(b.code);
+    if (!kept || b.text.length > kept.text.length) byCode.set(b.code, b);
+  }
+  return [...byCode.values()];
+}
+
+/**
  * Repli sans IA : découpe le texte sur les lignes qui ressemblent à un titre
  * de niveau. Le contenu est conservé en liste simple (l'admin peut corriger).
  */
@@ -294,8 +352,8 @@ function heuristicSplit(text) {
   let current = null;
 
   for (const line of lines) {
-    // Un titre de niveau est une ligne courte contenant un niveau reconnu
-    const code = line.length <= 60 ? levelCodeFromLabel(line) : null;
+    // Titre de niveau : le libellé doit ouvrir la ligne (voir headingLevelCode).
+    const code = headingLevelCode(line);
     if (code) {
       current = { level_code: code, level_label: line, aliases: [], items: [] };
       sections.push(current);
@@ -508,8 +566,45 @@ export async function analyzeDocument({ documentId, schoolId, buffer = null }) {
     };
   }
 
-  const structured = await structureWithLLM(text);
-  const rawSections = structured?.sections?.length ? structured.sections : heuristicSplit(text);
+  // Un document couvrant une douzaine de niveaux dépasse largement la sortie
+  // maximale du LLM : le JSON revenait tronqué, donc illisible, et l'analyse
+  // basculait silencieusement sur le repli heuristique (une seule rubrique
+  // « Fournitures », titres de matières transformés en articles).
+  //
+  // On découpe donc d'abord par niveau de façon déterministe, puis on
+  // structure CHAQUE niveau séparément : chaque réponse reste courte. Le
+  // libellé du niveau vient du document, plus d'une supposition du modèle.
+  const blocks = splitBlocksByLevel(text);
+  let rawSections = [];
+
+  if (blocks.length >= 2) {
+    // Concurrence bornée : l'import est attendu par la requête HTTP, on ne
+    // sérialise pas 12 appels réseau, sans pour autant saturer l'API.
+    const results = new Array(blocks.length).fill(null);
+    const CONCURRENCY = 4;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < blocks.length) {
+        const i = cursor++;
+        const block = blocks[i];
+        const one = await structureWithLLM(block.text);
+        const section = one?.sections?.[0];
+        results[i] = section
+          // Le découpage déterministe fait autorité sur le niveau.
+          ? { ...section, level_code: block.code, level_label: section.level_label || block.label }
+          : heuristicSplit(block.text)[0] || null;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, blocks.length) }, worker));
+    rawSections = results.filter(Boolean);
+  }
+
+  // Document sans titres de niveau exploitables : ancien comportement.
+  if (rawSections.length === 0) {
+    const structured = await structureWithLLM(text);
+    rawSections = structured?.sections?.length ? structured.sections : heuristicSplit(text);
+  }
+
   const sections = rawSections
     .map(sanitizeSection)
     .filter((s) => s.content.groups.length > 0 || s.content.notes.length > 0);
