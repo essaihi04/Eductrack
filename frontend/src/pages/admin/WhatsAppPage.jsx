@@ -189,6 +189,7 @@ const WhatsAppPage = () => {
   const [commForm, setCommForm] = useState({
     title: '', body: '', type: 'normal', deadline_date: '',
     attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false,
+    personalize: false,
   });
   const [commClassIds, setCommClassIds] = useState([]); // [] = toute l'école
   const [commSaving, setCommSaving] = useState(false);
@@ -1006,6 +1007,10 @@ const WhatsAppPage = () => {
 
   useEffect(() => { if (activeTab === 'planning') fetchCommCount(); }, [activeTab, fetchCommCount]);
 
+  // Langue de la salutation nominative : arabe si le message est en arabe.
+  // Doit rester aligne sur greetingFor() dans backend communicationScheduler.js.
+  const commGreetingIsArabic = /[؀-ۿ]/.test(`${commForm.title || ''} ${commForm.body || ''}`);
+
   const submitComm = async () => {
     if (!commForm.title) { setCommError('Titre requis'); return; }
     if (!commForm.send_now && commForm.type !== 'urgent' && !commForm.scheduled_at) {
@@ -1045,7 +1050,7 @@ const WhatsAppPage = () => {
       });
       const data = await res.json();
       if (data.success) {
-        setCommForm({ title: '', body: '', type: 'normal', deadline_date: '', attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false });
+        setCommForm({ title: '', body: '', type: 'normal', deadline_date: '', attachment_url: '', attachment_name: '', scheduled_at: '', send_now: false, personalize: false });
         setCommClassIds([]); removeCommMedia();
         setCommParentMode('all'); setCommSelectedParents([]); setCommParentsList([]);
         setShowCommForm(false);
@@ -3083,6 +3088,36 @@ const WhatsAppPage = () => {
                   </div>
                 )}
                 <p className="text-[11px] text-gray-400 mt-1">Le canal est choisi automatiquement par parent : push si l'app est installée, sinon WhatsApp (selon le canal ci-dessus).</p>
+              </div>
+
+              {/* Personnalisation : un texte distinct par parent → moins de risque de ban */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5 w-4 h-4 rounded text-indigo-600"
+                    checked={commForm.personalize}
+                    onChange={(e) => setCommForm({ ...commForm, personalize: e.target.checked })} />
+                  <span>
+                    <span className="text-sm font-medium text-gray-800">Ajouter le nom du parent</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      Chaque parent reçoit un message distinct au lieu de N copies identiques :
+                      c'est ce que WhatsApp regarde pour repérer les envois de masse.
+                    </span>
+                  </span>
+                </label>
+                {commForm.personalize && (
+                  <div className="mt-2.5 ml-6 rounded-md border border-indigo-100 bg-white px-3 py-2">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Aperçu de la 1re ligne</p>
+                    <p className="text-sm text-gray-700" dir={commGreetingIsArabic ? 'rtl' : 'ltr'}>
+                      {commGreetingIsArabic
+                        ? 'تحية طيبة السيد(ة) [اسم ولي الأمر]،'
+                        : 'Bonjour [Nom du parent],'}
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1.5">
+                      Les parents sans nom enregistré reçoivent le message sans salutation.
+                      La notification dans l'app n'est pas modifiée.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {commForm.type !== 'urgent' && (

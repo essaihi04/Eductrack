@@ -37,6 +37,22 @@ function formatDateFr(iso) {
   return `${d}/${m}/${y}`;
 }
 
+/** Le texte contient-il de l'arabe ? (salutation dans la bonne langue) */
+const hasArabic = (text) => /[؀-ۿ]/.test(String(text || ''));
+
+/**
+ * Salutation nominative placée en tête du message.
+ * Retourne null si le parent n'a pas de nom exploitable : mieux vaut pas de
+ * salutation du tout qu'un « Bonjour , » qui trahit l'envoi automatique.
+ */
+function greetingFor(comm, parentName) {
+  const name = String(parentName || '').trim();
+  if (!name) return null;
+  return hasArabic(`${comm.title || ''} ${comm.body || ''}`)
+    ? `تحية طيبة السيد(ة) ${name}،`
+    : `Bonjour ${name},`;
+}
+
 /**
  * Construit le texte d'une communication.
  * @param {object} comm
@@ -44,9 +60,16 @@ function formatDateFr(iso) {
  *   (true pour push/app et pour les pièces jointes « lien seul » ;
  *    false quand le fichier part en VRAIE pièce jointe WhatsApp → le lien
  *    ferait doublon avec l'image/PDF joint).
+ * @param {string|null} parentName  nom du parent : ajoute une salutation
+ *   nominative en tête quand comm.personalize est actif. Chaque destinataire
+ *   reçoit alors un texte distinct, ce qui réduit le risque de ban WhatsApp.
  */
-function buildMessage(comm, withLink = true) {
+function buildMessage(comm, withLink = true, parentName = null) {
   const lines = [];
+  if (comm.personalize) {
+    const greeting = greetingFor(comm, parentName);
+    if (greeting) { lines.push(greeting); lines.push(''); }
+  }
   lines.push(`${TYPE_PREFIX[comm.type] || ''}*${comm.title}*`);
   if (comm.body) { lines.push(''); lines.push(comm.body); }
   if (comm.type === 'deadline' && comm.deadline_date) {
@@ -78,13 +101,40 @@ async function phonesForParents(ids) {
   return phoneByParent;
 }
 
-/** Résout la liste des parents ciblés { parent_id, phone } pour une école. */
+/** Nom affichable par parent (Map parent_id → nom), pour la personnalisation. */
+async function namesForParents(ids) {
+  const nameByParent = new Map();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: rows } = await supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name')
+      .in('id', ids.slice(i, i + 200));
+    (rows || []).forEach((r) => {
+      const name = `${r.first_name || ''} ${r.last_name || ''}`.trim();
+      if (name) nameByParent.set(r.id, name);
+    });
+  }
+  return nameByParent;
+}
+
+/** Assemble { parent_id, phone, name } pour une liste d'identifiants parents. */
+async function buildParentRows(ids) {
+  const [phoneByParent, nameByParent] = await Promise.all([
+    phonesForParents(ids),
+    namesForParents(ids),
+  ]);
+  return ids.map((pid) => ({
+    parent_id: pid,
+    phone: phoneByParent.get(pid) || null,
+    name: nameByParent.get(pid) || null,
+  }));
+}
+
+/** Résout la liste des parents ciblés { parent_id, phone, name } pour une école. */
 async function resolveTargetParents(schoolId, target) {
   // 0. Ciblage direct de parents (sélection manuelle dans l'UI)
   if (Array.isArray(target?.parent_ids) && target.parent_ids.length) {
-    const ids = [...new Set(target.parent_ids)];
-    const phoneByParent = await phonesForParents(ids);
-    return ids.map((pid) => ({ parent_id: pid, phone: phoneByParent.get(pid) || null }));
+    return buildParentRows([...new Set(target.parent_ids)]);
   }
 
   // 1. Élèves de l'école (filtrés par classes si fourni)
@@ -119,10 +169,8 @@ async function resolveTargetParents(schoolId, target) {
   }
   if (!parentIds.size) return [];
 
-  // 3. Numéro WhatsApp principal par parent
-  const ids = [...parentIds];
-  const phoneByParent = await phonesForParents(ids);
-  return ids.map((pid) => ({ parent_id: pid, phone: phoneByParent.get(pid) || null }));
+  // 3. Numéro WhatsApp principal + nom par parent
+  return buildParentRows([...parentIds]);
 }
 
 /**
@@ -199,7 +247,9 @@ export async function sendCommunication(comm) {
 
   // Texte WhatsApp : sans le lien si le fichier part en vraie pièce jointe
   // (sinon doublon image/PDF + lien) ; push : toujours avec le lien.
-  const waText = buildMessage(comm, !hasRealAttachment);
+  // Si comm.personalize, le texte est reconstruit pour chaque parent avec sa
+  // salutation nominative → autant de messages distincts que de destinataires.
+  const waTextFor = (parent) => buildMessage(comm, !hasRealAttachment, parent?.name);
   const pushBody = comm.body
     ? comm.body.slice(0, 120)
     : (comm.type === 'deadline' && comm.deadline_date ? `Date limite : ${formatDateFr(comm.deadline_date)}` : 'Nouvelle communication');
@@ -266,6 +316,7 @@ export async function sendCommunication(comm) {
         if (await whatsappOptedOut(p.parent_id)) {
           errorMsg = [errorMsg, 'Opt-out WhatsApp (STOP)'].filter(Boolean).join(' | ');
         } else {
+          const waText = waTextFor(p);
           let r;
           if (isImage) r = await sendImage(comm.school_id, p.phone, comm.attachment_url, waText);
           else if (isDoc) r = await sendDocument(comm.school_id, p.phone, comm.attachment_url, comm.attachment_name || 'document.pdf', waText);

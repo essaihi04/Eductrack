@@ -70,6 +70,7 @@ router.post('/', async (req, res) => {
     const {
       title, body, type = 'normal', deadline_date,
       attachment_url, attachment_name, attachment_type, channels, target, scheduled_at, send_now,
+      personalize,
     } = req.body || {};
 
     if (!title) return res.status(400).json({ error: 'Titre requis' });
@@ -98,6 +99,9 @@ router.post('/', async (req, res) => {
       attachment_name: attachment_name || null,
       attachment_type: ['image', 'document'].includes(attachment_type) ? attachment_type : null,
       target: validTarget,
+      // Salutation nominative par parent : chaque destinataire reçoit un texte
+      // distinct, ce qui réduit le risque de ban WhatsApp.
+      personalize: personalize === true,
       scheduled_at: when,
       status: 'scheduled',
     };
@@ -109,10 +113,11 @@ router.post('/', async (req, res) => {
       .single();
     // Migrations pas toutes appliquées → retente sans les colonnes récentes
     // (la création ne doit jamais être bloquée par une colonne manquante).
-    if (error && /column|category|channels|attachment_type/i.test(error.message || '')) {
+    if (error && /column|category|channels|attachment_type|personalize/i.test(error.message || '')) {
       delete payload.category;
       delete payload.channels;
       delete payload.attachment_type;
+      delete payload.personalize;
       ({ data, error } = await supabaseAdmin
         .from('scheduled_communications')
         .insert(payload)
