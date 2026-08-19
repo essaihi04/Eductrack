@@ -72,8 +72,28 @@ const loggedOutRetryDelay = (attempts) => {
 };
 
 // Nombre de retries avant d'abandonner sur 401 (sans purger l'auth, juste
-// passer en état needs_reconnect que l'admin pourra relancer manuellement).
+// passer en état needs_reconnect que le watchdog / l'admin pourra relancer).
 const MAX_LOGGED_OUT_RETRIES = 6;
+
+// Passe à true dès qu'un SIGINT/SIGTERM arrive : plus aucune reconnexion n'est
+// planifiée, sinon on recréerait des sockets pendant que le process s'éteint —
+// c'est exactement ce qui laisse des credentials à moitié écrits sur le disque
+// (cause majeure des 401 « loggedOut » au redémarrage suivant).
+let shuttingDown = false;
+
+/**
+ * Planifie une reconnexion en gardant une référence sur le timer, pour pouvoir
+ * l'annuler à l'arrêt du process. Un seul timer par école à la fois.
+ */
+const scheduleRestart = (schoolId, delay, onIncoming) => {
+  if (shuttingDown) return;
+  const entry = getEntry(schoolId);
+  if (entry.retryTimer) clearTimeout(entry.retryTimer);
+  entry.retryTimer = setTimeout(() => {
+    entry.retryTimer = null;
+    startSession(schoolId, { onIncoming });
+  }, delay);
+};
 
 /**
  * Détruit proprement un socket existant AVANT d'en recréer un nouveau.
@@ -102,6 +122,7 @@ function destroySocket(sock) {
  */
 export async function startSession(schoolId, { onIncoming } = {}) {
   if (!schoolId) throw new Error('schoolId requis');
+  if (shuttingDown) return getEntry(schoolId);
   const entry = getEntry(schoolId);
 
   // Déjà en cours
@@ -142,7 +163,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
     entry.reconnectAttempts = (entry.reconnectAttempts || 0) + 1;
     const delay = reconnectDelay(entry.reconnectAttempts);
     console.error(`[baileys][${schoolId}] Échec init (${e.message}) — retry dans ${delay}ms`);
-    setTimeout(() => startSession(schoolId, { onIncoming }), delay);
+    scheduleRestart(schoolId, delay, onIncoming);
     return entry;
   }
 
@@ -208,7 +229,11 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       entry.qrDataUrl = null;
       entry.pairingCode = null;
       entry.reconnectAttempts = 0;
-      entry.loggedOutRetried = false;
+      // Le compteur 401 doit repartir de zéro après une reconnexion réussie :
+      // sans ça, un 401 isolé des semaines plus tard tombait déjà sur un
+      // compteur épuisé et parquait la session sans réessayer une seule fois.
+      entry.loggedOutAttempts = 0;
+      entry.reconnectNotified = false;
       // Récupère le numéro
       const me = sock.user?.id?.split(':')[0]?.split('@')[0] || null;
       entry.phone = me;
@@ -226,6 +251,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
     }
 
     if (connection === 'close') {
+      const wasConnected = entry.status === 'connected';
       const code = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output?.statusCode
         : null;
@@ -267,7 +293,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         entry.loggedOutAttempts = 0;
         // Délai plus long pour éviter que creds.update ne soit pas encore flushé
         // sur disque (cause majoritaire des 401 post-restart en boucle).
-        setTimeout(() => startSession(schoolId, { onIncoming }), 3000);
+        scheduleRestart(schoolId, 3000, onIncoming);
         return;
       }
 
@@ -283,7 +309,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
           const delay = loggedOutRetryDelay(entry.loggedOutAttempts - 1);
           entry.status = 'disconnected';
           console.log(`[baileys][${schoolId}] ⚠️ 401 (tentative ${entry.loggedOutAttempts}/${MAX_LOGGED_OUT_RETRIES}) — retry dans ${delay}ms (auth conservé)`);
-          setTimeout(() => startSession(schoolId, { onIncoming }), delay);
+          scheduleRestart(schoolId, delay, onIncoming);
           return;
         }
 
@@ -291,11 +317,12 @@ export async function startSession(schoolId, { onIncoming } = {}) {
         // L'admin pourra relancer manuellement via le bouton "Reconnecter"
         // (qui rappelle startSession), ou cliquer "Déconnecter" pour purger.
         entry.status = 'needs_reconnect';
-        console.warn(`[baileys][${schoolId}] ❌ ${MAX_LOGGED_OUT_RETRIES} tentatives 401 échouées — pause. Auth files conservés. Admin doit relancer.`);
+        console.warn(`[baileys][${schoolId}] ❌ ${MAX_LOGGED_OUT_RETRIES} tentatives 401 échouées — pause. Le watchdog réessaiera, l'admin peut aussi relancer.`);
         await supabaseAdmin
           .from('whatsapp_school_sessions')
           .update({ status: 'needs_reconnect' })
           .eq('school_id', schoolId);
+        await notifyAdminsSessionDown(schoolId, entry);
         return;
       }
 
@@ -303,9 +330,18 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       entry.status = 'disconnected';
       entry.sock = null;
       entry.reconnectAttempts += 1;
+      // La base restait figée sur « connected » tant qu'il n'y avait ni ban ni
+      // 401 : l'interface annonçait une session vivante alors que le socket
+      // était tombé. On écrit une seule fois, au décrochage.
+      if (wasConnected) {
+        await supabaseAdmin
+          .from('whatsapp_school_sessions')
+          .update({ status: 'disconnected' })
+          .eq('school_id', schoolId);
+      }
       const delay = reconnectDelay(entry.reconnectAttempts);
       console.log(`[baileys][${schoolId}] Reconnexion dans ${delay}ms (tentative ${entry.reconnectAttempts})`);
-      setTimeout(() => startSession(schoolId, { onIncoming }), delay);
+      scheduleRestart(schoolId, delay, onIncoming);
     }
   });
 
@@ -499,6 +535,113 @@ export async function checkNumberExists(schoolId, phone) {
   } catch {
     return null;
   }
+}
+
+
+/**
+ * Prévient les administrateurs de l'école qu'il faut rescanner le QR.
+ *
+ * Un 401 épuisé n'est PAS rattrapable automatiquement : WhatsApp a invalidé les
+ * credentials, seul un nouveau scan les rétablit. Sans cette alerte, personne
+ * n'était au courant tant qu'un admin n'ouvrait pas la page Connexion — les
+ * messages partaient en échec pendant des jours.
+ *
+ * Une seule notification par épisode (`reconnectNotified`), remise à zéro à la
+ * prochaine connexion réussie.
+ */
+async function notifyAdminsSessionDown(schoolId, entry) {
+  if (entry.reconnectNotified) return;
+  entry.reconnectNotified = true;
+  try {
+    // Anti-doublon inter-redémarrages : l'état en mémoire repart de zéro à
+    // chaque boot, mais l'école n'a pas besoin d'une alerte par redémarrage.
+    const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+    const { count } = await supabaseAdmin
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('school_id', schoolId)
+      .eq('data->>kind', 'whatsapp_session_down')
+      .gte('created_at', since);
+    if (count && count > 0) return;
+
+    const { data: admins } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('school_id', schoolId)
+      .in('role', ['admin', 'school_admin']);
+    if (!admins || admins.length === 0) return;
+    await supabaseAdmin.from('notifications').insert(
+      admins.map((a) => ({
+        user_id: a.id,
+        title: 'WhatsApp déconnecté',
+        message: "La session WhatsApp de l'école n'est plus valide. Ouvrez Communication → Connexion et rescannez le QR code pour rétablir l'envoi des messages.",
+        type: 'system',
+        school_id: schoolId,
+        data: { kind: 'whatsapp_session_down', school_id: schoolId },
+      }))
+    );
+    console.log(`[baileys][${schoolId}] Admins prévenus : QR à rescanner`);
+  } catch (e) {
+    console.error(`[baileys][${schoolId}] Alerte admin échouée:`, e.message);
+  }
+}
+
+/**
+ * Arrêt propre du process (SIGINT/SIGTERM, redéploiement pm2).
+ *
+ * Sans ça, le process était tué avec ses WebSockets ouverts et, si un
+ * `creds.update` était en cours d'écriture, le fichier restait tronqué :
+ * au démarrage suivant WhatsApp refusait les credentials (401) et la session
+ * était perdue pour de bon. On ferme les sockets SANS logout (l'appairage côté
+ * téléphone reste valide) puis on laisse le disque se vider.
+ */
+export async function shutdownAllSessions() {
+  shuttingDown = true;
+  for (const [schoolId, entry] of sockets.entries()) {
+    if (entry.retryTimer) { clearTimeout(entry.retryTimer); entry.retryTimer = null; }
+    if (entry.sock) {
+      destroySocket(entry.sock);
+      entry.sock = null;
+    }
+    entry.status = 'disconnected';
+    console.log(`[baileys][${schoolId}] socket fermé proprement (arrêt du serveur)`);
+  }
+  // Laisse le temps aux écritures d'auth en cours d'atteindre le disque.
+  await new Promise((r) => setTimeout(r, 800));
+}
+
+/**
+ * Surveillance périodique des sessions.
+ *
+ * Le backoff intégré couvre les coupures réseau, mais une session parquée en
+ * `needs_reconnect` ne réessayait plus JAMAIS jusqu'au redémarrage du process.
+ * Le watchdog relance UNE tentative par passage : si le 401 persiste, la
+ * session repart aussitôt en `needs_reconnect` (compteur déjà au maximum) au
+ * lieu de rejouer un cycle complet de 6 essais.
+ */
+export function startSessionWatchdog(onIncoming, intervalMs = 15 * 60_000) {
+  setInterval(async () => {
+    if (shuttingDown) return;
+    let dirs = [];
+    try {
+      if (fs.existsSync(AUTH_ROOT)) dirs = fs.readdirSync(AUTH_ROOT);
+    } catch { return; }
+    for (const schoolId of dirs) {
+      const entry = sockets.get(schoolId);
+      // Jamais démarrée : bootstrapAllSessions s'en charge au boot.
+      if (!entry) continue;
+      // Session vivante, en cours d'appairage, bannie ou déconnectée par
+      // l'admin : on ne touche à rien.
+      if (['connected', 'connecting', 'qr', 'banned'].includes(entry.status)) continue;
+      if (entry.adminLogout) continue;
+      // Une reconnexion est déjà planifiée par le backoff : on la laisse faire.
+      if (entry.retryTimer) continue;
+      console.log(`[baileys][${schoolId}] watchdog : session ${entry.status} — nouvelle tentative`);
+      entry.loggedOutAttempts = MAX_LOGGED_OUT_RETRIES;
+      try { await startSession(schoolId, { onIncoming }); }
+      catch (e) { console.error(`[baileys][${schoolId}] watchdog:`, e.message); }
+    }
+  }, intervalMs).unref?.();
 }
 
 /**

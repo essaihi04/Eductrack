@@ -53,7 +53,7 @@ import inscriptionsRoutes from './routes/inscriptions.routes.js';
 import { startInvoiceScheduler } from './services/invoiceScheduler.js';
 import { startJobRunner, registerJobHandler } from './services/jobs/index.js';
 import { runBulkSend, WHATSAPP_BULK_SEND } from './services/whatsapp/bulkSend.js';
-import { bootstrapAllSessions } from './services/whatsapp/index.js';
+import { bootstrapAllSessions, shutdownAllSessions, startSessionWatchdog } from './services/whatsapp/index.js';
 import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
 
 dotenv.config();
@@ -157,7 +157,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   startCommunicationScheduler();
   startInvoiceScheduler();
@@ -175,4 +175,30 @@ app.listen(PORT, async () => {
   } catch (e) {
     console.error('❌ Erreur bootstrap WhatsApp:', e.message);
   }
+
+  // Filet de sécurité : une session tombée et parquée (401 épuisé) ne
+  // réessayait plus jusqu'au redémarrage suivant du serveur.
+  startSessionWatchdog(handleBaileysIncoming);
 });
+
+// ── Arrêt propre ────────────────────────────────────────────────────────────
+// pm2 restart envoie un SIGINT. Sans ce handler, le process mourait avec ses
+// WebSockets WhatsApp ouverts et, si une écriture de credentials était en
+// cours, le fichier d'auth restait tronqué → 401 au démarrage suivant et
+// session perdue jusqu'à un nouveau scan de QR.
+let shuttingDown = false;
+const gracefulShutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} reçu — fermeture propre...`);
+  server.close();
+  try {
+    await shutdownAllSessions();
+  } catch (e) {
+    console.error('[shutdown] sessions WhatsApp:', e.message);
+  }
+  console.log('[shutdown] terminé');
+  process.exit(0);
+};
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

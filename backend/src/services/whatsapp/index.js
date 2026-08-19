@@ -8,7 +8,7 @@
  * Les media sont téléchargés depuis URL puis envoyés en buffer.
  */
 
-import { getSocket, phoneToJid, checkNumberExists, getStatus, startSession, logoutSession, getQrDataUrl, getPairingCode, requestPairingCode, bootstrapAllSessions } from './baileysClient.js';
+import { getSocket, phoneToJid, checkNumberExists, getStatus, startSession, logoutSession, getQrDataUrl, getPairingCode, requestPairingCode, bootstrapAllSessions, shutdownAllSessions, startSessionWatchdog } from './baileysClient.js';
 import * as cloud from './cloudApi.js';
 import {
   checkAllowed,
@@ -206,6 +206,8 @@ export {
   requestPairingCode,
   checkNumberExists,
   bootstrapAllSessions,
+  shutdownAllSessions,
+  startSessionWatchdog,
   ensureWarmupStarted,
   getStats,
 };
