@@ -238,6 +238,20 @@ RÈGLES :
 - Regroupe les articles en catégories logiques quand le document le fait ; sinon un seul groupe intitulé "Fournitures".
 - Conserve la langue d'origine des articles (français ou arabe).
 - Les consignes qui concernent TOUS les niveaux doivent être répétées dans le champ "notes" de chaque section.
+
+FILTRAGE — un "item" est UNIQUEMENT une chose que le parent doit acheter ou apporter.
+Ne mets JAMAIS dans "items" :
+- un titre de rubrique ("Manuels", "Fournitures", "Trousse complète", "المقررات", "اللوازم", "Manuels — Français") : c'est un "title" de groupe ;
+- une métadonnée du document ("Niveau : GS", "Source : liste.pdf", "Liste établie pour 2025/2026") ;
+- un en-tête ou un pied de page (nom de l'école, "Année scolaire 2026-2027", numéro de page) ;
+- un intitulé de matière seul ("Français", "Mathématiques", "الاجتماعيات") : c'est un "title" de groupe.
+Ces lignes doivent être ignorées ou converties en titre de groupe, jamais recopiées en article.
+
+MISE EN FORME DES ITEMS :
+- Le texte du PDF est extrait ligne par ligne : un article coupé en deux par la mise en page ("... + cahier" puis "d'écriture)") doit être RECOLLÉ en un seul item.
+- Retire les puces et tirets de début et de fin de ligne ("•", "-", "*").
+- Un item doit être compréhensible seul, hors de son contexte de page.
+
 - Réponds UNIQUEMENT avec le JSON, sans commentaire.`;
 
 /**
@@ -309,6 +323,67 @@ function heuristicSplit(text) {
   }));
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Filtrage des fausses fournitures
+//
+// Le LLM recopie parfois des lignes qui ne sont PAS des articles : en-tête et
+// pied de page du PDF, mention de source, numéro de page, année scolaire, ou
+// le titre de catégorie lui-même (« Manuels », « المقررات »). Elles se
+// retrouvaient telles quelles dans la liste du parent, avec une case à cocher.
+// Le prompt seul ne suffit pas — on filtre donc aussi de façon déterministe.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Puces et tirets décoratifs laissés par l'extraction du PDF. */
+const BULLET_RE = /^[\s\-–—•*·▪◦o]+|[\s\-–—•*·▪◦]+$/g;
+
+/** Titres de rubrique courants : jamais un article à acheter. */
+const HEADING_WORDS = [
+  'manuels', 'fournitures', 'manuel', 'fourniture', 'important', 'trousse',
+  'trousse complète', 'matériel', 'materiel', 'divers', 'liste', 'sommaire',
+  'المقررات', 'اللوازم', 'الكتب', 'المواد',
+];
+
+/**
+ * Une ligne à rejeter : métadonnée de document, en-tête/pied de page, ou
+ * simple titre de rubrique. Rien qu'un parent puisse acheter.
+ */
+function isNotSupplyItem(label) {
+  const t = String(label || '').trim();
+  if (!t) return true;
+  // Numéro de page seul (« 3 », « 4 / 12 »).
+  if (/^\d+\s*(\/\s*\d+)?$/.test(t)) return true;
+  // Année scolaire seule (« Année scolaire 2026-2027 »).
+  if (/^(année|annee|العام|السنة)?\s*(scolaire|الدراسي[ةه]?)?\s*20\d{2}\s*[-–/]\s*20\d{2}\.?$/i.test(t)) return true;
+  // Ligne de métadonnée du document source.
+  if (/^niveau\s*[:：]/i.test(t) && /(source|liste établie|liste etablie)/i.test(t)) return true;
+  if (/^source\s*[:：]/i.test(t)) return true;
+  if (/(liste établie pour|liste etablie pour)/i.test(t)) return true;
+  // Pied de page « ÉCOLE — Fournitures 1AP — CP (…) ».
+  if (/—\s*fournitures\s+(TPS|PS|MS|GS|[1-6]AP|[1-3]AC|TC|[12]BAC)\b/i.test(t)) return true;
+  // Titre de rubrique nu, éventuellement suivi de « : » ou d'une matière.
+  const bare = t.replace(/[:：.]+$/, '').trim().toLowerCase();
+  if (bare.length <= 40 && HEADING_WORDS.includes(bare)) return true;
+  // « Manuels — Français », « المقررات — العربية » : titre composé, pas un article.
+  if (bare.length <= 40 && /^(manuels?|fournitures?|المقررات|اللوازم)\s*[—–-]/.test(bare)) return true;
+  return false;
+}
+
+/**
+ * Recolle un fragment né d'un retour à la ligne du PDF d'origine
+ * (« … + cahier » / « d'écriture) »). On reste prudent : uniquement un court
+ * fragment qui commence en minuscule ou par une ponctuation fermante, après
+ * un article qui ne se termine pas lui-même par une ponctuation forte.
+ */
+function looksLikeContinuation(fragment, previousLabel) {
+  const f = String(fragment || '').trim();
+  const p = String(previousLabel || '').trim();
+  if (!f || !p) return false;
+  if (f.length > 40) return false;
+  if (!/^[a-zà-öø-ÿ)\]]/.test(f)) return false;
+  if (/[.!?:；;]$/.test(p)) return false;
+  return true;
+}
+
 /** Nettoie / borne une section renvoyée par le LLM avant insertion en base. */
 function sanitizeSection(section, index) {
   const levelLabel = String(section?.level_label || '').trim() || 'Tous les niveaux';
@@ -317,9 +392,11 @@ function sanitizeSection(section, index) {
     : levelCodeFromLabel(levelLabel);
 
   const groups = (Array.isArray(section?.groups) ? section.groups : [])
-    .map((g) => ({
-      title: String(g?.title || 'Fournitures').trim().slice(0, 120),
-      items: (Array.isArray(g?.items) ? g.items : [])
+    .map((g) => {
+      const title = String(g?.title || 'Fournitures').trim().slice(0, 120);
+      const titleKey = title.replace(/[:：.]+$/, '').trim().toLowerCase();
+
+      const cleaned = (Array.isArray(g?.items) ? g.items : [])
         .map((it) => (typeof it === 'string'
           ? { label: it, quantity: '', note: '' }
           : {
@@ -327,8 +404,26 @@ function sanitizeSection(section, index) {
             quantity: String(it?.quantity ?? '').trim().slice(0, 40),
             note: String(it?.note ?? '').trim().slice(0, 200),
           }))
-        .filter((it) => it.label),
-    }))
+        // Puces décoratives issues de l'extraction du PDF.
+        .map((it) => ({ ...it, label: it.label.replace(BULLET_RE, '').trim() }))
+        // Métadonnées, en-têtes/pieds de page, titres de rubrique.
+        .filter((it) => it.label && !isNotSupplyItem(it.label))
+        // Le titre du groupe répété en premier article.
+        .filter((it) => it.label.replace(/[:：.]+$/, '').trim().toLowerCase() !== titleKey);
+
+      // Recollage des fragments coupés par la mise en page d'origine.
+      const items = [];
+      for (const it of cleaned) {
+        const prev = items[items.length - 1];
+        if (prev && looksLikeContinuation(it.label, prev.label)) {
+          prev.label = `${prev.label} ${it.label}`.replace(/\s+/g, ' ').slice(0, 300);
+          continue;
+        }
+        items.push(it);
+      }
+
+      return { title, items };
+    })
     .filter((g) => g.items.length > 0);
 
   const notes = (Array.isArray(section?.notes) ? section.notes : [])

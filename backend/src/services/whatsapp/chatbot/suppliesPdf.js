@@ -303,8 +303,20 @@ export function buildSuppliesPdfBuffer({ school = {}, logoBuffer = null, section
         const items = group.items || [];
         if (items.length === 0) return;
 
-        // En-tête du groupe (on évite un titre orphelin en bas de page)
-        ensureSpace(70);
+        // En-tête du groupe. Réserver une hauteur forfaitaire ne suffisait pas :
+        // un titre pouvait tenir en bas de page pendant que ses articles
+        // partaient sur la suivante. On mesure donc les deux premiers articles
+        // et on n'écrit le titre que si le bloc « titre + ces articles » tient.
+        const rowHeightOf = (item) => {
+          const l = item?.label || '';
+          const n = item?.note || '';
+          return Math.max(24, mixedParagraphHeight(doc, l, { width: labelW, size: 10.5 })
+            + (n ? mixedParagraphHeight(doc, n, { width: labelW, size: 8.5 }) : 0)
+            + 12) + 6;
+        };
+        const headerH = 34;
+        const keepWithHeader = items.slice(0, 2).reduce((sum, it) => sum + rowHeightOf(it), 0);
+        ensureSpace(headerH + keepWithHeader);
         const countText = L.items(items.length);
         card(doc, PAGE_MARGIN, y, contentW, 28, { fill: INDIGO_SOFT, radius: 6 });
         doc.rect(rtl ? contentRight - 4 : PAGE_MARGIN, y + 4, 4, 20).fill(INDIGO);
