@@ -4,6 +4,7 @@ import { authenticate, requireSchoolAdmin, requireSchoolAdminOrFinance } from '.
 import { nextLevel, isTerminalLevel } from '../utils/levelProgression.js';
 import { yearVariants } from '../utils/enrollmentScope.js';
 import { autoApplyFeePlanForStudent } from '../utils/feeTemplateAutoApply.js';
+import { chunkArray } from '../utils/chunkedQueries.js';
 import { invalidateProfileCache } from '../utils/authToken.js';
 
 const router = express.Router();
@@ -85,21 +86,34 @@ const toDash = (year) => String(year || '').replace('/', '-');
 // template_id → les familles avec remise repartaient plein tarif, et les plans
 // 100 % personnalisés (sans modèle) n'étaient pas reconduits du tout.
 // Renvoie true si un plan a été créé.
-const carryFeePlanForStudent = async (schoolId, sid, fromYear, toYear, userId) => {
-  const { data: prevPlan } = await supabaseAdmin
-    .from('student_fee_plans')
-    .select('*, custom_items:student_fee_plan_items(*)')
-    .eq('student_id', sid)
-    .eq('academic_year', toDash(fromYear))
-    .maybeSingle();
+// `prefetch` (facultatif) évite les deux SELECT par élève sur les traitements de
+// masse : { prevPlanByStudent: Map, existingTargetIds: Set }. Sans lui, le
+// comportement est inchangé (un élève à la fois).
+const carryFeePlanForStudent = async (schoolId, sid, fromYear, toYear, userId, prefetch = null) => {
+  let prevPlan;
+  if (prefetch) {
+    prevPlan = prefetch.prevPlanByStudent.get(sid) || null;
+  } else {
+    ({ data: prevPlan } = await supabaseAdmin
+      .from('student_fee_plans')
+      .select('*, custom_items:student_fee_plan_items(*)')
+      .eq('student_id', sid)
+      .eq('academic_year', toDash(fromYear))
+      .maybeSingle());
+  }
   // Seul un plan ACTIF se reconduit (pas de résurrection d'un plan annulé).
   if (!prevPlan || prevPlan.status !== 'active') return false;
-  const { data: exists } = await supabaseAdmin
-    .from('student_fee_plans')
-    .select('id')
-    .eq('student_id', sid)
-    .eq('academic_year', toDash(toYear))
-    .maybeSingle();
+  let exists;
+  if (prefetch) {
+    exists = prefetch.existingTargetIds.has(sid);
+  } else {
+    ({ data: exists } = await supabaseAdmin
+      .from('student_fee_plans')
+      .select('id')
+      .eq('student_id', sid)
+      .eq('academic_year', toDash(toYear))
+      .maybeSingle());
+  }
   if (exists) return false;
 
   // Toutes les colonnes du plan sont copiées telles quelles (remises comprises),
@@ -437,47 +451,113 @@ router.post('/auto-reinscription', requireSchoolAdmin, async (req, res) => {
     const dstLevelByClass = new Map((dstExisting || []).map((c) => [c.id, c.level]));
     const feeTemplatesCache = {}; // évite de recharger les modèles à chaque élève
 
-    let reinscrits = 0;
-    let nonReinscrits = 0;
+    // Une école de 300 élèves faisait ici ~1 500 allers-retours Supabase en
+    // série (upsert + update profil + 2 SELECT de frais par élève), soit
+    // plusieurs minutes : la requête HTTP mourait en 502 côté proxy avant la
+    // fin. On procède donc par lots. Le traitement reste idempotent (upsert sur
+    // student_id+academic_year, garde d'existence sur les plans de frais), donc
+    // relançable sans doublon.
     let feePlansCopied = 0;
     let feePlansAuto = 0;
-    for (const e of (roster || []).filter((r) => r.status !== 'NR')) {
-      const sid = e.student_id;
-      const srcLevel = srcLevelByClass.get(e.class_id);
-      const newClassId = classMap.get(e.class_id);
 
-      // Pas de classe cible (niveau terminal ou classe non clonée) → non réinscrit.
-      if (!newClassId || isTerminalLevel(srcLevel)) {
-        await supabaseAdmin.from('student_enrollments').upsert({
-          school_id: schoolId, student_id: sid, class_id: null, academic_year: to_year,
-          status: 'NR', previous_class_id: e.class_id, created_by: req.user.id,
-        }, { onConflict: 'student_id,academic_year' });
-        nonReinscrits += 1;
+    // 3a) Répartition RI / NR, sans aucun appel réseau.
+    const riRows = [];
+    const nrRows = [];
+    for (const e of (roster || []).filter((r) => r.status !== 'NR')) {
+      const newClassId = classMap.get(e.class_id);
+      const target = !newClassId || isTerminalLevel(srcLevelByClass.get(e.class_id)) ? nrRows : riRows;
+      target.push({
+        school_id: schoolId,
+        student_id: e.student_id,
+        class_id: target === nrRows ? null : newClassId,
+        academic_year: to_year,
+        status: target === nrRows ? 'NR' : 'RI',
+        previous_class_id: e.class_id,
+        created_by: req.user.id,
+      });
+    }
+
+    // 3b) Inscriptions en lot. RI et NR séparés pour que les compteurs restent
+    // justes si un lot échoue.
+    const upsertEnrollments = async (rows) => {
+      let failed = 0;
+      for (const part of chunkArray(rows, 200)) {
+        const { error: upErr } = await supabaseAdmin
+          .from('student_enrollments')
+          .upsert(part, { onConflict: 'student_id,academic_year' });
+        if (upErr) {
+          console.error('auto-reinscription: upsert inscriptions:', upErr.message);
+          failed += part.length;
+        }
+      }
+      return failed;
+    };
+    const nrFailed = await upsertEnrollments(nrRows);
+    const riFailed = await upsertEnrollments(riRows);
+
+    // 3c) Profils : une requête par classe cible au lieu d'une par élève.
+    const studentsByClass = new Map();
+    for (const r of riRows) {
+      if (!studentsByClass.has(r.class_id)) studentsByClass.set(r.class_id, []);
+      studentsByClass.get(r.class_id).push(r.student_id);
+    }
+    for (const [classId, ids] of studentsByClass) {
+      for (const part of chunkArray(ids, 150)) {
+        const { error: pErr } = await supabaseAdmin
+          .from('profiles')
+          .update({ class_id: classId })
+          .in('id', part);
+        if (pErr) console.error('auto-reinscription: update profils:', pErr.message);
+      }
+    }
+
+    // 3d) Plans de frais : on précharge en 2 requêtes ce que la boucle allait
+    // chercher élève par élève.
+    const riIds = riRows.map((r) => r.student_id);
+    let feePrefetch = null;
+    if (carryFee && riIds.length) {
+      const prevPlanByStudent = new Map();
+      const existingTargetIds = new Set();
+      for (const part of chunkArray(riIds, 150)) {
+        const { data: prev } = await supabaseAdmin
+          .from('student_fee_plans')
+          .select('*, custom_items:student_fee_plan_items(*)')
+          .in('student_id', part)
+          .eq('academic_year', toDash(from_year));
+        (prev || []).forEach((plan) => prevPlanByStudent.set(plan.student_id, plan));
+        const { data: cur } = await supabaseAdmin
+          .from('student_fee_plans')
+          .select('student_id')
+          .in('student_id', part)
+          .in('academic_year', yearVariants(to_year));
+        (cur || []).forEach((plan) => existingTargetIds.add(plan.student_id));
+      }
+      feePrefetch = { prevPlanByStudent, existingTargetIds };
+    }
+
+    for (const r of riRows) {
+      const sid = r.student_id;
+      if (carryFee && await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id, feePrefetch)) {
+        feePlansCopied += 1;
         continue;
       }
-
-      const { error: enrErr } = await supabaseAdmin.from('student_enrollments').upsert({
-        school_id: schoolId, student_id: sid, class_id: newClassId, academic_year: to_year,
-        status: 'RI', previous_class_id: e.class_id, created_by: req.user.id,
-      }, { onConflict: 'student_id,academic_year' });
-      if (enrErr) continue;
-      await supabaseAdmin.from('profiles').update({ class_id: newClassId }).eq('id', sid);
-      if (carryFee && await carryFeePlanForStudent(schoolId, sid, from_year, to_year, req.user.id)) {
-        feePlansCopied += 1;
-      } else {
-        // Pas de plan reconduit → modèle de frais du niveau cible s'il existe.
-        const feeAuto = await autoApplyFeePlanForStudent({
-          schoolId,
-          studentId: sid,
-          level: dstLevelByClass.get(newClassId) || null,
-          academicYear: to_year,
-          createdBy: req.user.id,
-          templatesCache: feeTemplatesCache,
-        });
-        if (feeAuto.applied) feePlansAuto += 1;
-      }
-      reinscrits += 1;
+      // Déjà un plan pour l'année cible → rien à faire (évite un SELECT inutile
+      // dans autoApplyFeePlanForStudent).
+      if (feePrefetch?.existingTargetIds.has(sid)) continue;
+      // Pas de plan reconduit → modèle de frais du niveau cible s'il existe.
+      const feeAuto = await autoApplyFeePlanForStudent({
+        schoolId,
+        studentId: sid,
+        level: dstLevelByClass.get(r.class_id) || null,
+        academicYear: to_year,
+        createdBy: req.user.id,
+        templatesCache: feeTemplatesCache,
+      });
+      if (feeAuto.applied) feePlansAuto += 1;
     }
+
+    const nonReinscrits = Math.max(0, nrRows.length - nrFailed);
+    const reinscrits = Math.max(0, riRows.length - riFailed);
 
     res.json({ success: true, to_year, classes_created: classesCreated, reinscrits, non_reinscrits: nonReinscrits, fee_plans_copied: feePlansCopied, fee_plans_auto: feePlansAuto });
   } catch (e) {
