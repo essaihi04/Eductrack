@@ -64,8 +64,15 @@ const handleSendError = (schoolId, err) => {
   // Erreurs de timelock / rate limit côté WhatsApp
   if (code === 463 || /rate|spam|timelock/i.test(msg)) {
     pauseSession(schoolId, 'wa_rate_limit', 60 * 60 * 1000);
-  } else if (code === 401 || code === 403) {
+    return fail(msg || 'Erreur envoi WhatsApp', { reason: 'paused' });
+  }
+  if (code === 401 || code === 403) {
     pauseSession(schoolId, 'wa_auth_error', 5 * 60 * 1000);
+    return fail(msg || 'Erreur envoi WhatsApp', { reason: 'session_down' });
+  }
+  // Socket fermé / timeout : la connexion est en cause, pas le destinataire.
+  if (code === 428 || code === 408 || /connection|closed|timed? ?out|socket/i.test(msg)) {
+    return fail(msg || 'Erreur envoi WhatsApp', { reason: 'session_down' });
   }
   return fail(msg || 'Erreur envoi WhatsApp');
 };
@@ -87,7 +94,11 @@ export async function sendText(schoolId, phone, text, opts = {}) {
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendText(schoolId, phone, text, opts);
 
   const sock = getSocket(schoolId);
-  if (!sock) return fail('Session WhatsApp non connectée');
+  // `reason: 'session_down'` est capital : sans lui, une session qui tombe au
+  // milieu d'une campagne faisait marquer tous les destinataires restants en
+  // ÉCHEC DÉFINITIF. L'appelant (job d'envoi de masse) sait maintenant qu'il
+  // s'agit d'un refus temporaire et reprend après reconnexion.
+  if (!sock) return fail('Session WhatsApp non connectée', { reason: 'session_down' });
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
@@ -121,7 +132,11 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = 
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendImage(schoolId, phone, imageUrl, caption, opts);
 
   const sock = getSocket(schoolId);
-  if (!sock) return fail('Session WhatsApp non connectée');
+  // `reason: 'session_down'` est capital : sans lui, une session qui tombe au
+  // milieu d'une campagne faisait marquer tous les destinataires restants en
+  // ÉCHEC DÉFINITIF. L'appelant (job d'envoi de masse) sait maintenant qu'il
+  // s'agit d'un refus temporaire et reprend après reconnexion.
+  if (!sock) return fail('Session WhatsApp non connectée', { reason: 'session_down' });
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
@@ -157,7 +172,11 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype, opts);
 
   const sock = getSocket(schoolId);
-  if (!sock) return fail('Session WhatsApp non connectée');
+  // `reason: 'session_down'` est capital : sans lui, une session qui tombe au
+  // milieu d'une campagne faisait marquer tous les destinataires restants en
+  // ÉCHEC DÉFINITIF. L'appelant (job d'envoi de masse) sait maintenant qu'il
+  // s'agit d'un refus temporaire et reprend après reconnexion.
+  if (!sock) return fail('Session WhatsApp non connectée', { reason: 'session_down' });
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
@@ -195,7 +214,11 @@ export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'documen
   if (await cloud.isCloudSchool(schoolId)) return cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption }, opts);
 
   const sock = getSocket(schoolId);
-  if (!sock) return fail('Session WhatsApp non connectée');
+  // `reason: 'session_down'` est capital : sans lui, une session qui tombe au
+  // milieu d'une campagne faisait marquer tous les destinataires restants en
+  // ÉCHEC DÉFINITIF. L'appelant (job d'envoi de masse) sait maintenant qu'il
+  // s'agit d'un refus temporaire et reprend après reconnexion.
+  if (!sock) return fail('Session WhatsApp non connectée', { reason: 'session_down' });
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });

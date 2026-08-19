@@ -659,8 +659,18 @@ export function startSessionWatchdog(onIncoming, intervalMs = 15 * 60_000) {
     } catch { return; }
     for (const schoolId of dirs) {
       const entry = sockets.get(schoolId);
-      // Jamais démarrée : bootstrapAllSessions s'en charge au boot.
-      if (!entry) continue;
+
+      // Aucune entrée en mémoire alors que l'auth existe sur le disque : le
+      // bootstrap du démarrage a échoué pour cette école (Supabase injoignable,
+      // erreur réseau). Sans ce rattrapage elle restait muette jusqu'au
+      // redémarrage suivant.
+      if (!entry) {
+        console.log(`[baileys][${schoolId}] watchdog : jamais démarrée — démarrage`);
+        try { await startSession(schoolId, { onIncoming }); }
+        catch (e) { console.error(`[baileys][${schoolId}] watchdog:`, e.message); }
+        continue;
+      }
+
       // Session vivante, en cours d'appairage, bannie ou déconnectée par
       // l'admin : on ne touche à rien.
       if (['connected', 'connecting', 'qr', 'banned'].includes(entry.status)) continue;

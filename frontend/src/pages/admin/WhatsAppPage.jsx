@@ -1201,13 +1201,22 @@ const WhatsAppPage = () => {
     } finally { setPairingLoading(false); }
   }, [apiUrl, pairingPhone, sessionStatus]);
 
+  // L'école tourne DÉJÀ sur Baileys et sa session est tombée : le QR doit
+  // s'afficher tout seul. Il était auparavant caché derrière « Méthode
+  // alternative » — l'écran annonçait « Scannez le QR code ci-dessous » sans
+  // rien afficher dessous, et l'admin n'avait aucun moyen de rétablir l'envoi.
+  // Le repli derrière showLegacy ne concerne plus que les écoles SANS session,
+  // pour continuer à mettre en avant l'API officielle.
+  const needsQrScan = Boolean(sessionStatus?.session)
+    && sessionStatus?.provider !== 'cloud'
+    && sessionStatus?.status !== 'no_session'
+    && !sessionStatus?.connected;
+
   // Booléen stable : true si on doit poller la connexion (évite que les timers
   // se réinitialisent à chaque rafraîchissement de sessionStatus).
   const needsPolling = activeTab === 'connection'
-    && Boolean(sessionStatus?.session)
-    && sessionStatus?.provider !== 'cloud' // pas de QR Baileys pour les écoles Cloud
-    && showLegacy // ne poller le QR que si l'utilisateur a ouvert l'ancienne méthode
-    && !sessionStatus?.connected;
+    && (needsQrScan || (showLegacy && Boolean(sessionStatus?.session) && !sessionStatus?.connected))
+    && sessionStatus?.provider !== 'cloud'; // pas de QR Baileys pour les écoles Cloud
 
   // Polling automatique tant que la session n'est pas connectée :
   //  - /session-status toutes les 2s pour détecter la connexion réussie
@@ -3630,9 +3639,21 @@ const WhatsAppPage = () => {
               </div>
             )}
 
-            {/* QR Code (ancienne méthode Baileys, masquée par défaut) */}
-            {showLegacy && sessionStatus && !sessionStatus.connected && sessionStatus.provider !== 'cloud' && sessionStatus.session && (
-              <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            {/* QR Code — affiché d'office dès qu'une session Baileys existante
+                est tombée (voir needsQrScan), sinon derrière « Méthode
+                alternative » pour les écoles qui n'en ont pas encore. */}
+            {(needsQrScan || (showLegacy && sessionStatus && !sessionStatus.connected && sessionStatus.provider !== 'cloud' && sessionStatus.session)) && (
+              <div className={`rounded-lg border p-6 shadow-sm ${needsQrScan ? 'border-amber-300 bg-amber-50/40' : 'border-gray-200 bg-white'}`}>
+                {needsQrScan && (
+                  <div className="mb-4 flex items-start gap-2 text-sm text-amber-800">
+                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <p>
+                      La session de l'école n'est plus valide : WhatsApp a invalidé l'appareil lié.
+                      Scannez ce QR code pour rétablir l'envoi — les campagnes interrompues repartent
+                      automatiquement là où elles s'étaient arrêtées.
+                    </p>
+                  </div>
+                )}
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2"><QrCode className="w-5 h-5" /> Scanner le QR Code</h2>
                   <button onClick={fetchQR} disabled={qrLoading}
