@@ -173,6 +173,19 @@ async function finishJob(job, error) {
 
 async function runJob(job) {
   active.set(job.id, job.lock_key);
+
+  // Battement de cœur automatique. Un handler qui reste longtemps sans rien
+  // écrire — l'envoi WhatsApp marque 10 min de pause entre deux vagues — voyait
+  // son bail expirer : le job passait pour orphelin et était REPRIS EN DOUBLE,
+  // donc des messages envoyés deux fois. Le handler n'a plus à y penser ; son
+  // `touch` explicite reste utile pour publier la progression.
+  const heartbeat = setInterval(() => {
+    touchJob(job.id).catch((e) =>
+      console.error(`[jobs] battement de cœur ${job.id} échoué : ${e.message}`)
+    );
+  }, Math.floor(LEASE_SECONDS / 3) * 1000);
+  if (typeof heartbeat.unref === 'function') heartbeat.unref();
+
   try {
     const handler = handlers.get(job.type);
     if (!handler) throw new Error(`Aucun handler enregistré pour le type « ${job.type} »`);
@@ -189,6 +202,7 @@ async function runJob(job) {
       console.error('[jobs] impossible d\'enregistrer l\'échec :', e.message)
     );
   } finally {
+    clearInterval(heartbeat);
     active.delete(job.id);
   }
 }

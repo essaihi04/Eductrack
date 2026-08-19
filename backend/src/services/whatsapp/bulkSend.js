@@ -17,6 +17,13 @@ import { isSessionReady, sendUnified } from './sendHelpers.js';
 
 export const WHATSAPP_BULK_SEND = 'whatsapp_bulk_send';
 
+/**
+ * Refus temporaire d'envoi (hors plage horaire, session en pause anti-ban).
+ * Interrompt le job sans marquer les destinataires restants en échec : la
+ * reprise repart exactement là où l'envoi s'est arrêté.
+ */
+class SendSuspended extends Error {}
+
 export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   const touch = ctx.touch || (async () => {});
 
@@ -127,10 +134,20 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
             waOk = true;
             waSentPhones.add(recipient.phone_e164);
             patch.provider_msg_id = String(result.data?.msgId || '');
+          } else if (result.reason === 'out_of_hours' || result.reason === 'paused') {
+            // Refus temporaire, pas un échec du destinataire : avec l'envoi par
+            // vagues une campagne s'étale sur plusieurs heures et franchit la
+            // limite de 23 h ou tombe sur une pause anti-ban. Les marquer en
+            // échec les priverait définitivement du message. On interrompt : le
+            // job reprendra, et les destinataires déjà servis sont ignorés.
+            throw new SendSuspended(`Envoi suspendu (${result.reason}) — reprise automatique`);
           } else {
             errorMsg = [errorMsg, result.message || 'Erreur WhatsApp'].filter(Boolean).join(' | ');
           }
         } catch (sendErr) {
+          // Une suspension n'est pas une erreur du destinataire : elle doit
+          // remonter au job, pas être consignée comme un échec d'envoi.
+          if (sendErr instanceof SendSuspended) throw sendErr;
           errorMsg = [errorMsg, sendErr.message || 'Erreur réseau'].filter(Boolean).join(' | ');
         }
       }

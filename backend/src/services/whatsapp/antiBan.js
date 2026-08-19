@@ -21,9 +21,22 @@ import { supabaseAdmin } from '../../config/supabase.js';
 
 // ───── Configuration ─────────────────────────────────────────────────────
 const CONFIG = {
-  // Délai entre 2 messages (gaussienne tronquée)
-  MIN_DELAY_MS: 8_000,
-  MAX_DELAY_MS: 20_000,
+  // Délai entre 2 messages (gaussienne tronquée) : 1 à 2 minutes.
+  // Aucun envoi simultané, et jamais deux intervalles identiques.
+  MIN_DELAY_MS: 60_000,
+  MAX_DELAY_MS: 120_000,
+
+  // ─── Envoi par vagues ───────────────────────────────────────────────────
+  // 10 messages, pause, 20, pause, 40, pause, 80… La taille double à chaque
+  // vague. Une montée en charge progressive ressemble à une activité qui
+  // s'installe, pas à un automate qui vide une liste d'un trait.
+  BURST_FIRST_SIZE: 10,
+  BURST_GROWTH: 2,
+  BURST_PAUSE_MS: 10 * 60 * 1000,
+  // Au-delà, la vague cesse de grossir : sans plafond, une école de plusieurs
+  // milliers de parents finirait par enchaîner des centaines d'envois sans
+  // aucune pause — exactement ce que ce mécanisme cherche à éviter.
+  BURST_MAX_SIZE: 320,
   // Présence "typing…" avant envoi
   TYPING_MIN_MS: 1_500,
   TYPING_MAX_MS: 4_000,
@@ -71,6 +84,9 @@ const getState = (schoolId) => {
       dayStart: startOfToday(),
       pausedUntil: 0,
       warmupStart: null, // chargé depuis DB
+      // Vague en cours : 10, puis 20, 40, 80… (voir waitHumanDelay)
+      burstSize: CONFIG.BURST_FIRST_SIZE,
+      burstSent: 0,
     });
   }
   return sessionState.get(schoolId);
@@ -244,6 +260,25 @@ export async function checkAllowed(schoolId, { urgent = false } = {}) {
  */
 export async function waitHumanDelay(schoolId) {
   const state = getState(schoolId);
+
+  // ─── Pause de fin de vague ───────────────────────────────────────────────
+  // La vague en cours est pleine : on marque un arrêt franc avant la suivante,
+  // qui sera deux fois plus grande. Le compteur ne repart qu'après la pause,
+  // et non au premier envoi, pour que la vague soit réellement délimitée.
+  if (state.burstSent >= state.burstSize) {
+    console.log(
+      `[anti-ban] Vague de ${state.burstSize} message(s) terminée (école ${schoolId}) — `
+      + `pause ${CONFIG.BURST_PAUSE_MS / 60000} min avant la vague suivante.`,
+    );
+    await sleep(CONFIG.BURST_PAUSE_MS);
+    state.burstSize = Math.min(CONFIG.BURST_MAX_SIZE, state.burstSize * CONFIG.BURST_GROWTH);
+    state.burstSent = 0;
+    // La pause tient lieu d'intervalle : le premier message de la nouvelle
+    // vague part sans attendre 1 à 2 minutes de plus.
+    state.lastSendAt = Date.now();
+    return;
+  }
+
   const elapsed = Date.now() - state.lastSendAt;
   let target = gaussianRandom(CONFIG.MIN_DELAY_MS, CONFIG.MAX_DELAY_MS);
 
@@ -338,6 +373,7 @@ export async function recordSent(schoolId) {
   const state = getState(schoolId);
   state.lastSendAt = Date.now();
   state.sentToday += 1;
+  state.burstSent += 1;
   await incrementDbCounter(schoolId);
 }
 
@@ -388,6 +424,9 @@ export async function getStats(schoolId) {
     remaining: Math.max(0, limit - dbCount),
     paused_until: state.pausedUntil > Date.now() ? new Date(state.pausedUntil).toISOString() : null,
     last_send_at: state.lastSendAt ? new Date(state.lastSendAt).toISOString() : null,
+    burst_size: state.burstSize,
+    burst_sent: state.burstSent,
+    burst_remaining: Math.max(0, state.burstSize - state.burstSent),
   };
 }
 
