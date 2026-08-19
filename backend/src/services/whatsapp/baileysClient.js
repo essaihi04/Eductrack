@@ -171,7 +171,9 @@ export async function startSession(schoolId, { onIncoming } = {}) {
     version,
     auth: state,
     logger,
-    printQRInTerminal: false,
+    // `printQRInTerminal` a été SUPPRIMÉ de Baileys 7 (marqué @deprecated dans
+    // les types) : le QR passe uniquement par l'event connection.update, que
+    // l'on convertit déjà en data-URL pour l'interface admin.
     browser: Browsers.appropriate('Chrome'), // signature humaine
     syncFullHistory: false,
     markOnlineOnConnect: false, // évite de spammer "online" → ban-tier

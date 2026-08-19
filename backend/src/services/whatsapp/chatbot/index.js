@@ -2004,6 +2004,8 @@ async function handleBaileysImpl({ schoolId, msg, sock }) {
     return;
   }
 
+  const activeSock = sock || getSocket(schoolId);
+
   // Pour les messages 1-à-1, WhatsApp utilise désormais 2 formats :
   //   - @s.whatsapp.net : ancien format, le JID = phone E.164
   //   - @lid           : nouveau "Linked Identity" pour la confidentialité
@@ -2018,6 +2020,24 @@ async function handleBaileysImpl({ schoolId, msg, sock }) {
       msg.key?.participantPn ||
       msg.key?.remoteJidAlt ||
       null;
+
+    // Meta n'envoie plus systématiquement le numéro dans la clé du message :
+    // certains messages arrivent avec un @lid seul, et ils étaient alors
+    // PUREMENT ET SIMPLEMENT ignorés — le parent n'avait aucune réponse.
+    // Baileys 7 tient un annuaire LID → numéro, alimenté par le serveur
+    // WhatsApp et persisté avec les credentials : on l'interroge en secours.
+    if (!phoneJid) {
+      try {
+        const resolved = await activeSock?.signalRepository?.lidMapping?.getPNForLID?.(remoteJid);
+        if (resolved) {
+          phoneJid = resolved;
+          console.log(`[chatbot] 🔗 LID résolu via l'annuaire Baileys: ${remoteJid} → ${resolved}`);
+        }
+      } catch (e) {
+        console.warn(`[chatbot] annuaire LID indisponible: ${e.message}`);
+      }
+    }
+
     if (!phoneJid) {
       console.warn(
         `[chatbot] ⚠️  Message @lid sans numéro résoluble — clés disponibles: ${JSON.stringify(Object.keys(msg.key || {}))}`
@@ -2030,13 +2050,15 @@ async function handleBaileysImpl({ schoolId, msg, sock }) {
     return;
   }
 
-  const from = '+' + phoneJid.split('@')[0];
+  // L'annuaire LID renvoie le JID AVEC l'identifiant d'appareil
+  // (212600000000:0@s.whatsapp.net) : sans retirer le « :0 », le numéro
+  // reconstruit ne correspondrait à aucun parent en base.
+  const from = '+' + phoneJid.split('@')[0].split(':')[0];
   const id = msg.key?.id || `${Date.now()}`;
 
   // Comportement humain : on "lit" d'abord le message (coches bleues + on
   // apparaît en ligne) puis on marque une courte pause de lecture avant de
   // composer la réponse — exactement comme une personne qui ouvre la conv.
-  const activeSock = sock || getSocket(schoolId);
   if (activeSock) {
     await simulateRead(activeSock, msg.key, remoteJid);
   }
