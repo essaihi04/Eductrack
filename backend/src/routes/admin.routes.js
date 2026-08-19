@@ -5992,14 +5992,14 @@ router.post('/students/import', async (req, res) => {
         const existingEnrolls = await selectByIdsInChunks(
           (chunk) => supabaseAdmin
             .from('student_enrollments')
-            .select('student_id')
-            .eq('academic_year', enrollYear)
+            .select('student_id, class_id, status')
+            .in('academic_year', yearVariants(enrollYear))
             .in('student_id', chunk),
           importedIds
         );
-        const alreadyEnrolled = new Set((existingEnrolls || []).map(e => e.student_id));
+        const enrollByStudent = new Map((existingEnrolls || []).map(e => [e.student_id, e]));
         const toEnroll = importedIds
-          .filter(id => !alreadyEnrolled.has(id))
+          .filter(id => !enrollByStudent.has(id))
           .map(id => ({
             school_id: getSchoolId(req),
             student_id: id,
@@ -6014,6 +6014,31 @@ router.post('/students/import', async (req, res) => {
             .upsert(toEnroll, { onConflict: 'student_id,academic_year' });
           if (enrollError) console.error('[Import] Inscriptions échouées:', enrollError.message);
           else console.log(`[Import] ${toEnroll.length} inscription(s) ${enrollYear} créée(s)`);
+        }
+
+        // Élève DÉJÀ inscrit cette année mais pas encore rattaché à cette classe.
+        // Cas type : réinscription « niveau seul » (RI, class_id null), puis
+        // l'import Massar constitue les classes. Sans ce bloc, seul
+        // profiles.class_id était mis à jour et l'élève disparaissait des pages
+        // Élèves/Finance, qui filtrent sur student_enrollments.
+        //
+        // On ne touche QUE class_id : le statut posé par la réinscription reste
+        // intact. Les non-réinscrits (NR) sont exclus — les rattacher à une
+        // classe annulerait une décision explicite de l'administration.
+        if (classId) {
+          const toAttach = importedIds.filter((id) => {
+            const e = enrollByStudent.get(id);
+            return e && e.status !== 'NR' && e.class_id !== classId;
+          });
+          for (const part of chunkArray(toAttach, 100)) {
+            const { error: attachErr } = await supabaseAdmin
+              .from('student_enrollments')
+              .update({ class_id: classId })
+              .in('academic_year', yearVariants(enrollYear))
+              .in('student_id', part);
+            if (attachErr) console.error('[Import] Rattachement de classe échoué:', attachErr.message);
+          }
+          if (toAttach.length) console.log(`[Import] ${toAttach.length} inscription(s) rattachée(s) à la classe`);
         }
       }
     } catch (enrollErr) {
