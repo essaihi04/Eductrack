@@ -327,6 +327,13 @@ export async function simulateTyping(sock, jid, text = null) {
       ? humanTypingDuration(text)
       : gaussianRandom(CONFIG.TYPING_MIN_MS, CONFIG.TYPING_MAX_MS);
 
+    // Un vrai client s'abonne à la présence du contact en OUVRANT la
+    // conversation, avant d'écrire. Sans cet abonnement, la séquence
+    // « composing » sort de nulle part : le serveur voit un client qui écrit
+    // à quelqu'un dont il n'a jamais demandé le statut — motif qu'aucun
+    // WhatsApp Web ne produit.
+    try { await sock.presenceSubscribe(jid); } catch {}
+
     // Rafraîchit 'composing' toutes les ~3 s (l'état expire côté WhatsApp).
     const REFRESH_MS = 3_000;
     let waited = 0;

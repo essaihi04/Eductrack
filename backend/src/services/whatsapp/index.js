@@ -21,6 +21,19 @@ import {
   getStats,
 } from './antiBan.js';
 import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
+import { isOnWhatsApp } from './numberCheck.js';
+
+// Écrire à des numéros qui ne sont pas sur WhatsApp est l'un des signaux
+// anti-spam les plus lourds côté Meta. On refuse l'envoi UNIQUEMENT sur un
+// « false » franc : un doute (session instable, timeout) renvoie null et le
+// message part quand même — jamais priver un parent sur une incertitude.
+const notOnWhatsApp = async (schoolId, phone) => {
+  const exists = await isOnWhatsApp(schoolId, phone);
+  if (exists === false) {
+    return fail("Ce numéro n'est pas inscrit sur WhatsApp", { reason: 'not_on_whatsapp' });
+  }
+  return null;
+};
 
 // Interrupteur global (voir outboundGate.js) : notifications sortantes
 // bloquées, réponses du chatbot toujours autorisées.
@@ -79,6 +92,11 @@ export async function sendText(schoolId, phone, text, opts = {}) {
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
 
+  // Avant la temporisation : inutile d'immobiliser la file 1 à 2 minutes
+  // pour un numéro auquel on ne pourra rien envoyer.
+  const invalid = await notOnWhatsApp(schoolId, phone);
+  if (invalid) return invalid;
+
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
 
   const jid = phoneToJid(phone);
@@ -107,6 +125,11 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = 
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
+
+  // Avant la temporisation : inutile d'immobiliser la file 1 à 2 minutes
+  // pour un numéro auquel on ne pourra rien envoyer.
+  const invalid = await notOnWhatsApp(schoolId, phone);
+  if (invalid) return invalid;
 
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);
@@ -138,6 +161,11 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
+
+  // Avant la temporisation : inutile d'immobiliser la file 1 à 2 minutes
+  // pour un numéro auquel on ne pourra rien envoyer.
+  const invalid = await notOnWhatsApp(schoolId, phone);
+  if (invalid) return invalid;
 
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);
@@ -171,6 +199,11 @@ export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'documen
 
   const allowed = await checkAllowed(schoolId, opts);
   if (!allowed.allowed) return fail(allowed.message, { reason: allowed.reason });
+
+  // Avant la temporisation : inutile d'immobiliser la file 1 à 2 minutes
+  // pour un numéro auquel on ne pourra rien envoyer.
+  const invalid = await notOnWhatsApp(schoolId, phone);
+  if (invalid) return invalid;
 
   if (!opts.skipDelay) await waitHumanDelay(schoolId);
   const jid = phoneToJid(phone);

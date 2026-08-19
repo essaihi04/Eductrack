@@ -75,6 +75,35 @@ const loggedOutRetryDelay = (attempts) => {
 // passer en état needs_reconnect que le watchdog / l'admin pourra relancer).
 const MAX_LOGGED_OUT_RETRIES = 6;
 
+/**
+ * Version de WhatsApp Web annoncée au serveur, mise en cache.
+ *
+ * `fetchLatestBaileysVersion()` interroge raw.githubusercontent.com à CHAQUE
+ * démarrage de session. Avec cinq écoles et des boucles de reconnexion, ça
+ * fait des dizaines d'appels à GitHub par heure ; une fois limité ou
+ * injoignable, la fonction retombe SILENCIEUSEMENT sur la version figée dans
+ * la bibliothèque (`isLatest: false`). Annoncer une version de WhatsApp Web
+ * périmée est précisément ce qui distingue un client automatisé d'un vrai
+ * navigateur. On interroge donc une fois toutes les 6 h, et on trace
+ * explicitement le cas où la version n'est pas à jour.
+ */
+const VERSION_TTL_MS = 6 * 3600_000;
+let versionCache = { version: null, fetchedAt: 0 };
+
+const getWaWebVersion = async () => {
+  if (versionCache.version && Date.now() - versionCache.fetchedAt < VERSION_TTL_MS) {
+    return versionCache.version;
+  }
+  const { version, isLatest } = await fetchLatestBaileysVersion();
+  if (!isLatest) {
+    console.warn(`[baileys] ⚠️ version WhatsApp Web non vérifiée (GitHub injoignable) — repli sur ${version.join('.')}`);
+  } else {
+    console.log(`[baileys] version WhatsApp Web ${version.join('.')}`);
+  }
+  versionCache = { version, fetchedAt: Date.now() };
+  return version;
+};
+
 // Passe à true dès qu'un SIGINT/SIGTERM arrive : plus aucune reconnexion n'est
 // planifiée, sinon on recréerait des sockets pendant que le process s'éteint —
 // c'est exactement ce qui laisse des credentials à moitié écrits sur le disque
@@ -153,7 +182,7 @@ export async function startSession(schoolId, { onIncoming } = {}) {
   try {
     const authDir = ensureAuthDir(schoolId);
     ({ state, saveCreds } = await useMultiFileAuthState(authDir));
-    ({ version } = await fetchLatestBaileysVersion());
+    version = await getWaWebVersion();
   } catch (e) {
     // Init échouée (lecture auth, fetch version réseau…) : on libère le verrou
     // pour ne pas laisser l'école bloquée, et on replanifie une reconnexion.
