@@ -1076,20 +1076,35 @@ router.get('/conversations', async (req, res) => {
 
     // Group by phone number to create conversations
     const conversationMap = {};
-    allRecipients.forEach(r => {
-      const phone = r.phone_e164;
+    const ensureConv = (phone, parentId) => {
       if (!conversationMap[phone]) {
-        const parent = parentMap[r.parent_id];
+        const parent = parentMap[parentId];
         conversationMap[phone] = {
           phone,
           parentName: parent ? `${parent.first_name} ${parent.last_name}` : null,
-          parentId: r.parent_id,
+          parentId: parentId || null,
+          contactRole: parentId ? 'parent' : null,
           messages: [],
           lastMessageAt: null,
+          lastIncomingAt: null,
           totalSent: 0,
-          totalFailed: 0
+          totalFailed: 0,
+          totalReceived: 0
         };
+      } else if (!conversationMap[phone].parentId && parentId) {
+        const parent = parentMap[parentId];
+        conversationMap[phone].parentId = parentId;
+        if (parent) {
+          conversationMap[phone].parentName = `${parent.first_name} ${parent.last_name}`;
+          conversationMap[phone].contactRole = 'parent';
+        }
       }
+      return conversationMap[phone];
+    };
+
+    allRecipients.forEach(r => {
+      const phone = r.phone_e164;
+      ensureConv(phone, r.parent_id);
 
       const msg = messages.find(m => m.id === r.message_id);
       if (msg) {
@@ -1116,11 +1131,106 @@ router.get('/conversations', async (req, res) => {
       if (r.status === 'failed') conversationMap[phone].totalFailed++;
     });
 
+    // ── Messages ENTRANTS (réponses des parents, des professeurs, visiteurs) ──
+    // whatsapp_incoming_messages porte le message reçu ET, le cas échéant, la
+    // réponse automatique du chatbot (ai_response_text) : les deux sont
+    // réinjectés dans le fil pour que l'école voie la conversation complète.
+    let incomingQuery = supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .select('id, phone_e164, parent_id, message_text, ai_response_text, ai_response_sent, received_at, category')
+      .order('received_at', { ascending: false })
+      .limit(3000);
+    if (schoolId) incomingQuery = incomingQuery.eq('school_id', schoolId);
+    if (allowedCatsConv) incomingQuery = incomingQuery.in('category', allowedCatsConv);
+
+    const { data: incomingRows, error: incError } = await incomingQuery;
+    if (incError) throw incError;
+
+    let incoming = incomingRows || [];
+    // Périmètre pédagogique restreint : on ne montre que les parents autorisés
+    // (les entrants sans parent identifié — profs, inconnus — sont masqués).
+    if (allowedParentIds !== null) {
+      incoming = incoming.filter(r => r.parent_id && allowedParentIds.has(r.parent_id));
+    }
+
+    // Noms des parents qui n'apparaissaient que côté entrant
+    const newParentIds = [...new Set(
+      incoming.map(r => r.parent_id).filter(id => id && !parentMap[id])
+    )];
+    if (newParentIds.length > 0) {
+      const extraParents = await selectInChunks(newParentIds, (chunk) =>
+        supabaseAdmin.from('profiles').select('id, first_name, last_name').in('id', chunk)
+      );
+      extraParents.forEach(p => { parentMap[p.id] = p; });
+    }
+
+    incoming.forEach(r => {
+      const phone = r.phone_e164;
+      if (!phone) return;
+      const conv = ensureConv(phone, r.parent_id);
+      conv.messages.push({
+        id: `in-${r.id}`,
+        content: r.message_text || '',
+        messageType: 'text',
+        status: 'received',
+        createdAt: r.received_at,
+        direction: 'incoming'
+      });
+      conv.totalReceived++;
+      if (!conv.lastIncomingAt || new Date(r.received_at) > new Date(conv.lastIncomingAt)) {
+        conv.lastIncomingAt = r.received_at;
+      }
+      if (r.ai_response_text) {
+        conv.messages.push({
+          id: `bot-${r.id}`,
+          content: r.ai_response_text,
+          messageType: 'text',
+          status: r.ai_response_sent ? 'sent' : 'pending',
+          // +1 s pour que la réponse du bot se place après la question
+          createdAt: new Date(new Date(r.received_at).getTime() + 1000).toISOString(),
+          senderName: '🤖 Chatbot',
+          direction: 'outgoing',
+          isBot: true
+        });
+      }
+    });
+
+    // ── Identité des numéros sans parent rattaché (professeurs, personnel) ────
+    const unknownPhones = Object.values(conversationMap)
+      .filter(c => !c.parentName)
+      .map(c => c.phone);
+    if (unknownPhones.length > 0) {
+      let staffQuery = supabaseAdmin
+        .from('profiles')
+        .select('id, first_name, last_name, phone, role')
+        .not('phone', 'is', null)
+        .in('role', ['teacher', 'admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'finance_manager', 'transport_manager', 'driver']);
+      if (schoolId) staffQuery = staffQuery.eq('school_id', schoolId);
+      const { data: staff } = await staffQuery;
+      // Rapprochement sur les 9 derniers chiffres : les numéros sont saisis
+      // avec ou sans indicatif (0612…, +212612…, 212612…).
+      const tail = (p) => (p || '').replace(/\D/g, '').slice(-9);
+      const staffByTail = {};
+      (staff || []).forEach(s => { const t = tail(s.phone); if (t.length === 9 && !staffByTail[t]) staffByTail[t] = s; });
+      unknownPhones.forEach(phone => {
+        const match = staffByTail[tail(phone)];
+        if (match) {
+          conversationMap[phone].parentName = `${match.first_name} ${match.last_name}`;
+          conversationMap[phone].contactRole = match.role;
+        }
+      });
+    }
+
     // Sort messages within each conversation and set lastMessageAt
     const conversations = Object.values(conversationMap).map(conv => {
       conv.messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-      conv.lastMessageAt = conv.messages.length > 0 ? conv.messages[conv.messages.length - 1].createdAt : null;
+      const last = conv.messages[conv.messages.length - 1];
+      conv.lastMessageAt = last ? last.createdAt : null;
       conv.messageCount = conv.messages.length;
+      // « À traiter » : le dernier message du fil vient du contact et aucune
+      // réponse (humaine ou chatbot) n'a suivi.
+      conv.awaitingReply = !!last && last.direction === 'incoming';
+      if (!conv.contactRole) conv.contactRole = 'inconnu';
       return conv;
     });
 

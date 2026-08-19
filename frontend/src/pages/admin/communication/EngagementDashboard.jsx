@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Eye, MessageCircle, Smartphone, BellOff, RefreshCw, Search,
+  Eye, MessageCircle, MessageSquare, Smartphone, BellOff, RefreshCw, Search,
   TrendingUp, Users, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import {
@@ -43,7 +43,7 @@ const StatCard = ({ icon: Icon, iconCls, title, value, sub }) => (
   </div>
 );
 
-export default function EngagementDashboard({ apiUrl, getAuthToken }) {
+export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConversation }) {
   const [days, setDays] = useState(30);
   const [summary, setSummary] = useState(null);
   const [parents, setParents] = useState([]);
@@ -247,8 +247,14 @@ export default function EngagementDashboard({ apiUrl, getAuthToken }) {
                     ) : filteredParents.map(p => {
                       const seg = SEGMENTS[p.segment] || SEGMENTS.silencieux;
                       const readPct = p.reached ? Math.round((p.read / p.reached) * 100) : 0;
+                      const openInbox = () => onOpenConversation?.({
+                        phone: p.phone, parentId: p.parent_id, name: p.name,
+                      });
                       return (
-                        <tr key={p.parent_id} className="hover:bg-gray-50/70">
+                        <tr key={p.parent_id}
+                          onClick={onOpenConversation ? openInbox : undefined}
+                          title={onOpenConversation ? 'Ouvrir la conversation dans la boîte de réception' : undefined}
+                          className={`hover:bg-gray-50/70 ${onOpenConversation ? 'cursor-pointer' : ''}`}>
                           <td className="px-4 py-2">
                             <p className="font-medium text-gray-800 flex items-center gap-1.5">
                               {p.name || 'Parent'}
@@ -275,7 +281,17 @@ export default function EngagementDashboard({ apiUrl, getAuthToken }) {
                           </td>
                           <td className="px-2 py-2 text-xs text-gray-500">{fmtDate(p.lastReadAt)}</td>
                           <td className="px-2 py-2">
-                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${seg.cls}`}>{seg.label}</span>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${seg.cls}`}>{seg.label}</span>
+                              {onOpenConversation && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openInbox(); }}
+                                  title="Ouvrir la conversation"
+                                  className="p-1 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50">
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -290,7 +306,8 @@ export default function EngagementDashboard({ apiUrl, getAuthToken }) {
                 <p>
                   « Vu » = notification lue dans l'app ou ✓✓ bleu WhatsApp (si les accusés de lecture du parent sont activés).
                   « Réponse » = message WhatsApp reçu après un envoi. Les parents ⚠️ injoignables n'ont ni app ni WhatsApp fonctionnel :
-                  pensez à mettre à jour leur numéro ou à les inviter à installer l'application.
+                  pensez à mettre à jour leur numéro ou à les inviter à installer l'application.{' '}
+                  Cliquez sur une ligne pour ouvrir la conversation du parent dans la boîte de réception.
                 </p>
               </div>
             </div>

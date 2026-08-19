@@ -12,7 +12,7 @@ import {
   MessageSquare, Send, Paperclip, Image, FileText, Users, CheckSquare,
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
   Smartphone, Wifi, WifiOff, QrCode, Info, Plus, Trash2,
-  Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowLeft,
+  Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowDownLeft, ArrowLeft,
   Bot, Sparkles,
   Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2, Shield
 } from 'lucide-react';
@@ -132,6 +132,10 @@ const WhatsAppPage = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [inboxFilter, setInboxFilter] = useState('all');
   const [inboxView, setInboxView] = useState('conversations');
+  // Contact à ouvrir dans la boîte de réception depuis un autre onglet
+  // (clic sur une ligne du dashboard d'engagement) : { phone, parentId, name }
+  const [pendingConv, setPendingConv] = useState(null);
+  const [convFetchedAt, setConvFetchedAt] = useState(0);
   const [apiLogs, setApiLogs] = useState([]);
   const [apiLogsLoading, setApiLogsLoading] = useState(false);
   const [apiLogsPage, setApiLogsPage] = useState(1);
@@ -628,7 +632,7 @@ const WhatsAppPage = () => {
       const data = await res.json();
       if (data.success) setConversations(data.conversations || []);
     } catch (error) { console.error('Erreur conversations:', error); }
-    finally { setInboxLoading(false); }
+    finally { setInboxLoading(false); setConvFetchedAt(Date.now()); }
   }, [apiUrl]);
 
   const fetchApiLogs = useCallback(async (page = 1) => {
@@ -656,6 +660,68 @@ const WhatsAppPage = () => {
     }
   }, [activeTab, inboxView, apiLogsPage, fetchConversations, fetchApiLogs]);
 
+  // Rafraîchissement automatique : les réponses des parents/professeurs
+  // arrivent en continu, l'onglet ne doit pas rester figé.
+  useEffect(() => {
+    if (activeTab !== 'inbox' || inboxView !== 'conversations') return;
+    const id = setInterval(fetchConversations, 30000);
+    return () => clearInterval(id);
+  }, [activeTab, inboxView, fetchConversations]);
+
+  // Après un rechargement, la conversation ouverte doit refléter les nouveaux
+  // messages (sinon on garde le fil figé au moment du clic).
+  useEffect(() => {
+    if (!selectedConv || conversations.length === 0) return;
+    const fresh = conversations.find(c => c.phone === selectedConv.phone);
+    if (fresh && fresh.messageCount !== selectedConv.messageCount) setSelectedConv(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations]);
+
+  // ── Ouverture d'une conversation depuis un autre onglet (dashboard) ────────
+  // On compare sur les 9 derniers chiffres : les numéros sont stockés tantôt
+  // en +212…, tantôt en 06…
+  const phoneTail = (p) => (p || '').replace(/\D/g, '').slice(-9);
+
+  const openConversation = useCallback((contact) => {
+    // `requestedAt` : la sélection n'est résolue qu'une fois qu'un chargement
+    // POSTÉRIEUR au clic est terminé, sinon on ouvrirait un fil vide alors que
+    // l'historique n'est pas encore arrivé.
+    setPendingConv({ ...contact, requestedAt: Date.now() });
+    setSelectedConv(null);
+    setActiveTab('inbox');
+    setInboxView('conversations');
+    setInboxFilter('all');
+    setSearchQuery('');
+    fetchConversations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHub, fetchConversations]);
+
+  useEffect(() => {
+    if (!pendingConv || activeTab !== 'inbox') return;
+    if (inboxLoading || convFetchedAt < pendingConv.requestedAt) return;
+    const tail = phoneTail(pendingConv.phone);
+    const match = conversations.find(c =>
+      (pendingConv.parentId && c.parentId === pendingConv.parentId) ||
+      (tail.length === 9 && phoneTail(c.phone) === tail)
+    );
+    if (match) {
+      setSelectedConv(match);
+    } else if (pendingConv.phone) {
+      // Aucun historique : on ouvre un fil vide pour pouvoir écrire quand même.
+      setSelectedConv({
+        phone: pendingConv.phone,
+        parentName: pendingConv.name || null,
+        parentId: pendingConv.parentId || null,
+        contactRole: 'parent',
+        messages: [], messageCount: 0,
+        totalSent: 0, totalFailed: 0, totalReceived: 0,
+      });
+    } else {
+      setSearchQuery(pendingConv.name || '');
+    }
+    setPendingConv(null);
+  }, [pendingConv, activeTab, inboxLoading, convFetchedAt, conversations]);
+
   useEffect(() => {
     if (selectedConv && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConv]);
@@ -665,10 +731,14 @@ const WhatsAppPage = () => {
       (conv.parentName && conv.parentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
       conv.phone.includes(searchQuery);
     const matchesFilter = inboxFilter === 'all' ||
+      (inboxFilter === 'awaiting' && conv.awaitingReply) ||
+      (inboxFilter === 'received' && conv.totalReceived > 0) ||
       (inboxFilter === 'sent' && conv.totalSent > 0) ||
       (inboxFilter === 'failed' && conv.totalFailed > 0);
     return matchesSearch && matchesFilter;
   });
+
+  const awaitingCount = conversations.filter(c => c.awaitingReply).length;
 
   // Inline compose helpers
   const handleDirectFileSelect = (e) => {
@@ -1238,6 +1308,20 @@ const WhatsAppPage = () => {
     );
   };
   const typeLabel = (type) => ({ text: 'Texte', image: 'Image', document: 'Document' }[type] || type);
+
+  // Qui est au bout du fil : parent, professeur, membre du personnel ou numéro
+  // non rattaché (visiteur, futur parent qui écrit au chatbot public).
+  const contactRoleBadge = (role) => {
+    const map = {
+      parent: { label: 'Parent', cls: 'bg-green-100 text-green-700', avatar: 'from-green-400 to-green-600' },
+      teacher: { label: 'Professeur', cls: 'bg-indigo-100 text-indigo-700', avatar: 'from-indigo-400 to-indigo-600' },
+      driver: { label: 'Chauffeur', cls: 'bg-amber-100 text-amber-700', avatar: 'from-amber-400 to-amber-600' },
+      inconnu: { label: 'Numéro inconnu', cls: 'bg-gray-100 text-gray-500', avatar: 'from-gray-400 to-gray-500' },
+    };
+    if (map[role]) return map[role];
+    if (role) return { label: 'Personnel', cls: 'bg-violet-100 text-violet-700', avatar: 'from-violet-400 to-violet-600' };
+    return { label: '', cls: '', avatar: 'from-green-400 to-green-600' };
+  };
   const msgTypeIcon = (type) => {
     if (type === 'image') return <Image className="w-3.5 h-3.5" />;
     if (type === 'document') return <FileText className="w-3.5 h-3.5" />;
@@ -1246,6 +1330,7 @@ const WhatsAppPage = () => {
 
   const inboxTotalSent = conversations.reduce((s, c) => s + c.totalSent, 0);
   const inboxTotalFailed = conversations.reduce((s, c) => s + c.totalFailed, 0);
+  const inboxTotalReceived = conversations.reduce((s, c) => s + (c.totalReceived || 0), 0);
   const inboxTotalMessages = conversations.reduce((s, c) => s + c.messageCount, 0);
 
   // ===================== REPORTS IA LOGIC =====================
@@ -2176,7 +2261,7 @@ const WhatsAppPage = () => {
 
       {/* ===================== TAB: DASHBOARD PARENTS ===================== */}
       {activeTab === 'dashboard' && (
-        <EngagementDashboard apiUrl={apiUrl} getAuthToken={getAuthToken} />
+        <EngagementDashboard apiUrl={apiUrl} getAuthToken={getAuthToken} onOpenConversation={openConversation} />
       )}
 
       {/* ===================== TAB: VITRINE ÉCOLE ===================== */}
@@ -2205,7 +2290,9 @@ const WhatsAppPage = () => {
             <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center gap-4 flex-shrink-0">
               <span className="text-[11px] text-gray-600"><strong className="text-gray-900">{conversations.length}</strong> conv.</span>
               <span className="text-[11px] text-green-600"><strong>{inboxTotalSent}</strong> envoyés</span>
-              <span className="text-[11px] text-red-500"><strong>{inboxTotalFailed}</strong> échoués</span>
+              <span className="text-[11px] text-blue-600"><strong>{inboxTotalReceived}</strong> reçus</span>
+              {inboxTotalFailed > 0 && <span className="text-[11px] text-red-500"><strong>{inboxTotalFailed}</strong> échoués</span>}
+              {awaitingCount > 0 && <span className="text-[11px] text-amber-600"><strong>{awaitingCount}</strong> à répondre</span>}
               <div className="ml-auto flex bg-gray-100 rounded p-0.5">
                 <button onClick={() => setInboxView('conversations')}
                   className={`px-2 py-1 text-[10px] font-medium rounded ${inboxView === 'conversations' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>
@@ -2227,8 +2314,14 @@ const WhatsAppPage = () => {
                     <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Rechercher..." className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 bg-gray-50" />
                   </div>
-                  <div className="flex gap-1">
-                    {[{ key: 'all', label: 'Tous' }, { key: 'sent', label: 'Envoyés' }, { key: 'failed', label: 'Échoués' }].map(f => (
+                  <div className="flex gap-1 flex-wrap">
+                    {[
+                      { key: 'all', label: 'Tous' },
+                      { key: 'awaiting', label: `À répondre${awaitingCount ? ` (${awaitingCount})` : ''}` },
+                      { key: 'received', label: 'Réponses reçues' },
+                      { key: 'sent', label: 'Envoyés' },
+                      { key: 'failed', label: 'Échoués' },
+                    ].map(f => (
                       <button key={f.key} onClick={() => setInboxFilter(f.key)}
                         className={`px-2.5 py-1 text-xs font-medium rounded-full ${inboxFilter === f.key ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                         {f.label}
@@ -2249,28 +2342,39 @@ const WhatsAppPage = () => {
                       <p className="text-sm text-gray-500 font-medium">Aucune conversation</p>
                       <p className="text-xs text-gray-400 mt-1">Les messages envoyés apparaîtront ici</p>
                     </div>
-                  ) : filteredConversations.map(conv => (
+                  ) : filteredConversations.map(conv => {
+                    const last = conv.messages[conv.messages.length - 1];
+                    const role = contactRoleBadge(conv.contactRole);
+                    return (
                     <button key={conv.phone} onClick={() => setSelectedConv(conv)}
-                      className={`w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors ${selectedConv?.phone === conv.phone ? 'bg-green-50 border-l-2 border-l-green-500' : ''}`}>
+                      className={`w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors ${selectedConv?.phone === conv.phone ? 'bg-green-50 border-l-2 border-l-green-500' : conv.awaitingReply ? 'bg-amber-50/40' : ''}`}>
                       <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center flex-shrink-0">
+                        <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${role.avatar} flex items-center justify-center flex-shrink-0`}>
                           <span className="text-white font-semibold text-sm">{conv.parentName ? conv.parentName.charAt(0).toUpperCase() : '#'}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-semibold text-gray-900 truncate">{conv.parentName || conv.phone}</p>
-                            <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">{formatDate(conv.lastMessageAt)}</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-gray-900 truncate flex items-center gap-1.5">
+                              {conv.parentName || conv.phone}
+                              {conv.awaitingReply && <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" title="En attente de réponse" />}
+                            </p>
+                            <span className="text-[10px] text-gray-400 flex-shrink-0">{formatDate(conv.lastMessageAt)}</span>
                           </div>
-                          {conv.parentName && (
-                            <p className="text-[11px] text-gray-400 flex items-center gap-1"><Phone className="w-3 h-3" />{conv.phone}</p>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {role.label && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${role.cls}`}>{role.label}</span>}
+                            {conv.parentName && (
+                              <p className="text-[11px] text-gray-400 flex items-center gap-1"><Phone className="w-3 h-3" />{conv.phone}</p>
+                            )}
+                          </div>
                           <div className="flex items-center justify-between mt-1">
-                            <p className="text-xs text-gray-500 truncate pr-2 flex items-center gap-1">
-                              {conv.messages.length > 0 && conv.messages[conv.messages.length - 1].isAiReport && <Bot className="w-3 h-3 text-purple-500 flex-shrink-0" />}
-                              {conv.messages.length > 0 ? (conv.messages[conv.messages.length - 1].isAiReport ? 'Rapport IA quotidien' : (conv.messages[conv.messages.length - 1].content || `[${conv.messages[conv.messages.length - 1].messageType}]`)) : ''}
+                            <p className={`text-xs truncate pr-2 flex items-center gap-1 ${last?.direction === 'incoming' ? 'text-gray-800 font-medium' : 'text-gray-500'}`}>
+                              {last?.direction === 'incoming' && <ArrowDownLeft className="w-3 h-3 text-blue-500 flex-shrink-0" />}
+                              {last?.isBot && <Bot className="w-3 h-3 text-purple-500 flex-shrink-0" />}
+                              {last?.isAiReport && <Bot className="w-3 h-3 text-purple-500 flex-shrink-0" />}
+                              {last ? (last.isAiReport ? 'Rapport IA quotidien' : (last.content || `[${last.messageType}]`)) : ''}
                             </p>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
-                              {conv.messages.some(m => m.isAiReport) && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-purple-500"><Bot className="w-3 h-3" /></span>}
+                              {conv.totalReceived > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-600"><MessageSquare className="w-3 h-3" />{conv.totalReceived}</span>}
                               {conv.totalSent > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-green-600"><CheckCircle className="w-3 h-3" />{conv.totalSent}</span>}
                               {conv.totalFailed > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-red-500"><XCircle className="w-3 h-3" />{conv.totalFailed}</span>}
                             </div>
@@ -2278,7 +2382,8 @@ const WhatsAppPage = () => {
                         </div>
                       </div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </>
             ) : (
@@ -2331,17 +2436,31 @@ const WhatsAppPage = () => {
                   <button onClick={() => setSelectedConv(null)} className="lg:hidden p-1 hover:bg-gray-100 rounded">
                     <ArrowLeft className="w-5 h-5 text-gray-600" />
                   </button>
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
+                  <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${contactRoleBadge(selectedConv.contactRole).avatar} flex items-center justify-center`}>
                     <span className="text-white font-semibold text-sm">{selectedConv.parentName ? selectedConv.parentName.charAt(0).toUpperCase() : '#'}</span>
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-gray-900">{selectedConv.parentName || selectedConv.phone}</p>
-                    <p className="text-xs text-gray-500 flex items-center gap-1"><Phone className="w-3 h-3" />{selectedConv.phone} · {selectedConv.messageCount} msg</p>
+                    <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                      {selectedConv.parentName || selectedConv.phone}
+                      {contactRoleBadge(selectedConv.contactRole).label && (
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${contactRoleBadge(selectedConv.contactRole).cls}`}>
+                          {contactRoleBadge(selectedConv.contactRole).label}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      <Phone className="w-3 h-3" />{selectedConv.phone} · {selectedConv.messageCount} msg
+                      {selectedConv.totalReceived > 0 && <span className="text-blue-600">· {selectedConv.totalReceived} reçu(s)</span>}
+                    </p>
                   </div>
+                  {selectedConv.awaitingReply && (
+                    <span className="text-[10px] px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium whitespace-nowrap">En attente de réponse</span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0 overflow-y-auto px-4 py-4 space-y-3">
                   {selectedConv.messages.map((msg, idx) => {
                     const showDate = idx === 0 || new Date(msg.createdAt).toDateString() !== new Date(selectedConv.messages[idx - 1].createdAt).toDateString();
+                    const incoming = msg.direction === 'incoming';
                     return (
                       <div key={msg.id}>
                         {showDate && (
@@ -2351,8 +2470,14 @@ const WhatsAppPage = () => {
                             </span>
                           </div>
                         )}
-                        <div className="flex justify-end">
-                          <div className={`max-w-[92%] sm:max-w-[80%] lg:max-w-[72%] rounded-lg rounded-tr-none px-3 py-2 shadow-sm ${msg.isComprehensiveReport ? 'bg-[#dbeafe] border border-blue-200' : msg.isAiReport ? 'bg-[#e8e0f3] border border-purple-200' : 'bg-[#d9fdd3]'}`}>
+                        <div className={incoming ? 'flex justify-start' : 'flex justify-end'}>
+                          <div className={`max-w-[92%] sm:max-w-[80%] lg:max-w-[72%] rounded-lg px-3 py-2 shadow-sm ${incoming ? 'rounded-tl-none bg-white border border-gray-200' : 'rounded-tr-none'} ${incoming ? '' : msg.isComprehensiveReport ? 'bg-[#dbeafe] border border-blue-200' : (msg.isAiReport || msg.isBot) ? 'bg-[#e8e0f3] border border-purple-200' : 'bg-[#d9fdd3]'}`}>
+                            {msg.isBot && (
+                              <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-purple-200">
+                                <Bot className="w-3.5 h-3.5 text-purple-600" />
+                                <span className="text-[11px] font-semibold text-purple-700">Réponse automatique du chatbot</span>
+                              </div>
+                            )}
                             {msg.isComprehensiveReport && (
                               <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-blue-200">
                                 <FileText className="w-3.5 h-3.5 text-blue-600" />
@@ -2378,9 +2503,9 @@ const WhatsAppPage = () => {
                               <p className="text-[11px] text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{msg.errorMessage}</p>
                             )}
                             <div className="flex items-center justify-end gap-1.5 mt-1">
-                              {msg.senderName && <span className={`text-[10px] mr-auto ${msg.isComprehensiveReport ? 'text-blue-500' : msg.isAiReport ? 'text-purple-500' : 'text-gray-500'}`}>{msg.senderName}</span>}
+                              {msg.senderName && <span className={`text-[10px] mr-auto ${msg.isComprehensiveReport ? 'text-blue-500' : (msg.isAiReport || msg.isBot) ? 'text-purple-500' : 'text-gray-500'}`}>{msg.senderName}</span>}
                               <span className="text-[10px] text-gray-500">{new Date(msg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-                              {statusBadge(msg.status)}
+                              {!incoming && statusBadge(msg.status)}
                             </div>
                           </div>
                         </div>
