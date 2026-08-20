@@ -87,7 +87,7 @@ const WhatsAppPage = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [detailMessage, setDetailMessage] = useState(null);
   const [showResend, setShowResend] = useState(false); // panneau « Renvoyer »
-  const [resendCriteria, setResendCriteria] = useState({ unread: true, unresponded: false, undelivered: false });
+  const [resendCriteria, setResendCriteria] = useState({ unread: true, unresponded: false, undelivered: false, wa_not_sent: false });
   const [resendChannel, setResendChannel] = useState('app'); // app | whatsapp | both
   const [resendBusy, setResendBusy] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
@@ -569,7 +569,7 @@ const WhatsAppPage = () => {
       setDetailMessage(await res.json());
       // Réinitialise le panneau « Renvoyer » à l'ouverture d'un détail
       setShowResend(false); setResendMsg('');
-      setResendCriteria({ unread: true, unresponded: false, undelivered: false });
+      setResendCriteria({ unread: true, unresponded: false, undelivered: false, wa_not_sent: false });
       setResendChannel('app');
     } catch (error) { console.error('Erreur détails:', error); }
   };
@@ -577,11 +577,14 @@ const WhatsAppPage = () => {
   // Destinataires correspondant aux critères de renvoi + canal (liste cochable).
   const resendMatchList = (recs) => {
     const crit = resendCriteria;
-    if (!crit.unread && !crit.unresponded && !crit.undelivered) return [];
+    if (!crit.unread && !crit.unresponded && !crit.undelivered && !crit.wa_not_sent) return [];
     let matched = (recs || []).filter(r =>
       (crit.unread && !r.read_at) ||
       (crit.unresponded && !r.responded_at) ||
-      (crit.undelivered && r.status !== 'sent'));
+      (crit.undelivered && r.status !== 'sent') ||
+      // WhatsApp jamais parti : `status` ne le dit pas, il passe à 'sent' dès
+      // que la notification in-app est créée. Seul wa_status suit ce canal.
+      (crit.wa_not_sent && !!r.phone_e164 && r.wa_status !== 'sent'));
     if (resendChannel === 'app') matched = matched.filter(r => r.parent_id);
     if (resendChannel === 'whatsapp') {
       const seen = new Set();
@@ -3868,6 +3871,7 @@ const WhatsAppPage = () => {
                           { k: 'unread', label: 'Non vus' },
                           { k: 'unresponded', label: 'Non répondus' },
                           { k: 'undelivered', label: 'Non distribués (échec)' },
+                          { k: 'wa_not_sent', label: 'WhatsApp jamais parti (reprise après coupure)' },
                         ].map(o => (
                           <label key={o.k} className="flex items-center gap-2 text-sm text-gray-700">
                             <input type="checkbox" checked={resendCriteria[o.k]}

@@ -772,7 +772,12 @@ router.post('/messages/:messageId/resend', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { messageId } = req.params;
-    const allowed = ['unread', 'unresponded', 'undelivered'];
+    // 'wa_not_sent' : le WhatsApp n'est jamais parti (session tombée en cours
+    // de campagne). Distinct de 'undelivered', qui se fie à `status` — lequel
+    // passe à 'sent' dès que la notification in-app est créée et masque donc
+    // l'échec WhatsApp. C'est le critère à utiliser pour reprendre un envoi
+    // interrompu sans redoubler ceux qui ont déjà reçu le message.
+    const allowed = ['unread', 'unresponded', 'undelivered', 'wa_not_sent'];
     const criteria = (Array.isArray(req.body?.criteria) ? req.body.criteria : [])
       .filter((c) => allowed.includes(c));
     if (!criteria.length) criteria.push('unread');
@@ -793,7 +798,7 @@ router.post('/messages/:messageId/resend', async (req, res) => {
     // (cases cochées côté UI) ; sinon union des critères non vus/répondus/échec.
     const { data: recs, error: rErr } = await supabaseAdmin
       .from('whatsapp_message_recipients')
-      .select('id, parent_id, phone_e164, status, read_at, responded_at')
+      .select('id, parent_id, phone_e164, status, wa_status, read_at, responded_at')
       .eq('message_id', messageId);
     if (rErr) throw rErr;
     const explicitIds = Array.isArray(req.body?.recipient_ids)
@@ -807,7 +812,9 @@ router.post('/messages/:messageId/resend', async (req, res) => {
       const match = (r) => criteria.some((c) =>
         c === 'unread' ? !r.read_at
           : c === 'unresponded' ? !r.responded_at
-          : c === 'undelivered' ? r.status !== 'sent' : false);
+          : c === 'undelivered' ? r.status !== 'sent'
+          : c === 'wa_not_sent' ? (!!r.phone_e164 && r.wa_status !== 'sent')
+          : false);
       targets = (recs || []).filter(match);
     }
     if (!wantWa) targets = targets.filter((r) => r.parent_id);        // app seul → besoin d'un parent
@@ -1274,7 +1281,7 @@ async function fetchEngagementRows(req, days) {
       msgIds,
       (chunk) => supabaseAdmin
         .from('whatsapp_message_recipients')
-        .select('message_id, parent_id, phone_e164, status, push_status, notification_id, provider_msg_id, delivered_at, read_at, read_channel, responded_at, sent_at, created_at')
+        .select('message_id, parent_id, phone_e164, status, wa_status, push_status, notification_id, provider_msg_id, delivered_at, read_at, read_channel, responded_at, sent_at, created_at')
         .in('message_id', chunk)
     );
   }

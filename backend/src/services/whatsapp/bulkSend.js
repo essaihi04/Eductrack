@@ -46,14 +46,21 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
   const { data: allRecipients, error: recError } = await supabaseAdmin
     .from('whatsapp_message_recipients')
-    .select('id, parent_id, phone_e164, status')
+    .select('id, parent_id, phone_e164, status, wa_status, notification_id')
     .eq('message_id', messageId);
 
   if (recError) throw recError;
 
-  // Reprise : on ne rejoue que ce qui n'est pas déjà parti.
-  const done = (allRecipients || []).filter((r) => r.status === 'sent');
-  const todo = (allRecipients || []).filter((r) => r.status !== 'sent');
+  // Reprise PAR CANAL. Auparavant `status` servait aux deux : dès que la
+  // notification in-app était créée, le destinataire comptait comme servi et
+  // la reprise le sautait — même si son WhatsApp n'était jamais parti. Une
+  // session tombée en cours de campagne laissait donc des centaines de parents
+  // sans message, avec un envoi affiché « terminé, 0 échec ».
+  const waPending = (r) => wantWa && r.phone_e164 && r.wa_status !== 'sent';
+  const appPending = (r) => wantPush && r.parent_id && !r.notification_id;
+
+  const todo = (allRecipients || []).filter((r) => waPending(r) || appPending(r));
+  const done = (allRecipients || []).filter((r) => !waPending(r) && !appPending(r));
 
   if (todo.length === 0) {
     await finalize(messageId, done.length, 0, allRecipients?.length || 0);
@@ -80,7 +87,9 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   // Un même numéro partagé par 2 parents ne reçoit qu'UN WhatsApp, mais chaque
   // parent garde sa notification in-app. Amorcé avec les numéros déjà servis
   // pour qu'une reprise n'envoie pas de doublon.
-  const waSentPhones = new Set(done.map((r) => r.phone_e164).filter(Boolean));
+  const waSentPhones = new Set(
+    (allRecipients || []).filter((r) => r.wa_status === 'sent').map((r) => r.phone_e164).filter(Boolean)
+  );
 
   let sentCount = done.length;
   let failedCount = 0;
@@ -92,7 +101,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
     let errorMsg = null;
 
     // 1. Canal app : notification in-app (lisible même sans push) + push
-    if (wantPush && recipient.parent_id) {
+    if (wantPush && recipient.parent_id && !recipient.notification_id) {
       try {
         const { data: notif, error: notifErr } = await supabaseAdmin
           .from('notifications')
@@ -125,8 +134,11 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
     // 2. Canal WhatsApp
     if (wantWa && recipient.phone_e164) {
+      // waSentPhones contient les numéros servis lors des passages précédents
+      // (wa_status = 'sent') ET ceux servis dans cette boucle : un parent déjà
+      // couvert n'est jamais réexpédié, et son wa_status reste 'sent'.
       if (waSentPhones.has(recipient.phone_e164)) {
-        waOk = true; // déjà envoyé à ce numéro (parents partageant un téléphone)
+        waOk = true;
       } else {
         try {
           const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message, mediaUrl, fileName });
@@ -153,6 +165,16 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
           errorMsg = [errorMsg, sendErr.message || 'Erreur réseau'].filter(Boolean).join(' | ');
         }
       }
+    }
+
+    // Déjà notifié lors d'un passage précédent : on ne renvoie rien, mais le
+    // canal app compte comme servi pour le calcul du statut global.
+    if (wantPush && recipient.parent_id && recipient.notification_id) appOk = true;
+
+    // wa_status suit le canal WhatsApp SEUL : c'est lui qui rend une reprise
+    // possible sans redoubler les envois déjà partis.
+    if (wantWa && recipient.phone_e164) {
+      patch.wa_status = waOk ? 'sent' : 'failed';
     }
 
     const reached = waOk || appOk;
