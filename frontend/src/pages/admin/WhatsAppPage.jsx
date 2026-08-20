@@ -3446,9 +3446,25 @@ const WhatsAppPage = () => {
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
                 </div>
               ) : sessionStatus?.status === 'no_session' ? (
-                <div className="text-center py-6 space-y-2">
+                <div className="text-center py-6 space-y-3">
                   <p className="text-gray-500 text-sm">Aucun numéro connecté.</p>
-                  <p className="text-gray-500 text-sm">Utilisez la <strong>connexion via API officielle</strong> ci-dessous. 👇</p>
+                  <p className="text-gray-500 text-sm">
+                    L'<strong>API officielle</strong> ci-dessous est recommandée (boutons natifs, pas de risque de blocage).
+                  </p>
+                  {/* Le QR Baileys reste une entrée à part entière : c'est la
+                      seule option pour une école qui n'a pas de compte Meta
+                      Business. Elle était uniquement accessible en dépliant un
+                      lien gris en bas de page — introuvable en pratique. */}
+                  <div className="pt-1">
+                    <button
+                      onClick={() => { setShowLegacy(true); setShowCreateForm(true); }}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                      <QrCode className="w-4 h-4" /> Connecter un numéro par QR code (Baileys)
+                    </button>
+                    <p className="text-[11px] text-gray-400 mt-1.5">
+                      Sans compte Meta Business : scan du QR depuis WhatsApp, comme WhatsApp Web.
+                    </p>
+                  </div>
                 </div>
               ) : sessionStatus ? (
                 <div className="space-y-4">
