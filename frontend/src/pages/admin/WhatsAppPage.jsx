@@ -164,6 +164,11 @@ const WhatsAppPage = () => {
   // true quand des credentials existent mais sont refusés par WhatsApp :
   // aucun QR ne sortira tant qu'ils ne sont pas purgés (réappairage).
   const [qrNeedsRepair, setQrNeedsRepair] = useState(false);
+  // Une seule demande automatique de QR par épisode de déconnexion.
+  const qrAutoRequestedRef = useRef(false);
+  // Chargement du RÉAPPAIRAGE seul : « Régénérer le QR » ne doit pas être
+  // désactivé par une requête de QR ordinaire, c'est la porte de sortie.
+  const [qrRepairing, setQrRepairing] = useState(false);
   const lastQrSrcRef = useRef(null); // dernière source QR affichée (anti-clignotement)
   // Connexion par code (alternative au QR, utile sur iPhone)
   const [showPairing, setShowPairing] = useState(false);
@@ -1157,7 +1162,7 @@ const WhatsAppPage = () => {
   // clignote/rechargerait toutes les 3s et serait illisible au scan.
   const fetchQR = useCallback(async (silent = false, force = false) => {
     if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); lastQrSrcRef.current = null; }
-    if (force) setQrNeedsRepair(false);
+    if (force) { setQrNeedsRepair(false); setQrRepairing(true); qrAutoRequestedRef.current = true; }
     try {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr${force ? '?force=1' : ''}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -1183,7 +1188,7 @@ const WhatsAppPage = () => {
     } catch (error) {
       console.error('Erreur QR:', error);
       if (!silent) setQrError('Erreur de connexion');
-    } finally { if (!silent) setQrLoading(false); }
+    } finally { if (!silent) setQrLoading(false); if (force) setQrRepairing(false); }
   }, [apiUrl]);
 
   // Connexion par code (alternative au QR) — saisie du numéro → code à 8 car.
@@ -1233,16 +1238,27 @@ const WhatsAppPage = () => {
     if (!needsPolling) return;
 
     const statusTimer = setInterval(() => { fetchStatus(true); }, 2000);
-    const qrTimer = setInterval(() => { fetchQR(true); }, 3000);
-    return () => { clearInterval(statusTimer); clearInterval(qrTimer); };
-  }, [needsPolling, fetchStatus, fetchQR]);
+    // Tant que l'appairage est refusé, aucun QR ne PEUT sortir : continuer à
+    // interroger relancerait une tentative de connexion côté serveur toutes
+    // les 3 s, pour rien. On garde uniquement le suivi du statut, qui détectera
+    // la reconnexion après le réappairage.
+    const qrTimer = qrNeedsRepair ? null : setInterval(() => { fetchQR(true); }, 3000);
+    return () => { clearInterval(statusTimer); if (qrTimer) clearInterval(qrTimer); };
+  }, [needsPolling, qrNeedsRepair, fetchStatus, fetchQR]);
 
-  // Auto-affichage du QR dès qu'une session existe mais n'est pas connectée
+  // Auto-affichage du QR dès qu'une session existe mais n'est pas connectée.
+  //
+  // UNE SEULE fois par épisode de déconnexion (qrAutoRequestedRef). Sans ce
+  // garde, l'effet se relançait à chaque bascule de qrLoading — la requête
+  // repartait aussitôt terminée, qrLoading restait vrai en permanence, et TOUS
+  // les boutons de la carte (dont « Régénérer le QR », le seul qui débloque la
+  // situation) restaient désactivés indéfiniment.
   useEffect(() => {
-    if (needsPolling && !qrCode && !qrLoading) {
-      fetchQR(false);
-    }
-  }, [needsPolling, qrCode, qrLoading, fetchQR]);
+    if (!needsPolling) { qrAutoRequestedRef.current = false; return; }
+    if (qrCode || qrLoading || qrNeedsRepair || qrAutoRequestedRef.current) return;
+    qrAutoRequestedRef.current = true;
+    fetchQR(false);
+  }, [needsPolling, qrCode, qrLoading, qrNeedsRepair, fetchQR]);
 
   const handleCreateSession = async () => {
     if (!newSessionName || !newSessionPhone) { setCreateError('Nom et numéro requis'); return; }
@@ -3672,9 +3688,9 @@ const WhatsAppPage = () => {
                           if (!confirm("Régénérer le QR ? L'appairage actuel sera supprimé et remplacé par le nouveau scan. À faire uniquement si aucun QR n'apparaît.")) return;
                           fetchQR(false, true);
                         }}
-                        disabled={qrLoading}
+                        disabled={qrRepairing}
                         className="flex items-center gap-1 px-3 py-1.5 text-sm border border-amber-400 text-amber-800 bg-white rounded-lg hover:bg-amber-50 disabled:opacity-50">
-                        <QrCode className="w-4 h-4" /> Régénérer le QR
+                        <QrCode className={`w-4 h-4 ${qrRepairing ? 'animate-spin' : ''}`} /> {qrRepairing ? 'Régénération…' : 'Régénérer le QR'}
                       </button>
                     )}
                   </div>
