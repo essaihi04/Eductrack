@@ -6,6 +6,7 @@ import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/wh
 import {
   sendText, sendMediaBuffer,
   startSession, logoutSession, getStatus, getQrDataUrl,
+  resetForPairing, hasAuthState,
   requestPairingCode,
   getStats as getAntiBanStats,
 } from '../services/whatsapp/index.js';
@@ -1549,7 +1550,18 @@ router.get('/session-qr', async (req, res) => {
     if (status.connected) {
       return res.json({ success: false, error: 'Session déjà connectée, pas besoin de QR code', connected: true });
     }
-    if (['disconnected', 'logged_out', 'needs_reconnect'].includes(status.status)) {
+
+    // ?force=1 → RÉAPPAIRAGE. Baileys n'émet un QR que s'il n'a aucun
+    // credential : tant que creds.json existe il retente la connexion avec, et
+    // si WhatsApp les a invalidés il boucle sur l'échec sans jamais produire de
+    // QR — l'écran tournait indéfiniment. Purger l'appairage est le seul moyen
+    // d'obtenir un nouveau code. Réservé à un clic explicite de l'admin : le
+    // rafraîchissement automatique de la page ne doit jamais détruire une
+    // session qui n'a qu'une coupure réseau passagère.
+    const force = req.query.force === '1' || req.query.force === 'true';
+    if (force) {
+      await resetForPairing(schoolId, { onIncoming: handleBaileysIncoming });
+    } else if (['disconnected', 'logged_out', 'needs_reconnect'].includes(status.status)) {
       await startSession(schoolId, { onIncoming: handleBaileysIncoming });
     }
 
@@ -1567,7 +1579,17 @@ router.get('/session-qr', async (req, res) => {
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    res.json({ success: false, error: 'QR code non disponible. Réessayez dans quelques secondes.' });
+    // Pas de QR alors que des credentials existent : ils sont refusés par
+    // WhatsApp et aucun QR ne sortira tant qu'ils ne sont pas purgés. On le dit
+    // au front pour qu'il propose le réappairage au lieu d'un spinner sans fin.
+    const needsRepair = !force && hasAuthState(schoolId);
+    res.json({
+      success: false,
+      needsRepair,
+      error: needsRepair
+        ? "L'appairage enregistré est refusé par WhatsApp : aucun QR ne peut être généré tant qu'il n'est pas remplacé. Utilisez « Régénérer le QR »."
+        : 'QR code non disponible. Réessayez dans quelques secondes.',
+    });
   } catch (error) {
     console.error('Erreur QR code:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });

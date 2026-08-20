@@ -685,6 +685,58 @@ export function startSessionWatchdog(onIncoming, intervalMs = 15 * 60_000) {
   }, intervalMs).unref?.();
 }
 
+
+/**
+ * Indique si des credentials existent sur le disque pour cette école.
+ */
+export function hasAuthState(schoolId) {
+  try {
+    return fs.existsSync(path.join(AUTH_ROOT, String(schoolId), 'creds.json'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Repart d'un appairage NEUF : purge les credentials puis relance une session.
+ *
+ * POURQUOI C'EST INDISPENSABLE
+ * ----------------------------
+ * Baileys n'émet un QR que s'il n'a AUCUN credential enregistré. Tant que
+ * creds.json est là, il tente de se connecter avec — et si WhatsApp les a
+ * invalidés (401 à répétition), il boucle sur l'échec sans jamais produire de
+ * QR. L'écran « Scannez le QR code » tournait donc indéfiniment : la seule
+ * façon d'obtenir un nouveau code est de supprimer d'abord l'ancien appairage.
+ *
+ * À la différence de logoutSession(), on n'appelle PAS sock.logout() : il
+ * s'adresse au serveur WhatsApp pour délier l'appareil, ce qui échoue (ou
+ * traîne) sur une session déjà morte. L'appareil est de toute façon déjà
+ * invalide côté téléphone. On garde aussi la ligne whatsapp_school_sessions,
+ * pour ne pas perdre le rattachement de l'école à son numéro.
+ */
+export async function resetForPairing(schoolId, { onIncoming } = {}) {
+  const entry = sockets.get(schoolId);
+  if (entry) {
+    if (entry.retryTimer) { clearTimeout(entry.retryTimer); entry.retryTimer = null; }
+    if (entry.sock) destroySocket(entry.sock);
+  }
+  sockets.delete(schoolId);
+
+  try {
+    fs.rmSync(path.join(AUTH_ROOT, String(schoolId)), { recursive: true, force: true });
+    console.log(`[baileys][${schoolId}] credentials purgés — réappairage demandé`);
+  } catch (e) {
+    console.error(`[baileys][${schoolId}] purge auth:`, e.message);
+  }
+
+  await supabaseAdmin
+    .from('whatsapp_school_sessions')
+    .update({ status: 'disconnected' })
+    .eq('school_id', schoolId);
+
+  return startSession(schoolId, { onIncoming });
+}
+
 /**
  * Démarre toutes les sessions des écoles déjà appariées (au boot du serveur).
  */

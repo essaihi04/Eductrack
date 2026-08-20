@@ -161,6 +161,9 @@ const WhatsAppPage = () => {
   const [qrCode, setQrCode] = useState(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState('');
+  // true quand des credentials existent mais sont refusés par WhatsApp :
+  // aucun QR ne sortira tant qu'ils ne sont pas purgés (réappairage).
+  const [qrNeedsRepair, setQrNeedsRepair] = useState(false);
   const lastQrSrcRef = useRef(null); // dernière source QR affichée (anti-clignotement)
   // Connexion par code (alternative au QR, utile sur iPhone)
   const [showPairing, setShowPairing] = useState(false);
@@ -1152,12 +1155,14 @@ const WhatsAppPage = () => {
   // (utilisé pour le polling auto en arrière-plan). On ne remplace l'image QR que
   // si la SOURCE a réellement changé (rotation Baileys ~20s), sinon l'image
   // clignote/rechargerait toutes les 3s et serait illisible au scan.
-  const fetchQR = useCallback(async (silent = false) => {
+  const fetchQR = useCallback(async (silent = false, force = false) => {
     if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); lastQrSrcRef.current = null; }
+    if (force) setQrNeedsRepair(false);
     try {
       const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr${force ? '?force=1' : ''}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
+      setQrNeedsRepair(Boolean(data.needsRepair));
       // Nouveau backend Baileys : retourne qrDataUrl (image PNG déjà encodée)
       // Ancien backend Wasender : retournait qrString (texte brut à transformer)
       if (data.success && data.qrDataUrl) {
@@ -3654,13 +3659,35 @@ const WhatsAppPage = () => {
                     </p>
                   </div>
                 )}
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                   <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2"><QrCode className="w-5 h-5" /> Scanner le QR Code</h2>
-                  <button onClick={fetchQR} disabled={qrLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                    <RefreshCw className={`w-4 h-4 ${qrLoading ? 'animate-spin' : ''}`} /> {qrCode ? 'Rafraîchir' : 'Obtenir le QR'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => fetchQR(false, false)} disabled={qrLoading}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
+                      <RefreshCw className={`w-4 h-4 ${qrLoading ? 'animate-spin' : ''}`} /> {qrCode ? 'Rafraîchir' : 'Obtenir le QR'}
+                    </button>
+                    {(qrNeedsRepair || needsQrScan) && (
+                      <button
+                        onClick={() => {
+                          if (!confirm("Régénérer le QR ? L'appairage actuel sera supprimé et remplacé par le nouveau scan. À faire uniquement si aucun QR n'apparaît.")) return;
+                          fetchQR(false, true);
+                        }}
+                        disabled={qrLoading}
+                        className="flex items-center gap-1 px-3 py-1.5 text-sm border border-amber-400 text-amber-800 bg-white rounded-lg hover:bg-amber-50 disabled:opacity-50">
+                        <QrCode className="w-4 h-4" /> Régénérer le QR
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {qrNeedsRepair && !qrCode && (
+                  <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-100/60 p-3 text-sm text-amber-900">
+                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <p>
+                      WhatsApp refuse l'appairage enregistré : aucun QR ne peut être produit tant
+                      qu'il n'est pas remplacé. Cliquez sur <strong>Régénérer le QR</strong>.
+                    </p>
+                  </div>
+                )}
                 {qrLoading ? (
                   <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div></div>
                 ) : qrCode ? (
