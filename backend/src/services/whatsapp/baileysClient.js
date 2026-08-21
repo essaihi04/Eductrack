@@ -27,6 +27,7 @@ import path from 'path';
 import fs from 'fs';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { markWaAck } from '../communicationTracking.js';
+import { ensureWarmupStarted, resetWarmup } from './antiBan.js';
 
 const AUTH_ROOT = process.env.WHATSAPP_AUTH_DIR || path.join(process.cwd(), 'data', 'whatsapp_auth');
 
@@ -279,6 +280,11 @@ export async function startSession(schoolId, { onIncoming } = {}) {
           status: 'connected',
           last_connected_at: new Date().toISOString(),
         }, { onConflict: 'school_id' });
+
+      // Démarre la montée en charge si elle ne l'est pas déjà. Sans cet appel
+      // `warmup_started_at` restait NULL pour tout le monde et le plafond
+      // journalier serait figé à vie sur celui du premier jour.
+      await ensureWarmupStarted(schoolId);
     }
 
     if (connection === 'close') {
@@ -733,6 +739,10 @@ export async function resetForPairing(schoolId, { onIncoming } = {}) {
     .from('whatsapp_school_sessions')
     .update({ status: 'disconnected' })
     .eq('school_id', schoolId);
+
+  // Nouveau scan de QR = nouvel appareil lié aux yeux de WhatsApp : le numéro
+  // perd le bénéfice de son historique et doit remonter en charge doucement.
+  await resetWarmup(schoolId);
 
   return startSession(schoolId, { onIncoming });
 }

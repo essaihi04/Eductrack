@@ -3828,6 +3828,41 @@ const WhatsAppPage = () => {
               </div>
             )}
 
+            {/* Montée en charge : sans cet affichage, un envoi qui s'arrête à
+                20 messages passerait pour une panne. */}
+            {sessionStatus?.connected && sessionStatus?.anti_ban?.daily_limit != null && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-900 flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4" /> Montée en charge du numéro
+                    </p>
+                    <p className="text-[11px] text-indigo-700/80 mt-0.5">
+                      Après un nouvel appairage, WhatsApp traite le numéro comme neuf : le plafond
+                      remonte sur une semaine (20 → 40 → 80 → 160 → 300 → 500 → 800 par jour).
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-indigo-900 leading-none">
+                      {sessionStatus.anti_ban.sent_today}
+                      <span className="text-sm font-medium text-indigo-500"> / {sessionStatus.anti_ban.daily_limit}</span>
+                    </p>
+                    <p className="text-[11px] text-indigo-600 mt-0.5">
+                      {sessionStatus.anti_ban.remaining} message(s) restant(s) aujourd'hui
+                    </p>
+                  </div>
+                </div>
+                <div className="w-full bg-white/70 rounded-full h-1.5 mt-3">
+                  <div className="bg-indigo-500 h-1.5 rounded-full transition-all"
+                    style={{ width: `${Math.min(100, (sessionStatus.anti_ban.sent_today / Math.max(1, sessionStatus.anti_ban.daily_limit)) * 100)}%` }} />
+                </div>
+                <p className="text-[11px] text-indigo-700/70 mt-2">
+                  Le plafond atteint ne fait pas échouer les envois : la campagne se met en pause
+                  et reprend d'elle-même le lendemain, là où elle s'était arrêtée.
+                </p>
+              </div>
+            )}
+
             {sessionStatus?.connected && (
               <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg border border-green-200">
                 <CheckCircle className="w-6 h-6 text-green-600" />

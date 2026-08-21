@@ -54,14 +54,21 @@ const CONFIG = {
   DISTRACTION_PROBABILITY: 0.12, // ~1 message sur 8
   DISTRACTION_MIN_MS: 20_000,
   DISTRACTION_MAX_MS: 75_000,
-  // Quota journalier — DÉSACTIVÉ (numéros déjà chauffés en production).
-  // La protection anti-ban repose uniquement sur :
-  //   - le délai humain entre messages (waitHumanDelay)
-  //   - la pause forcée après erreur grave (timelock 463, 401, 403)
-  //   - la variation de contenu (zero-width space)
-  // Si besoin de réactiver le warm-up, mettre ENABLE_DAILY_QUOTA à true.
-  ENABLE_DAILY_QUOTA: false,
-  WARMUP_DAYS: [80, 150, 250, 400, 600, 800, 1000],
+  // Quota journalier avec montée en charge — RÉACTIVÉ.
+  //
+  // Il avait été coupé au motif que « les numéros sont déjà chauffés en
+  // production ». Ce n'est plus vrai après un réappairage : WhatsApp traite un
+  // appareil fraîchement relié comme suspect, surtout sur un numéro qui a un
+  // historique d'envoi de masse. Un blocage de 4 h est survenu après SEULEMENT
+  // 4 messages, le lendemain d'un nouveau scan de QR.
+  //
+  // Le compteur repart donc de zéro à chaque réappairage (resetWarmup, appelé
+  // par resetForPairing) et la rampe redémarre au jour 1.
+  ENABLE_DAILY_QUOTA: true,
+  // Rampe volontairement basse au départ : l'ancienne commençait à 80/jour,
+  // beaucoup trop pour un appareil qui vient d'être relié.
+  // J1 20 · J2 40 · J3 80 · J4 160 · J5 300 · J6 500 · J7 800 · puis régime.
+  WARMUP_DAYS: [20, 40, 80, 160, 300, 500, 800],
   STEADY_DAILY_LIMIT: 1000,
   // Plage horaire autorisée (heure locale école, 24h)
   // 7h–23h : les envois sortants (notifications, communications planifiées)
@@ -405,16 +412,50 @@ export function processOutgoingText(text) {
  * Démarre / reset le warm-up pour une école (appelé à la 1re connexion).
  */
 export async function ensureWarmupStarted(schoolId) {
-  const { data } = await supabaseAdmin
-    .from('whatsapp_school_sessions')
-    .select('warmup_started_at')
-    .eq('school_id', schoolId)
-    .single();
-  if (!data?.warmup_started_at) {
+  try {
+    const { data } = await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .select('warmup_started_at')
+      .eq('school_id', schoolId)
+      .maybeSingle();
+    if (!data?.warmup_started_at) {
+      await supabaseAdmin
+        .from('whatsapp_school_sessions')
+        .update({ warmup_started_at: new Date().toISOString() })
+        .eq('school_id', schoolId);
+      console.log(`[anti-ban][${schoolId}] chauffe démarrée — plafond du jour : ${CONFIG.WARMUP_DAYS[0]} messages`);
+    }
+  } catch (e) {
+    // Ne jamais empêcher une connexion à cause du compteur de chauffe.
+    console.error(`[anti-ban][${schoolId}] démarrage de la chauffe :`, e.message);
+  }
+}
+
+/**
+ * Remet la chauffe à zéro : à appeler lors d'un RÉAPPAIRAGE.
+ *
+ * Un nouveau scan de QR crée un nouvel appareil lié aux yeux de WhatsApp. Le
+ * numéro perd le bénéfice de son historique et doit remonter en charge
+ * progressivement, sinon quelques messages suffisent à déclencher un blocage.
+ * La rampe repart au jour 1 à la prochaine connexion réussie.
+ */
+export async function resetWarmup(schoolId) {
+  try {
     await supabaseAdmin
       .from('whatsapp_school_sessions')
-      .update({ warmup_started_at: new Date().toISOString() })
+      .update({ warmup_started_at: null })
       .eq('school_id', schoolId);
+    // Le compteur du jour repart aussi de zéro : les messages déjà envoyés
+    // l'ont été sous l'ancien appairage.
+    const today = new Date().toISOString().slice(0, 10);
+    await supabaseAdmin
+      .from('whatsapp_quota_daily')
+      .delete()
+      .eq('school_id', schoolId)
+      .eq('day', today);
+    console.log(`[anti-ban][${schoolId}] chauffe réinitialisée (réappairage) — reprise à ${CONFIG.WARMUP_DAYS[0]} messages/jour`);
+  } catch (e) {
+    console.error(`[anti-ban][${schoolId}] réinitialisation de la chauffe :`, e.message);
   }
 }
 

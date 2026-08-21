@@ -169,11 +169,12 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
             waOk = true;
             waSentPhones.add(recipient.phone_e164);
             patch.provider_msg_id = String(result.data?.msgId || '');
-          } else if (result.reason === 'out_of_hours' || result.reason === 'paused' || result.reason === 'session_down') {
+          } else if (result.reason === 'out_of_hours' || result.reason === 'paused' || result.reason === 'session_down' || result.reason === 'daily_quota_exceeded') {
             // Refus temporaire, pas un échec du destinataire : avec l'envoi par
             // vagues une campagne s'étale sur plusieurs heures et franchit la
-            // limite de 23 h, tombe sur une pause anti-ban, ou perd la session
-            // WhatsApp en cours de route. Les marquer en échec les priverait
+            // limite de 23 h, tombe sur une pause anti-ban, atteint le quota
+            // de chauffe du jour, ou perd la session WhatsApp en cours de
+            // route. Les marquer en échec les priverait
             // définitivement du message. On interrompt : le job reprendra une
             // fois la session revenue, et les destinataires déjà servis sont
             // ignorés (status = 'sent').

@@ -529,9 +529,10 @@ router.post('/send', async (req, res) => {
         // Chaque reprise refusée consomme une tentative alors qu'elle n'a rien
         // fait ; avec les 3 tentatives par défaut le job serait abandonné en
         // trois minutes et les parents restants ne recevraient jamais le
-        // message. Le délai entre tentatives croît (1 min, 2 min, 3 min…),
-        // 40 tentatives couvrent donc largement une nuit.
-        maxAttempts: 40,
+        // message. Le délai entre tentatives croît (1 min, 2 min, 3 min…) :
+        // 60 tentatives cumulent ~30 h, de quoi traverser une nuit ET une
+        // suspension pour quota de chauffe atteint, qui attend le lendemain.
+        maxAttempts: 60,
       });
     } catch (queueError) {
       // Table jobs absente (ADD_JOBS_QUEUE.sql pas encore exécuté) : on garde le
@@ -917,7 +918,7 @@ router.post('/messages/:messageId/resend', async (req, res) => {
         runAfter,
         // Une relance s'étale sur des heures et se suspend hors plage horaire
         // ou session tombée ; chaque reprise refusée consomme une tentative.
-        maxAttempts: 40,
+        maxAttempts: 60,
       });
     } catch (queueError) {
       queued = false;
