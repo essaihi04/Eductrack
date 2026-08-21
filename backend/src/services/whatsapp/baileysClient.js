@@ -305,6 +305,12 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       // `warmup_started_at` restait NULL pour tout le monde et le plafond
       // journalier serait figé à vie sur celui du premier jour.
       await ensureWarmupStarted(schoolId);
+
+      // Un même numéro WhatsApp appairé à DEUX écoles = deux appareils
+      // concurrents sur un seul compte. WhatsApp en éjecte un (401), le
+      // watchdog le relance, il éjecte l'autre : va-et-vient sans fin qui
+      // finit par faire bannir le numéro.
+      await detectNumberConflict(schoolId, me);
     }
 
     if (connection === 'close') {
@@ -601,6 +607,79 @@ export async function checkNumberExists(schoolId, phone) {
 
 
 /**
+ * Repère un numéro WhatsApp partagé par deux écoles et fait céder la plus
+ * ancienne.
+ *
+ * Aucun garde n'existait à ce niveau : la protection anti-doublon de socket
+ * agit PAR ÉCOLE (`entry.starting`, `destroySocket`), elle ne voyait donc pas
+ * deux écoles différentes réclamant le même compte WhatsApp.
+ *
+ * Arbitrage : la connexion qui vient de s'ouvrir gagne — c'est le résultat de
+ * l'action humaine la plus récente, un scan de QR. L'autre école est mise en
+ * `conflict`, ce qui la sort du va-et-vient : le watchdog ignore cet état, elle
+ * ne se reconnectera donc plus tant qu'un administrateur n'aura pas tranché.
+ */
+async function detectNumberConflict(schoolId, phone) {
+  if (!phone) return;
+  try {
+    const { data: others } = await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .select('school_id, phone_number')
+      .eq('phone_number', phone)
+      .neq('school_id', schoolId);
+    if (!others || others.length === 0) return;
+
+    for (const other of others) {
+      console.error(
+        `[baileys][${schoolId}] ⚠️ CONFLIT DE NUMÉRO : ${phone} est aussi appairé à l'école ` +
+        `${other.school_id}. Deux appareils sur un même compte WhatsApp = éjection mutuelle (401) ` +
+        `en boucle, et risque de bannissement. L'école ${other.school_id} est mise en pause.`
+      );
+
+      const otherEntry = sockets.get(other.school_id);
+      if (otherEntry) {
+        if (otherEntry.retryTimer) { clearTimeout(otherEntry.retryTimer); otherEntry.retryTimer = null; }
+        if (otherEntry.sock) destroySocket(otherEntry.sock);
+        otherEntry.sock = null;
+        otherEntry.status = 'conflict';
+        otherEntry.lastError = `Numéro ${phone} déjà utilisé par une autre école`;
+      }
+
+      await supabaseAdmin
+        .from('whatsapp_school_sessions')
+        .update({ status: 'conflict' })
+        .eq('school_id', other.school_id);
+
+      await notifyAdminsNumberConflict(other.school_id, phone);
+    }
+  } catch (e) {
+    console.error(`[baileys][${schoolId}] détection de conflit de numéro :`, e.message);
+  }
+}
+
+/** Prévient les admins de l'école mise en pause pour cause de numéro partagé. */
+async function notifyAdminsNumberConflict(schoolId, phone) {
+  try {
+    const { data: admins } = await supabaseAdmin
+      .from('profiles').select('id').eq('school_id', schoolId)
+      .in('role', ['admin', 'school_admin']);
+    if (!admins || admins.length === 0) return;
+    await supabaseAdmin.from('notifications').insert(
+      admins.map((a) => ({
+        user_id: a.id,
+        title: 'WhatsApp : numéro déjà utilisé',
+        message: `Le numéro ${phone} vient d'être appairé à une autre école. Une même ligne WhatsApp ne peut pas servir deux établissements : les deux se déconnecteraient en boucle. Appairez un numéro distinct depuis Communication → Connexion.`,
+        type: 'system',
+        school_id: schoolId,
+        data: { kind: 'whatsapp_number_conflict', phone },
+      }))
+    );
+  } catch (e) {
+    console.error(`[baileys][${schoolId}] alerte conflit :`, e.message);
+  }
+}
+
+/**
  * Prévient les administrateurs de l'école qu'il faut rescanner le QR.
  *
  * Un 401 épuisé n'est PAS rattrapable automatiquement : WhatsApp a invalidé les
@@ -704,7 +783,9 @@ export function startSessionWatchdog(onIncoming, intervalMs = 15 * 60_000) {
 
       // Session vivante, en cours d'appairage, bannie ou déconnectée par
       // l'admin : on ne touche à rien.
-      if (['connected', 'connecting', 'qr', 'banned'].includes(entry.status)) continue;
+      // 'conflict' : numéro partagé avec une autre école. Relancer relancerait
+      // le va-et-vient d'éjections — un humain doit d'abord changer de numéro.
+      if (['connected', 'connecting', 'qr', 'banned', 'conflict'].includes(entry.status)) continue;
       if (entry.adminLogout) continue;
       // Une reconnexion est déjà planifiée par le backoff : on la laisse faire.
       if (entry.retryTimer) continue;
