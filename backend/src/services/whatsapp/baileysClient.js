@@ -105,6 +105,26 @@ const getWaWebVersion = async () => {
   return version;
 };
 
+/**
+ * Dernière opération demandée au socket, par école.
+ *
+ * Quand WhatsApp coupe la connexion, le log disait seulement
+ * « Déconnecté code=428 » — sans jamais indiquer ce que l'application était en
+ * train de faire. Impossible de distinguer une coupure réseau d'un appel qui
+ * déplaît au serveur. On mémorise donc la dernière opération et on la joint au
+ * message de déconnexion.
+ */
+export function markOp(schoolId, label) {
+  const entry = sockets.get(schoolId);
+  if (entry) entry.lastOp = { label, at: Date.now() };
+}
+
+const describeLastOp = (entry) => {
+  if (!entry?.lastOp) return 'aucune';
+  const ago = Math.round((Date.now() - entry.lastOp.at) / 1000);
+  return `${entry.lastOp.label} il y a ${ago}s`;
+};
+
 // Passe à true dès qu'un SIGINT/SIGTERM arrive : plus aucune reconnexion n'est
 // planifiée, sinon on recréerait des sockets pendant que le process s'éteint —
 // c'est exactement ce qui laisse des credentials à moitié écrits sur le disque
@@ -299,7 +319,11 @@ export async function startSession(schoolId, { onIncoming } = {}) {
       const isRestartRequired = code === DisconnectReason.restartRequired || code === 515;
 
       entry.lastError = lastDisconnect?.error?.message || `code=${code}`;
-      console.warn(`[baileys][${schoolId}] Déconnecté code=${code} loggedOut=${isLoggedOut} banned=${isBanned} restartRequired=${isRestartRequired}`);
+      console.warn(
+        `[baileys][${schoolId}] Déconnecté code=${code} loggedOut=${isLoggedOut} banned=${isBanned} ` +
+        `restartRequired=${isRestartRequired} | dernière opération: ${describeLastOp(entry)} | ` +
+        `motif: ${entry.lastError}`
+      );
 
       // Si l'admin a déclenché un logoutSession() explicite, on ne reconnecte
       // surtout pas (le flag est posé juste avant le logout).
@@ -567,6 +591,7 @@ export async function checkNumberExists(schoolId, phone) {
   if (!sock) return null;
   try {
     const jid = phoneToJid(phone);
+    markOp(schoolId, `onWhatsApp ${phone}`);
     const [result] = await sock.onWhatsApp(jid);
     return result?.exists ? result.jid : null;
   } catch {

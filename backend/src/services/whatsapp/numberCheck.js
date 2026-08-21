@@ -24,7 +24,13 @@
  */
 
 import { supabaseAdmin } from '../../config/supabase.js';
-import { getSocket, phoneToJid } from './baileysClient.js';
+import { getSocket, phoneToJid, markOp } from './baileysClient.js';
+
+// Interrupteur d'urgence : WA_NUMBER_CHECK=off désactive l'interrogation de
+// WhatsApp avant envoi, sans redéploiement. `onWhatsApp` est une requête USync
+// au serveur ; si elle s'avère mal supportée par une session, il faut pouvoir
+// la couper immédiatement sans perdre le reste de la protection anti-ban.
+const CHECK_ENABLED = String(process.env.WA_NUMBER_CHECK || 'on').toLowerCase() !== 'off';
 
 // Cache mémoire : évite un aller-retour Supabase par envoi.
 const memCache = new Map(); // phone_e164 -> { exists: bool, at: number }
@@ -47,6 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *          null = indéterminé (ne jamais bloquer l'envoi sur un null).
  */
 export async function isOnWhatsApp(schoolId, phone) {
+  if (!CHECK_ENABLED) return null;   // null = indéterminé → l'envoi se fait
   if (!phone) return null;
   const e164 = String(phone).startsWith('+') ? String(phone) : `+${String(phone).replace(/\D/g, '')}`;
 
@@ -84,6 +91,7 @@ export async function isOnWhatsApp(schoolId, phone) {
 
   let exists;
   try {
+    markOp(schoolId, `vérification numéro ${e164}`);
     const [result] = await sock.onWhatsApp(phoneToJid(e164));
     exists = !!result?.exists;
   } catch (e) {

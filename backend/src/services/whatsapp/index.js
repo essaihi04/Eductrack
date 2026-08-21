@@ -22,6 +22,7 @@ import {
 } from './antiBan.js';
 import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
 import { isOnWhatsApp } from './numberCheck.js';
+import { markOp } from './baileysClient.js';
 
 // Écrire à des numéros qui ne sont pas sur WhatsApp est l'un des signaux
 // anti-spam les plus lourds côté Meta. On refuse l'envoi UNIQUEMENT sur un
@@ -115,6 +116,7 @@ export async function sendText(schoolId, phone, text, opts = {}) {
 
   try {
     const finalText = processOutgoingText(text);
+    markOp(schoolId, `envoi texte ${phone}`);
     const sent = await sock.sendMessage(jid, { text: finalText });
     await recordSent(schoolId);
     return ok(sent?.key?.id || null);
