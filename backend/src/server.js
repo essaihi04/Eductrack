@@ -53,8 +53,6 @@ import inscriptionsRoutes from './routes/inscriptions.routes.js';
 import { startInvoiceScheduler } from './services/invoiceScheduler.js';
 import { startJobRunner, registerJobHandler } from './services/jobs/index.js';
 import { runBulkSend, WHATSAPP_BULK_SEND } from './services/whatsapp/bulkSend.js';
-import { bootstrapAllSessions, shutdownAllSessions, startSessionWatchdog } from './services/whatsapp/index.js';
-import { handleBaileysIncoming } from './services/whatsapp/chatbot/index.js';
 
 dotenv.config();
 
@@ -166,37 +164,17 @@ const server = app.listen(PORT, async () => {
   // l'arrêt précédent (déploiement, crash) au lieu de les perdre.
   registerJobHandler(WHATSAPP_BULK_SEND, runBulkSend);
   startJobRunner();
-
-  // Reconnecte automatiquement toutes les sessions WhatsApp Baileys
-  // pour les écoles déjà appairées (auth state présent sur disque).
-  try {
-    await bootstrapAllSessions(handleBaileysIncoming);
-    console.log('✅ Sessions WhatsApp Baileys initialisées');
-  } catch (e) {
-    console.error('❌ Erreur bootstrap WhatsApp:', e.message);
-  }
-
-  // Filet de sécurité : une session tombée et parquée (401 épuisé) ne
-  // réessayait plus jusqu'au redémarrage suivant du serveur.
-  startSessionWatchdog(handleBaileysIncoming);
 });
 
 // ── Arrêt propre ────────────────────────────────────────────────────────────
-// pm2 restart envoie un SIGINT. Sans ce handler, le process mourait avec ses
-// WebSockets WhatsApp ouverts et, si une écriture de credentials était en
-// cours, le fichier d'auth restait tronqué → 401 au démarrage suivant et
-// session perdue jusqu'à un nouveau scan de QR.
+// pm2 restart envoie un SIGINT : on ferme le serveur HTTP avant de sortir pour
+// laisser les requêtes en cours se terminer.
 let shuttingDown = false;
 const gracefulShutdown = async (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[shutdown] ${signal} reçu — fermeture propre...`);
   server.close();
-  try {
-    await shutdownAllSessions();
-  } catch (e) {
-    console.error('[shutdown] sessions WhatsApp:', e.message);
-  }
   console.log('[shutdown] terminé');
   process.exit(0);
 };

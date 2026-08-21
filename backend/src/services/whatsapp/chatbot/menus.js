@@ -5,16 +5,15 @@
  *  - id : code court tapé par l'utilisateur (1, 2, p1, f3, ...)
  *  - action : nom de la fonction de réponse à appeler
  *
- * On envoie d'abord en texte numéroté (toujours fonctionnel).
- * En option, on tente aussi un `listMessage` Baileys qui affiche un menu
- * cliquable sur les versions WhatsApp qui le supportent.
+ * Le rendu par défaut est la LISTE cliquable native de l'API Cloud officielle.
+ * Si elle échoue (hors fenêtre 24 h, numéro non rattaché), on retombe sur le
+ * menu texte numéroté, auquel l'utilisateur peut toujours répondre par le
+ * numéro de l'option.
  */
 
 import * as A from './answers.js';
-import { getSocket, phoneToJid } from '../baileysClient.js';
 import { sendText } from '../index.js';
 import * as cloud from '../cloudApi.js';
-import { simulateTyping, waitHumanDelay, recordSent, checkAllowed } from '../antiBan.js';
 import { capabilityForOption, isCapabilityEnabled } from './capabilities.js';
 import { customOptionsForMenu } from './customEntries.js';
 
@@ -167,60 +166,18 @@ export function renderMenuText(menu, ctx = {}) {
 
 /**
  * Envoie un menu sur WhatsApp.
- * - Tente d'abord listMessage Baileys (rendu cliquable type "boutons")
- * - Si non supporté ou erreur → envoie en texte numéroté
+ * - Liste cliquable native de l'API Cloud officielle (vrais boutons)
+ * - En cas d'échec (hors fenêtre 24 h, numéro non rattaché) → texte numéroté
  *
  * Dans tous les cas, l'utilisateur peut répondre par le NUMÉRO de l'option.
  */
 export async function sendMenu(schoolId, phone, menu, ctx = {}) {
-  // École Cloud API : liste cliquable native (vrais boutons), pas d'anti-ban.
-  // En cas d'échec (ex. hors fenêtre 24h), repli sur le menu texte numéroté.
-  if (await cloud.isCloudSchool(schoolId)) {
-    const r = await cloud.sendListMenu(schoolId, phone, menu, ctx);
-    if (r?.success) return true;
-    console.warn(`[chatbot] liste Cloud échouée, repli texte:`, r?.message);
-    return await sendText(schoolId, phone, renderMenuText(menu, ctx), { urgent: true })
-      .then((res) => !!res.success);
-  }
+  const r = await cloud.sendListMenu(schoolId, phone, menu, ctx);
+  if (r?.success) return true;
 
-  const sock = getSocket(schoolId);
-  if (!sock) return false;
-
-  // Anti-ban check
-  const allowed = await checkAllowed(schoolId, { urgent: true });
-  if (!allowed.allowed) return false;
-
-  await waitHumanDelay(schoolId);
-  const jid = phoneToJid(phone);
-  const text = renderMenuText(menu, ctx);
-  await simulateTyping(sock, jid, text);
-
-  // Tentative listMessage (rendu "bouton" sur certaines versions WhatsApp)
-  try {
-    const sections = [{
-      title: menu.title,
-      rows: menu.options.map((opt) => ({
-        rowId: `${menu.id}:${opt.id}`,
-        title: `${opt.emoji} ${opt.label}`,
-        description: '',
-      })),
-    }];
-
-    await sock.sendMessage(jid, {
-      text,
-      footer: ctx.schoolName || 'Eductrack',
-      title: menu.title,
-      buttonText: 'Voir les options',
-      sections,
-    });
-    await recordSent(schoolId);
-    return true;
-  } catch (err) {
-    // Fallback : envoi texte simple
-    console.warn(`[chatbot] listMessage non supporté, fallback texte:`, err?.message);
-    return await sendText(schoolId, phone, text, { urgent: true, skipDelay: true, skipTyping: true })
-      .then((r) => !!r.success);
-  }
+  console.warn(`[chatbot] liste Cloud échouée, repli texte:`, r?.message);
+  const res = await sendText(schoolId, phone, renderMenuText(menu, ctx), { urgent: true });
+  return !!res.success;
 }
 
 /**
@@ -231,7 +188,7 @@ export function matchMenuOption(menu, input) {
   if (!menu || !input) return null;
   const raw = String(input).trim();
 
-  // Cas listMessage : "menuId:optionId"
+  // Cas clic sur une ligne de liste : "menuId:optionId"
   if (raw.includes(':')) {
     const [mId, optId] = raw.split(':');
     if (mId === menu.id) {

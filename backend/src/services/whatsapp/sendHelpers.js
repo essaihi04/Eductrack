@@ -1,14 +1,13 @@
 // Helpers d'envoi partagés entre les routes WhatsApp et le job d'envoi de masse
 // (services/jobs). Extraits de routes/whatsapp.routes.js où ils étaient locaux.
 
-import { sendText, sendImage, sendDocument, getStatus } from './index.js';
+import { sendText, sendImage, sendDocument } from './index.js';
 import * as cloud from './cloudApi.js';
 
-// Une école est joignable si sa session Baileys est connectée, ou si elle passe
-// par l'API Cloud officielle de Meta.
+// Une école est joignable si son numéro est rattaché à l'API Cloud officielle
+// de Meta (provider unique depuis la suppression de Baileys).
 export const isSessionReady = async (schoolId) => {
   if (!schoolId) return false;
-  if (getStatus(schoolId).connected) return true;
   return await cloud.isCloudSchool(schoolId);
 };
 

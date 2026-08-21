@@ -3,7 +3,7 @@
  *
  * Un prospect (directeur d'une autre école) scanne le QR affiché dans l'admin :
  * il ouvre WhatsApp avec le message pré-rempli « DEMO PARENT » vers le numéro
- * Baileys de l'école démo. À la réception :
+ * WhatsApp de l'école démo. À la réception :
  *   1. La config demo_parent_configs de l'école est chargée (absente/désactivée
  *      → on laisse le chatbot normal traiter le message).
  *   2. Numéro déjà associé à un élève de la classe démo → on régénère son mot

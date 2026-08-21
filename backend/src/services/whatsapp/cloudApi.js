@@ -1,13 +1,15 @@
 /**
  * Provider WhatsApp Cloud API (officielle Meta) — multi-écoles, token central.
  *
- * Expose la MÊME interface publique que ./index.js (Baileys) :
+ * SEUL provider WhatsApp du projet depuis la suppression de Baileys.
+ * Interface d'envoi (reprise telle quelle par ./index.js) :
  *   sendText / sendImage / sendDocument / sendMediaBuffer
  *   → format de retour { success: bool, data: { msgId }, message? }
  *
- * Différences clés avec Baileys :
+ * Caractéristiques :
  *   - Aucun socket, aucune session : tout passe par des appels HTTPS Graph API.
- *   - Aucune couche anti-ban (l'API officielle n'a pas de risque de ban).
+ *   - Aucune couche anti-ban nécessaire (l'API officielle n'a pas de risque de
+ *     blocage pour usage automatisé).
  *   - 1 seul token (WA_TOKEN). Chaque école = un phone_number_id distinct,
  *     stocké dans whatsapp_school_sessions.phone_number_id.
  *
@@ -37,7 +39,7 @@ const toPlain = (phone) => String(phone || '').replace(/[^\d]/g, '');
 // ─────────────────────────────────────────────────────────────────────────
 
 const CACHE_TTL = 60_000; // 1 min
-const providerCache = new Map(); // school_id -> { provider, phoneNumberId, at }
+const providerCache = new Map(); // school_id -> { phoneNumberId, phone, status, at }
 
 async function loadSession(schoolId) {
   const cached = providerCache.get(schoolId);
@@ -45,13 +47,15 @@ async function loadSession(schoolId) {
 
   const { data } = await supabaseAdmin
     .from('whatsapp_school_sessions')
-    .select('provider, phone_number_id')
+    .select('phone_number_id, phone_number, status, session_name')
     .eq('school_id', schoolId)
     .maybeSingle();
 
   const entry = {
-    provider: data?.provider || 'baileys',
     phoneNumberId: data?.phone_number_id || null,
+    phone: data?.phone_number || null,
+    name: data?.session_name || null,
+    status: data?.status || 'no_session',
     at: Date.now(),
   };
   providerCache.set(schoolId, entry);
@@ -64,11 +68,38 @@ export function invalidateCache(schoolId) {
   else providerCache.clear();
 }
 
-/** true si l'école utilise le Cloud API officiel (et a un numéro configuré). */
+/** true si l'école a un numéro Cloud API configuré (seul provider supporté). */
 export async function isCloudSchool(schoolId) {
   if (!schoolId || !TOKEN()) return false;
   const s = await loadSession(schoolId);
-  return s.provider === 'cloud' && !!s.phoneNumberId;
+  return !!s.phoneNumberId;
+}
+
+/**
+ * État de la connexion WhatsApp d'une école, au format attendu par les
+ * appelants (`{ connected, status, phone, provider }`).
+ *
+ * ASYNCHRONE : avec le Cloud API il n'y a plus de socket en mémoire, l'état
+ * vient de la base. Tous les appelants doivent faire `await getStatus(...)`.
+ */
+export async function getStatus(schoolId) {
+  if (!schoolId) return { connected: false, status: 'no_school', phone: null, provider: 'cloud' };
+  if (!TOKEN()) {
+    return { connected: false, status: 'no_token', phone: null, provider: 'cloud',
+      last_error: 'WA_TOKEN manquant (token Cloud API non configuré)' };
+  }
+  const s = await loadSession(schoolId);
+  if (!s.phoneNumberId) {
+    return { connected: false, status: 'no_session', phone: s.phone, name: s.name, provider: 'cloud' };
+  }
+  return {
+    connected: s.status === 'connected',
+    status: s.status,
+    phone: s.phone,
+    name: s.name,
+    phoneNumberId: s.phoneNumberId,
+    provider: 'cloud',
+  };
 }
 
 async function getPhoneNumberId(schoolId) {
@@ -356,7 +387,7 @@ async function downloadCloudMedia(mediaId) {
 
 /**
  * Parse un payload webhook Meta et en extrait un message normalisé,
- * au MÊME format que handleBaileysIncoming → handleIncomingWhatsAppMessage.
+ * au format attendu par handleIncomingWhatsAppMessage.
  * @returns {object|null} { from, text, id, schoolId, location, image } ou null
  */
 export async function parseIncoming(body) {

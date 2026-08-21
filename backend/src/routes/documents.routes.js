@@ -397,7 +397,7 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
               .single();
 
             const schoolId = classInfoWa?.school_id || req.user.school_id;
-            const waStatus = getWhatsAppStatus(schoolId);
+            const waStatus = await getWhatsAppStatus(schoolId);
 
             console.log(`[Documents][${requestId}] WhatsApp session check`, {
               classId: targetClassId,

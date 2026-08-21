@@ -6,7 +6,7 @@
 //    avec fallback sur profiles.phone si non configuré.
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUsers } from './webPush.js';
-import { sendText, getStatus } from './whatsapp/index.js';
+import { sendText } from './whatsapp/index.js';
 import { parentHasApp, whatsappOptedOut, whatsappWindowOpen, isTransportSkippedToday } from './notificationRouter.js';
 import * as cloud from './whatsapp/cloudApi.js';
 
@@ -17,7 +17,7 @@ import * as cloud from './whatsapp/cloudApi.js';
 const TRANSPORT_GATE = process.env.TRANSPORT_GATE_ENABLED === 'true';
 const TRANSPORT_TEMPLATE = process.env.WA_TRANSPORT_TEMPLATE || null;
 
-// Envoi via le provider Baileys (avec anti-ban intégré)
+// Envoi via l'API Cloud officielle de Meta
 async function rawSend(schoolId, phone, text, opts = {}) {
   const result = await sendText(schoolId, phone, text, opts);
   return { ok: !!result.success, data: result.data, error: result.message };
@@ -105,7 +105,7 @@ async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, rec
   }));
   await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRows);
 
-  // 3) Envoi séquentiel via Baileys (l'anti-ban applique délai humain entre chaque)
+  // 3) Envoi séquentiel via l'API Cloud
   // Les notifs transport sont marquées "urgent" pour ignorer la fenêtre horaire stricte
   // (un parent doit être notifié à 7h du matin si son enfant monte dans le bus).
   let sentOk = 0, failed = 0;
@@ -346,7 +346,7 @@ export async function notifyTripStarted(tripId) {
 /**
  * Envoie le message « porte d'entrée » aux parents SANS app (ni opt-out).
  * Cloud API + template approuvé → message à boutons quick-reply.
- * Sinon (Baileys) → repli texte « Répondez OUI / NON ».
+ * Sinon → repli texte « Répondez OUI / NON ».
  */
 async function sendDepartureGate(schoolId, parentIds, senderId, label) {
   const isCloud = await cloud.isCloudSchool(schoolId);
@@ -361,7 +361,7 @@ async function sendDepartureGate(schoolId, parentIds, senderId, label) {
         // Template approuvé avec boutons quick-reply « Voir détails » / « Je ne veux pas »
         await cloud.sendTemplate(schoolId, phone, TRANSPORT_TEMPLATE, 'fr');
       } else {
-        // Repli texte (Baileys, ou tant que le template n'est pas configuré)
+        // Repli texte (tant que le template n'est pas configuré)
         const txt = `🚌 *Transport — ${label}*\nLe bus démarre.\n\n• Répondez *BUS OUI* pour recevoir le suivi du bus aujourd'hui (gratuit).\n• Répondez *BUS NON* pour ne pas être notifié aujourd'hui.\n\n📲 _Avec l'application, tout est automatique et gratuit._`;
         await sendText(schoolId, phone, txt, { urgent: true });
       }

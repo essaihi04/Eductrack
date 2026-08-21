@@ -1,9 +1,7 @@
 // File d'attente de travaux, persistée dans Postgres (table `jobs`).
 //
-// Pourquoi pas Redis : le worker doit rester dans le process web, parce que les
-// sockets Baileys y vivent en mémoire et ne sont pas partageables entre process.
-// Un worker séparé ne pourrait pas envoyer de WhatsApp. Redis apporterait la
-// persistance mais pas le découplage — Postgres, déjà là, suffit.
+// Pourquoi pas Redis : Postgres est déjà là et suffit pour la persistance des
+// travaux. Redis apporterait la même chose au prix d'une dépendance de plus.
 //
 // Ce que ça apporte par rapport au fire-and-forget d'avant : un job interrompu
 // (redémarrage PM2, crash, déploiement) REPREND tout seul au lieu d'être perdu

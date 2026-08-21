@@ -2,7 +2,7 @@
  * Tracking des communications parents (WhatsApp + push in-app).
  *
  * Alimente les colonnes de suivi de whatsapp_message_recipients :
- *   - delivered_at / read_at ('whatsapp')  ← accusés Baileys (✓✓) et Cloud API
+ *   - delivered_at / read_at ('whatsapp')  ← accusés de l'API Cloud (✓✓)
  *   - read_at ('app')                      ← notification in-app marquée lue
  *   - responded_at ('whatsapp')            ← message entrant du parent
  *
@@ -17,7 +17,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 const RESPONSE_WINDOW_DAYS = 7;
 
 /**
- * Accusé WhatsApp pour un message sortant (Baileys messages.update ou
+ * Accusé WhatsApp pour un message sortant (statuts du webhook Cloud API ou
  * webhook statuses de la Cloud API).
  * @param {string} providerMsgId  id du message chez le provider
  * @param {'delivered'|'read'} kind

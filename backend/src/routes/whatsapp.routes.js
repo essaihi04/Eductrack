@@ -3,15 +3,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
-import {
-  sendText, sendMediaBuffer,
-  startSession, logoutSession, getStatus, getQrDataUrl,
-  resetForPairing, hasAuthState,
-  requestPairingCode,
-  getStats as getAntiBanStats,
-} from '../services/whatsapp/index.js';
+import { sendText, sendMediaBuffer, getStatus } from '../services/whatsapp/index.js';
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
-import { handleBaileysIncoming } from '../services/whatsapp/chatbot/index.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeEnrollmentMap, activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
@@ -115,9 +108,8 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
   }
 });
 
-// Vérifie qu'une session WhatsApp est prête pour une école.
-// Cloud API : prête dès que l'école est mappée (provider='cloud' + phone_number_id).
-// Baileys : prête si le socket est connecté.
+// Vérifie qu'une école peut envoyer : son numéro doit être rattaché à l'API
+// Cloud officielle (phone_number_id renseigné).
 // isSessionReady / sendUnified vivent désormais dans services/whatsapp/sendHelpers.js :
 // le job d'envoi de masse en a besoin aussi (voir import en tête de fichier).
 
@@ -507,7 +499,7 @@ router.post('/send', async (req, res) => {
       .insert(recipientRecords);
     if (recipientsError) throw recipientsError;
 
-    // Vérifie session Baileys/Cloud (seulement si le canal WhatsApp est demandé)
+    // Vérifie le numéro Cloud API (seulement si le canal WhatsApp est demandé)
     if (wantWa && !(await isSessionReady(schoolId))) {
       await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Connectez le numéro de votre école depuis l\'onglet Connexion, ou choisissez le canal Application.' });
@@ -615,7 +607,7 @@ router.post('/send-direct', async (req, res) => {
       status: 'pending'
     });
 
-    // Envoi via Baileys
+    // Envoi via l'API Cloud
     const result = await sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName });
 
     if (result.success) {
@@ -952,7 +944,7 @@ router.post('/messages/:messageId/resend', async (req, res) => {
 // ==================== INBOX / MESSAGE LOGS ====================
 
 // GET /message-logs — journaux des messages envoyés, depuis la base locale
-// (Baileys écrit dans whatsapp_messages / whatsapp_message_recipients).
+// (l'envoi écrit dans whatsapp_messages / whatsapp_message_recipients).
 router.get('/message-logs', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -1489,61 +1481,35 @@ router.post('/upload', async (req, res) => {
 
 // ==================== SESSION STATUS ====================
 
-// GET /session-status — état de la session Baileys de cette école
+// GET /session-status — état du numéro Cloud API de cette école
 router.get('/session-status', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    if (!schoolId) return res.json({ connected: false, status: 'no_school' });
+    if (!schoolId) return res.json({ connected: false, status: 'no_school', provider: 'cloud' });
 
-    const status = getStatus(schoolId);
-
-    // Métadonnées DB (numéro, warm-up, quotas, provider)
     const { data: row } = await supabaseAdmin
       .from('whatsapp_school_sessions')
-      .select('phone_number, phone_number_id, provider, session_name, warmup_started_at, last_connected_at, status')
+      .select('phone_number, phone_number_id, session_name, last_connected_at, status')
       .eq('school_id', schoolId)
       .maybeSingle();
 
-    // École en mode Cloud API : pas de socket Baileys, l'état vient de la DB.
-    if (row?.provider === 'cloud') {
-      const cloudConnected = row.status === 'connected';
-      return res.json({
-        connected: cloudConnected,
-        status: row.status || 'pending_verification',
-        provider: 'cloud',
-        session: {
-          id: schoolId,
-          name: row.session_name || null,
-          phone: row.phone_number || null,
-          phone_number_id: row.phone_number_id || null,
-          status: row.status || 'pending_verification',
-          last_connected_at: row.last_connected_at || null,
-        },
-      });
+    // Aucun numéro déclaré : l'école doit passer par l'onboarding Cloud API.
+    if (!row?.phone_number_id) {
+      return res.json({ connected: false, status: 'no_session', session: null, provider: 'cloud' });
     }
-
-    // Aucun socket en mémoire ET aucune ligne DB → pas de session du tout
-    if (!status.connected && status.status === 'disconnected' && !row) {
-      return res.json({ connected: false, status: 'no_session', session: null, provider: 'baileys' });
-    }
-
-    let antiBan = null;
-    try { antiBan = await getAntiBanStats(schoolId); } catch {}
 
     res.json({
-      connected: status.connected,
-      status: status.status,
-      provider: 'baileys',
+      connected: row.status === 'connected',
+      status: row.status || 'pending_verification',
+      provider: 'cloud',
       session: {
-        id: schoolId, // sert d'identifiant logique (utilisé pour DELETE)
-        name: row?.session_name || null,
-        phone: status.phone || row?.phone_number || null,
-        status: status.status,
-        last_error: status.last_error || null,
-        last_connected_at: row?.last_connected_at || null,
-        warmup_started_at: row?.warmup_started_at || null,
+        id: schoolId, // identifiant logique (utilisé pour DELETE)
+        name: row.session_name || null,
+        phone: row.phone_number || null,
+        phone_number_id: row.phone_number_id,
+        status: row.status || 'pending_verification',
+        last_connected_at: row.last_connected_at || null,
       },
-      anti_ban: antiBan,
     });
   } catch (error) {
     console.error('Erreur statut session:', error);
@@ -1551,68 +1517,8 @@ router.get('/session-status', async (req, res) => {
   }
 });
 
-// GET /session-qr — récupère le QR code Baileys pour appairage
-router.get('/session-qr', async (req, res) => {
-  try {
-    const schoolId = getSchoolId(req);
-    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
-
-    // Démarre la session si pas déjà active.
-    // On déclenche un (re)start sur tous les états "non actifs" : disconnected,
-    // logged_out, needs_reconnect (auth conservé après 6 échecs 401). Sinon
-    // l'utilisateur restait bloqué sans pouvoir relancer le QR.
-    const status = getStatus(schoolId);
-    if (status.connected) {
-      return res.json({ success: false, error: 'Session déjà connectée, pas besoin de QR code', connected: true });
-    }
-
-    // ?force=1 → RÉAPPAIRAGE. Baileys n'émet un QR que s'il n'a aucun
-    // credential : tant que creds.json existe il retente la connexion avec, et
-    // si WhatsApp les a invalidés il boucle sur l'échec sans jamais produire de
-    // QR — l'écran tournait indéfiniment. Purger l'appairage est le seul moyen
-    // d'obtenir un nouveau code. Réservé à un clic explicite de l'admin : le
-    // rafraîchissement automatique de la page ne doit jamais détruire une
-    // session qui n'a qu'une coupure réseau passagère.
-    const force = req.query.force === '1' || req.query.force === 'true';
-    if (force) {
-      await resetForPairing(schoolId, { onIncoming: handleBaileysIncoming });
-    } else if (['disconnected', 'logged_out', 'needs_reconnect'].includes(status.status)) {
-      await startSession(schoolId, { onIncoming: handleBaileysIncoming });
-    }
-
-    // Polling : attend max 15s qu'un QR soit généré
-    const start = Date.now();
-    while (Date.now() - start < 15000) {
-      const qr = getQrDataUrl(schoolId);
-      if (qr) {
-        return res.json({ success: true, qrDataUrl: qr });
-      }
-      const s = getStatus(schoolId);
-      if (s.connected) {
-        return res.json({ success: false, error: 'Session connectée entre-temps', connected: true });
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    // Pas de QR alors que des credentials existent : ils sont refusés par
-    // WhatsApp et aucun QR ne sortira tant qu'ils ne sont pas purgés. On le dit
-    // au front pour qu'il propose le réappairage au lieu d'un spinner sans fin.
-    const needsRepair = !force && hasAuthState(schoolId);
-    res.json({
-      success: false,
-      needsRepair,
-      error: needsRepair
-        ? "L'appairage enregistré est refusé par WhatsApp : aucun QR ne peut être généré tant qu'il n'est pas remplacé. Utilisez « Régénérer le QR »."
-        : 'QR code non disponible. Réessayez dans quelques secondes.',
-    });
-  } catch (error) {
-    console.error('Erreur QR code:', error);
-    res.status(500).json({ error: error.message || 'Erreur serveur' });
-  }
-});
-
 // GET /demo-parent-qr — QR du mode démo commercial (école principale).
-// Renvoie le lien wa.me (numéro Baileys connecté + mot-clé pré-rempli) et son
+// Renvoie le lien wa.me (numéro WhatsApp de l'école + mot-clé pré-rempli) et son
 // QR : un prospect le scanne → envoie « DEMO PARENT » → devient parent d'un
 // élève de la classe démo. 404 si l'école n'a pas de config démo activée.
 router.get('/demo-parent-qr', async (req, res) => {
@@ -1628,8 +1534,8 @@ router.get('/demo-parent-qr', async (req, res) => {
       .maybeSingle();
     if (!cfg) return res.status(404).json({ error: 'Mode démo non activé pour cette école (exécuter SEED_CLASSE_DEMO.sql)' });
 
-    // Numéro WhatsApp de l'école : session en mémoire, sinon table de mapping
-    const status = getStatus(schoolId);
+    // Numéro WhatsApp de l'école : état Cloud API, sinon table de mapping
+    const status = await getStatus(schoolId);
     let phone = status?.phone || null;
     if (!phone) {
       const { data: row } = await supabaseAdmin
@@ -1663,36 +1569,6 @@ router.get('/demo-parent-qr', async (req, res) => {
   } catch (error) {
     console.error('Erreur demo-parent-qr:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
-  }
-});
-
-// POST /session-pairing-code — connexion par CODE (alternative au QR).
-// Body : { phone }. Renvoie un code à 8 caractères à saisir dans WhatsApp →
-// Appareils connectés → « Lier avec numéro de téléphone ».
-router.post('/session-pairing-code', async (req, res) => {
-  try {
-    const schoolId = getSchoolId(req);
-    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
-
-    let { phone } = req.body || {};
-    // Repli : numéro enregistré sur la session si non fourni
-    if (!phone) {
-      const { data: row } = await supabaseAdmin
-        .from('whatsapp_school_sessions')
-        .select('phone_number')
-        .eq('school_id', schoolId)
-        .maybeSingle();
-      phone = row?.phone_number || null;
-    }
-    if (!phone) {
-      return res.status(400).json({ error: 'Numéro de téléphone requis (format international, ex : +212600000000)' });
-    }
-
-    const code = await requestPairingCode(schoolId, phone, { onIncoming: handleBaileysIncoming });
-    res.json({ success: true, code });
-  } catch (error) {
-    console.error('Erreur code appairage:', error);
-    res.status(400).json({ success: false, error: error.message || 'Impossible de générer le code' });
   }
 });
 
@@ -1787,87 +1663,16 @@ router.post('/cloud/verify', async (req, res) => {
 
 // ==================== SESSION MANAGEMENT ====================
 
-// POST /sessions — crée (initialise) une session Baileys pour cette école.
-// Avec Baileys self-hosted, il n'y a plus de création distante : on démarre
-// le socket localement, qui génère un QR code que le frontend récupère via
-// /session-qr puis affiche pour appairage WhatsApp.
-router.post('/sessions', async (req, res) => {
-  try {
-    const schoolId = getSchoolId(req);
-    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
-
-    const { name, phone_number } = req.body || {};
-    // (name et phone_number sont juste méta-info, le vrai numéro est déterminé
-    // au scan du QR par WhatsApp)
-
-    // Si une session précédente existait avec auth corrompu (status
-    // needs_reconnect, logged_out ou banned), on purge tout pour repartir
-    // propre — sinon on restait coincé en boucle 401 sur creds périmés.
-    const existing = getStatus(schoolId);
-    const needsClean = ['needs_reconnect', 'logged_out', 'banned'].includes(existing.status);
-    if (needsClean) {
-      console.log(`[whatsapp] POST /sessions : purge auth (status=${existing.status})`);
-      try { await logoutSession(schoolId); } catch (e) { console.warn('purge logout:', e.message); }
-    }
-
-    // Crée/maj le mapping en DB. On NE laisse PAS l'erreur silencieuse : si la
-    // colonne héritée wasender_session_id est encore NOT NULL (ou autre souci
-    // de schéma), l'INSERT échoue et le nom/numéro « disparaissent » au scan.
-    const { error: upErr } = await supabaseAdmin
-      .from('whatsapp_school_sessions')
-      .upsert({
-        school_id: schoolId,
-        session_name: name || 'WhatsApp École',
-        phone_number: phone_number || null,
-        provider: 'baileys',
-        status: 'connecting',
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'school_id' });
-    if (upErr) {
-      console.error('[whatsapp] upsert session échoué:', upErr.message);
-      return res.status(500).json({
-        error: 'Impossible d\'enregistrer la session. Vérifiez la migration de la table whatsapp_school_sessions (wasender_session_id doit être nullable).',
-        details: upErr.message,
-      });
-    }
-
-    // Démarre la session Baileys (callback chatbot pour les messages entrants)
-    await startSession(schoolId, { onIncoming: handleBaileysIncoming });
-
-    res.json({
-      success: true,
-      session: {
-        school_id: schoolId,
-        name: name || 'WhatsApp École',
-        status: 'connecting',
-        provider: 'baileys',
-      },
-      message: 'Session initialisée. Récupérez le QR code via GET /session-qr et scannez-le avec WhatsApp.',
-    });
-  } catch (error) {
-    console.error('Erreur création session:', error);
-    res.status(500).json({ error: error.message || 'Erreur serveur' });
-  }
-});
-
-// PUT /sessions/:sessionId/webhook — déprécié (Baileys n'utilise pas de webhook).
-// Conservé pour rester compatible avec d'anciens frontends.
-router.put('/sessions/:sessionId/webhook', async (req, res) => {
-  res.json({
-    success: true,
-    deprecated: true,
-    message: 'Avec Baileys self-hosted, les messages entrants sont reçus en direct via WebSocket. Aucun webhook à configurer.',
-  });
-});
-
-// DELETE /sessions/:sessionId — déconnecte la session Baileys et purge l'auth.
+// DELETE /sessions/:sessionId — détache le numéro Cloud API de cette école.
+// Le numéro reste déclaré côté Meta (WABA central) ; seul le rattachement à
+// l'école est supprimé, ce qui coupe immédiatement tout envoi.
 router.delete('/sessions/:sessionId', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
 
-    await logoutSession(schoolId);
     await supabaseAdmin.from('whatsapp_school_sessions').delete().eq('school_id', schoolId);
+    cloud.invalidateCache(schoolId);
     res.json({ success: true });
   } catch (error) {
     console.error('Erreur suppression session:', error);
@@ -2018,7 +1823,7 @@ router.post('/daily-reports/send-pdf-report', async (req, res) => {
       );
     }
 
-    // 6. Envoi via Baileys (PDF buffer)
+    // 6. Envoi via l'API Cloud (PDF buffer)
     let sent = 0, failed = 0;
     const errors = new Set();
     for (const contact of contacts) {
@@ -2127,7 +1932,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
       await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRecords);
     }
 
-    // Vérifie session Baileys connectée
+    // Vérifie que le numéro Cloud API est rattaché
     if (!(await isSessionReady(schoolId))) {
       if (msgLog) await supabaseAdmin.from('whatsapp_messages').update({ status: 'failed' }).eq('id', msgLog.id);
       return res.json({ success: false, error: 'Aucune session WhatsApp connectée pour cette école.' });

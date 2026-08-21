@@ -970,7 +970,7 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun parent n\'a de numéro WhatsApp' });
     }
 
-    const waStatus = getStatus(schoolId);
+    const waStatus = await getStatus(schoolId);
     if (!waStatus.connected) {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école. Connectez le numéro de votre école depuis la page WhatsApp.' });
     }
@@ -1071,7 +1071,7 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
           console.error('[Parents WhatsApp] send failed (tous numéros)', parent.id, waResult.message);
           await supabaseAdmin
             .from('whatsapp_message_recipients')
-            .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
+            .update({ status: 'failed', error_message: waResult.message || 'Échec envoi WhatsApp' })
             .eq('id', recipientLog.id);
           await supabaseAdmin
             .from('whatsapp_messages')
@@ -2472,7 +2472,7 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
     const classId = req.params.classId;
     const schoolId = getSchoolId(req);
 
-    const waStatus = getStatus(schoolId);
+    const waStatus = await getStatus(schoolId);
     if (!waStatus.connected) {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école. Connectez le numéro de votre école depuis la page WhatsApp.' });
     }
@@ -3267,7 +3267,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
           continue;
         }
 
-        if (!getStatus(schoolId).connected) {
+        if (!(await getStatus(schoolId)).connected) {
           errorCount++;
           continue;
         }
@@ -3338,7 +3338,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 } else {
                   await supabaseAdmin
                     .from('whatsapp_message_recipients')
-                    .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
+                    .update({ status: 'failed', error_message: waResult.message || 'Échec envoi WhatsApp' })
                     .eq('id', recipientLog.data.id);
                 }
               }
@@ -3446,7 +3446,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
             const recipients = Object.values(uniquePhones);
 
             if (recipients.length > 0) {
-              const waStatus = getStatus(student.school_id);
+              const waStatus = await getStatus(student.school_id);
 
               if (waStatus.connected) {
                 // Formater le message avec login et mot de passe séparés
@@ -3474,7 +3474,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                   .single();
 
                 if (msgLog) {
-                  // Envoi via Baileys (sendText intègre déjà le délai anti-ban)
+                  // Envoi via l'API Cloud officielle
                   for (const contact of recipients) {
                     try {
                       const recipientLog = await supabaseAdmin
@@ -5421,7 +5421,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun professeur n\'a de numéro de téléphone' });
     }
 
-    const waStatusTeacher = getStatus(schoolId);
+    const waStatusTeacher = await getStatus(schoolId);
     if (!waStatusTeacher.connected) {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée pour cette école. Connectez le numéro de votre école depuis la page WhatsApp.' });
     }
@@ -5511,7 +5511,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             .single();
 
           if (recipientLog.data) {
-            // Envoyer via Baileys selon le type de message
+            // Envoyer via l'API Cloud selon le type de message
             let waResult;
             if (messageType === 'image' && mediaUrl) {
               waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '', { urgent: true });
@@ -5535,7 +5535,7 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
               console.error('[Teachers WhatsApp] send failed:', { teacherId: teacher.id, phoneNumber, error: waResult.message });
               await supabaseAdmin
                 .from('whatsapp_message_recipients')
-                .update({ status: 'failed', error_message: waResult.message || 'Échec envoi Baileys' })
+                .update({ status: 'failed', error_message: waResult.message || 'Échec envoi WhatsApp' })
                 .eq('id', recipientLog.data.id);
               await supabaseAdmin
                 .from('whatsapp_messages')

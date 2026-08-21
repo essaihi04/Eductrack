@@ -6,12 +6,12 @@
  *
  * Le nouveau chatbot vit dans `./whatsapp/chatbot/`.
  * Il fournit :
- *  - menu interactif (boutons listMessage + fallback texte)
+ *  - menu interactif (liste cliquable Cloud API + repli texte numéroté)
  *  - réponses prédéfinies déterministes pour pédagogie & finance
  *  - DeepSeek IA uniquement sur le chemin "Question libre"
  */
 
-import { handleIncomingWhatsAppMessage as v2Handler, handleBaileysIncoming as v2Baileys } from './whatsapp/chatbot/index.js';
+import { handleIncomingWhatsAppMessage as v2Handler } from './whatsapp/chatbot/index.js';
 import { sendText, sendMediaBuffer, getStatus } from './whatsapp/index.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import path from 'path';
@@ -72,17 +72,12 @@ async function logWhatsAppSend({
   }
 }
 
-// Adapter pour l'ancien webhook Wasender (compat) — le webhook n'est plus utilisé
-// avec Baileys, mais on garde l'export pour ne pas casser les imports legacy.
+// Adapter legacy : conserve l'ancienne signature { from, text, id, sessionId }
+// où sessionId vaut le school_id.
 export async function handleIncomingWhatsAppMessage(messageInfo) {
-  // Format ancien : { from, text, id, sessionId } → schoolId résolu via DB
   const { from, text, id, sessionId } = messageInfo;
-  // Avec Baileys, sessionId = school_id directement
   return v2Handler({ from, text, id, schoolId: sessionId });
 }
-
-// Re-export Baileys handler (utilisé par baileysClient.startSession)
-export const handleBaileysIncoming = v2Baileys;
 
 /**
  * Envoyer une réponse WhatsApp simple — utilisé par teacher / homework / controls
@@ -92,7 +87,7 @@ export const handleBaileysIncoming = v2Baileys;
  * @param {object} opts  { category, senderId, parentId, recipientFilter }
  */
 export async function sendWhatsAppResponse(phoneNumber, message, schoolId, opts = {}) {
-  if (!getStatus(schoolId).connected) {
+  if (!(await getStatus(schoolId)).connected) {
     console.error('[whatsapp] Pas de session active pour school', schoolId);
     await logWhatsAppSend({
       schoolId, phoneNumber, content: message, messageType: 'text',
@@ -123,7 +118,7 @@ export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId,
   let type = 'document';
   let fileName = path.basename(filePath || 'file');
   try {
-    if (!getStatus(schoolId).connected) {
+    if (!(await getStatus(schoolId)).connected) {
       console.error('[whatsapp] Pas de session active pour school', schoolId);
       await logWhatsAppSend({
         schoolId, phoneNumber, content: caption || '', messageType: 'document',
@@ -196,7 +191,7 @@ export async function sendWhatsAppFile(phoneNumber, filePath, caption, schoolId,
  */
 export async function sendWhatsAppFileBuffer(phoneNumber, buffer, fileName, mimetype, caption, schoolId, opts = {}) {
   try {
-    if (!getStatus(schoolId).connected) {
+    if (!(await getStatus(schoolId)).connected) {
       await logWhatsAppSend({ schoolId, phoneNumber, content: caption || '', messageType: 'document', fileName, category: opts.category, senderId: opts.senderId, parentId: opts.parentId, recipientFilter: opts.recipientFilter, status: 'failed', errorMessage: 'Session WhatsApp non connectée' });
       return false;
     }
@@ -216,10 +211,10 @@ export async function sendWhatsAppFileBuffer(phoneNumber, buffer, fileName, mime
 }
 
 /**
- * @deprecated — Wasender n'est plus utilisé. Cette fonction renvoie toujours null.
+ * @deprecated — plus aucune clé de session externe. Renvoie toujours null.
  * Conservée pour ne pas casser les imports legacy (à supprimer après migration complète).
  */
 export async function getSchoolSessionApiKey(_schoolId) {
-  console.warn('[whatsapp] getSchoolSessionApiKey est déprécié (Baileys self-hosted ne nécessite plus de clé externe).');
+  console.warn("[whatsapp] getSchoolSessionApiKey est déprécié (l'API Cloud officielle utilise un token central).");
   return null;
 }

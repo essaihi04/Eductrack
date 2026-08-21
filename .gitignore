@@ -62,9 +62,6 @@ migration-selfhost/data/
 # Sorties generees par les scripts (regenerables)
 output/
 
-# Sessions WhatsApp Baileys (credentials des appareils liés).
-# NON versionnées, mais surtout : sans cette ligne le dossier apparaît en
-# "untracked" et un `git clean -fd` sur le serveur supprimerait toutes les
-# sessions des écoles — il faudrait rescanner un QR pour chacune.
-backend/data/whatsapp_auth/
+# Donnees locales du backend (aucune session WhatsApp : l'API Cloud officielle
+# ne stocke rien sur disque).
 backend/data/

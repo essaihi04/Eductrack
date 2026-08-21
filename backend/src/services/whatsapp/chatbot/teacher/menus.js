@@ -3,7 +3,7 @@
  *
  * Même format que les menus parents (`chatbot/menus.js`) : on réutilise
  * directement `sendMenu` et `matchMenuOption` pour bénéficier du rendu liste
- * cliquable (Cloud API / Baileys), de l'anti-ban et du repli texte numéroté.
+ * cliquable de l'API Cloud et du repli texte numéroté.
  *
  * Phase 1 : CONSULTATION uniquement. Aucune option n'écrit en base.
  */

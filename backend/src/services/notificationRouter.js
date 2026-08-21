@@ -3,7 +3,7 @@
  *
  * Priorité :
  *   1. Le parent a l'app (abonnement push actif) → PUSH (gratuit)
- *   2. Sinon, et pas d'opt-out WhatsApp           → WhatsApp (payant / Baileys)
+ *   2. Sinon, et pas d'opt-out WhatsApp           → WhatsApp (API Cloud, payant)
  *   3. Sinon (opt-out + pas d'app)                → rien (dispo à l'ouverture de l'app)
  *
  * « A l'app »      = au moins une ligne dans push_subscriptions (user_id = parent_id).

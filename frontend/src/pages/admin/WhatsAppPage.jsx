@@ -16,7 +16,6 @@ import {
   Bot, Sparkles,
   Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2, Shield
 } from 'lucide-react';
-import QRCode from 'qrcode';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
 // Rôles qui utilisent le hub /communication (onglets pilotés par l'URL +
@@ -162,29 +161,6 @@ const WhatsAppPage = () => {
   // ===================== TAB: CONNECTION =====================
   const [sessionStatus, setSessionStatus] = useState(null);
   const [connLoading, setConnLoading] = useState(true);
-  const [qrCode, setQrCode] = useState(null);
-  const [qrLoading, setQrLoading] = useState(false);
-  const [qrError, setQrError] = useState('');
-  // true quand des credentials existent mais sont refusés par WhatsApp :
-  // aucun QR ne sortira tant qu'ils ne sont pas purgés (réappairage).
-  const [qrNeedsRepair, setQrNeedsRepair] = useState(false);
-  // Une seule demande automatique de QR par épisode de déconnexion.
-  const qrAutoRequestedRef = useRef(false);
-  // Chargement du RÉAPPAIRAGE seul : « Régénérer le QR » ne doit pas être
-  // désactivé par une requête de QR ordinaire, c'est la porte de sortie.
-  const [qrRepairing, setQrRepairing] = useState(false);
-  const lastQrSrcRef = useRef(null); // dernière source QR affichée (anti-clignotement)
-  // Connexion par code (alternative au QR, utile sur iPhone)
-  const [showPairing, setShowPairing] = useState(false);
-  const [pairingPhone, setPairingPhone] = useState('');
-  const [pairingCode, setPairingCode] = useState('');
-  const [pairingLoading, setPairingLoading] = useState(false);
-  const [pairingError, setPairingError] = useState('');
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newSessionName, setNewSessionName] = useState('');
-  const [newSessionPhone, setNewSessionPhone] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState('');
   // Onboarding Cloud API (numéro officiel Meta)
   const [cloudCC, setCloudCC] = useState('212');
   const [cloudPhone, setCloudPhone] = useState('');
@@ -195,8 +171,6 @@ const WhatsAppPage = () => {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState('');
   const [cloudPin, setCloudPin] = useState(null);
-  // Ancien flux Baileys (QR) masqué par défaut au profit du Cloud
-  const [showLegacy, setShowLegacy] = useState(false);
 
   // ===================== TAB: PLANNING (communications) =====================
   const [comms, setComms] = useState([]);
@@ -896,7 +870,7 @@ const WhatsAppPage = () => {
   }, [apiUrl]);
 
   // silent=true (polling auto) → ne déclenche PAS le spinner plein écran de la
-  // section (sinon la partie connexion « se recharge » toutes les 2s et masque le QR).
+  // section (sinon la partie connexion « se recharge » en boucle sous les yeux).
   const fetchStatus = useCallback(async (silent = false) => {
     if (!silent) setConnLoading(true);
     try {
@@ -963,7 +937,7 @@ const WhatsAppPage = () => {
     } finally { setCloudLoading(false); }
   };
 
-  const isCloudConnected = sessionStatus?.provider === 'cloud' && sessionStatus?.connected;
+  const isCloudConnected = Boolean(sessionStatus?.connected);
 
   // ===================== PLANNING LOGIC =====================
   const fetchComms = useCallback(async () => {
@@ -1173,139 +1147,30 @@ const WhatsAppPage = () => {
     } catch (e) { console.error('Erreur send-now comm:', e); }
   };
 
-  // fetchQR : récupère un QR. silent=true → pas de spinner ni reset du QR affiché
-  // (utilisé pour le polling auto en arrière-plan). On ne remplace l'image QR que
-  // si la SOURCE a réellement changé (rotation Baileys ~20s), sinon l'image
-  // clignote/rechargerait toutes les 3s et serait illisible au scan.
-  const fetchQR = useCallback(async (silent = false, force = false) => {
-    if (!silent) { setQrLoading(true); setQrError(''); setQrCode(null); lastQrSrcRef.current = null; }
-    if (force) { setQrNeedsRepair(false); setQrRepairing(true); qrAutoRequestedRef.current = true; }
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-qr${force ? '?force=1' : ''}`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      setQrNeedsRepair(Boolean(data.needsRepair));
-      // Nouveau backend Baileys : retourne qrDataUrl (image PNG déjà encodée)
-      // Ancien backend Wasender : retournait qrString (texte brut à transformer)
-      if (data.success && data.qrDataUrl) {
-        if (data.qrDataUrl !== lastQrSrcRef.current) {
-          lastQrSrcRef.current = data.qrDataUrl;
-          setQrCode(data.qrDataUrl);
-        }
-        setQrError('');
-      } else if (data.success && data.qrString) {
-        if (data.qrString !== lastQrSrcRef.current) {
-          lastQrSrcRef.current = data.qrString;
-          setQrCode(await QRCode.toDataURL(data.qrString, { width: 300, margin: 2 }));
-        }
-        setQrError('');
-      } else if (!silent) {
-        setQrError(data.error || 'QR code non disponible');
-      }
-    } catch (error) {
-      console.error('Erreur QR:', error);
-      if (!silent) setQrError('Erreur de connexion');
-    } finally { if (!silent) setQrLoading(false); if (force) setQrRepairing(false); }
-  }, [apiUrl]);
-
-  // Connexion par code (alternative au QR) — saisie du numéro → code à 8 car.
-  const requestPairing = useCallback(async () => {
-    const phone = (pairingPhone || sessionStatus?.session?.phone || '').trim();
-    if (!phone) { setPairingError('Entrez le numéro WhatsApp (format international, ex : +212600000000)'); return; }
-    setPairingLoading(true); setPairingError(''); setPairingCode('');
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/session-pairing-code`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
-      });
-      const data = await res.json();
-      if (data.success && data.code) setPairingCode(data.code);
-      else setPairingError(data.error || 'Impossible de générer le code');
-    } catch (e) {
-      setPairingError('Erreur de connexion au serveur');
-    } finally { setPairingLoading(false); }
-  }, [apiUrl, pairingPhone, sessionStatus]);
-
-  // L'école tourne DÉJÀ sur Baileys et sa session est tombée : le QR doit
-  // s'afficher tout seul. Il était auparavant caché derrière « Méthode
-  // alternative » — l'écran annonçait « Scannez le QR code ci-dessous » sans
-  // rien afficher dessous, et l'admin n'avait aucun moyen de rétablir l'envoi.
-  // Le repli derrière showLegacy ne concerne plus que les écoles SANS session,
-  // pour continuer à mettre en avant l'API officielle.
-  const needsQrScan = Boolean(sessionStatus?.session)
-    && sessionStatus?.provider !== 'cloud'
-    && sessionStatus?.status !== 'no_session'
+  // Tant que le numéro n'est pas « connected », on suit le statut : la
+  // vérification Cloud API bascule l'état côté serveur sans action de l'admin.
+  const needsPolling = activeTab === 'connection'
+    && Boolean(sessionStatus?.session)
     && !sessionStatus?.connected;
 
-  // Booléen stable : true si on doit poller la connexion (évite que les timers
-  // se réinitialisent à chaque rafraîchissement de sessionStatus).
-  const needsPolling = activeTab === 'connection'
-    && (needsQrScan || (showLegacy && Boolean(sessionStatus?.session) && !sessionStatus?.connected))
-    && sessionStatus?.provider !== 'cloud'; // pas de QR Baileys pour les écoles Cloud
-
-  // Polling automatique tant que la session n'est pas connectée :
-  //  - /session-status toutes les 2s pour détecter la connexion réussie
-  //  - /session-qr toutes les 3s pour suivre les rotations Baileys (~20s) ET
-  //    surtout pour récupérer immédiatement le nouveau QR après le restart
-  //    post-scan (WhatsApp demande "Scannez à nouveau" pendant le restart
-  //    Baileys et envoie un nouveau QR ~1s après).
   useEffect(() => {
     if (!needsPolling) return;
-
-    const statusTimer = setInterval(() => { fetchStatus(true); }, 2000);
-    // Tant que l'appairage est refusé, aucun QR ne PEUT sortir : continuer à
-    // interroger relancerait une tentative de connexion côté serveur toutes
-    // les 3 s, pour rien. On garde uniquement le suivi du statut, qui détectera
-    // la reconnexion après le réappairage.
-    const qrTimer = qrNeedsRepair ? null : setInterval(() => { fetchQR(true); }, 3000);
-    return () => { clearInterval(statusTimer); if (qrTimer) clearInterval(qrTimer); };
-  }, [needsPolling, qrNeedsRepair, fetchStatus, fetchQR]);
-
-  // Auto-affichage du QR dès qu'une session existe mais n'est pas connectée.
-  //
-  // UNE SEULE fois par épisode de déconnexion (qrAutoRequestedRef). Sans ce
-  // garde, l'effet se relançait à chaque bascule de qrLoading — la requête
-  // repartait aussitôt terminée, qrLoading restait vrai en permanence, et TOUS
-  // les boutons de la carte (dont « Régénérer le QR », le seul qui débloque la
-  // situation) restaient désactivés indéfiniment.
-  useEffect(() => {
-    if (!needsPolling) { qrAutoRequestedRef.current = false; return; }
-    if (qrCode || qrLoading || qrNeedsRepair || qrAutoRequestedRef.current) return;
-    qrAutoRequestedRef.current = true;
-    fetchQR(false);
-  }, [needsPolling, qrCode, qrLoading, qrNeedsRepair, fetchQR]);
-
-  const handleCreateSession = async () => {
-    if (!newSessionName || !newSessionPhone) { setCreateError('Nom et numéro requis'); return; }
-    setCreating(true); setCreateError('');
-    try {
-      const token = await getAuthToken();
-      const res = await fetch(`${apiUrl}/api/admin/whatsapp/sessions`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newSessionName, phone_number: newSessionPhone })
-      });
-      const data = await res.json();
-      if (data.success) { setShowCreateForm(false); setNewSessionName(''); setNewSessionPhone(''); fetchStatus(); }
-      else setCreateError(data.error || 'Erreur création');
-    } catch (error) { setCreateError('Erreur de connexion'); }
-    finally { setCreating(false); }
-  };
+    const statusTimer = setInterval(() => { fetchStatus(true); }, 3000);
+    return () => clearInterval(statusTimer);
+  }, [needsPolling, fetchStatus]);
 
   const handleDeleteSession = async () => {
     setDeleting(true);
     try {
       const token = await getAuthToken();
-      // Le backend Baileys identifie la session par school_id (via le JWT),
-      // l'ID dans l'URL est ignoré — on envoie 'current' comme placeholder.
+      // Le backend identifie l'école par school_id (via le JWT), l'ID dans
+      // l'URL est ignoré — on envoie 'current' comme placeholder.
       const sessionRef = sessionStatus?.session?.id || 'current';
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/sessions/${sessionRef}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      if (data.success) { setConfirmDelete(false); setSessionStatus(null); setQrCode(null); fetchStatus(); }
+      if (data.success) { setConfirmDelete(false); setSessionStatus(null); fetchStatus(); }
       else alert(data.error || 'Erreur suppression');
     } catch (error) { alert('Erreur de connexion'); }
     finally { setDeleting(false); }
@@ -1432,7 +1297,7 @@ const WhatsAppPage = () => {
 
   // Envoie le rapport sous forme de PDF moderne aux parents via WhatsApp.
   // Le backend regénère les données + le PDF avec graphes/charts/IA et l'envoie
-  // en pièce jointe (sendMediaBuffer Baileys), pas en texte tronqué.
+  // en pièce jointe (sendMediaBuffer), pas en texte tronqué.
   const sendReportWhatsApp = async () => {
     if (!reportSelectedStudent) { alert('Sélectionnez un élève d\'abord.'); return; }
     if (!reportPeriodData) { alert('Générez d\'abord un aperçu pour fixer la période.'); return; }
@@ -3463,25 +3328,11 @@ const WhatsAppPage = () => {
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
                 </div>
               ) : sessionStatus?.status === 'no_session' ? (
-                <div className="text-center py-6 space-y-3">
+                <div className="text-center py-6 space-y-2">
                   <p className="text-gray-500 text-sm">Aucun numéro connecté.</p>
                   <p className="text-gray-500 text-sm">
-                    L'<strong>API officielle</strong> ci-dessous est recommandée (boutons natifs, pas de risque de blocage).
+                    Rattachez le numéro de l'école via l'<strong>API officielle WhatsApp</strong> ci-dessous.
                   </p>
-                  {/* Le QR Baileys reste une entrée à part entière : c'est la
-                      seule option pour une école qui n'a pas de compte Meta
-                      Business. Elle était uniquement accessible en dépliant un
-                      lien gris en bas de page — introuvable en pratique. */}
-                  <div className="pt-1">
-                    <button
-                      onClick={() => { setShowLegacy(true); setShowCreateForm(true); }}
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-                      <QrCode className="w-4 h-4" /> Connecter un numéro par QR code (Baileys)
-                    </button>
-                    <p className="text-[11px] text-gray-400 mt-1.5">
-                      Sans compte Meta Business : scan du QR depuis WhatsApp, comme WhatsApp Web.
-                    </p>
-                  </div>
                 </div>
               ) : sessionStatus ? (
                 <div className="space-y-4">
@@ -3489,7 +3340,7 @@ const WhatsAppPage = () => {
                     {sessionStatus.connected ? (
                       <><Wifi className="w-8 h-8 text-green-600" /><div><p className="font-semibold text-green-800">Connecté</p><p className="text-sm text-green-700">Session active et prête.</p></div></>
                     ) : (
-                      <><WifiOff className="w-8 h-8 text-red-600" /><div><p className="font-semibold text-red-800">Déconnecté</p><p className="text-sm text-red-700">{sessionStatus.error || 'Scannez le QR code ci-dessous.'}</p></div></>
+                      <><WifiOff className="w-8 h-8 text-red-600" /><div><p className="font-semibold text-red-800">Déconnecté</p><p className="text-sm text-red-700">{sessionStatus.error || "Le numéro n'est pas encore activé — terminez la vérification ci-dessous."}</p></div></>
                     )}
                   </div>
                   {sessionStatus.session && (
@@ -3571,10 +3422,10 @@ const WhatsAppPage = () => {
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-6 shadow-sm space-y-4">
               <div>
                 <h2 className="text-base font-semibold text-emerald-900 flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5" /> Connexion via API officielle WhatsApp (recommandé)
+                  <CheckCircle className="w-5 h-5" /> Connexion via l'API officielle WhatsApp
                 </h2>
                 <p className="text-xs text-emerald-700 mt-1">
-                  Boutons cliquables, pas de QR, pas de risque de blocage. Le numéro doit être
+                  Boutons cliquables et aucun risque de blocage du numéro. Le numéro doit être
                   <strong> dédié</strong> et ne plus être utilisé dans l'application WhatsApp.
                 </p>
               </div>
@@ -3660,208 +3511,6 @@ const WhatsAppPage = () => {
                 </div>
               )}
             </div>
-
-            {/* Create Session Form */}
-            {showCreateForm && (
-              <div className="rounded-lg border border-green-200 bg-green-50 p-6 shadow-sm space-y-4">
-                <h2 className="text-base font-semibold text-green-900 flex items-center gap-2"><Plus className="w-5 h-5" /> Nouvelle session</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-700 block mb-1">Nom *</label>
-                    <input type="text" value={newSessionName} onChange={(e) => setNewSessionName(e.target.value)}
-                      placeholder="Ex: Suivi étudiants" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-700 block mb-1">Téléphone * (international)</label>
-                    <input type="text" value={newSessionPhone} onChange={(e) => setNewSessionPhone(e.target.value)}
-                      placeholder="Ex: +212600000000" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-green-500" />
-                  </div>
-                </div>
-                {createError && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-200">
-                    <AlertCircle className="w-4 h-4 text-red-600" /><p className="text-sm text-red-800">{createError}</p>
-                  </div>
-                )}
-                <div className="flex items-center gap-3">
-                  <button onClick={handleCreateSession} disabled={creating}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium">
-                    {creating ? <><RefreshCw className="w-4 h-4 animate-spin" /> Création...</> : <><Plus className="w-4 h-4" /> Créer</>}
-                  </button>
-                  <button onClick={() => { setShowCreateForm(false); setCreateError(''); }}
-                    className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Annuler</button>
-                </div>
-              </div>
-            )}
-
-            {/* QR Code — affiché d'office dès qu'une session Baileys existante
-                est tombée (voir needsQrScan), sinon derrière « Méthode
-                alternative » pour les écoles qui n'en ont pas encore. */}
-            {(needsQrScan || (showLegacy && sessionStatus && !sessionStatus.connected && sessionStatus.provider !== 'cloud' && sessionStatus.session)) && (
-              <div className={`rounded-lg border p-6 shadow-sm ${needsQrScan ? 'border-amber-300 bg-amber-50/40' : 'border-gray-200 bg-white'}`}>
-                {needsQrScan && (
-                  <div className="mb-4 flex items-start gap-2 text-sm text-amber-800">
-                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <p>
-                      La session de l'école n'est plus valide : WhatsApp a invalidé l'appareil lié.
-                      Scannez ce QR code pour rétablir l'envoi — les campagnes interrompues repartent
-                      automatiquement là où elles s'étaient arrêtées.
-                    </p>
-                  </div>
-                )}
-                <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
-                  <h2 className="text-base font-semibold text-gray-800 flex items-center gap-2"><QrCode className="w-5 h-5" /> Scanner le QR Code</h2>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => fetchQR(false, false)} disabled={qrLoading}
-                      className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-                      <RefreshCw className={`w-4 h-4 ${qrLoading ? 'animate-spin' : ''}`} /> {qrCode ? 'Rafraîchir' : 'Obtenir le QR'}
-                    </button>
-                    {(qrNeedsRepair || needsQrScan) && (
-                      <button
-                        onClick={() => {
-                          if (!confirm("Régénérer le QR ? L'appairage actuel sera supprimé et remplacé par le nouveau scan. À faire uniquement si aucun QR n'apparaît.")) return;
-                          fetchQR(false, true);
-                        }}
-                        disabled={qrRepairing}
-                        className="flex items-center gap-1 px-3 py-1.5 text-sm border border-amber-400 text-amber-800 bg-white rounded-lg hover:bg-amber-50 disabled:opacity-50">
-                        <QrCode className={`w-4 h-4 ${qrRepairing ? 'animate-spin' : ''}`} /> {qrRepairing ? 'Régénération…' : 'Régénérer le QR'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {qrNeedsRepair && !qrCode && (
-                  <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-100/60 p-3 text-sm text-amber-900">
-                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <p>
-                      WhatsApp refuse l'appairage enregistré : aucun QR ne peut être produit tant
-                      qu'il n'est pas remplacé. Cliquez sur <strong>Régénérer le QR</strong>.
-                    </p>
-                  </div>
-                )}
-                {qrLoading ? (
-                  <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div></div>
-                ) : qrCode ? (
-                  <div className="flex flex-col items-center gap-4">
-                    {/* Pas de imageRendering:pixelated : le downscale 512→320 en
-                        nearest-neighbor déforme les modules et empêche le scan
-                        sur iPhone (scanner iOS plus exigeant). Rendu lisse = net. */}
-                    <div className="p-4 bg-white border-2 border-gray-200 rounded-xl"><img src={qrCode} alt="QR Code" className="w-80 h-80" /></div>
-                    <div className="text-center">
-                      <p className="text-sm text-gray-700 font-medium">Scannez avec l'application WhatsApp</p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Android : Menu (⋮) · iPhone : Réglages ⚙️ → <strong>Appareils connectés</strong> → <strong>Connecter un appareil</strong>
-                      </p>
-                      <p className="text-[11px] text-gray-400 mt-1">Scannez depuis WhatsApp (pas l'app Appareil photo). Augmentez la luminosité de l'écran.</p>
-                    </div>
-
-                    {/* Alternative : connexion par code (iPhone qui ne scanne pas) */}
-                    <div className="w-full max-w-sm border-t border-gray-200 pt-3">
-                      {!showPairing ? (
-                        <button onClick={() => { setShowPairing(true); setPairingPhone(sessionStatus?.session?.phone || ''); }}
-                          className="text-sm text-green-700 hover:underline">
-                          📱 Le QR ne se scanne pas ? Se connecter avec un code
-                        </button>
-                      ) : (
-                        <div className="space-y-2 text-left">
-                          <label className="block text-xs font-semibold text-gray-700">Numéro WhatsApp (format international)</label>
-                          <div className="flex gap-2">
-                            <input type="text" value={pairingPhone} onChange={e => setPairingPhone(e.target.value)}
-                              placeholder="+212600000000"
-                              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-                            <button onClick={requestPairing} disabled={pairingLoading}
-                              className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50">
-                              {pairingLoading ? '…' : 'Obtenir le code'}
-                            </button>
-                          </div>
-                          {pairingError && <p className="text-xs text-red-600">{pairingError}</p>}
-                          {pairingCode && (
-                            <div className="text-center bg-green-50 border border-green-200 rounded-lg p-3">
-                              <p className="text-xs text-gray-600 mb-1">Saisissez ce code dans WhatsApp :</p>
-                              <p className="text-2xl font-bold tracking-widest text-green-800 select-all">{pairingCode}</p>
-                              <p className="text-[11px] text-gray-500 mt-2">
-                                WhatsApp → <strong>Appareils connectés</strong> → <strong>Connecter un appareil</strong> →
-                                <strong> Lier avec numéro de téléphone</strong> → entrez ce code.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : qrError ? (
-                  <div className="flex items-center gap-2 p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <AlertCircle className="w-5 h-5 text-yellow-600" /><p className="text-sm text-yellow-800">{qrError}</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 text-center py-8">Cliquez sur "Obtenir le QR" pour afficher le code.</p>
-                )}
-              </div>
-            )}
-
-            {/* Méthode alternative : ancien flux Baileys (QR), masqué par défaut */}
-            {sessionStatus?.provider !== 'cloud' && (
-              <div className="text-center">
-                {!showLegacy ? (
-                  <button onClick={() => setShowLegacy(true)}
-                    className="text-xs text-gray-400 hover:text-gray-600 underline">
-                    Méthode alternative : connexion par QR code (Baileys, non-officielle)
-                  </button>
-                ) : (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-5 space-y-3 text-left">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><QrCode className="w-4 h-4" /> Connexion par QR code (ancienne méthode)</h3>
-                      <button onClick={() => setShowLegacy(false)} className="text-xs text-gray-400 hover:text-gray-600 underline">Masquer</button>
-                    </div>
-                    <p className="text-xs text-gray-500">Méthode non-officielle (Baileys), sans boutons et avec risque de blocage. Préférez l'API officielle ci-dessus.</p>
-                    {sessionStatus?.status === 'no_session' && (
-                      <button onClick={() => setShowCreateForm(true)}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm font-medium">
-                        <Plus className="w-4 h-4" /> Créer une session QR
-                      </button>
-                    )}
-                    <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
-                      <li>Créez une session avec le numéro WhatsApp de l'école</li>
-                      <li>Cliquez sur « Obtenir le QR »</li>
-                      <li>WhatsApp → Appareils connectés → Connecter un appareil → scannez</li>
-                    </ol>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Montée en charge : sans cet affichage, un envoi qui s'arrête à
-                20 messages passerait pour une panne. */}
-            {sessionStatus?.connected && sessionStatus?.anti_ban?.daily_limit != null && (
-              <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-indigo-900 flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4" /> Montée en charge du numéro
-                    </p>
-                    <p className="text-[11px] text-indigo-700/80 mt-0.5">
-                      Après un nouvel appairage, WhatsApp traite le numéro comme neuf : le plafond
-                      remonte sur une semaine (20 → 40 → 80 → 160 → 300 → 500 → 800 par jour).
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-indigo-900 leading-none">
-                      {sessionStatus.anti_ban.sent_today}
-                      <span className="text-sm font-medium text-indigo-500"> / {sessionStatus.anti_ban.daily_limit}</span>
-                    </p>
-                    <p className="text-[11px] text-indigo-600 mt-0.5">
-                      {sessionStatus.anti_ban.remaining} message(s) restant(s) aujourd'hui
-                    </p>
-                  </div>
-                </div>
-                <div className="w-full bg-white/70 rounded-full h-1.5 mt-3">
-                  <div className="bg-indigo-500 h-1.5 rounded-full transition-all"
-                    style={{ width: `${Math.min(100, (sessionStatus.anti_ban.sent_today / Math.max(1, sessionStatus.anti_ban.daily_limit)) * 100)}%` }} />
-                </div>
-                <p className="text-[11px] text-indigo-700/70 mt-2">
-                  Le plafond atteint ne fait pas échouer les envois : la campagne se met en pause
-                  et reprend d'elle-même le lendemain, là où elle s'était arrêtée.
-                </p>
-              </div>
-            )}
 
             {sessionStatus?.connected && (
               <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg border border-green-200">

@@ -93,7 +93,7 @@ async function notifyUsers(userIds, { title, message, type = 'system', data = nu
 async function broadcastWhatsApp(schoolId, phones, text, imageRelUrl = null) {
   if (!schoolId || !phones || phones.length === 0) return { sent: 0 };
   try {
-    if (!getStatus(schoolId).connected) return { sent: 0, reason: 'not_connected' };
+    if (!(await getStatus(schoolId)).connected) return { sent: 0, reason: 'not_connected' };
   } catch {
     return { sent: 0, reason: 'not_connected' };
   }

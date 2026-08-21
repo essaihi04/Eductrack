@@ -2,7 +2,7 @@
  * Orchestrateur du chatbot WhatsApp v2.
  *
  * Architecture :
- *   1. Message entrant Baileys → handleBaileysIncoming
+ *   1. Message entrant (webhook Cloud API) → handleIncomingWhatsAppMessage
  *   2. Identification du parent via numéro
  *   3. State machine :
  *        - Pas d'enfant sélectionné → menu de sélection enfant
@@ -17,7 +17,6 @@
 import fs from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { downloadMediaMessage } from 'baileys';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import { runAsChatbot } from '../outboundGate.js';
@@ -45,8 +44,6 @@ import { handleAbsenceReply } from './absenceJustification.js';
 import * as A from './answers.js';
 import { generateInvoicePdfById } from './invoicePdf.js';
 import { sendMediaBuffer, sendImage, sendDocument } from '../index.js';
-import { getSocket } from '../baileysClient.js';
-import { simulateRead } from '../antiBan.js';
 import { generateBulletinPdfById } from '../../bulletins/bulletinPdf.js';
 import { generateTimetablePdfForStudent } from '../../bulletins/timetablePdf.js';
 import { generatePreview } from '../../dailyReports.js';
@@ -287,7 +284,7 @@ async function getParentByPhone(phone, schoolId = null) {
   // Cherche d'abord dans parent_contacts (numéro WhatsApp dédié).
   // IMPORTANT : un même numéro peut être enregistré pour des parents
   // appartenant à plusieurs écoles. On DOIT filtrer par schoolId (l'école
-  // qui a reçu le message via sa session Baileys) sinon on risque de router
+  // qui a reçu le message sur son numéro Cloud API) sinon on risque de router
   // la conversation vers la mauvaise école (silence total à l'envoi car la
   // session de l'autre école n'est pas connectée).
   let parentId = null;
@@ -1122,12 +1119,12 @@ async function handleReceptionistMessage({ phone, text, providerMessageId, schoo
  * @param {object} param0
  * @param {string} param0.from        - numéro E.164 du parent
  * @param {string} param0.text        - corps du message
- * @param {string} param0.id          - ID Baileys du message
- * @param {string} param0.schoolId    - school_id résolu via la session Baileys
+ * @param {string} param0.id          - ID du message côté WhatsApp
+ * @param {string} param0.schoolId    - school_id résolu via le phone_number_id
  * @param {object} [param0.location]  - localisation partagée { lat, lng, name, address }
  * @param {object} [param0.image]     - image partagée { download(), mimetype }
  */
-// Les deux handlers d'entrée posent le contexte « chatbot » (outboundGate) :
+// Le handler d'entrée pose le contexte « chatbot » (outboundGate) :
 // les réponses envoyées pendant le traitement d'un message entrant restent
 // autorisées même quand les notifications sortantes sont désactivées.
 export async function handleIncomingWhatsAppMessage(args) {
@@ -1407,7 +1404,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     return;
   }
   // Porte d'entrée transport : réponse aux boutons « Voir détails » / « Je ne veux pas »
-  // (id boutons Cloud : transport_yes / transport_no ; repli texte Baileys : BUS OUI / BUS NON)
+  // (id boutons Cloud : transport_yes / transport_no ; repli texte : BUS OUI / BUS NON)
   {
     const t = String(text || '').trim().toLowerCase();
     if (t === 'transport_yes' || t === 'bus oui') {
@@ -1922,146 +1919,4 @@ async function markProcessed(incomingMsgId) {
     .from('whatsapp_incoming_messages')
     .update({ processed: true })
     .eq('id', incomingMsgId);
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Adapter Baileys (callback fourni à baileysClient.startSession)
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * Déballe les enveloppes de message WhatsApp. Quand un chat a les « messages
- * éphémères » (disparition automatique) activés, ou pour les « view once » et
- * les documents légendés, Baileys imbrique le vrai contenu sous un conteneur :
- *   m.ephemeralMessage.message.locationMessage
- *   m.viewOnceMessage.message.imageMessage
- *   m.documentWithCaptionMessage.message.documentMessage
- * Sans déballage, m.locationMessage / m.imageMessage sont undefined → aucune
- * détection (silence total). On déballe récursivement jusqu'au contenu réel.
- */
-function unwrapMessage(message) {
-  let m = message || {};
-  for (let i = 0; i < 5; i += 1) {
-    const inner =
-      m.ephemeralMessage?.message ||
-      m.viewOnceMessage?.message ||
-      m.viewOnceMessageV2?.message ||
-      m.viewOnceMessageV2Extension?.message ||
-      m.documentWithCaptionMessage?.message ||
-      m.editedMessage?.message ||
-      null;
-    if (!inner) break;
-    m = inner;
-  }
-  return m;
-}
-
-export async function handleBaileysIncoming(args) {
-  return runAsChatbot(() => handleBaileysImpl(args));
-}
-
-async function handleBaileysImpl({ schoolId, msg, sock }) {
-  const m = unwrapMessage(msg.message);
-  const text =
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.documentMessage?.caption ||
-    // Réponse à un listMessage : rowId stocké dans selectedRowId
-    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    m.buttonsResponseMessage?.selectedButtonId ||
-    '';
-
-  // Localisation partagée (position statique ou live) → profil transport
-  const locMsg = m.locationMessage || m.liveLocationMessage;
-  let location = null;
-  if (locMsg && locMsg.degreesLatitude != null && locMsg.degreesLongitude != null) {
-    location = {
-      lat: Number(locMsg.degreesLatitude),
-      lng: Number(locMsg.degreesLongitude),
-      name: locMsg.name || null,
-      address: locMsg.address || null,
-    };
-  }
-
-  // Image partagée → photo de profil de l'enfant (téléchargement lazy : on
-  // ne télécharge le média que si l'expéditeur est un parent connu)
-  let image = null;
-  if (m.imageMessage) {
-    image = {
-      mimetype: m.imageMessage.mimetype || 'image/jpeg',
-      download: () => downloadMediaMessage(msg, 'buffer', {}),
-    };
-  }
-
-  if (!text && !location && !image) return;
-
-  const remoteJid = msg.key?.remoteJid || '';
-
-  // Ignore les groupes (toujours @g.us)
-  if (remoteJid.endsWith('@g.us')) {
-    console.log(`[chatbot] Ignoré (groupe): ${remoteJid}`);
-    return;
-  }
-
-  const activeSock = sock || getSocket(schoolId);
-
-  // Pour les messages 1-à-1, WhatsApp utilise désormais 2 formats :
-  //   - @s.whatsapp.net : ancien format, le JID = phone E.164
-  //   - @lid           : nouveau "Linked Identity" pour la confidentialité
-  // Pour @lid, Baileys expose le vrai téléphone dans key.senderPn / participantPn
-  // ou via remoteJidAlt selon la version. On tente chaque champ dans l'ordre.
-  let phoneJid = null;
-  if (remoteJid.endsWith('@s.whatsapp.net')) {
-    phoneJid = remoteJid;
-  } else if (remoteJid.endsWith('@lid')) {
-    phoneJid =
-      msg.key?.senderPn ||
-      msg.key?.participantPn ||
-      msg.key?.remoteJidAlt ||
-      null;
-
-    // Meta n'envoie plus systématiquement le numéro dans la clé du message :
-    // certains messages arrivent avec un @lid seul, et ils étaient alors
-    // PUREMENT ET SIMPLEMENT ignorés — le parent n'avait aucune réponse.
-    // Baileys 7 tient un annuaire LID → numéro, alimenté par le serveur
-    // WhatsApp et persisté avec les credentials : on l'interroge en secours.
-    if (!phoneJid) {
-      try {
-        const resolved = await activeSock?.signalRepository?.lidMapping?.getPNForLID?.(remoteJid);
-        if (resolved) {
-          phoneJid = resolved;
-          console.log(`[chatbot] 🔗 LID résolu via l'annuaire Baileys: ${remoteJid} → ${resolved}`);
-        }
-      } catch (e) {
-        console.warn(`[chatbot] annuaire LID indisponible: ${e.message}`);
-      }
-    }
-
-    if (!phoneJid) {
-      console.warn(
-        `[chatbot] ⚠️  Message @lid sans numéro résoluble — clés disponibles: ${JSON.stringify(Object.keys(msg.key || {}))}`
-      );
-      return;
-    }
-    console.log(`[chatbot] 🔗 LID résolu: ${remoteJid} → ${phoneJid}`);
-  } else {
-    console.log(`[chatbot] Ignoré (format JID inconnu): ${remoteJid}`);
-    return;
-  }
-
-  // L'annuaire LID renvoie le JID AVEC l'identifiant d'appareil
-  // (212600000000:0@s.whatsapp.net) : sans retirer le « :0 », le numéro
-  // reconstruit ne correspondrait à aucun parent en base.
-  const from = '+' + phoneJid.split('@')[0].split(':')[0];
-  const id = msg.key?.id || `${Date.now()}`;
-
-  // Comportement humain : on "lit" d'abord le message (coches bleues + on
-  // apparaît en ligne) puis on marque une courte pause de lecture avant de
-  // composer la réponse — exactement comme une personne qui ouvre la conv.
-  if (activeSock) {
-    await simulateRead(activeSock, msg.key, remoteJid);
-  }
-
-  return handleIncomingWhatsAppMessage({ from, text, id, schoolId, location, image });
 }
