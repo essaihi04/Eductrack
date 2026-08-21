@@ -14,6 +14,7 @@
 import { supabaseAdmin } from '../../config/supabase.js';
 import { sendPushToUser } from '../webPush.js';
 import { isSessionReady, sendUnified } from './sendHelpers.js';
+import { withGreeting } from './messageVariants.js';
 
 export const WHATSAPP_BULK_SEND = 'whatsapp_bulk_send';
 
@@ -29,7 +30,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
   const { data: msg, error: msgError } = await supabaseAdmin
     .from('whatsapp_messages')
-    .select('id, school_id, message_type, content, media_url, file_name, channels, total_recipients')
+    .select('id, school_id, message_type, content, media_url, file_name, channels, total_recipients, personalize, variants, resend_of')
     .eq('id', messageId)
     .single();
 
@@ -43,6 +44,12 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   const channels = msg.channels || 'whatsapp';
   const wantWa = channels !== 'push';
   const wantPush = channels !== 'whatsapp';
+
+  // Formulations générées à la création du message et stockées : le job les
+  // rejoue telles quelles, donc une reprise après coupure ne rappelle pas l'IA
+  // et un parent ne reçoit jamais deux versions différentes du même message.
+  const variants = Array.isArray(msg.variants) && msg.variants.length ? msg.variants : [message];
+  const personalize = msg.personalize === true;
 
   const { data: allRecipients, error: recError } = await supabaseAdmin
     .from('whatsapp_message_recipients')
@@ -73,6 +80,16 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
     throw new Error('Session WhatsApp non connectée — nouvelle tentative plus tard');
   }
 
+  const nameByParent = new Map();
+  if (personalize && wantWa) {
+    const pids = [...new Set(todo.map((r) => r.parent_id).filter(Boolean))];
+    for (let i = 0; i < pids.length; i += 200) {
+      const { data: profs } = await supabaseAdmin
+        .from('profiles').select('id, first_name, last_name').in('id', pids.slice(i, i + 200));
+      (profs || []).forEach((pr) => nameByParent.set(pr.id, `${pr.first_name || ''} ${pr.last_name || ''}`.trim()));
+    }
+  }
+
   let schoolName = 'votre école';
   if (wantPush && schoolId) {
     const { data: school } = await supabaseAdmin.from('schools').select('name').eq('id', schoolId).maybeSingle();
@@ -93,6 +110,9 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
   let sentCount = done.length;
   let failedCount = 0;
+  // La rotation démarre sur le nombre de numéros DÉJÀ servis pour qu'une
+  // reprise ne reparte pas systématiquement sur la même formulation.
+  let waIndex = waSentPhones.size;
 
   for (const recipient of todo) {
     const patch = {};
@@ -141,7 +161,10 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
         waOk = true;
       } else {
         try {
-          const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message, mediaUrl, fileName });
+          let body = variants[waIndex % variants.length];
+          waIndex++;
+          if (personalize) body = withGreeting(body, nameByParent.get(recipient.parent_id));
+          const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName });
           if (result.success) {
             waOk = true;
             waSentPhones.add(recipient.phone_e164);
@@ -184,6 +207,18 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
     if (errorMsg) patch.error_message = errorMsg;
 
     await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', recipient.id);
+
+    // Relance : on répercute l'envoi sur le message D'ORIGINE. Les critères de
+    // relance (« WhatsApp jamais parti », « non distribués ») se lisent sur ce
+    // message-là ; sans cette mise à jour, une SECONDE relance reciblait les
+    // parents que la première venait de servir.
+    if (msg.resend_of && waOk && recipient.phone_e164) {
+      await supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .update({ wa_status: 'sent' })
+        .eq('message_id', msg.resend_of)
+        .eq('phone_e164', recipient.phone_e164);
+    }
 
     await supabaseAdmin
       .from('whatsapp_messages')

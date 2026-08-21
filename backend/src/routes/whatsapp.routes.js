@@ -18,6 +18,7 @@ import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendPushToUser } from '../services/webPush.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 import { isSessionReady, sendUnified } from '../services/whatsapp/sendHelpers.js';
+import { generateVariants } from '../services/whatsapp/messageVariants.js';
 import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.js';
 import { enqueueJob } from '../services/jobs/index.js';
 
@@ -782,6 +783,16 @@ router.post('/messages/:messageId/resend', async (req, res) => {
       .filter((c) => allowed.includes(c));
     if (!criteria.length) criteria.push('unread');
     const channel = ['whatsapp', 'app', 'both'].includes(req.body?.channel) ? req.body.channel : 'app';
+    // Deux couches de personnalisation, cumulables. Une relance envoyait
+    // jusqu'ici un texte RIGOUREUSEMENT identique à tout le monde, alors que
+    // les communications planifiées savaient déjà nommer le parent.
+    const personalize = req.body?.personalize === true;   // salutation nominative
+    const varyWording = req.body?.varyWording === true;   // reformulations IA
+    // Planification : ISO ou null. Une date passée = envoi immédiat.
+    const scheduledAt = req.body?.scheduled_at && !Number.isNaN(Date.parse(req.body.scheduled_at))
+      ? new Date(req.body.scheduled_at)
+      : null;
+    const runAfter = scheduledAt && scheduledAt.getTime() > Date.now() ? scheduledAt.toISOString() : null;
     const wantWa = channel !== 'app';
     const wantPush = channel !== 'whatsapp';
 
@@ -828,113 +839,109 @@ router.post('/messages/:messageId/resend', async (req, res) => {
     }
     if (!targets.length) return res.status(400).json({ error: 'Aucun destinataire ne correspond aux critères pour ce canal.' });
 
-    // 3. Session WhatsApp requise si canal WA
-    if (wantWa && !(await isSessionReady(schoolId))) {
-      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Choisissez le canal Application ou connectez WhatsApp.' });
+    // 3. Session WhatsApp requise pour un envoi IMMÉDIAT seulement : une
+    //    relance planifiée pour demain n'a pas à exiger une session connectée
+    //    maintenant, et le job attendra de toute façon qu'elle revienne.
+    if (wantWa && !runAfter && !(await isSessionReady(schoolId))) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée. Choisissez le canal Application, planifiez la relance, ou connectez WhatsApp.' });
     }
 
     // 4. Nouvelle entrée « relance » + destinataires
     const channelsCol = channel === 'app' ? 'push' : channel === 'whatsapp' ? 'whatsapp' : 'both';
     const messageType = orig.message_type || 'text';
-    const { data: msgLog, error: logErr } = await supabaseAdmin
-      .from('whatsapp_messages')
-      .insert({
-        school_id: orig.school_id,
-        sent_by: req.user.id,
-        message_type: messageType,
-        content: orig.content,
-        media_url: orig.media_url,
-        file_name: orig.file_name,
-        recipient_filter: { resend_of: messageId, criteria },
-        total_recipients: targets.length,
-        status: 'sending',
-        category: orig.category || 'general',
-        channels: channelsCol,
-      })
-      .select('id')
-      .single();
+
+    // Reformulations générées MAINTENANT et stockées sur le message : le job
+    // les rejoue telles quelles, donc une reprise après coupure ne rappelle pas
+    // l'IA et un parent ne peut pas recevoir deux versions différentes.
+    let variants = null;
+    if (wantWa && varyWording && orig.content) {
+      const generated = await generateVariants(orig.content, { count: 6 });
+      if (generated.length > 1) variants = generated;
+    }
+
+    const insertPayload = {
+      school_id: orig.school_id,
+      sent_by: req.user.id,
+      message_type: messageType,
+      content: orig.content,
+      media_url: orig.media_url,
+      file_name: orig.file_name,
+      recipient_filter: { resend_of: messageId, criteria },
+      total_recipients: targets.length,
+      status: runAfter ? 'pending' : 'sending',
+      category: orig.category || 'general',
+      channels: channelsCol,
+      resend_of: messageId,
+      personalize,
+      variants,
+      scheduled_at: runAfter,
+    };
+    let { data: msgLog, error: logErr } = await supabaseAdmin
+      .from('whatsapp_messages').insert(insertPayload).select('id').single();
+    // Migration ADD_RESEND_SCHEDULING.sql pas encore jouée : on retombe sur les
+    // colonnes historiques plutôt que de refuser la relance.
+    if (logErr && /column|resend_of|personalize|variants|scheduled_at/i.test(logErr.message || '')) {
+      console.warn('[resend] colonnes de personnalisation absentes — exécutez ADD_RESEND_SCHEDULING.sql');
+      ['resend_of', 'personalize', 'variants', 'scheduled_at'].forEach((k) => delete insertPayload[k]);
+      insertPayload.status = 'sending';
+      ({ data: msgLog, error: logErr } = await supabaseAdmin
+        .from('whatsapp_messages').insert(insertPayload).select('id').single());
+    }
     if (logErr) throw logErr;
 
-    const { data: inserted } = await supabaseAdmin
-      .from('whatsapp_message_recipients')
-      .insert(targets.map((t) => ({ message_id: msgLog.id, parent_id: t.parent_id, phone_e164: t.phone_e164 || '', status: 'pending' })))
-      .select('id, parent_id, phone_e164');
-    const rowIdBy = new Map((inserted || []).map((r) => [`${r.parent_id || ''}|${r.phone_e164 || ''}`, r.id]));
-
-    let schoolName = 'votre école';
-    if (wantPush && orig.school_id) {
-      const { data: sc } = await supabaseAdmin.from('schools').select('name').eq('id', orig.school_id).maybeSingle();
-      if (sc?.name) schoolName = sc.name;
-    }
-
-    // Répond tout de suite, envoi en arrière-plan
-    res.json({ success: true, messageId: msgLog.id, totalRecipients: targets.length });
-
-    let sent = 0, failed = 0;
-    const notifTitle = `📣 ${schoolName}`;
-    const notifBody = orig.content || (messageType === 'image' ? '📷 Image' : (orig.media_url ? '📎 Document' : 'Nouvelle communication'));
-    const waSent = new Set();
-    for (const t of targets) {
-      const rowId = rowIdBy.get(`${t.parent_id || ''}|${t.phone_e164 || ''}`);
-      const patch = {};
-      let waOk = false, appOk = false, errorMsg = null;
-
-      if (wantPush && t.parent_id) {
-        try {
-          const { data: notif, error: nErr } = await supabaseAdmin
-            .from('notifications')
-            .insert({
-              user_id: t.parent_id,
-              type: 'message',
-              title: notifTitle,
-              message: notifBody,
-              data: { hub_message_id: msgLog.id, media_url: orig.media_url || null, file_name: orig.file_name || null, message_type: messageType },
-            })
-            .select('id')
-            .single();
-          if (nErr) throw nErr;
-          patch.notification_id = notif.id;
-          appOk = true;
-          const pr = await sendPushToUser(t.parent_id, {
-            title: notifTitle,
-            body: (orig.content || notifBody).slice(0, 140),
-            url: '/parent/notifications',
-            tag: `comm-msg-${msgLog.id}`,
-            // Pièce jointe image → grande image dans la notification (sinon logo école)
-            image: messageType === 'image' && orig.media_url ? orig.media_url : undefined,
-          });
-          patch.push_status = pr.sent > 0 ? 'sent' : 'no_subscription';
-        } catch (e) {
-          patch.push_status = 'failed';
-          errorMsg = `App: ${e.message || 'erreur'}`;
-        }
-      }
-
-      if (wantWa && t.phone_e164) {
-        if (waSent.has(t.phone_e164)) waOk = true;
-        else {
-          try {
-            const r = await sendUnified(orig.school_id, t.phone_e164, { messageType, message: orig.content, mediaUrl: orig.media_url, fileName: orig.file_name });
-            if (r.success) { waOk = true; waSent.add(t.phone_e164); patch.provider_msg_id = String(r.data?.msgId || ''); }
-            else errorMsg = [errorMsg, r.message || 'Erreur WhatsApp'].filter(Boolean).join(' | ');
-          } catch (e) {
-            errorMsg = [errorMsg, e.message || 'Erreur réseau'].filter(Boolean).join(' | ');
-          }
-        }
-      }
-
-      const reached = waOk || appOk;
-      if (reached) sent++; else failed++;
-      patch.status = reached ? 'sent' : 'failed';
-      if (reached) patch.sent_at = new Date().toISOString();
-      if (errorMsg) patch.error_message = errorMsg;
-      if (rowId) await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', rowId);
-      await supabaseAdmin.from('whatsapp_messages').update({ sent_count: sent, failed_count: failed, updated_at: new Date().toISOString() }).eq('id', msgLog.id);
-    }
     await supabaseAdmin
-      .from('whatsapp_messages')
-      .update({ status: failed === targets.length ? 'failed' : 'completed', sent_count: sent, failed_count: failed, updated_at: new Date().toISOString() })
-      .eq('id', msgLog.id);
+      .from('whatsapp_message_recipients')
+      .insert(targets.map((t) => ({
+        message_id: msgLog.id,
+        parent_id: t.parent_id,
+        phone_e164: t.phone_e164 || '',
+        status: 'pending',
+      })));
+
+    // L'envoi passe par la FILE DE TRAVAUX, comme un envoi de masse ordinaire.
+    //
+    // Il tournait auparavant dans une boucle lancée après res.json(), vivant en
+    // mémoire du process : un redémarrage pm2 en cours de relance perdait tout
+    // le reste sans trace — et une relance de 255 parents dure plusieurs heures
+    // avec la cadence anti-ban. Passer par le job apporte trois choses d'un
+    // coup : la reprise après coupure, la planification (run_after), et la
+    // logique par canal déjà écrite dans runBulkSend (personnalisation,
+    // rotation des formulations, répercussion sur le message d'origine).
+    let queued = true;
+    try {
+      await enqueueJob({
+        type: WHATSAPP_BULK_SEND,
+        payload: { message_id: msgLog.id },
+        schoolId: orig.school_id,
+        createdBy: req.user.id,
+        runAfter,
+        // Une relance s'étale sur des heures et se suspend hors plage horaire
+        // ou session tombée ; chaque reprise refusée consomme une tentative.
+        maxAttempts: 40,
+      });
+    } catch (queueError) {
+      queued = false;
+      console.error('[resend] file de travaux indisponible:', queueError.message);
+    }
+
+    if (!queued) {
+      await supabaseAdmin
+        .from('whatsapp_messages')
+        .update({ status: 'failed' })
+        .eq('id', msgLog.id);
+      return res.status(500).json({
+        error: "File de travaux indisponible : exécutez ADD_JOBS_QUEUE.sql, la relance n'a pas été lancée.",
+      });
+    }
+
+    res.json({
+      success: true,
+      messageId: msgLog.id,
+      totalRecipients: targets.length,
+      variants: variants ? variants.length : 1,
+      personalize,
+      scheduledAt: runAfter,
+    });
   } catch (error) {
     console.error('Erreur renvoi message:', error);
     if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });

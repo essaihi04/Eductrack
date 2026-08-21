@@ -89,6 +89,10 @@ const WhatsAppPage = () => {
   const [showResend, setShowResend] = useState(false); // panneau « Renvoyer »
   const [resendCriteria, setResendCriteria] = useState({ unread: true, unresponded: false, undelivered: false, wa_not_sent: false });
   const [resendChannel, setResendChannel] = useState('app'); // app | whatsapp | both
+  // Personnalisation de la relance : salutation nominative et/ou reformulations.
+  const [resendPersonalize, setResendPersonalize] = useState(true);
+  const [resendVaryWording, setResendVaryWording] = useState(true);
+  const [resendScheduledAt, setResendScheduledAt] = useState(''); // '' = immédiat
   const [resendBusy, setResendBusy] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
   const [resendSelected, setResendSelected] = useState(new Set()); // ids destinataires cochés
@@ -619,7 +623,17 @@ const WhatsAppPage = () => {
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/messages/${detailMessage.message.id}/resend`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ criteria, channel: resendChannel, recipient_ids }),
+        body: JSON.stringify({
+          criteria,
+          channel: resendChannel,
+          recipient_ids,
+          personalize: resendPersonalize,
+          varyWording: resendVaryWording,
+          // datetime-local est une heure LOCALE sans fuseau : on la convertit
+          // en ISO absolu, sinon le serveur l'interpréterait en UTC et la
+          // relance partirait avec une heure de décalage.
+          scheduled_at: resendScheduledAt ? new Date(resendScheduledAt).toISOString() : null,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -3899,6 +3913,62 @@ const WhatsAppPage = () => {
                         })}
                       </div>
                     </div>
+
+                    {/* Anti-répétition : N messages rigoureusement identiques
+                        sont un signal de spam pour WhatsApp. */}
+                    {resendChannel !== 'app' && (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                        <p className="text-[11px] font-semibold text-gray-500">Personnalisation du texte WhatsApp</p>
+                        <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                          <input type="checkbox" className="mt-0.5" checked={resendPersonalize}
+                            onChange={(e) => setResendPersonalize(e.target.checked)} />
+                          <span>
+                            Saluer chaque parent par son nom
+                            <span className="block text-[11px] text-gray-400">« Bonjour {'{nom}'}, » en tête du message — chaque destinataire reçoit un texte différent.</span>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+                          <input type="checkbox" className="mt-0.5" checked={resendVaryWording}
+                            onChange={(e) => setResendVaryWording(e.target.checked)} />
+                          <span>
+                            Générer plusieurs versions du message
+                            <span className="block text-[11px] text-gray-400">
+                              L'IA reformule le texte en gardant le sens ; les versions alternent entre les destinataires.
+                              Numéros de téléphone, liens, dates et montants sont recopiés à l'identique et vérifiés.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    )}
+
+                    {/* Planification : la relance passe par la file de travaux,
+                        elle survit donc à un redémarrage et peut attendre. */}
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <p className="text-[11px] font-semibold text-gray-500 mb-1.5">Quand envoyer</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          type="datetime-local"
+                          value={resendScheduledAt}
+                          onChange={(e) => setResendScheduledAt(e.target.value)}
+                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                        />
+                        {resendScheduledAt ? (
+                          <button type="button" onClick={() => setResendScheduledAt('')}
+                            className="text-xs text-gray-500 hover:text-gray-700 underline">
+                            Envoyer maintenant
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-500">Vide = envoi immédiat</span>
+                        )}
+                      </div>
+                      {resendScheduledAt && (
+                        <p className="text-[11px] text-gray-400 mt-1.5">
+                          La session WhatsApp n'a pas besoin d'être connectée maintenant : l'envoi
+                          attendra qu'elle le soit.
+                        </p>
+                      )}
+                    </div>
+
                     {(() => {
                       const matches = resendMatchList(detailMessage.recipients);
                       const q = resendSearch.trim().toLowerCase();
