@@ -530,8 +530,8 @@ const ClassMetricsDashboard = () => {
                         </p>
                       </div>
                       <div className="flex items-center gap-4 text-sm">
-                        <span className="text-green-600">{t('dash.present', { n: session.presenceRate })}</span>
-                        <span className="text-blue-600">{t('dash.active', { n: session.participationRate })}</span>
+                        <span className="text-green-600">{t('dash.present', { n: session.presenceRate ?? 0 })}</span>
+                        <span className="text-blue-600">{t('dash.active', { n: session.participationRate ?? 0 })}</span>
                         {session.incidentsCount > 0 && (
                           <span className="text-red-600">{t('dash.incidents', { n: session.incidentsCount })}</span>
                         )}
