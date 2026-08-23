@@ -1123,7 +1123,8 @@ const ControlsPage = () => {
   const handleGradeKeyDown = (event, index) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    const nextInput = document.querySelector(`[data-grade-index="${index + 1}"]`);
+    const nextInput = Array.from(document.querySelectorAll(`[data-grade-index="${index + 1}"]`))
+      .find(input => input.offsetParent !== null);
     if (nextInput) {
       nextInput.focus();
       nextInput.select();
