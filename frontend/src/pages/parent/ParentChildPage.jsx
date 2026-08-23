@@ -93,6 +93,9 @@ const ParentChildPage = () => {
   useEffect(() => {
     rememberParentChild(childId);
     load();
+    // `load` lit uniquement l'identifiant courant ; le changement de route
+    // est l'unique déclencheur voulu ici.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [childId]);
 
   const handlePhotoUpload = async (e) => {
@@ -213,6 +216,13 @@ const ParentChildPage = () => {
           </button>
         </div>
       </div>
+
+      {!profile.classes && (
+        <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <p>{t('pchild.noClassHelp')}</p>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto mb-4 border-b border-gray-200">

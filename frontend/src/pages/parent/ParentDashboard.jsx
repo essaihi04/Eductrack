@@ -1,7 +1,7 @@
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, Bell, BookOpen, Bot, Bus, CalendarClock, CheckCircle2,
+  AlertCircle, Bell, BookOpen, Bus, CalendarClock, CheckCircle2,
   ChevronRight, FileText, GraduationCap, Image as ImageIcon, Search,
   Sparkles, User, Users2, Wallet,
 } from 'lucide-react';
@@ -9,14 +9,12 @@ import { supabase } from '../../lib/supabase';
 import {
   parentPathForChild, preferredParentChild, rememberParentChild,
 } from '../../lib/parentNavigation';
-import { useParentAssistant } from '../../contexts/ParentAssistantContext';
 import { useT } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const ParentDashboard = () => {
   const navigate = useNavigate();
-  const { openAssistant } = useParentAssistant();
   const t = useT();
   const [children, setChildren] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -147,11 +145,11 @@ const ParentDashboard = () => {
                 onClick={() => navigate('/parent/notifications')}
               />
               <ActionCard
-                icon={Bot}
-                title={t('passist.title')}
-                hint={t('pdash.action.assistantHint')}
+                icon={FileText}
+                title={t('pnav.bulletins')}
+                hint={t('pdash.action.bulletinsHint')}
                 color="bg-violet-100 text-violet-700"
-                onClick={() => openAssistant(selectedChild.id)}
+                onClick={() => openForChild('/parent/bulletins')}
               />
             </div>
           </section>
@@ -162,11 +160,10 @@ const ParentDashboard = () => {
               <p className="text-sm text-gray-500">{t('pdash.servicesHint')}</p>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-              <ServiceButton icon={FileText} label={t('pnav.bulletins')} onClick={() => openForChild('/parent/bulletins')} />
               <ServiceButton icon={Bus} label={t('pnav.transport')} onClick={() => openForChild('/parent/transport')} />
               <ServiceButton icon={CalendarClock} label={t('pnav.appointments')} onClick={() => openForChild('/parent/appointments')} />
               <ServiceButton icon={AlertCircle} label={t('nav.reports')} onClick={() => openForChild('/parent/signalements')} />
-              <ServiceButton icon={ImageIcon} label={t('nav.lifeBook')} onClick={() => navigate('/school-life/cahier-de-vie')} />
+              {selectedChild.class && <ServiceButton icon={ImageIcon} label={t('nav.lifeBook')} onClick={() => navigate('/school-life/cahier-de-vie')} />}
               <ServiceButton icon={Sparkles} label={t('nav.extracurricular')} onClick={() => navigate('/school-life/parascolaire')} />
               <ServiceButton icon={Search} label={t('nav.lostFound')} onClick={() => navigate('/school-life/objets-perdus')} />
               <ServiceButton icon={Users2} label={t('pnav.polls')} onClick={() => navigate('/school-life/sondages')} />
@@ -225,6 +222,13 @@ const ChildFocus = ({ child, onOpen, t }) => {
           {t('pdash.openFollowup')} <ChevronRight className="w-4 h-4" />
         </button>
       </div>
+
+      {!child.class && (
+        <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{t('pdash.noClassHelp', { name: child.first_name })}</span>
+        </div>
+      )}
 
       {(summary.overdue_homework > 0 || summary.upcoming_homework > 0 || summary.absent_count > 0) && (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-primary/10 pt-3">

@@ -25,6 +25,9 @@ import {
   loadCustomEntries, findCustomEntry, matchCustomEntryByKeyword,
 } from '../services/whatsapp/chatbot/customEntries.js';
 import { listParentChildren, loadParentChild } from '../services/parentAccess.js';
+import {
+  actionLabel, assistantText, localizeAssistantReply, normalizeAssistantLocale, sectionLabel,
+} from '../services/parentAssistantLocalization.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -106,12 +109,12 @@ function toMarkdown(whatsappText) {
 }
 
 /** Options accessibles d'une section, telles qu'affichées en boutons. */
-async function sectionOptions(schoolId, menu) {
+async function sectionOptions(schoolId, menu, locale) {
   const caps = CAPABILITIES.filter((c) => c.menu === menu && HANDLERS[c.id]);
   const out = [];
   for (const cap of caps) {
     if (!(await isCapabilityEnabled(schoolId, cap.id))) continue;
-    out.push({ action: cap.id, label: cap.label, emoji: OPTION_EMOJI[cap.id] || '•' });
+    out.push({ action: cap.id, label: actionLabel(cap.id, cap.label, locale), emoji: OPTION_EMOJI[cap.id] || '•' });
   }
   return out;
 }
@@ -123,18 +126,19 @@ router.get('/menu', async (req, res) => {
     const parentInfo = await buildParentInfo(req);
     const schoolId = parentInfo.school_id;
     const children = await listParentChildren(parentInfo.parent_id);
+    const locale = normalizeAssistantLocale(req.query.lang);
 
     const sections = [];
     for (const s of SECTIONS) {
       if (!(await isCapabilityEnabled(schoolId, s.section))) continue;
-      const options = await sectionOptions(schoolId, s.menu);
-      if (options.length > 0) sections.push({ ...s, options });
+      const options = await sectionOptions(schoolId, s.menu, locale);
+      if (options.length > 0) sections.push({ ...s, label: sectionLabel(s.menu, s.label, locale), options });
     }
 
     // Raccourcis hors section + contenus ajoutés par l'école.
     const shortcuts = [];
     if (await isCapabilityEnabled(schoolId, 'main.massar')) {
-      shortcuts.push({ action: 'main.massar', label: 'Code Massar', emoji: '🆔' });
+      shortcuts.push({ action: 'main.massar', label: actionLabel('main.massar', 'Code Massar', locale), emoji: '🆔' });
     }
     const entries = await loadCustomEntries(schoolId);
     entries.filter((e) => e.show_in_menu).forEach((e) => {
@@ -151,7 +155,7 @@ router.get('/menu', async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur assistant /menu:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: assistantText('serverError', req.query.lang) });
   }
 });
 
@@ -160,46 +164,47 @@ router.get('/menu', async (req, res) => {
 router.post('/message', async (req, res) => {
   try {
     const { child_id: childId, action, text } = req.body;
+    const locale = normalizeAssistantLocale(req.body.lang);
     const parentInfo = await buildParentInfo(req);
     const schoolId = parentInfo.school_id;
 
     const student = childId ? await loadParentChild(parentInfo.parent_id, childId) : null;
     if (childId && !student) {
-      return res.status(403).json({ error: 'Cet enfant n\'est pas rattaché à votre compte' });
+      return res.status(403).json({ error: assistantText('childForbidden', locale) });
     }
 
     // ── Bouton : contenu ajouté par l'école ──
     if (action?.startsWith('custom:')) {
       const entry = await findCustomEntry(schoolId, action.slice(7));
-      if (!entry) return res.json({ blocks: [{ type: 'text', markdown: 'Ce contenu n\'est plus disponible.' }], mood: 'idle' });
+      if (!entry) return res.json({ blocks: [{ type: 'text', markdown: assistantText('contentUnavailable', locale) }], mood: 'idle' });
       return res.json(renderCustomEntry(entry));
     }
 
     // ── Bouton : donnée du référentiel ──
     if (action) {
-      if (!HANDLERS[action]) return res.status(400).json({ error: 'Action inconnue' });
+      if (!HANDLERS[action]) return res.status(400).json({ error: assistantText('unknownAction', locale) });
 
       // Double contrôle : le bouton peut venir d'un menu affiché avant que
       // l'administration ne coupe la donnée.
       if (!(await isCapabilityEnabled(schoolId, action))) {
         return res.json({
-          blocks: [{ type: 'text', markdown: `Cette information n'est plus communiquée par ${parentInfo.school_name}. Contactez l'établissement directement.` }],
+          blocks: [{ type: 'text', markdown: assistantText('disabledInfo', locale, { school: parentInfo.school_name }) }],
           mood: 'blocked',
         });
       }
-      if (!student) return res.status(400).json({ error: 'Sélectionnez un enfant' });
+      if (!student) return res.status(400).json({ error: assistantText('selectChild', locale) });
 
       const reply = await HANDLERS[action](student, parentInfo);
       return res.json({
-        blocks: [{ type: 'text', markdown: toMarkdown(reply) }],
-        suggestions: await suggestionsFor(schoolId, action),
+        blocks: [{ type: 'text', markdown: toMarkdown(localizeAssistantReply(reply, locale)) }],
+        suggestions: await suggestionsFor(schoolId, action, locale),
         mood: moodFor(action),
       });
     }
 
     // ── Message libre ──
     const question = String(text || '').trim();
-    if (!question) return res.status(400).json({ error: 'Message vide' });
+    if (!question) return res.status(400).json({ error: assistantText('emptyMessage', locale) });
 
     // Un contenu de l'école déclenché par mot-clé prime sur l'IA.
     const hit = await matchCustomEntryByKeyword(schoolId, question);
@@ -207,23 +212,23 @@ router.post('/message', async (req, res) => {
 
     if (!(await isCapabilityEnabled(schoolId, 'main.ai'))) {
       return res.json({
-        blocks: [{ type: 'text', markdown: 'Les questions libres ne sont pas activées. Utilisez les boutons ci-dessous pour consulter les informations disponibles.' }],
+        blocks: [{ type: 'text', markdown: assistantText('aiDisabled', locale) }],
         mood: 'blocked',
       });
     }
-    if (!student) return res.status(400).json({ error: 'Sélectionnez un enfant' });
+    if (!student) return res.status(400).json({ error: assistantText('selectChild', locale) });
 
     // answerWithAI applique lui-même les interrupteurs : une donnée coupée
     // n'entre pas dans le contexte du modèle.
     const reply = await answerWithAI({ messageText: question, student, parentInfo });
     return res.json({
       blocks: [{ type: 'text', markdown: toMarkdown(reply) }],
-      suggestions: await suggestionsFor(schoolId, null),
+      suggestions: await suggestionsFor(schoolId, null, locale),
       mood: 'idle',
     });
   } catch (error) {
     console.error('Erreur assistant /message:', error);
-    res.status(500).json({ error: 'Erreur serveur' });
+    res.status(500).json({ error: assistantText('serverError', req.body?.lang) });
   }
 });
 
@@ -273,7 +278,7 @@ const FOLLOW_UPS = {
 
 const DEFAULT_SUGGESTIONS = ['pedagogy.tracking', 'pedagogy.homework', 'finance.balance'];
 
-async function suggestionsFor(schoolId, action) {
+async function suggestionsFor(schoolId, action, locale) {
   const wanted = FOLLOW_UPS[action] || DEFAULT_SUGGESTIONS;
   const disabled = await disabledCapabilities(schoolId);
 
@@ -282,7 +287,7 @@ async function suggestionsFor(schoolId, action) {
     if (id === action || disabled.has(id)) continue;
     if (!(await isCapabilityEnabled(schoolId, id))) continue;
     const cap = CAPABILITIES.find((c) => c.id === id);
-    if (cap) out.push({ action: id, label: cap.label, emoji: OPTION_EMOJI[id] || '•' });
+    if (cap) out.push({ action: id, label: actionLabel(id, cap.label, locale), emoji: OPTION_EMOJI[id] || '•' });
   }
   return out.slice(0, 3);
 }

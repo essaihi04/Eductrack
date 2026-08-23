@@ -29,7 +29,7 @@ import LessonPlan from './pages/teacher/LessonPlan';
 import StudentProfile from './pages/teacher/StudentProfile';
 import ClassMetricsDashboard from './pages/teacher/ClassMetricsDashboard';
 import StudentDashboard from './pages/teacher/StudentDashboard';
-import StudentProfilePage from './pages/student/StudentProfile';
+import AccountProfilePage from './pages/AccountProfilePage';
 import Devoirs from './pages/teacher/Devoirs';
 import StudentHomework from './pages/student/StudentHomework';
 import StudentDocuments from './pages/student/StudentDocuments';
@@ -326,7 +326,7 @@ function App() {
             <Route path="student/level" element={<StudentLevel />} />
             <Route path="student/badges" element={<StudentBadges />} />
             <Route path="student/bulletins" element={<StudentBulletins />} />
-            <Route path="profile" element={<StudentProfilePage />} />
+            <Route path="profile" element={<AccountProfilePage />} />
             <Route path="superadmin/schools" element={<SchoolsListPage />} />
             <Route path="superadmin/schools/:schoolId" element={<SchoolDetailPage />} />
             <Route path="superadmin/compare" element={<SchoolComparisonPage />} />

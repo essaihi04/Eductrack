@@ -1,17 +1,19 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useCallback, useState, useEffect } from 'react';
+import { motion as Motion } from 'framer-motion';
 import { Search, Plus, Trash2, MapPin, X, Send } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useI18n } from '../../i18n';
 import { schoolLifeApi, mediaUrl } from '../../lib/schoolLifeApi';
 
 const STATUS = {
-  trouve: { label: 'Trouvé', cls: 'bg-blue-100 text-blue-700' },
-  reclame: { label: 'Réclamé', cls: 'bg-amber-100 text-amber-700' },
-  rendu: { label: 'Rendu', cls: 'bg-green-100 text-green-700' },
+  trouve: { labelKey: 'slife.lost.trouve', cls: 'bg-blue-100 text-blue-700' },
+  reclame: { labelKey: 'slife.lost.reclame', cls: 'bg-amber-100 text-amber-700' },
+  rendu: { labelKey: 'slife.lost.rendu', cls: 'bg-green-100 text-green-700' },
 };
 
 const ObjetsPerdusPage = () => {
   const { profile } = useAuth();
+  const { t } = useI18n();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
   const canDelete = (ownerId) => isAdmin || (ownerId && ownerId === profile?.id);
@@ -25,12 +27,12 @@ const ObjetsPerdusPage = () => {
   const [photo, setPhoto] = useState(null);
   const [notify, setNotify] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try { setItems(await schoolLifeApi.listLostItems(filter)); } catch (e) { console.error(e); }
     setLoading(false);
-  };
-  useEffect(() => { load(); }, [filter]);
+  }, [filter]);
+  useEffect(() => { load(); }, [load]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -55,8 +57,8 @@ const ObjetsPerdusPage = () => {
     <div className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Search className="w-7 h-7 text-primary" /> Objets perdus</h1>
-          <p className="text-sm text-muted-foreground">Objets retrouvés à l'école</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Search className="w-7 h-7 text-primary" /> {t('slife.lost.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('slife.lost.subtitle')}</p>
         </div>
         {canManage && (
           <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg">
@@ -65,13 +67,13 @@ const ObjetsPerdusPage = () => {
         )}
       </div>
 
-      <div className="flex gap-2 mb-4">
+      {(items.length > 0 || filter) && <div className="flex gap-2 mb-4">
         {['', 'trouve', 'reclame', 'rendu'].map((s) => (
           <button key={s} onClick={() => setFilter(s)} className={`px-3 py-1 rounded-full text-sm ${filter === s ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-            {s === '' ? 'Tous' : STATUS[s].label}
+            {t(s === '' ? 'slife.lost.all' : STATUS[s].labelKey)}
           </button>
         ))}
-      </div>
+      </div>}
 
       {showForm && canManage && (
         <form onSubmit={submit} className="bg-card border border-border rounded-xl p-4 mb-6 space-y-3">
@@ -91,17 +93,17 @@ const ObjetsPerdusPage = () => {
       )}
 
       {loading ? (
-        <p className="text-muted-foreground">Chargement...</p>
+        <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : items.length === 0 ? (
-        <p className="text-muted-foreground text-center py-10">Aucun objet.</p>
+        <p className="text-muted-foreground text-center py-10">{t('slife.lost.empty')}</p>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           {items.map((it) => (
-            <motion.div key={it.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-card border border-border rounded-xl overflow-hidden">
+            <Motion.div key={it.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-card border border-border rounded-xl overflow-hidden">
               {it.photo_url ? <img src={mediaUrl(it.photo_url)} alt="" className="w-full h-32 object-cover" /> : <div className="w-full h-32 bg-muted flex items-center justify-center"><Search className="w-8 h-8 text-muted-foreground" /></div>}
               <div className="p-3">
                 <div className="flex items-center justify-between">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS[it.status]?.cls}`}>{STATUS[it.status]?.label}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS[it.status]?.cls}`}>{t(STATUS[it.status]?.labelKey || 'slife.lost.trouve')}</span>
                   {canDelete(it.reported_by) && <button onClick={() => remove(it.id)} className="text-destructive"><Trash2 className="w-4 h-4" /></button>}
                 </div>
                 <h3 className="font-semibold text-sm mt-1">{it.title}</h3>
@@ -109,13 +111,13 @@ const ObjetsPerdusPage = () => {
                 {it.location_found && <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1"><MapPin className="w-3 h-3" /> {it.location_found}</p>}
                 {canManage && (
                   <select value={it.status} onChange={(e) => setStatus(it.id, e.target.value)} className="mt-2 w-full text-xs border border-border rounded px-2 py-1 bg-background">
-                    <option value="trouve">Trouvé</option>
-                    <option value="reclame">Réclamé</option>
-                    <option value="rendu">Rendu</option>
+                    <option value="trouve">{t('slife.lost.trouve')}</option>
+                    <option value="reclame">{t('slife.lost.reclame')}</option>
+                    <option value="rendu">{t('slife.lost.rendu')}</option>
                   </select>
                 )}
               </div>
-            </motion.div>
+            </Motion.div>
           ))}
         </div>
       )}

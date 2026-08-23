@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 /**
@@ -20,22 +20,52 @@ export default function TaskModal({
   closeLabel = 'Fermer',
   maxWidth = 'max-w-3xl',
 }) {
+  const dialogRef = useRef(null);
+  const busyRef = useRef(busy);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
   useEffect(() => {
     if (!open) return undefined;
 
     const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement;
     document.body.style.overflow = 'hidden';
 
     const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !busy) onClose?.();
+      if (event.key === 'Escape' && !busyRef.current) onCloseRef.current?.();
+      if (event.key !== 'Tab') return;
+
+      const focusable = [...(dialogRef.current?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+      ) || [])];
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
 
+    const focusFrame = window.requestAnimationFrame(() => {
+      const firstField = dialogRef.current?.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])');
+      (firstField || dialogRef.current)?.focus();
+    });
+
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus?.();
     };
-  }, [open, busy, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -49,9 +79,11 @@ export default function TaskModal({
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         className={`flex max-h-[calc(100dvh-1.5rem)] w-full ${maxWidth} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)]`}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-gray-100 px-4 py-3 sm:px-5">

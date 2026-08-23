@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { Image as ImageIcon, Plus, Trash2, Calendar, Send, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { schoolLifeApi, fetchClasses, mediaUrl } from '../../lib/schoolLifeApi';
+import { useI18n } from '../../i18n';
 
 const CahierDeViePage = () => {
   const { profile } = useAuth();
+  const { t, lang } = useI18n();
   const { year } = useYear();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
@@ -68,8 +70,8 @@ const CahierDeViePage = () => {
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><ImageIcon className="w-7 h-7 text-primary" /> Cahier de vie</h1>
-          <p className="text-sm text-muted-foreground">Activités de classe & partage de photos (maternelle)</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><ImageIcon className="w-7 h-7 text-primary" /> {t('slife.feed.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('slife.feed.subtitle')}</p>
         </div>
         {canManage && (
           <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg">
@@ -102,19 +104,19 @@ const CahierDeViePage = () => {
       )}
 
       {loading ? (
-        <p className="text-muted-foreground">Chargement...</p>
+        <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : posts.length === 0 ? (
-        <p className="text-muted-foreground text-center py-10">Aucune publication pour le moment.</p>
+        <p className="text-muted-foreground text-center py-10">{t('slife.feed.empty')}</p>
       ) : (
         <div className="space-y-4">
           {posts.map((p) => (
-            <motion.div key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl overflow-hidden">
+            <Motion.div key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl overflow-hidden">
               <div className="p-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="font-semibold">{p.title || 'Activité de classe'}</h3>
+                    <h3 className="font-semibold">{p.title || t('slife.feed.defaultTitle')}</h3>
                     <p className="text-xs text-muted-foreground flex items-center gap-2">
-                      {p.classes?.name} {p.activity_date && <><Calendar className="w-3 h-3" /> {new Date(p.activity_date).toLocaleDateString('fr-FR')}</>}
+                      {p.classes?.name} {p.activity_date && <><Calendar className="w-3 h-3" /> {new Date(p.activity_date).toLocaleDateString(lang === 'ar' ? 'ar-MA' : 'fr-FR')}</>}
                     </p>
                   </div>
                   {canDelete(p.author_id) && <button onClick={() => remove(p.id)} className="text-destructive p-1"><Trash2 className="w-4 h-4" /></button>}
@@ -130,7 +132,7 @@ const CahierDeViePage = () => {
                   ))}
                 </div>
               )}
-            </motion.div>
+            </Motion.div>
           ))}
         </div>
       )}

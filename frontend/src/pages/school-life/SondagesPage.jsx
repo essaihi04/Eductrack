@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { BarChart2, Plus, Trash2, X, Send, CheckCircle2, Lock } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { schoolLifeApi, fetchClasses } from '../../lib/schoolLifeApi';
+import { useI18n } from '../../i18n';
 
 const SondagesPage = () => {
   const { profile } = useAuth();
+  const { t } = useI18n();
   const { year } = useYear();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
@@ -61,8 +63,8 @@ const SondagesPage = () => {
     <div className="max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><BarChart2 className="w-7 h-7 text-primary" /> Sondages</h1>
-          <p className="text-sm text-muted-foreground">Consultez les parents et la communauté</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><BarChart2 className="w-7 h-7 text-primary" /> {t(canManage ? 'pnav.polls' : 'slife.polls.parentTitle')}</h1>
+          <p className="text-sm text-muted-foreground">{canManage ? t('slife.polls.manageSubtitle') : t('slife.polls.parentSubtitle')}</p>
         </div>
         {canManage && (
           <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg">
@@ -103,15 +105,15 @@ const SondagesPage = () => {
       )}
 
       {loading ? (
-        <p className="text-muted-foreground">Chargement...</p>
+        <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : polls.length === 0 ? (
-        <p className="text-muted-foreground text-center py-10">Aucun sondage.</p>
+        <p className="text-muted-foreground text-center py-10">{t('slife.polls.empty')}</p>
       ) : (
         <div className="space-y-4">
           {polls.map((poll) => {
             const closed = !poll.is_active || (poll.closes_at && new Date(poll.closes_at) < new Date());
             return (
-              <motion.div key={poll.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-card border border-border rounded-xl p-4">
+              <Motion.div key={poll.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-card border border-border rounded-xl p-4">
                 <div className="flex items-start justify-between">
                   <h3 className="font-semibold">{poll.question}</h3>
                   {canManage && (
@@ -136,8 +138,8 @@ const SondagesPage = () => {
                     );
                   })}
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">{poll.total_votes || 0} vote(s){closed ? ' · clôturé' : ''}</p>
-              </motion.div>
+                <p className="text-xs text-muted-foreground mt-2">{t('slife.polls.votes', { n: poll.total_votes || 0 })}{closed ? ` · ${t('slife.polls.closed')}` : ''}</p>
+              </Motion.div>
             );
           })}
         </div>

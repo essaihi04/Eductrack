@@ -1,6 +1,7 @@
-import { createElement, useEffect, useState } from 'react';
+import { createElement, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CalendarClock, Plus, X, MapPin, User, Building2, GraduationCap } from 'lucide-react';
+import { CalendarClock, Plus, MapPin, User, Building2, GraduationCap } from 'lucide-react';
+import TaskModal from '../../components/ui/TaskModal';
 import { supabase } from '../../lib/supabase';
 import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 import {
@@ -33,10 +34,9 @@ export default function ParentAppointmentsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const requestedChildId = searchParams.get('childId') || '';
 
-  useEffect(() => { load(); }, []);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -48,7 +48,7 @@ export default function ParentAppointmentsPage() {
       ]);
       setItems(appts);
       const kids = Array.isArray(kidsRes) ? kidsRes : [];
-      const preferred = preferredParentChild(kids, searchParams.get('childId'));
+      const preferred = preferredParentChild(kids, requestedChildId);
       setChildren(kids);
       setPreferredChildId(preferred);
       rememberParentChild(preferred);
@@ -57,7 +57,9 @@ export default function ParentAppointmentsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [requestedChildId]);
+
+  useEffect(() => { load(); }, [load]);
 
   // Les professeurs proposés dépendent de la classe de l'enfant sélectionné.
   useEffect(() => {
@@ -192,15 +194,27 @@ export default function ParentAppointmentsPage() {
         </div>
       )}
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <form onSubmit={submit} className="bg-white rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="font-bold text-gray-900">{t('pappt.new')}</h2>
-              <button type="button" onClick={() => setShowForm(false)}><X className="w-5 h-5 text-gray-500" /></button>
-            </div>
-
-            <div className="p-4 space-y-4">
+      <TaskModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        onSubmit={submit}
+        busy={saving}
+        title={t('pappt.new')}
+        subtitle={t('pappt.form.slotHint')}
+        closeLabel={t('common.close')}
+        maxWidth="max-w-lg"
+        footer={(
+          <>
+            <button type="button" onClick={() => setShowForm(false)} disabled={saving} className="flex-1 rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 sm:flex-none">
+              {t('common.cancel')}
+            </button>
+            <button type="submit" disabled={saving} className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 sm:flex-none">
+              {saving ? t('pappt.form.sending') : t('pappt.form.submit')}
+            </button>
+          </>
+        )}
+      >
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.child')}</label>
                 <select
@@ -245,7 +259,7 @@ export default function ParentAppointmentsPage() {
               </div>
 
               {form.target_type === 'teacher' && (
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.teacherLabel')}</label>
                   <select
                     value={form.teacher_id}
@@ -268,7 +282,7 @@ export default function ParentAppointmentsPage() {
                 </div>
               )}
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.subject')}</label>
                 <input
                   value={form.subject}
@@ -284,7 +298,7 @@ export default function ParentAppointmentsPage() {
                 <textarea
                   value={form.message}
                   onChange={(e) => setForm({ ...form, message: e.target.value })}
-                  rows={3}
+                  rows={2}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 />
               </div>
@@ -297,27 +311,11 @@ export default function ParentAppointmentsPage() {
                   placeholder={t('pappt.form.slotPlaceholder')}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  {t('pappt.form.slotHint')}
-                </p>
               </div>
 
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && <p className="text-sm text-red-600 sm:col-span-2">{error}</p>}
             </div>
-
-            <div className="flex justify-end gap-2 p-4 border-t">
-              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-gray-600">{t('common.cancel')}</button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {saving ? t('pappt.form.sending') : t('pappt.form.submit')}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      </TaskModal>
     </div>
   );
 }

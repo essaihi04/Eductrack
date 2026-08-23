@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { Sparkles, Plus, Trash2, MapPin, Calendar, Send, X, Tag } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { schoolLifeApi, fetchClasses, mediaUrl } from '../../lib/schoolLifeApi';
+import { useI18n } from '../../i18n';
 
 const CATEGORIES = [
   { value: 'club', label: 'Club' },
@@ -12,10 +13,11 @@ const CATEGORIES = [
   { value: 'atelier', label: 'Atelier' },
   { value: 'activite', label: 'Activité' },
 ];
-const catLabel = (v) => CATEGORIES.find((c) => c.value === v)?.label || v;
+const catLabel = (v, t) => t(`slife.activities.cat.${v}`) || CATEGORIES.find((c) => c.value === v)?.label || v;
 
 const ParascolairePage = () => {
   const { profile } = useAuth();
+  const { t, lang } = useI18n();
   const { year } = useYear();
   const canManage = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager', 'teacher'].includes(profile?.role);
   const isAdmin = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'].includes(profile?.role);
@@ -67,8 +69,8 @@ const ParascolairePage = () => {
     <div className="max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Sparkles className="w-7 h-7 text-primary" /> Vie parascolaire</h1>
-          <p className="text-sm text-muted-foreground">Clubs, sorties, ateliers et événements</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Sparkles className="w-7 h-7 text-primary" /> {t('slife.activities.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('slife.activities.subtitle')}</p>
         </div>
         {canManage && (
           <button onClick={() => setShowForm((s) => !s)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg">
@@ -104,28 +106,28 @@ const ParascolairePage = () => {
       )}
 
       {loading ? (
-        <p className="text-muted-foreground">Chargement...</p>
+        <p className="text-muted-foreground">{t('common.loading')}</p>
       ) : items.length === 0 ? (
-        <p className="text-muted-foreground text-center py-10">Aucune activité.</p>
+        <p className="text-muted-foreground text-center py-10">{t('slife.activities.empty')}</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {items.map((a) => (
-            <motion.div key={a.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl overflow-hidden">
+            <Motion.div key={a.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-card border border-border rounded-xl overflow-hidden">
               {a.photo_url && <img src={mediaUrl(a.photo_url)} alt="" className="w-full h-40 object-cover" />}
               <div className="p-4">
                 <div className="flex items-start justify-between">
                   <h3 className="font-semibold">{a.title}</h3>
                   {canDelete(a.created_by) && <button onClick={() => remove(a.id)} className="text-destructive p-1"><Trash2 className="w-4 h-4" /></button>}
                 </div>
-                <span className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full mt-1"><Tag className="w-3 h-3" /> {catLabel(a.category)}</span>
+                <span className="inline-flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full mt-1"><Tag className="w-3 h-3" /> {catLabel(a.category, t)}</span>
                 {a.description && <p className="text-sm mt-2">{a.description}</p>}
                 <div className="text-xs text-muted-foreground mt-2 space-y-1">
                   {a.location && <p className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {a.location}</p>}
-                  {a.start_date && <p className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(a.start_date).toLocaleString('fr-FR')}</p>}
-                  {a.classes?.name && <p>Classe : {a.classes.name}</p>}
+                  {a.start_date && <p className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(a.start_date).toLocaleString(lang === 'ar' ? 'ar-MA' : 'fr-FR')}</p>}
+                  {a.classes?.name && <p>{t('slife.class')} : {a.classes.name}</p>}
                 </div>
               </div>
-            </motion.div>
+            </Motion.div>
           ))}
         </div>
       )}

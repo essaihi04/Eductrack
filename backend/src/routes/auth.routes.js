@@ -1,6 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 
 const router = express.Router();
 
@@ -248,6 +249,33 @@ router.post('/switch-school', async (req, res) => {
   } catch (error) {
     console.error('Erreur switch-school:', error);
     res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// Importer sa propre photo de profil (tous les rôles authentifiés).
+// L'ancienne route /students/me/photo reste disponible pour compatibilité,
+// mais le profil parent ne doit pas dépendre d'une autorisation « student ».
+router.post('/profile/photo', profilePhotoUpload.single('photo'), async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Token manquant' });
+
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
+    if (userError || !user) return res.status(401).json({ error: 'Utilisateur non authentifié' });
+    if (!req.file) return res.status(400).json({ error: 'Aucune image fournie' });
+
+    const avatar_url = await uploadProfilePhotoFile(req.file);
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .update({ avatar_url })
+      .eq('id', user.id)
+      .select('id, avatar_url')
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    console.error('Erreur upload photo profil:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
   }
 });
 

@@ -39,7 +39,7 @@ const renderMarkdown = (md) => {
 };
 
 export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildId = '' }) => {
-  const { t, dir } = useI18n();
+  const { t, dir, lang } = useI18n();
   const [searchParams] = useSearchParams();
   const rtl = dir === 'rtl';
 
@@ -80,7 +80,7 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
         setLoading(true);
         setError('');
         const headers = await authHeaders();
-        const menuRes = await fetch(`${apiUrl}/api/parent/assistant/menu`, { headers });
+        const menuRes = await fetch(`${apiUrl}/api/parent/assistant/menu?lang=${encodeURIComponent(lang)}`, { headers });
         if (!menuRes.ok) throw new Error(t('passist.loadError'));
         const menuData = await menuRes.json();
         const kids = Array.isArray(menuData?.children) ? menuData.children : [];
@@ -97,8 +97,10 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
         setLoading(false);
       }
     })();
+    // Les libellés du menu viennent du serveur et doivent suivre le changement
+    // de langue même si la fenêtre est restée montée en arrière-plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [lang]);
 
   useEffect(() => {
     if (!requestedChildId || children.length === 0 || requestedChildId === childId) return;
@@ -127,7 +129,7 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
       const res = await fetch(`${apiUrl}/api/parent/assistant/message`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ child_id: childId, action, text }),
+        body: JSON.stringify({ child_id: childId, action, text, lang }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t('passist.sendError'));
@@ -144,7 +146,7 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
     } finally {
       setThinking(false);
     }
-  }, [childId, thinking, t]);
+  }, [childId, lang, thinking, t]);
 
   const avatar = MOODS[mood] || MOODS.idle;
   const selectedChild = useMemo(

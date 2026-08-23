@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bell, BellRing, Bus, GraduationCap, Wallet, MessageSquare, Image as ImageIcon, FileText, CheckCircle2, AlertCircle, Clock, ThumbsUp, Reply, Send, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
@@ -155,9 +155,7 @@ const ParentNotificationsPage = () => {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('');
 
-  useEffect(() => { load(); }, []);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       const { data: { session } } = await supabase.auth.getSession();
@@ -176,7 +174,9 @@ const ParentNotificationsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t]);
+
+  useEffect(() => { load(); }, [load]);
 
   const filtered = useMemo(
     () => filter ? items.filter(i => i.category === filter) : items,
@@ -207,7 +207,7 @@ const ParentNotificationsPage = () => {
       <PushEnableBanner />
 
       {/* Filtres catégorie */}
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-4 -mx-4 px-4 md:mx-0 md:px-0">
+      {items.length > 0 && <div className="flex gap-2 overflow-x-auto pb-2 mb-4 -mx-4 px-4 md:mx-0 md:px-0">
         {CATEGORIES.map(c => {
           const Icon = c.icon;
           const active = filter === c.key;
@@ -229,7 +229,7 @@ const ParentNotificationsPage = () => {
             </button>
           );
         })}
-      </div>
+      </div>}
 
       {filtered.length === 0 && (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-10 text-center">
