@@ -24,6 +24,7 @@ import {
 import {
   loadCustomEntries, findCustomEntry, matchCustomEntryByKeyword,
 } from '../services/whatsapp/chatbot/customEntries.js';
+import { listParentChildren, loadParentChild } from '../services/parentAccess.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -75,26 +76,6 @@ const OPTION_EMOJI = {
 
 // ── Utilitaires ───────────────────────────────────────────────────────────
 
-/** Vérifie que l'enfant appartient bien au parent connecté. */
-async function loadChild(parentId, childId) {
-  const { data: link } = await supabaseAdmin
-    .from('parent_students')
-    .select('student_id')
-    .eq('parent_id', parentId)
-    .eq('student_id', childId)
-    .maybeSingle();
-  if (!link) return null;
-
-  const { data: student } = await supabaseAdmin
-    .from('profiles')
-    .select('id, first_name, last_name, class_id, classes(name)')
-    .eq('id', childId)
-    .single();
-  if (!student) return null;
-
-  return { ...student, class_name: student.classes?.name || null };
-}
-
 async function buildParentInfo(req) {
   const { data: profile } = await supabaseAdmin
     .from('profiles')
@@ -141,6 +122,7 @@ router.get('/menu', async (req, res) => {
   try {
     const parentInfo = await buildParentInfo(req);
     const schoolId = parentInfo.school_id;
+    const children = await listParentChildren(parentInfo.parent_id);
 
     const sections = [];
     for (const s of SECTIONS) {
@@ -165,6 +147,7 @@ router.get('/menu', async (req, res) => {
       ai_enabled: await isCapabilityEnabled(schoolId, 'main.ai'),
       school_name: parentInfo.school_name,
       parent_name: parentInfo.parent_name,
+      children,
     });
   } catch (error) {
     console.error('Erreur assistant /menu:', error);
@@ -180,7 +163,7 @@ router.post('/message', async (req, res) => {
     const parentInfo = await buildParentInfo(req);
     const schoolId = parentInfo.school_id;
 
-    const student = childId ? await loadChild(parentInfo.parent_id, childId) : null;
+    const student = childId ? await loadParentChild(parentInfo.parent_id, childId) : null;
     if (childId && !student) {
       return res.status(403).json({ error: 'Cet enfant n\'est pas rattaché à votre compte' });
     }

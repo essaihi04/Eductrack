@@ -1,4 +1,4 @@
-import { createElement, useEffect, useMemo, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, Bell, BookOpen, Bot, Bus, CalendarClock, CheckCircle2,
@@ -9,21 +9,21 @@ import { supabase } from '../../lib/supabase';
 import {
   parentPathForChild, preferredParentChild, rememberParentChild,
 } from '../../lib/parentNavigation';
+import { useParentAssistant } from '../../contexts/ParentAssistantContext';
 import { useT } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const ParentDashboard = () => {
   const navigate = useNavigate();
+  const { openAssistant } = useParentAssistant();
   const t = useT();
   const [children, setChildren] = useState([]);
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => { load(); }, []);
-
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -43,7 +43,9 @@ const ParentDashboard = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t]);
+
+  useEffect(() => { load(); }, [load]);
 
   const selectChild = (childId) => {
     setSelectedId(childId);
@@ -149,7 +151,7 @@ const ParentDashboard = () => {
                 title={t('passist.title')}
                 hint={t('pdash.action.assistantHint')}
                 color="bg-violet-100 text-violet-700"
-                onClick={() => openForChild('/parent/assistant')}
+                onClick={() => openAssistant(selectedChild.id)}
               />
             </div>
           </section>

@@ -205,6 +205,10 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
   const today = new Date().toISOString().slice(0, 10);
   const threeMonthsAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
   const none = Promise.resolve({ data: null });
+  // Les parents peuvent être liés à un élève avant son affectation à une
+  // classe. Une valeur UUID neutre évite d'envoyer `null` à PostgREST tout en
+  // conservant les données individuelles (présence, bulletins, finance).
+  const safeClassId = student.class_id || '00000000-0000-0000-0000-000000000000';
 
   // ⚡ Toutes les requêtes de base en PARALLÈLE (avant : 6-8 allers-retours
   // séquentiels vers Supabase = ~1 s perdue avant même d'appeler l'IA).
@@ -231,7 +235,7 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
     includePedagogy && scopes.has('homework') ? supabaseAdmin
       .from('homework')
       .select('id, title, due_date, target_type, created_by, subjects(name), homework_students(student_id), homework_submissions(student_id, status, submission_date, grade)')
-      .eq('class_id', student.class_id)
+      .eq('class_id', safeClassId)
       .gte('due_date', threeMonthsAgo)
       .order('due_date', { ascending: false })
       .limit(40) : none,
@@ -239,14 +243,14 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
       .from('control_notes')
       .select('note, appreciation, controls_plan!inner(id, name, date, class_id, teacher_id)')
       .eq('student_id', student.id)
-      .eq('controls_plan.class_id', student.class_id)
+      .eq('controls_plan.class_id', safeClassId)
       .gte('controls_plan.date', '2000-01-01')
       .order('controls_plan(date)', { ascending: false })
       .limit(60) : none,
     includeTimetable ? supabaseAdmin
       .from('class_timetable')
       .select('day_of_week, slot_order, start_time, end_time, room, subject:subjects(name), teacher:profiles!class_timetable_teacher_id_fkey(first_name, last_name)')
-      .eq('class_id', student.class_id)
+      .eq('class_id', safeClassId)
       .order('slot_order', { ascending: true }) : none,
     includeBulletins ? supabaseAdmin
       .from('bulletins')

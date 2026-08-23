@@ -34,6 +34,11 @@ const scoreEmoji = (score, max = 20) => {
 
 const header = (title, emoji) => `*${emoji} ${title}*\n━━━━━━━━━━━━━━━━━━━`;
 const footer = (schoolName) => `\n━━━━━━━━━━━━━━━━━━━\n🏫 ${schoolName || 'École'}`;
+const noClassMessage = (student, parentInfo, title, emoji) =>
+  `${header(title, emoji)}\n\n` +
+  `ℹ️ *${student.first_name}* n'est pas encore affecté(e) à une classe.\n\n` +
+  `Les données de classe seront disponibles dès que l'établissement aura effectué cette affectation.` +
+  footer(parentInfo.school_name);
 
 // ─────────────────────────────────────────────────────────────────────────
 // PÉDAGOGIE
@@ -243,6 +248,10 @@ export async function getUnjustifiedAbsences(student, parentInfo) {
 
 /** P4 — Devoirs à faire (homework non rendus) */
 export async function getPendingHomework(student, parentInfo) {
+  if (!student.class_id) {
+    return noClassMessage(student, parentInfo, 'Devoirs à faire', '✍️');
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   // Inclut les devoirs en retard (90 derniers jours) + à venir (aligné avec le contexte IA)
   const thirtyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
@@ -287,6 +296,10 @@ export async function getPendingHomework(student, parentInfo) {
 
 /** P5 — Programme de demain (cours + devoirs à rendre + contrôles) */
 export async function getTodaySchedule(student, parentInfo) {
+  if (!student.class_id) {
+    return noClassMessage(student, parentInfo, 'Programme de demain', '📆');
+  }
+
   const JS_TO_KEY = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const DAY_FR = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
   const tomorrow = new Date(Date.now() + 86400000);
@@ -385,6 +398,10 @@ export async function getTodaySchedule(student, parentInfo) {
 
 /** P6 — Documents partagés par les profs */
 export async function getRecentDocuments(student, parentInfo) {
+  if (!student.class_id) {
+    return noClassMessage(student, parentInfo, 'Documents partagés', '📎');
+  }
+
   // La vraie table est `teaching_documents` (l'ancienne `documents` est vide).
   const { data: docs } = await supabaseAdmin
     .from('teaching_documents')
@@ -678,6 +695,10 @@ export async function getExtracurricular(student, parentInfo) {
 
 /** V2 — Cahier de vie (dernières activités de classe + photos) */
 export async function getClassroomFeed(student, parentInfo) {
+  if (!student.class_id) {
+    return noClassMessage(student, parentInfo, 'Cahier de vie', '📸');
+  }
+
   const { data } = await supabaseAdmin
     .from('classroom_feed_posts')
     .select('title, content, media_urls, activity_date, created_at')
@@ -701,6 +722,8 @@ export async function getClassroomFeed(student, parentInfo) {
 
 /** Médias du cahier de vie à envoyer en pièce jointe WhatsApp (posts récents). */
 export async function getClassroomFeedMedia(student, parentInfo) {
+  if (!student.class_id) return [];
+
   const { data } = await supabaseAdmin
     .from('classroom_feed_posts')
     .select('title, media_urls, activity_date, created_at')

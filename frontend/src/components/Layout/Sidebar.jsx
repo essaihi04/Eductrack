@@ -48,7 +48,6 @@ import {
   MapPin,
   Bell,
   Image as ImageIcon,
-  Bot,
   Home as HomeIcon
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -230,7 +229,6 @@ const Sidebar = () => {
     if (profile?.role === 'parent') {
       return [
         { icon: HomeIcon, label: t('pnav.home'), path: '/parent', childPaths: ['/parent/children'] },
-        { icon: Bot, label: t('passist.title'), path: '/parent/assistant' },
         { icon: Bell, label: t('pnav.notifications'), path: '/parent/notifications' },
         { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
       ];

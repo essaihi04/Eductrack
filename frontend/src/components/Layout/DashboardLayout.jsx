@@ -9,6 +9,8 @@ import NotificationsBell from '../NotificationsBell';
 import YearSelector from '../YearSelector';
 import SchoolSwitcher from '../SchoolSwitcher';
 import BrandLogo from '../BrandLogo';
+import ParentAssistantWidget from '../parent/ParentAssistantWidget';
+import { ParentAssistantProvider } from '../../contexts/ParentAssistantContext';
 
 /** Âge en années à partir d'une date de naissance (null si invalide). */
 const ageFromDob = (dob) => {
@@ -78,7 +80,8 @@ const DashboardLayout = () => {
                          location.pathname.includes('/teacher/rapide');
 
   return (
-    <div className={`min-h-screen bg-background ${themeClass}`}>
+    <ParentAssistantProvider>
+      <div className={`min-h-screen bg-background ${themeClass}`}>
       {/* Sidebar desktop - Masquée en mode paysage sur les pages de suivi */}
       {!(isLandscape && isTrackingPage) && (
         <div className="hidden md:block">
@@ -149,7 +152,10 @@ const DashboardLayout = () => {
 
       {/* Bottom nav mobile - Masqué en mode paysage sur les pages de suivi */}
       {!(isLandscape && isTrackingPage) && <MobileNav />}
-    </div>
+
+      {profile?.role === 'parent' && <ParentAssistantWidget />}
+      </div>
+    </ParentAssistantProvider>
   );
 };
 

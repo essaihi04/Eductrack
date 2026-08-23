@@ -4,6 +4,7 @@ import path from 'path';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
+import { findParentChildLink } from '../services/parentAccess.js';
 
 const router = express.Router();
 
@@ -12,14 +13,7 @@ router.use(authorize('parent'));
 
 // Helper: vérifier que l'enfant appartient bien au parent connecté
 async function verifyChild(parentId, childId) {
-  const { data, error } = await supabaseAdmin
-    .from('parent_students')
-    .select('student_id, relationship')
-    .eq('parent_id', parentId)
-    .eq('student_id', childId)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
+  return findParentChildLink(parentId, childId);
 }
 
 // Middleware: charge l'enfant ciblé via :childId

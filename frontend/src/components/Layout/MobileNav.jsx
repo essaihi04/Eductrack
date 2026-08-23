@@ -28,7 +28,6 @@ import {
   X,
   Edit,
   CalendarClock,
-  Bot,
   Bell
 } from 'lucide-react';
 
@@ -84,7 +83,6 @@ const MobileNav = () => {
     if (profile?.role === 'parent') {
       return [
         { icon: LayoutDashboard, label: t('pnav.home'), path: '/parent', childPaths: ['/parent/children'] },
-        { icon: Bot, label: t('passist.title'), path: '/parent/assistant' },
         { icon: Bell, label: t('pnav.notifications'), path: '/parent/notifications' },
         { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
       ];
