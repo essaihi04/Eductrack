@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Calendar, Clock, FileText, Plus, Edit2, Trash2, Save, X, CheckCircle, Users, TrendingUp, UserX, Package, Shield, Phone, AlertTriangle, Eye, FileCheck, Upload, BarChart3, Edit3, Activity, TrendingDown } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Calendar, Clock, FileText, Plus, Edit2, Trash2, Save, X, CheckCircle, Users, TrendingUp, AlertTriangle, FileCheck, Upload, BarChart3, Edit3, Activity, TrendingDown, Search, ClipboardPaste } from 'lucide-react';
 import { saveBlob } from '../../lib/download';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -11,6 +11,10 @@ const ControlsPage = () => {
   const { t, lang } = useI18n();
   const { profile } = useAuth();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
+  const isControlOwner = useCallback(
+    (control) => control.is_owner ?? control.teacher_id === profile?.id,
+    [profile?.id]
+  );
   // La dispersion est stockee en francais (valeur metier) : on ne traduit que l'affichage.
   const dispersionLabel = (d) => (
     d === 'Faible' ? t('cp.dispersion.low') : d === 'Moyen' ? t('cp.dispersion.medium') : t('cp.dispersion.high')
@@ -19,10 +23,10 @@ const ControlsPage = () => {
   // Composant pour afficher une carte de contrôle avec statistiques (optimisé avec cache)
   const ControlCard = ({ control }) => {
     const stats = controlsStatsCache[control.id];
-    const isOwner = control.is_owner ?? control.teacher_id === profile?.id;
+    const isOwner = isControlOwner(control);
 
     return (
-      <div className="p-3 sm:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+      <div className={`p-3 sm:p-4 border rounded-xl transition-colors ${isOwner ? 'border-gray-200 bg-white hover:border-blue-200' : 'border-indigo-100 bg-indigo-50/30 hover:border-indigo-200'}`}>
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-0 mb-4">
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
@@ -64,25 +68,25 @@ const ControlsPage = () => {
             )}
           </div>
           {isOwner && <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-            {control.status === 'planned' && (
-              <button
-                onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
-                className="px-2 py-1 sm:px-3 sm:py-1.5 bg-green-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors flex-shrink-0"
-              >
-                {t('cp.start')}
-              </button>
-            )}
             <button
               onClick={() => {
                 setSelectedControlForNotes(control);
                 setShowNotesModal(true);
                 setActiveNotesTab('manual');
               }}
-              className="px-2 py-1 sm:px-3 sm:py-1.5 bg-blue-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1 flex-shrink-0"
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs sm:text-sm font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1.5 flex-shrink-0 shadow-sm"
             >
-              <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4" />
-              {t('cp.notes')}
+              <Edit3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              {t('cp.enterGrades')}
             </button>
+            {control.status === 'planned' && (
+              <button
+                onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
+                className="px-3 py-2 border border-green-200 bg-green-50 text-green-700 rounded-lg text-xs sm:text-sm font-medium hover:bg-green-100 transition-colors flex-shrink-0"
+              >
+                {t('cp.start')}
+              </button>
+            )}
             <button
               onClick={() => handleEdit(control)}
               className="p-1.5 sm:p-2 hover:bg-blue-100 rounded transition flex-shrink-0"
@@ -100,112 +104,31 @@ const ControlsPage = () => {
           </div>}
         </div>
 
-        {/* Statistiques détaillées pour les contrôles terminés */}
+        {/* Résumé compact : l'analyse complète reste disponible dans l'espace notes. */}
         {isOwner && control.status === 'completed' && (
-          <div className="border-t pt-4">
+          <div className="border-t border-gray-100 pt-3">
             {statsLoading && !stats ? (
-              <div className="text-center text-gray-500 py-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                {t('cp.loadingStats')}
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+                <span>{t('cp.loadingStats')}</span>
               </div>
             ) : stats && stats.totalStudents > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-start py-2">{t('cp.category')}</th>
-                      <th className="text-center py-2">{t('cp.count')}</th>
-                      <th className="text-center py-2">{t('cp.percentage')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <UserX className="w-4 h-4 text-red-500" />
-                        <span>{t('cp.absences')}</span>
-                      </td>
-                      <td className="text-center text-red-600 font-medium">{stats.absences}</td>
-                      <td className="text-center text-red-600">
-                        {Math.round((stats.absences / stats.totalStudents) * 100)}%
-                      </td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <Package className="w-4 h-4 text-green-500" />
-                        <span>{t('cp.materialComplete')}</span>
-                      </td>
-                      <td className="text-center text-green-600 font-medium">{stats.materialComplete}</td>
-                      <td className="text-center text-green-600">
-                        {Math.round((stats.materialComplete / stats.totalStudents) * 100)}%
-                      </td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <Shield className="w-4 h-4 text-blue-500" />
-                        <span>{t('cp.disciplineGood')}</span>
-                      </td>
-                      <td className="text-center text-blue-600 font-medium">{stats.disciplineGood}</td>
-                      <td className="text-center text-blue-600">
-                        {Math.round((stats.disciplineGood / stats.totalStudents) * 100)}%
-                      </td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <Phone className="w-4 h-4 text-orange-500" />
-                        <span>{t('cp.phoneUse')}</span>
-                      </td>
-                      <td className="text-center text-orange-600 font-medium">{stats.phoneUsage}</td>
-                      <td className="text-center text-orange-600">
-                        {Math.round((stats.phoneUsage / stats.totalStudents) * 100)}%
-                      </td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                        <span>{t('cp.cheatingAttempts')}</span>
-                      </td>
-                      <td className="text-center text-yellow-600 font-medium">{stats.cheatingAttempts}</td>
-                      <td className="text-center text-yellow-600">
-                        {stats.totalStudents > 0 ? Math.round((stats.cheatingAttempts / stats.totalStudents) * 100) : 0}%
-                      </td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <Eye className="w-4 h-4 text-red-600" />
-                        <span>{t('cp.cheatingConfirmed')}</span>
-                      </td>
-                      <td className="text-center text-red-600 font-medium">{stats.cheatingCaught}</td>
-                      <td className="text-center text-red-600">
-                        {stats.totalStudents > 0 ? Math.round((stats.cheatingCaught / stats.totalStudents) * 100) : 0}%
-                      </td>
-                    </tr>
-                    <tr className="border-b">
-                      <td className="py-2 flex items-center gap-2">
-                        <FileCheck className="w-4 h-4 text-purple-500" />
-                        <span>{t('cp.copiesSubmitted')}</span>
-                      </td>
-                      <td className="text-center text-purple-600 font-medium">{stats.copiesSubmitted}</td>
-                      <td className="text-center text-purple-600">
-                        {Math.round((stats.copiesSubmitted / stats.totalStudents) * 100)}%
-                      </td>
-                    </tr>
-                    <tr className="font-semibold">
-                      <td className="py-2 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-green-600" />
-                        <span>{t('cp.successRate')}</span>
-                      </td>
-                      <td className="text-center text-green-600" colSpan="2">
-                        {Math.round((stats.copiesSubmitted / stats.totalStudents) * 100)}%
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-                <div className="mt-2 text-xs text-gray-500 text-center">
-                  {t('cp.totalStudents', { n: stats.totalStudents })}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs sm:text-sm">
+                <div>
+                  <span className="text-gray-500">{t('cp.notedStudents')}</span>{' '}
+                  <strong className="text-gray-900">{stats.notedStudents || 0}/{stats.totalStudents}</strong>
+                </div>
+                <div>
+                  <span className="text-gray-500">{t('cp.average')}</span>{' '}
+                  <strong className="text-blue-700">{Number(stats.average || 0).toFixed(1)}/20</strong>
+                </div>
+                <div>
+                  <span className="text-gray-500">{t('cp.successRate')}</span>{' '}
+                  <strong className="text-green-700">{stats.successRate || 0}%</strong>
                 </div>
               </div>
             ) : (
-              <div className="text-center text-gray-500 text-sm py-2">
+              <div className="text-gray-500 text-xs">
                 {statsLoading ? t('common.loading') : t('cp.noStats')}
               </div>
             )}
@@ -226,6 +149,9 @@ const ControlsPage = () => {
   // États pour le filtre
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterClass, setFilterClass] = useState('all');
+  const [controlScope, setControlScope] = useState('mine');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleLimit, setVisibleLimit] = useState(12);
 
   // Cache global pour les statistiques par contrôle
   const [controlsStatsCache, setControlsStatsCache] = useState({});
@@ -242,10 +168,11 @@ const ControlsPage = () => {
   // États pour la modal de gestion des notes
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [selectedControlForNotes, setSelectedControlForNotes] = useState(null);
-  const [activeNotesTab, setActiveNotesTab] = useState('manual'); // 'import', 'manual', 'stats'
+  const [activeNotesTab, setActiveNotesTab] = useState('manual'); // 'manual', 'stats'
   const [classStudents, setClassStudents] = useState([]);
   const [studentsNotes, setStudentsNotes] = useState({});
   const [loadingStudents, setLoadingStudents] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
   const [pasteNotesText, setPasteNotesText] = useState('');
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [showFailingModal, setShowFailingModal] = useState(false);
@@ -260,6 +187,7 @@ const ControlsPage = () => {
   const [excelGlobalError, setExcelGlobalError] = useState(null);
   const [excelGlobalResult, setExcelGlobalResult] = useState(null);
   const [showExcelImportSection, setShowExcelImportSection] = useState(false);
+  const [excelImportTarget, setExcelImportTarget] = useState(null);
   const [notesVersion, setNotesVersion] = useState(0);
   const [excelDragOver, setExcelDragOver] = useState(false);
 
@@ -295,7 +223,7 @@ const ControlsPage = () => {
 
   // Fonction pour charger toutes les statistiques des contrôles terminés
   const loadAllControlsStats = async (forceReload = false) => {
-    const completedControls = controls.filter(c => c.status === 'completed');
+    const completedControls = controls.filter(c => c.status === 'completed' && isControlOwner(c));
     
     if (completedControls.length === 0) {
       setControlsStatsCache({});
@@ -444,23 +372,32 @@ const ControlsPage = () => {
 
   // Fonction pour enregistrer les notes
   const handleSaveNotes = async () => {
+    const notesData = Object.entries(studentsNotes).flatMap(([studentId, noteData]) => {
+      const rawNote = noteData.note;
+      if (rawNote === undefined || rawNote === null || String(rawNote).trim() === '') return [];
+      const note = Number(String(rawNote).replace(',', '.'));
+      return [{
+        student_id: studentId,
+        control_id: selectedControlForNotes.id,
+        note,
+        appreciation: noteData.appreciation || ''
+      }];
+    });
+
+    const invalidNotes = notesData.filter(({ note }) => !Number.isFinite(note) || note < 0 || note > 20);
+    if (invalidNotes.length > 0) {
+      alert(t('cp.invalidGrades', { n: invalidNotes.length }));
+      return;
+    }
+
+    if (notesData.length === 0) {
+      alert(t('cp.noNoteToSave'));
+      return;
+    }
+
+    setSavingNotes(true);
     try {
       const token = await getAuthToken();
-      
-      // Préparer les données pour l'API
-      const notesData = Object.entries(studentsNotes)
-        .filter(([_, noteData]) => noteData.note && typeof noteData.note === 'string' && noteData.note.trim() !== '')
-        .map(([studentId, noteData]) => ({
-          student_id: studentId,
-          control_id: selectedControlForNotes.id,
-          note: parseFloat(noteData.note.replace(',', '.')),
-          appreciation: noteData.appreciation || ''
-        }));
-
-      if (notesData.length === 0) {
-        alert(t('cp.noNoteToSave'));
-        return;
-      }
 
       console.log('Enregistrement des notes:', notesData);
 
@@ -500,28 +437,20 @@ const ControlsPage = () => {
     } catch (error) {
       console.error('Erreur:', error);
       alert(t('cp.saveNotesFailed'));
+    } finally {
+      setSavingNotes(false);
     }
   };
 
   // Fonction pour traiter le collage des notes
   const handlePasteNotes = () => {
-    console.log('Début du collage des notes');
-    console.log('Texte collé:', pasteNotesText);
-    console.log('Nombre d\'élèves:', classStudents.length);
-    
-    // Diviser le texte par lignes et nettoyer
     const lines = pasteNotesText.split('\n').filter(line => line.trim());
-    console.log('Lignes détectées:', lines.length);
-    
-    const notes = lines.map(line => {
-      // Garder la note telle quelle (avec virgule ou point)
-      const cleanNote = line.trim();
-      // Validation simple : vérifier que c'est un nombre valide
-      const note = parseFloat(cleanNote.replace(',', '.'));
-      return isNaN(note) ? null : Math.min(20, Math.max(0, note)); // Limiter entre 0 et 20
-    }).filter(note => note !== null);
-    
-    console.log('Notes valides:', notes);
+    const notes = lines.map(line => Number(line.trim().replace(',', '.')));
+    const invalidCount = notes.filter(note => !Number.isFinite(note) || note < 0 || note > 20).length;
+    if (invalidCount > 0) {
+      alert(t('cp.pasteInvalid', { n: invalidCount }));
+      return;
+    }
 
     // Mettre à jour les notes des élèves dans l'ordre
     const updatedNotes = { ...studentsNotes };
@@ -531,11 +460,9 @@ const ControlsPage = () => {
           ...updatedNotes[student.id],
           note: lines[index].trim() // Garder le format original (avec virgule si présente)
         };
-        console.log(`Élève ${student.first_name} ${student.last_name}: ${lines[index].trim()}`);
       }
     });
 
-    console.log('Notes mises à jour:', updatedNotes);
     setStudentsNotes(updatedNotes);
     
     // Fermer la modal de collage
@@ -868,6 +795,16 @@ const ControlsPage = () => {
 
   // ==================== IMPORT EXCEL HANDLERS (MULTI-FICHIERS) ====================
 
+  const openExcelImport = (control = null) => {
+    setExcelImportTarget(control);
+    setShowExcelImportSection(true);
+  };
+
+  const closeExcelImport = () => {
+    setShowExcelImportSection(false);
+    setExcelImportTarget(null);
+  };
+
   const resetExcelImport = () => {
     setExcelFiles([]);
     setExcelGlobalError(null);
@@ -877,12 +814,13 @@ const ControlsPage = () => {
 
   // Ajouter des fichiers (depuis input ou drag-drop)
   const addExcelFiles = (fileList) => {
+    const defaultClassId = excelImportTarget?.class_id || (filterClass !== 'all' ? filterClass : '');
     const newFiles = Array.from(fileList)
       .filter(f => /\.(xlsx|xls|csv)$/i.test(f.name))
       .map(f => ({
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         file: f,
-        classId: '',
+        classId: defaultClassId,
         parsing: false,
         parsed: null,
         mappings: {},
@@ -896,6 +834,11 @@ const ControlsPage = () => {
     setExcelFiles(prev => [...prev, ...newFiles]);
     setExcelGlobalError(null);
     setExcelGlobalResult(null);
+    if (defaultClassId) {
+      newFiles.forEach(fileEntry => {
+        setTimeout(() => parseExcelFile(fileEntry), 100);
+      });
+    }
   };
 
   const handleExcelFilesSelect = (e) => {
@@ -922,6 +865,11 @@ const ControlsPage = () => {
   const autoMapColumns = (data) => {
     const autoMappings = {};
     if (data.detectedColumns && data.dbControls) {
+      const importableColumns = data.detectedColumns.filter(col => col.controlNumber !== 'activities');
+      const targetExists = excelImportTarget?.id && data.dbControls.some(control => control.id === excelImportTarget.id);
+      if (targetExists && importableColumns.length === 1) {
+        autoMappings[importableColumns[0].label] = excelImportTarget.id;
+      }
       data.detectedColumns.forEach(col => {
         if (col.controlNumber === 'activities') return;
         const numLabels = {
@@ -934,7 +882,7 @@ const ControlsPage = () => {
         const match = data.dbControls.find(c =>
           labels.some(l => c.name.includes(l)) || c.name.includes(String(col.controlNumber))
         );
-        if (match) {
+        if (match && !autoMappings[col.label]) {
           autoMappings[col.label] = match.id;
         }
       });
@@ -1135,77 +1083,56 @@ const ControlsPage = () => {
     }
   }, [controls.length]); // Seulement quand le nombre de contrôles change
 
-  // Filtrer les contrôles en fonction des critères (avec debounce)
-  const filteredControls = controls.filter(control => {
-    // Filtre par statut (debounced)
-    if (debouncedFilterStatus !== 'all' && control.status !== debouncedFilterStatus) {
-      return false;
-    }
-    
-    // Filtre par classe (debounced)
-    if (debouncedFilterClass !== 'all' && control.class_id !== debouncedFilterClass) {
-      return false;
-    }
-    
+  // La page sépare clairement le travail du professeur des contrôles partagés.
+  const filteredControls = useMemo(() => controls.filter(control => {
+    if (debouncedFilterStatus !== 'all' && control.status !== debouncedFilterStatus) return false;
+    if (debouncedFilterClass !== 'all' && control.class_id !== debouncedFilterClass) return false;
     return true;
-  });
+  }), [controls, debouncedFilterStatus, debouncedFilterClass]);
 
-  // Calculer les statistiques des contrôles (optimisé avec useMemo)
-  const controlStats = useMemo(() => {
-    const completedControls = filteredControls.filter(c => c.status === 'completed');
-    
-    if (completedControls.length === 0) {
-      return {
-        totalStudents: 0,
-        successRate: 0,
-        absences: 0,
-        materialComplete: 0,
-        disciplineGood: 0,
-        phoneUsage: 0,
-        cheatingAttempts: 0,
-        cheatingCaught: 0,
-        copiesSubmitted: 0
-      };
-    }
+  const scopeCounts = useMemo(() => ({
+    mine: filteredControls.filter(isControlOwner).length,
+    shared: filteredControls.filter(control => !isControlOwner(control)).length
+  }), [filteredControls, isControlOwner]);
 
-    // Calculer les statistiques à partir du cache
-    let totalStudents = 0;
-    let absences = 0;
-    let materialComplete = 0;
-    let disciplineGood = 0;
-    let phoneUsage = 0;
-    let cheatingAttempts = 0;
-    let cheatingCaught = 0;
-    let copiesSubmitted = 0;
-
-    completedControls.forEach(control => {
-      const stats = controlsStatsCache[control.id];
-      if (stats) {
-        totalStudents += stats.totalStudents;
-        absences += stats.absences;
-        materialComplete += stats.materialComplete;
-        disciplineGood += stats.disciplineGood;
-        phoneUsage += stats.phoneUsage;
-        cheatingAttempts += stats.cheatingAttempts;
-        cheatingCaught += stats.cheatingCaught;
-        copiesSubmitted += stats.copiesSubmitted;
-      }
+  const visibleControls = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLocaleLowerCase(lang === 'ar' ? 'ar' : 'fr');
+    return filteredControls.filter(control => {
+      const matchesScope = controlScope === 'mine' ? isControlOwner(control) : !isControlOwner(control);
+      if (!matchesScope) return false;
+      if (!normalizedSearch) return true;
+      return [control.name, control.class_name, control.subject_name, control.teacher_name]
+        .filter(Boolean)
+        .some(value => String(value).toLocaleLowerCase(lang === 'ar' ? 'ar' : 'fr').includes(normalizedSearch));
     });
+  }, [filteredControls, controlScope, searchQuery, lang, isControlOwner]);
 
-    const successRate = totalStudents > 0 ? Math.round((copiesSubmitted / totalStudents) * 100) : 0;
+  const displayedControls = visibleControls.slice(0, visibleLimit);
 
-    return {
-      totalStudents,
-      successRate,
-      absences,
-      materialComplete,
-      disciplineGood,
-      phoneUsage,
-      cheatingAttempts,
-      cheatingCaught,
-      copiesSubmitted
-    };
-  }, [filteredControls, controlsStatsCache]);
+  const gradeDraftStats = useMemo(() => {
+    const values = Object.values(studentsNotes)
+      .map(entry => entry?.note)
+      .filter(value => value !== undefined && value !== null && String(value).trim() !== '');
+    const invalid = values.filter(value => {
+      const note = Number(String(value).replace(',', '.'));
+      return !Number.isFinite(note) || note < 0 || note > 20;
+    }).length;
+    return { entered: values.length, invalid };
+  }, [studentsNotes]);
+
+  const handleGradeKeyDown = (event, index) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const nextInput = document.querySelector(`[data-grade-index="${index + 1}"]`);
+    if (nextInput) {
+      nextInput.focus();
+      nextInput.select();
+    }
+  };
+
+  useEffect(() => {
+    setVisibleLimit(12);
+  }, [controlScope, searchQuery, debouncedFilterStatus, debouncedFilterClass]);
 
   useEffect(() => {
     fetchData();
@@ -1378,30 +1305,40 @@ const ControlsPage = () => {
 
   return (
     <div className="p-3 sm:p-6 max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0 mb-4 sm:mb-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-5 sm:mb-6">
         <div className="min-w-0">
           <h1 className="text-2xl sm:text-4xl font-bold truncate">{t('cp.title')}</h1>
           <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">{t('cp.subtitle')}</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingControl(null);
-            setFormData({
-              class_id: '',
-              name: '',
-              date: '',
-              start_time: '',
-              end_time: '',
-              description: '',
-              kind: 'control'
-            });
-            setShowCreateModal(true);
-          }}
-          className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 flex-shrink-0"
-        >
-          <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-          <span className="text-sm sm:text-base">{t('cp.newControl')}</span>
-        </button>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => openExcelImport()}
+            className="px-4 py-2.5 border border-green-200 bg-green-50 text-green-700 rounded-xl font-semibold hover:bg-green-100 transition-colors flex items-center justify-center gap-2"
+          >
+            <Upload className="w-4 h-4" />
+            <span className="text-sm">{t('cp.importGrades')}</span>
+          </button>
+          <button
+            onClick={() => {
+              setEditingControl(null);
+              setFormData({
+                class_id: '',
+                name: '',
+                date: '',
+                start_time: '',
+                end_time: '',
+                description: '',
+                kind: 'control'
+              });
+              setShowCreateModal(true);
+            }}
+            className="px-4 py-2.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="text-sm">{t('cp.newControl')}</span>
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -1413,58 +1350,75 @@ const ControlsPage = () => {
         </div>
       )}
 
-      {/* Filtre professionnel */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-lg">{t('cp.filterTitle')}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('cp.status')}</label>
+      {/* Recherche et filtres compacts */}
+      <Card className="mb-5">
+        <CardContent className="pt-5">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(260px,1fr)_220px_240px]">
+            <label className="relative block">
+              <span className="sr-only">{t('cp.search')}</span>
+              <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={t('cp.searchPlaceholder')}
+                className="w-full rounded-xl border border-gray-300 py-2.5 ps-10 pe-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+            <label>
+              <span className="sr-only">{t('cp.status')}</span>
               <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">{t('cp.allControls')}</option>
                 <option value="planned">{t('cp.planned')}</option>
                 <option value="completed">{t('cp.completed')}</option>
               </select>
-            </div>
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-sm font-medium text-gray-700 mb-2">{t('common.class')}</label>
+            </label>
+            <label>
+              <span className="sr-only">{t('common.class')}</span>
               <select
                 value={filterClass}
                 onChange={(e) => setFilterClass(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">{t('cp.allClasses')}</option>
                 {classes.map(cls => (
                   <option key={cls.id} value={cls.id}>{cls.name}</option>
                 ))}
               </select>
-            </div>
+            </label>
           </div>
         </CardContent>
       </Card>
 
-      {/* Import Excel des notes (Multi-fichiers) */}
-      <Card className="mb-6">
-        <CardHeader className="cursor-pointer" onClick={() => setShowExcelImportSection(prev => !prev)}>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Upload className="w-5 h-5 text-green-600" />
-            {t('cp.excelTitle')}
-            {excelFiles.length > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-normal">{t('cp.excelFiles', { n: excelFiles.length })}</span>
-            )}
-            <span className="ml-auto text-sm text-gray-400">{showExcelImportSection ? t('cp.hide') : t('cp.show')}</span>
-          </CardTitle>
-          <CardDescription>{t('cp.excelSubtitle')}</CardDescription>
-        </CardHeader>
-        {showExcelImportSection && (
-          <CardContent>
-            <div className="space-y-4">
+      {/* Espace d'import autonome : il conserve le contexte du contrôle choisi. */}
+      {showExcelImportSection && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b px-4 py-3 sm:px-6 sm:py-4">
+              <div className="min-w-0">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-gray-900 sm:text-xl">
+                  <Upload className="h-5 w-5 flex-shrink-0 text-green-600" />
+                  <span className="truncate">{t('cp.excelTitle')}</span>
+                  {excelFiles.length > 0 && (
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">{t('cp.excelFiles', { n: excelFiles.length })}</span>
+                  )}
+                </h2>
+                <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+                  {excelImportTarget
+                    ? t('cp.importTargetHint', { name: excelImportTarget.name, class: excelImportTarget.class_name })
+                    : t('cp.excelSubtitle')}
+                </p>
+              </div>
+              <button type="button" onClick={closeExcelImport} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100" aria-label={t('common.close')}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4 sm:p-6">
+              <div className="space-y-4">
 
               {/* Résultat global d'import */}
               {excelGlobalResult && (
@@ -1770,90 +1724,71 @@ const ControlsPage = () => {
                   )}
                 </>
               )}
+              </div>
             </div>
-          </CardContent>
-        )}
-      </Card>
-
-      {/* Statistiques détaillées */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-blue-600" />
-              {t('cp.plannedControls')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold text-blue-600">
-              {filteredControls.filter(c => c.status === 'planned').length}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-green-600" />
-              {t('cp.completedControls')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold text-green-600">
-              {filteredControls.filter(c => c.status === 'completed').length}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users className="w-5 h-5 text-purple-600" />
-              {t('cp.assignedClasses')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold text-purple-600">
-              {classStats.totalClasses}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users className="w-5 h-5 text-orange-600" />
-              {t('cp.totalStudentsShort')}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold text-orange-600">
-              {classStats.totalStudents}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      )}
 
       <Card>
-        <CardHeader>
-          <CardTitle>{t('cp.myControls')}</CardTitle>
-          <CardDescription>{t('cp.myControlsSubtitle')}</CardDescription>
+        <CardHeader className="border-b border-gray-100">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="inline-flex w-full rounded-xl bg-gray-100 p-1 sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setControlScope('mine')}
+                className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition sm:flex-none ${controlScope === 'mine' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                {t('cp.scopeMine')} <span className="ms-1 text-xs">({scopeCounts.mine})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setControlScope('shared')}
+                className={`flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition sm:flex-none ${controlScope === 'shared' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                {t('cp.scopeShared')} <span className="ms-1 text-xs">({scopeCounts.shared})</span>
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+              <span><strong className="text-blue-700">{filteredControls.filter(control => control.status === 'planned').length}</strong> {t('cp.planned').toLocaleLowerCase(lang)}</span>
+              <span><strong className="text-green-700">{filteredControls.filter(control => control.status === 'completed').length}</strong> {t('cp.completed').toLocaleLowerCase(lang)}</span>
+              <span><strong className="text-gray-900">{classStats.totalClasses}</strong> {t('cp.classesShort')}</span>
+            </div>
+          </div>
+          <div className="pt-1">
+            <CardTitle>{controlScope === 'mine' ? t('cp.myControls') : t('cp.sharedControlsTitle')}</CardTitle>
+            <CardDescription>{controlScope === 'mine' ? t('cp.myControlsSubtitle') : t('cp.sharedControlsSubtitle')}</CardDescription>
+          </div>
         </CardHeader>
-        <CardContent>
-          {filteredControls.length === 0 ? (
+        <CardContent className="pt-5">
+          {visibleControls.length === 0 ? (
             <div className="text-center py-8">
               <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
               <p className="text-gray-600">{t('cp.empty')}</p>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-              >
-                {t('cp.createControl')}
-              </button>
+              {controlScope === 'mine' && (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  {t('cp.createControl')}
+                </button>
+              )}
             </div>
           ) : (
-            <div className="space-y-4">
-              {filteredControls.map(control => (
-                <ControlCard key={control.id} control={control} />
-              ))}
-            </div>
+            <>
+              <div className="space-y-3">
+                {displayedControls.map(control => (
+                  <ControlCard key={control.id} control={control} />
+                ))}
+              </div>
+              {displayedControls.length < visibleControls.length && (
+                <div className="mt-5 text-center">
+                  <button type="button" onClick={() => setVisibleLimit(limit => limit + 12)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                    {t('cp.showMore', { n: visibleControls.length - displayedControls.length })}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -1880,72 +1815,66 @@ const ControlsPage = () => {
               </button>
             </div>
 
-            {/* Onglets */}
-            <div className="border-b flex-shrink-0">
-              <div className="flex w-full overflow-x-auto scrollbar-hide">
-                <button
-                  onClick={() => setActiveNotesTab('import')}
-                  className={`flex-1 min-w-[70px] sm:min-w-[80px] px-1 sm:px-4 py-2 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-[10px] sm:text-sm ${
-                    activeNotesTab === 'import'
-                      ? 'border-blue-500 text-blue-600 bg-blue-50'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  <Upload className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span className="hidden sm:inline">{t('cp.tab.import')}</span>
-                  <span className="sm:hidden">{t('cp.tab.importShort')}</span>
-                </button>
+            {/* Navigation simple : deux vues et deux méthodes d'entrée. */}
+            <div className="flex flex-shrink-0 flex-col gap-2 border-b bg-gray-50/70 px-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+              <div className="inline-flex rounded-lg bg-gray-100 p-1">
                 <button
                   onClick={() => setActiveNotesTab('manual')}
-                  className={`flex-1 min-w-[70px] sm:min-w-[80px] px-1 sm:px-4 py-2 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-[10px] sm:text-sm ${
+                  className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition sm:flex-none sm:text-sm ${
                     activeNotesTab === 'manual'
-                      ? 'border-blue-500 text-blue-600 bg-blue-50'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  <Edit3 className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span>{t('cp.tab.manual')}</span>
+                  {t('cp.tab.quickEntry')}
                 </button>
                 <button
                   onClick={() => setActiveNotesTab('stats')}
-                  className={`flex-1 min-w-[70px] sm:min-w-[80px] px-1 sm:px-4 py-2 font-medium flex flex-col sm:flex-row items-center justify-center gap-1 border-b-2 transition-colors text-[10px] sm:text-sm ${
+                  className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition sm:flex-none sm:text-sm ${
                     activeNotesTab === 'stats'
-                      ? 'border-blue-500 text-blue-600 bg-blue-50'
-                      : 'border-transparent text-gray-600 hover:text-gray-800'
+                      ? 'bg-white text-blue-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
-                  <BarChart3 className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
-                  <span>{t('cp.tab.stats')}</span>
+                  {t('cp.tab.results')}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:flex">
+                <button
+                  type="button"
+                  onClick={() => setShowPasteModal(true)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-purple-200 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50 sm:text-sm"
+                >
+                  <ClipboardPaste className="h-3.5 w-3.5" />
+                  {t('cp.pasteColumn')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openExcelImport(selectedControlForNotes)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-white px-3 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-50 sm:text-sm"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  {t('cp.importExcel')}
                 </button>
               </div>
             </div>
 
             {/* Contenu des onglets */}
             <div className="p-2 sm:p-4 overflow-y-auto flex-1">
-              {activeNotesTab === 'import' && (
-                <div className="text-center py-4">
-                  <Upload className="w-8 h-8 sm:w-12 sm:h-12 text-green-400 mx-auto mb-2 sm:mb-4" />
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-2">{t('cp.importAbove')}</h3>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-4">
-                    {t('cp.importAboveHint')}
-                  </p>
-                  <button
-                    onClick={() => {
-                      setShowNotesModal(false);
-                      setShowExcelImportSection(true);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className="px-4 py-2 sm:px-6 sm:py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium inline-flex items-center gap-2"
-                  >
-                    <Upload className="w-4 h-4" />
-                    {t('cp.goToImport')}
-                  </button>
-                </div>
-              )}
-
               {activeNotesTab === 'manual' && (
                 <div className="space-y-3 sm:space-y-4">
-                  <h3 className="text-base sm:text-lg font-semibold hidden sm:block">{t('cp.manualTitle')}</h3>
+                  <div className="flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50/70 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-blue-950 sm:text-base">{t('cp.quickEntryTitle')}</h3>
+                      <p className="mt-0.5 text-xs text-blue-700">{t('cp.quickEntryHint')}</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="font-semibold text-blue-800">{t('cp.enteredCount', { entered: gradeDraftStats.entered, total: classStudents.length })}</span>
+                      {gradeDraftStats.invalid > 0 && (
+                        <span className="rounded-full bg-red-100 px-2 py-1 font-semibold text-red-700">{t('cp.invalidCount', { n: gradeDraftStats.invalid })}</span>
+                      )}
+                    </div>
+                  </div>
                   
                   {loadingStudents ? (
                     <div className="text-center py-4 sm:py-8">
@@ -1961,21 +1890,29 @@ const ControlsPage = () => {
                     <>
                       {/* Vue carte mobile */}
                       <div className="md:hidden space-y-1.5">
-                        {classStudents.map((student) => (
+                        {classStudents.map((student, index) => {
+                          const rawNote = studentsNotes[student.id]?.note ?? '';
+                          const parsedNote = rawNote === '' ? null : Number(String(rawNote).replace(',', '.'));
+                          const isInvalid = rawNote !== '' && (!Number.isFinite(parsedNote) || parsedNote < 0 || parsedNote > 20);
+                          return (
                           <div key={student.id} className="flex items-center gap-1.5 p-1.5 border border-gray-200 rounded bg-white">
                             <div className="flex-1 min-w-0">
                               <span className="block text-xs font-medium text-gray-900 truncate">{student.first_name} {student.last_name}</span>
                             </div>
                             <input
-                              type="number"
-                              min="0" max="20" step="0.25"
-                              value={studentsNotes[student.id]?.note ?? ''}
+                              type="text"
+                              inputMode="decimal"
+                              data-grade-index={index}
+                              value={rawNote}
                               onChange={(e) => setStudentsNotes(prev => ({ ...prev, [student.id]: { ...prev[student.id], note: e.target.value } }))}
+                              onKeyDown={(event) => handleGradeKeyDown(event, index)}
                               placeholder="/20"
-                              className="w-12 text-center border border-gray-300 rounded px-1 py-1 text-xs"
+                              aria-label={`${t('cp.noteOn20')} — ${student.first_name} ${student.last_name}`}
+                              className={`w-14 rounded border px-1 py-1 text-center text-xs ${isInvalid ? 'border-red-400 bg-red-50 text-red-700' : 'border-gray-300'}`}
                             />
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {/* Vue tableau desktop */}
@@ -1989,21 +1926,24 @@ const ControlsPage = () => {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {classStudents.map((student) => (
+                            {classStudents.map((student, index) => {
+                              const rawNote = studentsNotes[student.id]?.note ?? '';
+                              const parsedNote = rawNote === '' ? null : Number(String(rawNote).replace(',', '.'));
+                              const isInvalid = rawNote !== '' && (!Number.isFinite(parsedNote) || parsedNote < 0 || parsedNote > 20);
+                              return (
                               <tr key={student.id}>
                                 <td className="px-4 py-3">
                                   <div className="font-medium text-gray-900">
                                     {student.first_name} {student.last_name}
                                   </div>
-                                  <div className="text-sm text-gray-500">
-                                    {student.email}
-                                  </div>
                                 </td>
                                 <td className="px-4 py-3">
                                   <input
                                     type="text"
-                                    placeholder="20,00"
-                                    value={studentsNotes[student.id]?.note || ''}
+                                    inputMode="decimal"
+                                    data-grade-index={index}
+                                    placeholder="—"
+                                    value={rawNote}
                                     onChange={(e) => {
                                       setStudentsNotes(prev => ({
                                         ...prev,
@@ -2013,7 +1953,9 @@ const ControlsPage = () => {
                                         }
                                       }));
                                     }}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded text-center focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    onKeyDown={(event) => handleGradeKeyDown(event, index)}
+                                    aria-label={`${t('cp.noteOn20')} — ${student.first_name} ${student.last_name}`}
+                                    className={`w-full rounded-lg border px-3 py-2 text-center font-semibold focus:ring-2 ${isInvalid ? 'border-red-400 bg-red-50 text-red-700 focus:ring-red-300' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500'}`}
                                   />
                                 </td>
                                 <td className="px-4 py-3">
@@ -2034,28 +1976,21 @@ const ControlsPage = () => {
                                   />
                                 </td>
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
-                      <div className="flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-0 mt-3 sm:mt-4">
-                        <div className="flex w-full sm:w-auto items-center justify-between sm:justify-start gap-2">
-                          <button 
-                            onClick={() => setShowPasteModal(true)}
-                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm flex-1 sm:flex-none"
-                          >
-                            <Upload className="w-3 h-3 sm:w-4 sm:h-4" />
-                            {t('cp.pasteNotes')}
-                          </button>
-                          <div className="text-[10px] sm:text-sm text-gray-600">
-                            {t('cp.studentsCount', { n: classStudents.length })}
-                          </div>
+                      <div className="sticky bottom-0 -mx-2 mt-3 flex flex-col gap-2 border-t bg-white/95 px-2 py-3 backdrop-blur sm:-mx-4 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                        <div className="text-xs text-gray-600 sm:text-sm">
+                          {gradeDraftStats.invalid > 0 ? t('cp.fixInvalidBeforeSave') : t('cp.readyToSave', { n: gradeDraftStats.entered })}
                         </div>
                         <button 
                           onClick={handleSaveNotes}
-                          className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                          disabled={savingNotes || gradeDraftStats.entered === 0 || gradeDraftStats.invalid > 0}
+                          className="w-full rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                         >
-                          {t('sr.saveShort')}
+                          {savingNotes ? t('common.saving') : t('cp.saveGrades', { n: gradeDraftStats.entered })}
                         </button>
                       </div>
                     </>
@@ -2207,11 +2142,11 @@ const ControlsPage = () => {
 
       {/* Modal de collage des notes */}
       {showPasteModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between p-4 md:p-6 border-b">
               <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Upload className="w-5 h-5 text-purple-600" />
+                <ClipboardPaste className="w-5 h-5 text-purple-600" />
                 {t('cp.pasteTitle')}
               </h3>
               <button
@@ -2231,40 +2166,13 @@ const ControlsPage = () => {
                   value={pasteNotesText}
                   onChange={(e) => setPasteNotesText(e.target.value)}
                   placeholder="12,00&#10;10,00&#10;12,00&#10;18,00&#10;15,25&#10;13,75&#10;8,75&#10;13,00&#10;12,00&#10;10,00&#10;12,25&#10;9,25&#10;8,00&#10;11,00&#10;12,00&#10;9,00&#10;8,25&#10;9,50&#10;0,00"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-sm resize-none"
-                  rows={8}
-                  style={{ minHeight: '200px' }}
+                  className="w-full resize-none rounded-xl border border-gray-300 px-3 py-3 font-mono text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-500"
+                  rows={9}
                 />
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                  <h4 className="font-medium text-purple-800 mb-2">{t('cp.instructions')}</h4>
-                  <ul className="text-sm text-purple-700 space-y-1">
-                    <li>• <strong>{t('cp.instr1')}</strong></li>
-                    <li>• <strong>{t('cp.instr2')}</strong></li>
-                    <li>• <strong>{t('cp.instr3')}</strong></li>
-                    <li>• <strong>{t('cp.instr4')}</strong></li>
-                  </ul>
-                </div>
-                
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <div className="text-sm text-green-800">
-                    <strong>{t('cp.autoResult')}</strong><br/>
-                    {t('cp.autoResultText')}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-yellow-800">
-                  <div>
-                    <strong>{t('cp.concernedStudents')}</strong> {t('cp.studentsCount', { n: classStudents.length })}
-                  </div>
-                  <div>
-                    <strong>{t('cp.detectedNotes')}</strong> {t('cp.notesCount', { n: pasteNotesText.split('\n').filter(line => line.trim()).length })}
-                  </div>
-                </div>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-purple-50 px-3 py-2 text-sm text-purple-800">
+                <span>{t('cp.pasteSimpleHint')}</span>
+                <strong>{t('cp.pastePreview', { notes: pasteNotesText.split('\n').filter(line => line.trim()).length, students: classStudents.length })}</strong>
               </div>
               
               <div className="flex flex-col sm:flex-row gap-3">
@@ -2278,7 +2186,7 @@ const ControlsPage = () => {
                   onClick={handlePasteNotes}
                   className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold"
                 >
-                  {t('cp.pasteAndClose')}
+                  {t('cp.applyToTable')}
                 </button>
               </div>
             </div>
