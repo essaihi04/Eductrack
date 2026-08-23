@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Send, Sparkles, Download, RefreshCw, ChevronDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 import { useI18n } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -37,6 +39,7 @@ const renderMarkdown = (md) => {
 
 const ParentAssistantPage = () => {
   const { t, dir } = useI18n();
+  const [searchParams] = useSearchParams();
   const rtl = dir === 'rtl';
 
   const [children, setChildren] = useState([]);
@@ -62,8 +65,10 @@ const ParentAssistantPage = () => {
         const kids = childRes.ok ? await childRes.json() : [];
         const menuData = menuRes.ok ? await menuRes.json() : null;
 
+        const preferred = preferredParentChild(kids, searchParams.get('childId'));
         setChildren(kids);
-        if (kids.length > 0) setChildId(kids[0].id);
+        setChildId(preferred);
+        rememberParentChild(preferred);
         setMenu(menuData);
 
         setMessages([{
@@ -119,6 +124,21 @@ const ParentAssistantPage = () => {
 
   const avatar = MOODS[mood] || MOODS.idle;
 
+  const changeChild = (nextChildId) => {
+    setChildId(nextChildId);
+    rememberParentChild(nextChildId);
+    setMood('hello');
+    setOpenSection(null);
+    setInput('');
+    setMessages([{
+      from: 'bot',
+      blocks: [{
+        type: 'text',
+        markdown: `**${t('passist.greetingTitle')}** 👋\n\n${t('passist.greetingBody')}`,
+      }],
+    }]);
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] max-w-3xl mx-auto" dir={dir}>
       {/* En-tête : avatar vivant + enfant concerné */}
@@ -137,7 +157,7 @@ const ParentAssistantPage = () => {
         {children.length > 1 && (
           <select
             value={childId}
-            onChange={(e) => setChildId(e.target.value)}
+            onChange={(e) => changeChild(e.target.value)}
             className="text-xs border rounded-lg px-2 py-1.5 bg-background max-w-[45%]"
           >
             {children.map((c) => (

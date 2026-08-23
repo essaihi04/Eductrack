@@ -287,7 +287,7 @@ router.get('/children/:childId/homework', loadChild, async (req, res) => {
     // Déduire la matière depuis le prof qui a créé le devoir (teacher_subjects)
     // car la table homework n'a pas de colonne subject_id.
     const teacherIds = [...new Set(filteredRaw.map(h => h.created_by).filter(Boolean))];
-    const subjectByTeacher = new Map();
+    const subjectNamesByTeacher = new Map();
     if (teacherIds.length > 0) {
       const { data: ts } = await supabaseAdmin
         .from('teacher_subjects')
@@ -295,11 +295,18 @@ router.get('/children/:childId/homework', loadChild, async (req, res) => {
         .in('teacher_id', teacherIds);
       (ts || []).forEach(row => {
         const name = row?.subjects?.name;
-        if (name && !subjectByTeacher.has(row.teacher_id)) {
-          subjectByTeacher.set(row.teacher_id, name);
-        }
+        if (!name) return;
+        if (!subjectNamesByTeacher.has(row.teacher_id)) subjectNamesByTeacher.set(row.teacher_id, new Set());
+        subjectNamesByTeacher.get(row.teacher_id).add(name);
       });
     }
+
+    // Un devoir historique ne porte pas de subject_id. On n'infère donc la
+    // matière que lorsque le professeur n'en enseigne qu'une seule.
+    const subjectByTeacher = new Map();
+    subjectNamesByTeacher.forEach((names, teacherId) => {
+      if (names.size === 1) subjectByTeacher.set(teacherId, [...names][0]);
+    });
 
     const filtered = filteredRaw.map(hw => ({
       ...hw,
@@ -446,7 +453,8 @@ router.get('/children/:childId/control-grades', loadChild, async (req, res) => {
     // Seuls les contrôles VALIDÉS/PUBLIÉS par l'administration sont visibles
     // (ADD_NOTES_PUBLICATION.sql) ; repli sans le filtre si migration absente.
     const controlsSelect = `
-        id, name, date, description, status, teacher_id, class_id,
+        id, name, date, description, status, teacher_id, class_id, subject_id,
+        subject:subjects(name),
         profiles!controls_plan_teacher_id_fkey(first_name, last_name),
         classes(name, level)
       `;
@@ -470,7 +478,9 @@ router.get('/children/:childId/control-grades', loadChild, async (req, res) => {
     const controlIds = (controls || []).map(c => c.id);
     if (!controlIds.length) return res.json([]);
 
-    const teacherIds = Array.from(new Set((controls || []).map(c => c.teacher_id).filter(Boolean)));
+    const teacherIds = Array.from(new Set(
+      (controls || []).filter(c => !c.subject?.name).map(c => c.teacher_id).filter(Boolean)
+    ));
 
     const { data: notes } = await supabaseAdmin
       .from('control_notes')
@@ -481,17 +491,28 @@ router.get('/children/:childId/control-grades', loadChild, async (req, res) => {
     const noteByControlId = new Map();
     (notes || []).forEach(n => { if (!noteByControlId.has(n.control_id)) noteByControlId.set(n.control_id, n); });
 
-    let subjectByTeacherId = new Map();
+    const subjectIdsByTeacher = new Map();
+    const subjectNameById = new Map();
     if (teacherIds.length) {
       const { data: ts } = await supabaseAdmin
         .from('teacher_subjects')
-        .select('teacher_id, subjects(name)')
+        .select('teacher_id, subject_id, subjects(name)')
         .in('teacher_id', teacherIds);
       (ts || []).forEach(row => {
-        const n = row?.subjects?.name;
-        if (n && !subjectByTeacherId.has(row.teacher_id)) subjectByTeacherId.set(row.teacher_id, n);
+        if (!row?.teacher_id || !row?.subject_id) return;
+        if (!subjectIdsByTeacher.has(row.teacher_id)) subjectIdsByTeacher.set(row.teacher_id, new Set());
+        subjectIdsByTeacher.get(row.teacher_id).add(row.subject_id);
+        if (row.subjects?.name) subjectNameById.set(row.subject_id, row.subjects.name);
       });
     }
+
+    const legacySubjectByTeacher = new Map();
+    subjectIdsByTeacher.forEach((subjectIds, teacherId) => {
+      if (subjectIds.size !== 1) return;
+      const [subjectId] = subjectIds;
+      const name = subjectNameById.get(subjectId);
+      if (name) legacySubjectByTeacher.set(teacherId, name);
+    });
 
     const formatted = (controls || []).map(c => {
       const note = noteByControlId.get(c.id) || null;
@@ -505,7 +526,7 @@ router.get('/children/:childId/control-grades', loadChild, async (req, res) => {
         control_name: c.name,
         control_date: c.date,
         control_description: c.description,
-        subject_name: subjectByTeacherId.get(c.teacher_id) || null,
+        subject_name: c.subject?.name || legacySubjectByTeacher.get(c.teacher_id) || null,
         teacher_name: teacher ? `${teacher.first_name} ${teacher.last_name}` : null,
         class_name: c?.classes?.name,
         class_level: c?.classes?.level,

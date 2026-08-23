@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { CalendarClock, Plus, X, MapPin, User, Building2, GraduationCap } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 import {
   appointmentsApi, APPOINTMENT_STATUS, formatSlot, personName,
 } from '../../lib/appointmentsApi';
@@ -19,11 +21,13 @@ const EMPTY_FORM = {
 
 export default function ParentAppointmentsPage() {
   const { t, lang } = useI18n();
+  const [searchParams] = useSearchParams();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const slotOpts = { locale: dateLocale, at: t('appt.at') };
   const [items, setItems] = useState([]);
   const [children, setChildren] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [preferredChildId, setPreferredChildId] = useState('');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -43,7 +47,11 @@ export default function ParentAppointmentsPage() {
         }).then((r) => (r.ok ? r.json() : [])),
       ]);
       setItems(appts);
-      setChildren(kidsRes || []);
+      const kids = Array.isArray(kidsRes) ? kidsRes : [];
+      const preferred = preferredParentChild(kids, searchParams.get('childId'));
+      setChildren(kids);
+      setPreferredChildId(preferred);
+      rememberParentChild(preferred);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -60,7 +68,7 @@ export default function ParentAppointmentsPage() {
   }, [form.student_id, form.target_type]);
 
   const openForm = () => {
-    setForm({ ...EMPTY_FORM, student_id: children[0]?.id || '' });
+    setForm({ ...EMPTY_FORM, student_id: preferredChildId || children[0]?.id || '' });
     setError('');
     setShowForm(true);
   };
@@ -197,7 +205,11 @@ export default function ParentAppointmentsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('pappt.form.child')}</label>
                 <select
                   value={form.student_id}
-                  onChange={(e) => setForm({ ...form, student_id: e.target.value, teacher_id: '' })}
+                  onChange={(e) => {
+                    rememberParentChild(e.target.value);
+                    setPreferredChildId(e.target.value);
+                    setForm({ ...form, student_id: e.target.value, teacher_id: '' });
+                  }}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2"
                   required
                 >
@@ -215,7 +227,7 @@ export default function ParentAppointmentsPage() {
                   {[
                     { value: 'administration', label: t('pappt.administration'), icon: Building2 },
                     { value: 'teacher', label: t('pappt.form.teacherOption'), icon: GraduationCap },
-                  ].map(({ value, label, icon: Icon }) => (
+                  ].map(({ value, label, icon }) => (
                     <button
                       key={value}
                       type="button"
@@ -226,7 +238,7 @@ export default function ParentAppointmentsPage() {
                           : 'border-gray-300 text-gray-700'
                       }`}
                     >
-                      <Icon className="w-4 h-4" /> {label}
+                      {createElement(icon, { className: 'w-4 h-4' })} {label}
                     </button>
                   ))}
                 </div>

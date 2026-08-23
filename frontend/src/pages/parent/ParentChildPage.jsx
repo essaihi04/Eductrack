@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { saveBlob, openBlob } from '../../lib/download';
 import {
@@ -12,17 +12,16 @@ import {
   PieChart, Pie, Cell, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import { supabase } from '../../lib/supabase';
+import { parentPathForChild, rememberParentChild } from '../../lib/parentNavigation';
 import { useI18n, useT } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const TABS = [
   { key: 'overview', labelKey: 'pchild.tab.overview', icon: Activity },
-  { key: 'homework', labelKey: 'pchild.tab.homework', icon: BookOpen },
-  { key: 'grades', labelKey: 'pchild.tab.grades', icon: Award },
+  { key: 'school', labelKey: 'pchild.tab.school', icon: BookOpen },
   { key: 'tracking', labelKey: 'pchild.tab.tracking', icon: GraduationCap },
-  { key: 'documents', labelKey: 'pchild.tab.documents', icon: FileText },
-  { key: 'timetable', labelKey: 'pchild.tab.timetable', icon: Calendar },
+  { key: 'resources', labelKey: 'pchild.tab.resources', icon: FileText },
 ];
 
 const fetchJson = async (path) => {
@@ -31,7 +30,7 @@ const fetchJson = async (path) => {
   const res = await fetch(`${apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     let msg = 'Erreur';
-    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    try { const j = await res.json(); msg = j.error || msg; } catch { /* réponse non JSON */ }
     throw new Error(msg);
   }
   return res.json();
@@ -43,7 +42,7 @@ const fetchBlob = async (path) => {
   const res = await fetch(`${apiUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) {
     let msg = `Erreur (${res.status})`;
-    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    try { const j = await res.json(); msg = j.error || msg; } catch { /* réponse non JSON */ }
     throw new Error(msg);
   }
   return res.blob();
@@ -91,7 +90,10 @@ const ParentChildPage = () => {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const photoInputRef = useRef(null);
 
-  useEffect(() => { load(); }, [childId]);
+  useEffect(() => {
+    rememberParentChild(childId);
+    load();
+  }, [childId]);
 
   const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -154,10 +156,6 @@ const ParentChildPage = () => {
 
   const total = stats?.total_sessions || 0;
   const presenceRate = total > 0 ? Math.round(((stats.present_count || 0) / total) * 100) : null;
-  const homeworkRate = (() => {
-    if (!stats || !stats.total_sessions) return null;
-    return null;
-  })();
   const concentreTotal = (stats?.concentre_count || 0) + (stats?.moyen_count || 0) + (stats?.distrait_count || 0);
   const disciplineRate = concentreTotal > 0 ? Math.round((stats.concentre_count / concentreTotal) * 100) : null;
   const partTotal = (stats?.excellent_participation || 0) + (stats?.good_participation || 0) + (stats?.faible_participation || 0);
@@ -208,7 +206,7 @@ const ParentChildPage = () => {
             </p>
           </div>
           <button
-            onClick={() => navigate('/parent/transport')}
+            onClick={() => navigate(parentPathForChild('/parent/transport', childId))}
             className="hidden sm:flex items-center gap-2 bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg backdrop-blur transition"
           >
             <Bus className="w-4 h-4" /> {t('pchild.transport')}
@@ -267,8 +265,9 @@ const ParentChildPage = () => {
         </div>
       )}
 
-      {tab === 'homework' && (
+      {tab === 'school' && (
         <div className="space-y-3">
+          <h2 className="text-lg font-bold text-gray-900">{t('pchild.tab.homework')}</h2>
           {homework.length === 0 && <Empty>{t('pchild.empty.homework')}</Empty>}
           {homework.map(hw => {
             const sub = (hw.homework_submissions || [])[0];
@@ -302,8 +301,9 @@ const ParentChildPage = () => {
         </div>
       )}
 
-      {tab === 'grades' && (
+      {tab === 'school' && (
         <div className="space-y-3">
+          <h2 className="text-lg font-bold text-gray-900 pt-3">{t('pchild.tab.grades')}</h2>
           {grades.length === 0 && <Empty>{t('pchild.empty.grades')}</Empty>}
           {grades.map(g => {
             const max = 20;
@@ -330,8 +330,9 @@ const ParentChildPage = () => {
 
       {tab === 'tracking' && <TrackingAnalytics history={history} dateLocale={dateLocale} />}
 
-      {tab === 'documents' && (
+      {tab === 'resources' && (
         <div className="space-y-3">
+          <h2 className="text-lg font-bold text-gray-900">{t('pchild.tab.documents')}</h2>
           {documents.length === 0 && <Empty>{t('pchild.empty.documents')}</Empty>}
           {documents.map(d => (
             <DocumentCard key={d.id} doc={d} childId={childId} dateLocale={dateLocale} />
@@ -339,7 +340,12 @@ const ParentChildPage = () => {
         </div>
       )}
 
-      {tab === 'timetable' && <TimetableGrid slots={timetable} />}
+      {tab === 'resources' && (
+        <div className="space-y-3 pt-3">
+          <h2 className="text-lg font-bold text-gray-900">{t('pchild.tab.timetable')}</h2>
+          <TimetableGrid slots={timetable} />
+        </div>
+      )}
     </div>
   );
 };
@@ -436,9 +442,9 @@ const TimetableGrid = ({ slots }) => {
   );
 };
 
-const KPI = ({ label, value, icon: Icon, color }) => (
+const KPI = ({ label, value, icon, color }) => (
   <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-    <Icon className={`w-5 h-5 ${color}`} />
+    {createElement(icon, { className: `w-5 h-5 ${color}` })}
     <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
     <p className="text-xs uppercase text-gray-500">{label}</p>
   </div>
@@ -660,7 +666,7 @@ const ChildActivityBadge = ({ kind, date, dateLocale }) => {
         hour: '2-digit', minute: '2-digit',
         timeZone: 'Africa/Casablanca',
       });
-    } catch {}
+    } catch { /* date invalide : le libellé reste vide */ }
   }
 
   return (

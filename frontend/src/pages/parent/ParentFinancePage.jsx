@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { createElement, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Wallet, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 import { useI18n } from '../../i18n';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -27,6 +29,7 @@ const fmtMoney = (n, cur = 'MAD') =>
 
 const ParentFinancePage = () => {
   const { t, lang } = useI18n();
+  const [searchParams] = useSearchParams();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [children, setChildren] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -34,13 +37,16 @@ const ParentFinancePage = () => {
   const [loading, setLoading] = useState(true);
   const [loadingInv, setLoadingInv] = useState(false);
   const [error, setError] = useState('');
+  const [invoiceError, setInvoiceError] = useState('');
 
   useEffect(() => {
     (async () => {
       try {
         const kids = await fetchJson('/api/parent/children');
         setChildren(kids || []);
-        if (kids && kids.length > 0) setSelected(kids[0].id);
+        const preferred = preferredParentChild(kids, searchParams.get('childId'));
+        setSelected(preferred);
+        rememberParentChild(preferred);
       } catch (e) {
         setError(e.message);
       } finally {
@@ -49,20 +55,27 @@ const ParentFinancePage = () => {
     })();
   }, []);
 
-  useEffect(() => {
-    if (!selected) return;
-    (async () => {
-      try {
-        setLoadingInv(true);
-        const fin = await fetchJson(`/api/parent/children/${selected}/invoices`);
-        setData(fin && Array.isArray(fin.invoices) ? fin : { invoices: [], summary: null });
-      } catch {
-        setData({ invoices: [], summary: null });
-      } finally {
-        setLoadingInv(false);
-      }
-    })();
-  }, [selected]);
+  const loadInvoices = async (childId) => {
+    if (!childId) return;
+    try {
+      setLoadingInv(true);
+      setInvoiceError('');
+      const fin = await fetchJson(`/api/parent/children/${childId}/invoices`);
+      setData(fin && Array.isArray(fin.invoices) ? fin : { invoices: [], summary: null });
+    } catch {
+      setData({ invoices: [], summary: null });
+      setInvoiceError(t('pfin.loadError'));
+    } finally {
+      setLoadingInv(false);
+    }
+  };
+
+  useEffect(() => { loadInvoices(selected); }, [selected]);
+
+  const chooseChild = (childId) => {
+    rememberParentChild(childId);
+    setSelected(childId);
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64">{t('common.loading')}</div>;
   if (error) return <div className="p-6 text-red-600">{error}</div>;
@@ -89,7 +102,7 @@ const ParentFinancePage = () => {
               {children.map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => setSelected(c.id)}
+                  onClick={() => chooseChild(c.id)}
                   className={`px-4 py-2 rounded-full text-sm font-medium transition ${
                     selected === c.id ? 'bg-emerald-600 text-white shadow' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
                   }`}
@@ -102,6 +115,13 @@ const ParentFinancePage = () => {
 
           {loadingInv ? (
             <div className="flex items-center justify-center h-40 text-gray-500">{t('pfin.loadingInvoices')}</div>
+          ) : invoiceError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-red-700">
+              <p>{invoiceError}</p>
+              <button onClick={() => loadInvoices(selected)} className="mt-2 text-sm font-semibold underline">
+                {t('common.retry')}
+              </button>
+            </div>
           ) : (
             <>
               {summary && (
@@ -162,9 +182,9 @@ const ParentFinancePage = () => {
   );
 };
 
-const SummaryCard = ({ label, value, icon: Icon, color }) => (
+const SummaryCard = ({ label, value, icon, color }) => (
   <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-    <Icon className={`w-5 h-5 ${color}`} />
+    {createElement(icon, { className: `w-5 h-5 ${color}` })}
     <p className={`text-lg font-bold mt-1 ${color}`}>{value}</p>
     <p className="text-xs uppercase text-gray-500">{label}</p>
   </div>

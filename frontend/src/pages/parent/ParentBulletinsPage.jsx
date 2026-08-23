@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
-import { FileText, Download, Eye, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { FileText, Eye, RefreshCw } from 'lucide-react';
 import { openPdfUrl } from '../../lib/download';
-import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { Card, CardContent } from '../../components/ui/Card';
+import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 import { useT } from '../../i18n';
 
 const ParentBulletinsPage = () => {
-  const { profile } = useAuth();
   const t = useT();
+  const [searchParams] = useSearchParams();
   const [children, setChildren] = useState([]);
   const [selectedChild, setSelectedChild] = useState('');
   const [bulletins, setBulletins] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const getToken = async () => {
@@ -23,45 +25,59 @@ const ParentBulletinsPage = () => {
 
   const fetchChildren = async () => {
     try {
+      setLoading(true);
+      setError('');
       const token = await getToken();
       const res = await fetch(`${apiUrl}/api/parent/children`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setChildren(data);
-        if (data.length > 0) {
-          const firstId = data[0].student?.id || data[0].id;
-          setSelectedChild(firstId);
-          fetchBulletins(firstId);
-        }
+      if (!res.ok) throw new Error(t('pbul.loadError'));
+      const data = await res.json();
+      const kids = Array.isArray(data) ? data : [];
+      setChildren(kids);
+      if (kids.length > 0) {
+        const preferred = preferredParentChild(kids, searchParams.get('childId'));
+        setSelectedChild(preferred);
+        rememberParentChild(preferred);
+        await fetchBulletins(preferred);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { setError(e.message || t('pbul.loadError')); }
     finally { setLoading(false); }
   };
 
   const fetchBulletins = async (childId) => {
     if (!childId) return;
-    setLoading(true);
     try {
       const token = await getToken();
       const res = await fetch(`${apiUrl}/api/bulletins/children/${childId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) setBulletins(await res.json());
-      else setBulletins([]);
-    } catch (e) { console.error(e); setBulletins([]); }
+      if (!res.ok) throw new Error(t('pbul.loadError'));
+      const data = await res.json();
+      setBulletins(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setBulletins([]);
+      throw e;
+    }
+  };
+
+  const handleChildChange = async (childId) => {
+    setLoading(true);
+    setError('');
+    setSelectedChild(childId);
+    rememberParentChild(childId);
+    try { await fetchBulletins(childId); }
+    catch { setError(t('pbul.loadError')); }
     finally { setLoading(false); }
   };
 
-  const handleChildChange = (childId) => {
-    setSelectedChild(childId);
-    fetchBulletins(childId);
-  };
-
   const openPdf = async (bulletinId) => {
-    const token = await getToken();
-    await openPdfUrl(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}`, `bulletin_${bulletinId}.pdf`);
+    try {
+      const token = await getToken();
+      await openPdfUrl(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}`, `bulletin_${bulletinId}.pdf`);
+    } catch {
+      alert(t('pbul.pdfError'));
+    }
   };
 
   const mentionColor = (avg) => {
@@ -94,6 +110,11 @@ const ParentBulletinsPage = () => {
 
       {loading ? (
         <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 animate-spin text-gray-400" /></div>
+      ) : error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-red-700">
+          <p>{error}</p>
+          <button onClick={fetchChildren} className="mt-2 text-sm font-semibold underline">{t('common.retry')}</button>
+        </div>
       ) : bulletins.length > 0 ? (
         <div className="space-y-4">
           {bulletins.map(b => (
@@ -142,7 +163,7 @@ const ParentBulletinsPage = () => {
                           .map(l => (
                           <tr key={l.id} className="border-t">
                             <td className="px-2 py-1">{l.subject_name}</td>
-                            <td className="px-2 py-1 text-center font-medium">{Number(l.note_20).toFixed(2)}</td>
+                            <td className="px-2 py-1 text-center font-medium">{l.note_20 == null ? '—' : Number(l.note_20).toFixed(2)}</td>
                             <td className="px-2 py-1 text-center">{l.coefficient}</td>
                             <td className="px-2 py-1 text-center">{l.rank_in_class || '—'}</td>
                             <td className="px-2 py-1 text-gray-500">{l.appreciation || l.appreciation_by_teacher || ''}</td>

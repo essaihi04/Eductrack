@@ -22,7 +22,6 @@ import {
   FileText,
   CheckSquare,
   Upload,
-  Users2,
   School,
   Shield,
   GitCompare,
@@ -48,11 +47,7 @@ import {
   Bus,
   MapPin,
   Bell,
-  Sparkles,
   Image as ImageIcon,
-  Search,
-  BarChart2,
-  AlertTriangle,
   Bot,
   Home as HomeIcon
 } from 'lucide-react';
@@ -234,20 +229,10 @@ const Sidebar = () => {
 
     if (profile?.role === 'parent') {
       return [
-        { icon: Users2, label: t('pnav.children'), path: '/parent' },
+        { icon: HomeIcon, label: t('pnav.home'), path: '/parent', childPaths: ['/parent/children'] },
         { icon: Bot, label: t('passist.title'), path: '/parent/assistant' },
-        { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
         { icon: Bell, label: t('pnav.notifications'), path: '/parent/notifications' },
-        { icon: FileText, label: t('pnav.bulletins'), path: '/parent/bulletins' },
-        { icon: Bus, label: t('pnav.transport'), path: '/parent/transport' },
-        { icon: CalendarClock, label: t('pnav.appointments'), path: '/parent/appointments' },
-        { section: t('nav.section.schoolLife'), isSection: true },
-        { icon: ImageIcon, label: t('nav.lifeBook'), path: '/school-life/cahier-de-vie' },
-        { icon: Sparkles, label: t('nav.extracurricular'), path: '/school-life/parascolaire' },
-        { icon: BarChart2, label: t('pnav.polls'), path: '/school-life/sondages' },
-        { icon: Search, label: t('nav.lostFound'), path: '/school-life/objets-perdus' },
-        { icon: AlertTriangle, label: t('nav.reports'), path: '/parent/signalements' },
-        { icon: Edit, label: t('pnav.profile'), path: '/profile' },
+        { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
       ];
     }
 
@@ -502,6 +487,9 @@ const Sidebar = () => {
             isActive = location.pathname.startsWith('/finance');
           } else if (item.domainKey) {
             isActive = domainForPath(location.pathname, profile?.role)?.domain.key === item.domainKey;
+          } else if (item.childPaths) {
+            isActive = location.pathname === item.path
+              || item.childPaths.some((path) => location.pathname.startsWith(`${path}/`));
           } else {
             isActive = location.pathname === item.path;
           }

@@ -1,14 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-defaulticon-compatibility';
 import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility.css';
-import { Bus, Home, RefreshCw, CheckCircle, AlertCircle, Clock } from 'lucide-react';
-import { transportApi, pushApi } from '../../lib/transportApi';
+import { Bus, RefreshCw } from 'lucide-react';
+import { transportApi } from '../../lib/transportApi';
 import { supabase } from '../../lib/supabase';
 import { enablePushNotifications } from '../../lib/pushClient';
 import { TILE_URL, TILE_ATTRIBUTION, TILE_SUBDOMAINS, TILE_MAX_ZOOM, busTopViewIcon, homeTopViewIcon } from '../../lib/mapAssets';
 import { useI18n } from '../../i18n';
+import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 
 const homeIcon = homeTopViewIcon(34);
 
@@ -16,6 +18,7 @@ const EVENT_TYPES = ['boarded', 'dropped', 'absent', 'no_show', 'approaching'];
 
 export default function ParentTransportPage() {
   const { t, lang } = useI18n();
+  const [searchParams] = useSearchParams();
   const timeLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const eventLabel = (e) => {
     if (!e) return '—';
@@ -24,6 +27,7 @@ export default function ParentTransportPage() {
   const [data, setData] = useState({ children: [] });
   const [loading, setLoading] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [selectedChildId, setSelectedChildId] = useState('');
   const channelRef = useRef(null);
 
   useEffect(() => {
@@ -37,7 +41,14 @@ export default function ParentTransportPage() {
   }, []);
 
   const load = async () => {
-    try { const r = await transportApi.parentLive(); setData(r); }
+    try {
+      const r = await transportApi.parentLive();
+      const next = r && Array.isArray(r.children) ? r : { children: [] };
+      const preferred = preferredParentChild(next.children, searchParams.get('childId'));
+      setData(next);
+      setSelectedChildId((current) => current && next.children.some((c) => c.student?.id === current) ? current : preferred);
+      rememberParentChild(preferred);
+    }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -49,13 +60,14 @@ export default function ParentTransportPage() {
     } catch (e) { alert(t('ptrans.error', { msg: e.message })); }
   };
 
-  // Calculer le centre de la carte
-  const points = [];
-  data.children.forEach(c => {
-    if (c.student.home_lat) points.push([c.student.home_lat, c.student.home_lng]);
-    c.buses.forEach(b => { if (b.last_position) points.push([b.last_position.lat, b.last_position.lng]); });
-  });
-  const center = points.length > 0 ? points[0] : [33.5731, -7.5898];
+  const chooseChild = (childId) => {
+    setSelectedChildId(childId);
+    rememberParentChild(childId);
+  };
+
+  const visibleChildren = selectedChildId
+    ? data.children.filter((c) => c.student?.id === selectedChildId)
+    : data.children;
 
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
@@ -74,8 +86,26 @@ export default function ParentTransportPage() {
 
       {loading ? <div className="text-center py-12 text-gray-400">{t('common.loading')}</div> : (
         <>
+          {data.children.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {data.children.map((c) => (
+                <button
+                  key={c.student.id}
+                  type="button"
+                  onClick={() => chooseChild(c.student.id)}
+                  className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium ${
+                    selectedChildId === c.student.id
+                      ? 'border-orange-600 bg-orange-600 text-white'
+                      : 'border-gray-200 bg-white text-gray-700'
+                  }`}
+                >
+                  {c.student.first_name} {c.student.last_name}
+                </button>
+              ))}
+            </div>
+          )}
           {data.children.length === 0 && <div className="text-center py-12 text-gray-400">{t('ptrans.noChild')}</div>}
-          {data.children.map(c => (
+          {visibleChildren.map(c => (
             <div key={c.student.id} className="bg-white rounded-xl shadow border overflow-hidden">
               <div className="p-4 border-b bg-gray-50 flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center text-xl">👦</div>

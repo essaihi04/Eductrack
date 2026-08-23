@@ -27,7 +27,9 @@ import {
   Menu,
   X,
   Edit,
-  CalendarClock
+  CalendarClock,
+  Bot,
+  Bell
 } from 'lucide-react';
 
 const MobileNav = () => {
@@ -76,6 +78,15 @@ const MobileNav = () => {
     if (profile?.role === 'driver') {
       return [
         { icon: LayoutDashboard, label: 'Tableau', path: '/driver/dashboard' },
+      ];
+    }
+
+    if (profile?.role === 'parent') {
+      return [
+        { icon: LayoutDashboard, label: t('pnav.home'), path: '/parent', childPaths: ['/parent/children'] },
+        { icon: Bot, label: t('passist.title'), path: '/parent/assistant' },
+        { icon: Bell, label: t('pnav.notifications'), path: '/parent/notifications' },
+        { icon: Wallet, label: t('pnav.finance'), path: '/parent/finance' },
       ];
     }
 
@@ -171,7 +182,9 @@ const MobileNav = () => {
           const Icon = item.icon;
           const isActive = item.more
             ? teacherSecondaryItems.some((secondary) => location.pathname.startsWith(secondary.path))
-            : location.pathname === item.path;
+            : item.childPaths
+              ? location.pathname === item.path || item.childPaths.some((path) => location.pathname.startsWith(`${path}/`))
+              : location.pathname === item.path;
           if (item.more) {
             return (
               <button
