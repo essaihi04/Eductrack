@@ -9,6 +9,7 @@ export default {
 
   // ── عام ───────────────────────────────────────────────────────────────
   'common.loading': 'جارٍ التحميل...',
+  'common.loadError': 'تعذر تحميل البيانات.',
   'common.cancel': 'إلغاء',
   'common.create': 'إنشاء',
   'common.save': 'حفظ',

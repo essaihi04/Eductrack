@@ -645,15 +645,6 @@ const DocumentsPage = () => {
               ? t('doc.emptyFilters')
               : t('doc.emptyFirst')}
           </p>
-          {!selectedClass && !selectedType && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 mx-auto transition-colors"
-            >
-              <Upload className="w-5 h-5" />
-              {t('doc.send')}
-            </button>
-          )}
         </div>
       ) : (
         <div className="grid gap-4">

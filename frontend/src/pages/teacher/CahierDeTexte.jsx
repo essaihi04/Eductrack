@@ -82,8 +82,13 @@ const CahierDeTexte = () => {
           ]);
           const classesData = await classesRes.json();
           const subjectsData = await subjectsRes.json();
-          const cls = (Array.isArray(classesData) ? classesData : [])
+          const allAssignedClasses = Array.isArray(classesData) ? classesData : [];
+          const classesForYear = allAssignedClasses
             .filter((item) => !item.academic_year || sameYear(item.academic_year, year));
+          // Un professeur ne peut pas changer l'année globale. Si ses classes
+          // assignées appartiennent encore à l'année précédente, elles doivent
+          // rester accessibles au lieu de rendre l'écran inutilisable.
+          const cls = classesForYear.length > 0 ? classesForYear : allAssignedClasses;
           const subs = dedupeSubjects(Array.isArray(subjectsData) ? subjectsData : []);
           setClasses(cls);
           setSelectedClasses(cls.map(c => c.id));

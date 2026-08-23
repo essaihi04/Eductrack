@@ -10,6 +10,7 @@ export default {
 
   // ── Générique ─────────────────────────────────────────────────────────
   'common.loading': 'Chargement...',
+  'common.loadError': 'Impossible de charger les données.',
   'common.cancel': 'Annuler',
   'common.create': 'Créer',
   'common.save': 'Enregistrer',

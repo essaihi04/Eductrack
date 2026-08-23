@@ -280,7 +280,7 @@ router.get('/controls-plan', authenticateUser, async (req, res) => {
       .select(`
         *,
         classes(name, level),
-        profiles(first_name, last_name)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name)
       `)
       .eq('teacher_id', teacher_id)
       .order('date', { ascending: false })
@@ -428,7 +428,7 @@ router.get('/controls-plan/class/:classId', authenticateUser, async (req, res) =
       .select(`
         *,
         classes(name),
-        profiles(first_name, last_name, email)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name, email)
       `)
       .eq('class_id', classId)
       .order('date', { ascending: true })
@@ -485,7 +485,7 @@ router.get('/controls-plan-calendar', authenticateUser, async (req, res) => {
       .select(`
         *,
         classes(name, level, school_id),
-        profiles(first_name, last_name)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name)
       `)
       .in('class_id', myClassIds)
       .order('date', { ascending: true })
@@ -562,7 +562,7 @@ router.get('/admin/controls-plan', authenticateUser, async (req, res) => {
       .select(`
         *,
         classes(name, level, school_id),
-        profiles(first_name, last_name, email)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name, email)
       `)
       .order('date', { ascending: true })
       .order('start_time', { ascending: true });

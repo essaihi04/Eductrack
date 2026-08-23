@@ -206,6 +206,7 @@ const ControlsPage = () => {
   const [classes, setClasses] = useState([]);
   const [controls, setControls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingControl, setEditingControl] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1222,6 +1223,7 @@ const ControlsPage = () => {
   };
 
   const fetchData = async () => {
+    setLoadError('');
     try {
       const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = authSession?.access_token;
@@ -1238,10 +1240,15 @@ const ControlsPage = () => {
       const classesData = await classesRes.json();
       const controlsData = await controlsRes.json();
 
+      if (!classesRes.ok || !controlsRes.ok) {
+        throw new Error(classesData?.error || controlsData?.error || t('common.loadError'));
+      }
+
       setClasses(Array.isArray(classesData) ? classesData : []);
       setControls(Array.isArray(controlsData) ? controlsData : []);
     } catch (error) {
       console.error('Erreur:', error);
+      setLoadError(error.message || t('common.loadError'));
     } finally {
       setLoading(false);
     }
@@ -1384,6 +1391,15 @@ const ControlsPage = () => {
           <span className="text-sm sm:text-base">{t('cp.newControl')}</span>
         </button>
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between">
+          <span>{loadError}</span>
+          <button type="button" onClick={fetchData} className="font-medium underline">
+            {t('common.retry')}
+          </button>
+        </div>
+      )}
 
       {/* Filtre professionnel */}
       <Card className="mb-6">

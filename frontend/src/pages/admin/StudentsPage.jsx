@@ -1968,7 +1968,7 @@ L'administration de ${schoolName}`;
                                 onToggleSelect={() => toggleStudentSelection(student.id)}
                                 onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
                                 actions={isCandidate ? [] : [
-                                  { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => openNotesWorkspace(student) },
+                                  ...(isAdmin ? [{ icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => openNotesWorkspace(student) }] : []),
                                   { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => openDossierWorkspace(student) },
                                 ]}
                               />
@@ -1997,8 +1997,8 @@ L'administration de ${schoolName}`;
                               onToggleSelect={() => toggleStudentSelection(student.id)}
                               onClick={() => isCandidate ? openReinscribe(student) : setActiveStudent(student)}
                               actions={isCandidate ? [] : [
-                                { icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => openNotesWorkspace(student) },
-                                  { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => openDossierWorkspace(student) },
+                                ...(isAdmin ? [{ icon: GraduationCap, label: "Notes de l'élève", tone: 'purple', onClick: () => openNotesWorkspace(student) }] : []),
+                                { icon: FolderOpen, label: 'Dossier complet', tone: 'blue', onClick: () => openDossierWorkspace(student) },
                               ]}
                             />
                           </div>
@@ -2064,19 +2064,21 @@ L'administration de ${schoolName}`;
               <FieldRow label="Email" value={activeStudent.email} />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className={`grid gap-2 ${isAdmin ? 'grid-cols-2' : 'grid-cols-1'}`}>
               <button
                 onClick={() => openDossierWorkspace(activeStudent)}
                 className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
               >
                 <FolderOpen className="w-4 h-4" /> Dossier complet
               </button>
-              <button
-                onClick={() => openNotesWorkspace(activeStudent)}
-                className="flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
-              >
-                <GraduationCap className="w-4 h-4" /> Notes
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => openNotesWorkspace(activeStudent)}
+                  className="flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-lg hover:from-indigo-700 hover:to-violet-700 transition-colors shadow-sm"
+                >
+                  <GraduationCap className="w-4 h-4" /> Notes
+                </button>
+              )}
             </div>
 
             {isAdmin && (

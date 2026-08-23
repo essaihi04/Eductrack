@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { Save, RefreshCw, Wand2, MessageSquare } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { useT } from '../../i18n';
+import { useYear } from '../../contexts/YearContext';
 
 const AppreciationsPage = () => {
   const t = useT();
+  const { year } = useYear();
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('');
   const [subjectName, setSubjectName] = useState('');
@@ -24,30 +26,30 @@ const AppreciationsPage = () => {
     return session?.access_token;
   };
 
-  const defaultYear = () => {
-    const now = new Date();
-    const y = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
-    return `${y}/${y + 1}`;
-  };
-
   useEffect(() => {
-    setAcademicYear(defaultYear());
+    setAcademicYear(year || '');
     fetchTeacherData();
-  }, []);
+  }, [year]);
 
   const fetchTeacherData = async () => {
     try {
       const token = await getToken();
       // Fetch teacher's classes
-      const classRes = await fetch(`${apiUrl}/api/teacher/classes`, {
+      const classRes = await fetch(`${apiUrl}/api/teacher/my-classes`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (classRes.ok) {
         const data = await classRes.json();
-        setClasses(data);
+        const rows = Array.isArray(data) ? data : [];
+        setClasses(rows);
+        const initialClass = rows.find(c => c.id === selectedClass) || rows[0];
+        if (initialClass) {
+          setSelectedClass(initialClass.id);
+          setAcademicYear(initialClass.academic_year || year || '');
+        }
       }
       // Fetch teacher's subject
-      const subjRes = await fetch(`${apiUrl}/api/teacher/subjects`, {
+      const subjRes = await fetch(`${apiUrl}/api/teacher/my-subjects`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (subjRes.ok) {
@@ -187,7 +189,12 @@ const AppreciationsPage = () => {
           <div className="flex flex-wrap gap-4 items-end">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">{t('common.class')}</label>
-              <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)}
+              <select value={selectedClass} onChange={e => {
+                const classId = e.target.value;
+                setSelectedClass(classId);
+                const selected = classes.find(c => c.id === classId);
+                if (selected?.academic_year) setAcademicYear(selected.academic_year);
+              }}
                 className="border rounded-lg px-3 py-2 text-sm min-w-[200px]">
                 <option value="">{t('appr.choose')}</option>
                 {classes.map(c => (

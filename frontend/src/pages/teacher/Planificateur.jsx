@@ -13,6 +13,7 @@ const Planificateur = () => {
   const [controls, setControls] = useState([]);
   const [calendarControls, setCalendarControls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingControl, setEditingControl] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -56,6 +57,7 @@ const Planificateur = () => {
   };
 
   const fetchData = async () => {
+    setLoadError('');
     try {
       const { data: { session: authSession } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
       const token = authSession?.access_token;
@@ -76,11 +78,18 @@ const Planificateur = () => {
       const controlsData = await controlsRes.json();
       const calendarData = await calendarRes.json();
 
+      if (!classesRes.ok || !controlsRes.ok || !calendarRes.ok) {
+        throw new Error(
+          classesData?.error || controlsData?.error || calendarData?.error || t('common.loadError')
+        );
+      }
+
       setClasses(Array.isArray(classesData) ? classesData : []);
       setControls(Array.isArray(controlsData) ? controlsData : []);
       setCalendarControls(Array.isArray(calendarData) ? calendarData : []);
     } catch (error) {
       console.error('Erreur:', error);
+      setLoadError(error.message || t('common.loadError'));
     } finally {
       setLoading(false);
     }
@@ -444,6 +453,15 @@ const Planificateur = () => {
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between">
+          <span>{loadError}</span>
+          <button type="button" onClick={fetchData} className="font-medium underline">
+            {t('common.retry')}
+          </button>
+        </div>
+      )}
 
       <CalendarView />
 

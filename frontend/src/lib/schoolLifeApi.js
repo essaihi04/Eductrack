@@ -118,7 +118,11 @@ export const fetchClasses = async (academicYear) => {
     const res = await fetch(`${API_URL}/api/teacher/my-classes`, auth);
     if (res.ok) {
       const data = await res.json();
-      return scope(Array.isArray(data) ? data : (data.classes || []));
+      const assigned = Array.isArray(data) ? data : (data.classes || []);
+      const scoped = scope(assigned);
+      // Les enseignants ne disposent pas du sélecteur d'année. Conserver leurs
+      // classes assignées en repli évite un formulaire vide à la rentrée.
+      return scoped.length > 0 ? scoped : assigned;
     }
   } catch {
     /* ignore */
