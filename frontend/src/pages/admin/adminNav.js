@@ -51,6 +51,7 @@ export const ADMIN_DOMAINS = [
           { label: 'Absences', path: '/absences', icon: UserX, roles: ALL_ADMIN },
           { label: 'Comportement', path: '/behavior', icon: BarChart3, roles: ALL_ADMIN },
           { label: 'Parents', path: '/parents', icon: Users2, roles: ALL_ADMIN },
+          { label: 'Rapports élèves', path: '/admin/student-reports', icon: Bot, roles: ALL_ADMIN },
           { label: 'Réinscription', path: '/admin/reinscription', icon: UserCheck, roles: NON_MANAGER },
         ],
       },
@@ -94,24 +95,57 @@ export const ADMIN_DOMAINS = [
     label: 'Communication',
     icon: MessageSquare,
     roles: ALL_ADMIN,
+    compactGroups: true,
     groups: [
       {
-        // Un seul espace de travail : plus de rangée « groupe » au-dessus des
-        // actions. Le parcours suit l'ordre réel écrire → suivre → automatiser.
-        key: 'communication',
-        label: 'Communication',
+        key: 'messages',
+        label: 'Messages',
+        icon: Inbox,
         items: [
-          { label: 'Écrire aux parents', path: '/communication/send', icon: Send, roles: ALL_ADMIN },
-          { label: 'Écrire aux profs', path: '/communication/teachers', icon: UserCircle, roles: ALL_ADMIN },
-          { label: 'Planifier', path: '/communication/planning', icon: Calendar, roles: ALL_ADMIN },
-          { label: 'Réception', path: '/communication/inbox', icon: Inbox, roles: ALL_ADMIN },
-          { label: 'Engagement', path: '/communication/dashboard', icon: BarChart3, roles: ALL_ADMIN },
+          { label: 'Boîte de réception', path: '/communication/inbox', icon: Inbox, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'compose',
+        label: 'Nouvel envoi',
+        icon: Send,
+        items: [
+          { label: 'Parents', path: '/communication/send', icon: Users2, roles: ALL_ADMIN },
+          { label: 'Professeurs', path: '/communication/teachers', icon: UserCircle, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'mailings',
+        label: 'Envois',
+        icon: Calendar,
+        items: [
+          { label: 'Envois planifiés et passés', path: '/communication/planning', icon: Calendar, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'appointments',
+        label: 'Rendez-vous',
+        icon: CalendarClock,
+        items: [
           { label: 'Rendez-vous', path: '/appointments', icon: CalendarClock, roles: ALL_ADMIN },
-          { label: 'Rapports IA', path: '/communication/reports', icon: Bot, roles: ALL_ADMIN },
-          { label: 'Base chatbot', path: '/communication/documents', icon: BookOpen, roles: ALL_ADMIN },
-          { label: 'Accès chatbot', path: '/communication/access', icon: Shield, roles: ALL_ADMIN },
-          { label: 'Vitrine école', path: '/communication/ecole', icon: Building2, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'tracking',
+        label: 'Suivi',
+        icon: BarChart3,
+        items: [
+          { label: 'Engagement des parents', path: '/communication/dashboard', icon: BarChart3, roles: ALL_ADMIN },
+        ],
+      },
+      {
+        key: 'settings',
+        label: 'Paramètres',
+        icon: Settings,
+        items: [
           { label: 'WhatsApp', path: '/communication/connection', icon: Smartphone, roles: ALL_ADMIN },
+          { label: 'Base de connaissances', path: '/communication/documents', icon: BookOpen, roles: ALL_ADMIN },
+          { label: 'Autorisations', path: '/communication/access', icon: Shield, roles: ALL_ADMIN },
         ],
       },
     ],
@@ -171,6 +205,13 @@ export const ADMIN_DOMAINS = [
           // Conservé, mais placé en dernier : l'entrée « Administration » ne
           // dépose plus l'utilisateur dans la partie financière par défaut.
           { label: 'Resp. financiers', path: '/admin/finance-managers', icon: UserCog, roles: FULL },
+        ],
+      },
+      {
+        key: 'etablissement',
+        label: 'Établissement',
+        items: [
+          { label: "Vitrine de l'école", path: '/admin/school-showcase', icon: Building2, roles: ALL_ADMIN },
         ],
       },
     ],

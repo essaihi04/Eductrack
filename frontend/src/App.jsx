@@ -215,9 +215,19 @@ function App() {
             <Route path="cahier-de-texte" element={<CahierDeTexte />} />
             {/* Hub Communication (admin/directeur/resp. pédago) — onglet piloté par l'URL.
                 /whatsapp reste pour les rôles finance/transport (barre d'onglets interne). */}
-            <Route path="communication" element={<WhatsAppPage />} />
+            <Route path="communication" element={<Navigate to="/communication/inbox" replace />} />
+            <Route path="communication/reports" element={<Navigate to="/admin/student-reports" replace />} />
+            <Route path="communication/ecole" element={<Navigate to="/admin/school-showcase" replace />} />
             <Route path="communication/:tab" element={<WhatsAppPage />} />
             <Route path="whatsapp" element={<WhatsAppPage />} />
+            <Route
+              path="admin/student-reports"
+              element={<WhatsAppPage pageTab="reports" pageTitle="Rapports élèves" pageSubtitle="Synthèse pédagogique et recommandations par élève" />}
+            />
+            <Route
+              path="admin/school-showcase"
+              element={<WhatsAppPage pageTab="ecole" pageTitle="Vitrine de l'école" pageSubtitle="Informations publiques et présentation de l'établissement" />}
+            />
             <Route path="finance" element={<FinanceShell />}>
               <Route index element={<FinanceDashboard />} />
               <Route path="fee-templates" element={<FeeTemplatesPage />} />

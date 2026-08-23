@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useT } from '../../i18n';
@@ -22,13 +23,27 @@ import {
   MapPin,
   UserCog,
   Wallet,
-  TrendingUp
+  TrendingUp,
+  Menu,
+  X,
+  Edit,
+  CalendarClock
 } from 'lucide-react';
 
 const MobileNav = () => {
   const location = useLocation();
   const { profile } = useAuth();
   const t = useT();
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const teacherSecondaryItems = profile?.role === 'teacher' ? [
+    { icon: ClipboardList, label: t('nav.controls'), path: '/teacher/controls' },
+    { icon: CalendarDays, label: t('nav.planner'), path: '/teacher/planificateur' },
+    { icon: FileText, label: t('nav.textbook'), path: '/teacher/cahier-de-texte' },
+    { icon: Upload, label: t('nav.teachingDocs'), path: '/teacher/documents' },
+    { icon: Edit, label: t('nav.appreciations'), path: '/teacher/appreciations' },
+    { icon: CalendarClock, label: t('nav.parentAppointments'), path: '/teacher/appointments' },
+  ] : [];
 
   const getNavItems = () => {
     if (profile?.role === 'super_admin') {
@@ -42,10 +57,10 @@ const MobileNav = () => {
     if (profile?.role === 'teacher') {
       return [
         { icon: BarChart3, label: t('mnav.dashboard'), path: '/teacher/dashboard' },
-        { icon: Users, label: t('mnav.students'), path: '/students' },
         { icon: Calendar, label: t('mnav.tracking'), path: '/teacher/rapide' },
-        { icon: ClipboardList, label: t('mnav.controls'), path: '/teacher/controls' },
-        { icon: CalendarDays, label: t('mnav.planning'), path: '/teacher/planificateur' },
+        { icon: Users, label: t('mnav.students'), path: '/students' },
+        { icon: BookOpen, label: t('nav.homework'), path: '/teacher/devoirs' },
+        { icon: Menu, label: t('mnav.more'), path: '#teacher-more', more: true },
       ];
     }
 
@@ -103,11 +118,77 @@ const MobileNav = () => {
   if (!navItems || navItems.length === 0) return null;
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-card border-t border-border">
+    <>
+      {profile?.role === 'teacher' && moreOpen && (
+        <>
+          <button
+            type="button"
+            aria-label={t('common.close')}
+            className="md:hidden fixed inset-0 z-30 bg-black/25"
+            onClick={() => setMoreOpen(false)}
+          />
+          <div className="md:hidden fixed inset-x-3 bottom-20 z-40 rounded-2xl border border-border bg-card p-3 shadow-xl">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <p className="text-sm font-semibold">{t('mnav.more')}</p>
+              <button
+                type="button"
+                aria-label={t('common.close')}
+                onClick={() => setMoreOpen(false)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {teacherSecondaryItems.map((item) => {
+                const Icon = item.icon;
+                const active = location.pathname.startsWith(item.path);
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setMoreOpen(false)}
+                    className={cn(
+                      'flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm',
+                      active
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    )}
+                  >
+                    <Icon className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-card border-t border-border">
       <div className="flex items-center justify-around h-16">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = location.pathname === item.path;
+          const isActive = item.more
+            ? teacherSecondaryItems.some((secondary) => location.pathname.startsWith(secondary.path))
+            : location.pathname === item.path;
+          if (item.more) {
+            return (
+              <button
+                key={item.path}
+                type="button"
+                onClick={() => setMoreOpen((open) => !open)}
+                className={cn(
+                  'relative flex flex-1 flex-col items-center justify-center h-full gap-1 text-xs transition-colors',
+                  isActive || moreOpen ? 'text-primary' : 'text-muted-foreground'
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="truncate max-w-[56px] text-center leading-tight">{item.label}</span>
+                {(isActive || moreOpen) && <span className="absolute bottom-0 w-8 h-0.5 bg-primary rounded-full" />}
+              </button>
+            );
+          }
           return (
             <Link
               key={item.path}
@@ -128,7 +209,8 @@ const MobileNav = () => {
           );
         })}
       </div>
-    </nav>
+      </nav>
+    </>
   );
 };
 

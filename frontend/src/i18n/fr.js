@@ -44,6 +44,10 @@ export default {
   'nav.textbook': 'Cahier de texte',
   'nav.appreciations': 'Appréciations',
   'nav.parentAppointments': 'Rendez-vous parents',
+  'nav.teacher.classroom': 'Ma classe',
+  'nav.teacher.teaching': 'Enseignement',
+  'nav.teacher.assessments': 'Évaluations',
+  'nav.teacher.parents': 'Parents',
   'nav.section.schoolLife': 'Vie scolaire',
   'nav.lifeBook': 'Cahier de vie',
   'nav.extracurricular': 'Parascolaire',
@@ -68,6 +72,7 @@ export default {
   'mnav.tracking': 'Suivi',
   'mnav.controls': 'Contrôles',
   'mnav.planning': 'Planning',
+  'mnav.more': 'Plus',
 
   // ── En-tête ───────────────────────────────────────────────────────────
   'header.menu': 'Ouvrir le menu',

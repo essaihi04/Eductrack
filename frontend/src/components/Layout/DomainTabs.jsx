@@ -21,26 +21,32 @@ export default function DomainTabs() {
   const { domain, group } = match;
   const groups = visibleGroups(domain, role);
   const hasGroups = groups.length > 1;
+  const compactGroups = Boolean(domain.compactGroups);
+  const showItemTabs = !compactGroups || group.items.length > 1;
 
   return (
     <div className="-mx-4 md:-mx-8 mb-4 md:mb-6 bg-card border-b border-border">
       <div className="px-4 md:px-6 pt-3 md:pt-4">
         {/* Niveau 1 : groupes du domaine (si plus d'un groupe) */}
         {hasGroups && (
-          <nav className="flex items-center gap-1 overflow-x-auto">
+          <nav className={compactGroups
+            ? 'grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-1'
+            : 'flex items-center gap-1 overflow-x-auto'}>
             {groups.map((g) => {
               const active = g.key === group.key;
+              const GroupIcon = g.icon;
               return (
                 <NavLink
                   key={g.key}
                   to={g.items[0].path}
                   end={g.items[0].end}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                  className={`flex items-center ${compactGroups ? 'justify-center' : ''} gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                     active
                       ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
                   }`}
                 >
+                  {GroupIcon && <GroupIcon className="w-4 h-4" />}
                   {g.label}
                 </NavLink>
               );
@@ -49,7 +55,7 @@ export default function DomainTabs() {
         )}
 
         {/* Niveau 2 : items du groupe actif */}
-        <nav className="flex items-center gap-1 mt-3 -mb-px overflow-x-auto">
+        {showItemTabs && <nav className={`flex items-center gap-1 -mb-px ${hasGroups ? 'mt-3' : ''} ${compactGroups ? 'flex-wrap' : 'overflow-x-auto'}`}>
           {group.items.map((tab) => {
             const TabIcon = tab.icon;
             return (
@@ -70,7 +76,7 @@ export default function DomainTabs() {
               </NavLink>
             );
           })}
-        </nav>
+        </nav>}
       </div>
     </div>
   );

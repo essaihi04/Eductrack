@@ -43,6 +43,10 @@ export default {
   'nav.textbook': 'دفتر النصوص',
   'nav.appreciations': 'الملاحظات التقييمية',
   'nav.parentAppointments': 'مواعيد الآباء',
+  'nav.teacher.classroom': 'قسمي',
+  'nav.teacher.teaching': 'التدريس',
+  'nav.teacher.assessments': 'التقييمات',
+  'nav.teacher.parents': 'الآباء',
   'nav.section.schoolLife': 'الحياة المدرسية',
   'nav.lifeBook': 'دفتر الحياة المدرسية',
   'nav.extracurricular': 'الأنشطة الموازية',
@@ -67,6 +71,7 @@ export default {
   'mnav.tracking': 'التتبع',
   'mnav.controls': 'الفروض',
   'mnav.planning': 'البرمجة',
+  'mnav.more': 'المزيد',
 
   // ── الترويسة ──────────────────────────────────────────────────────────
   'header.menu': 'فتح القائمة',

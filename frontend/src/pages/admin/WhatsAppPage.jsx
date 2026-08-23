@@ -23,7 +23,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 // avec la barre d'onglets interne.
 const ADMIN_HUB_ROLES = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'];
 
-const WhatsAppPage = () => {
+const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null }) => {
   const { profile } = useAuth();
   const { year } = useYear(); // année active : scope les classes/destinataires
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -31,16 +31,17 @@ const WhatsAppPage = () => {
   const navigate = useNavigate();
   const { tab: routeTab } = useParams();
   const isHub = location.pathname.startsWith('/communication');
+  const isManagedPage = isHub || Boolean(pageTab);
   const [localTab, setLocalTab] = useState('send');
-  const activeTab = isHub ? (routeTab || 'send') : localTab;
+  const activeTab = pageTab || (isHub ? (routeTab || 'inbox') : localTab);
   const setActiveTab = (key) => { if (isHub) navigate(`/communication/${key}`); else setLocalTab(key); };
 
   // Ancienne URL /whatsapp → hub pour les rôles admin (liens/favoris existants)
   useEffect(() => {
-    if (!isHub && ADMIN_HUB_ROLES.includes(profile?.role)) {
-      navigate('/communication/send', { replace: true });
+    if (!isManagedPage && ADMIN_HUB_ROLES.includes(profile?.role)) {
+      navigate('/communication/inbox', { replace: true });
     }
-  }, [isHub, profile?.role, navigate]);
+  }, [isManagedPage, profile?.role, navigate]);
 
   const getAuthToken = async () => {
     const { supabase } = await import('../../lib/supabase');
@@ -1431,36 +1432,40 @@ const WhatsAppPage = () => {
   ];
 
   return (
-    <div className={`${isHub ? 'h-[calc(100vh-8rem)]' : 'h-[calc(100vh-4rem)]'} flex flex-col overflow-hidden bg-gray-50`}>
+    <div className={`${isManagedPage ? 'h-[calc(100vh-8rem)]' : 'h-[calc(100vh-4rem)]'} flex flex-col overflow-hidden bg-gray-50`}>
       {/* ===== HEADER WITH TABS ===== */}
       <div className="bg-white border-b border-gray-200 flex-shrink-0">
         {/* Top bar */}
         <div className="px-5 py-3 flex items-center justify-between border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 bg-gradient-to-br ${isHub ? 'from-indigo-500 to-violet-600' : 'from-green-500 to-green-600'} rounded-xl flex items-center justify-center shadow-sm`}>
+            <div className={`w-9 h-9 bg-gradient-to-br ${isManagedPage ? 'from-indigo-500 to-violet-600' : 'from-green-500 to-green-600'} rounded-xl flex items-center justify-center shadow-sm`}>
               <MessageSquare className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-gray-900">{isHub ? 'Communication' : 'WhatsApp'}</h1>
-              <p className="text-xs text-gray-500">{isHub ? 'App (push) + WhatsApp — envoi, suivi de lecture et réponses' : 'Messagerie instantanée'}</p>
+              <h1 className="text-lg font-bold text-gray-900">{pageTitle || (isHub ? 'Communication' : 'WhatsApp')}</h1>
+              <p className="text-xs text-gray-500">{pageSubtitle || (isHub ? 'App (push) + WhatsApp — envoi, suivi de lecture et réponses' : 'Messagerie instantanée')}</p>
             </div>
           </div>
-          {sessionStatus && (
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border shadow-sm ${
+          {sessionStatus && !pageTab && (
+            <button
+              type="button"
+              onClick={() => isHub && navigate('/communication/connection')}
+              aria-label={`${sessionStatus.connected ? 'WhatsApp connecté' : 'WhatsApp déconnecté'}${isHub ? ' — ouvrir les paramètres' : ''}`}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border shadow-sm ${isHub ? 'cursor-pointer hover:shadow' : 'cursor-default'} ${
               sessionStatus.connected
                 ? 'bg-green-50 text-green-700 border-green-200'
                 : 'bg-red-50 text-red-600 border-red-200'
             }`}>
               <div className={`w-2 h-2 rounded-full ${sessionStatus.connected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`}></div>
               {sessionStatus.connected ? 'WhatsApp connecté' : 'WhatsApp déconnecté'}
-            </div>
+            </button>
           )}
         </div>
 
         {/* Horizontal tabs — sur le hub /communication, la navigation passe par
             les onglets du domaine (DomainTabs) ; la barre interne reste pour
             les rôles finance/transport sur /whatsapp. */}
-        {!isHub && (
+        {!isManagedPage && (
         <div className="px-4 flex gap-1 overflow-x-auto">
           {tabs.map(tab => {
             const Icon = tab.icon;

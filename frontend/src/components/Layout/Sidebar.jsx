@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import {
   Camera,
   Trash2,
@@ -131,6 +131,65 @@ const Sidebar = () => {
     finally { setLogoBusy(''); }
   };
 
+  // Navigation professeur : cinq rubriques stables, avec uniquement les
+  // outils du groupe actif affichés. Les écrans de vie scolaire réservés à
+  // l'administration ne surchargent plus le travail quotidien du professeur.
+  const teacherGroups = [
+    {
+      key: 'dashboard',
+      label: t('nav.dashboard'),
+      icon: BarChart3,
+      path: '/teacher/dashboard',
+      matches: ['/teacher/dashboard'],
+    },
+    {
+      key: 'classroom',
+      label: t('nav.teacher.classroom'),
+      icon: Users,
+      matches: ['/teacher/rapide', '/students', '/teacher/session/', '/teacher/student/'],
+      items: [
+        { icon: Calendar, label: t('nav.quickTracking'), path: '/teacher/rapide' },
+        { icon: Users, label: t('nav.students'), path: '/students' },
+      ],
+    },
+    {
+      key: 'teaching',
+      label: t('nav.teacher.teaching'),
+      icon: BookOpen,
+      matches: ['/teacher/devoirs', '/teacher/cahier-de-texte', '/teacher/documents'],
+      items: [
+        { icon: FileText, label: t('nav.homework'), path: '/teacher/devoirs' },
+        { icon: FileText, label: t('nav.textbook'), path: '/teacher/cahier-de-texte' },
+        { icon: Upload, label: t('nav.teachingDocs'), path: '/teacher/documents' },
+      ],
+    },
+    {
+      key: 'assessments',
+      label: t('nav.teacher.assessments'),
+      icon: ClipboardList,
+      matches: [
+        '/teacher/controls', '/teacher/planificateur', '/teacher/appreciations',
+        '/teacher/control/', '/teacher/assessments/', '/teacher/calendar/',
+        '/teacher/calendrier-classe',
+      ],
+      items: [
+        { icon: ClipboardList, label: t('nav.controls'), path: '/teacher/controls' },
+        { icon: CheckSquare, label: t('nav.planner'), path: '/teacher/planificateur' },
+        { icon: Edit, label: t('nav.appreciations'), path: '/teacher/appreciations' },
+      ],
+    },
+    {
+      key: 'parents',
+      label: t('nav.teacher.parents'),
+      icon: CalendarClock,
+      matches: ['/teacher/appointments', '/school-life/cahier-de-vie'],
+      items: [
+        { icon: CalendarClock, label: t('nav.parentAppointments'), path: '/teacher/appointments' },
+        { icon: ImageIcon, label: t('nav.lifeBook'), path: '/school-life/cahier-de-vie' },
+      ],
+    },
+  ];
+
   const getMenuItems = () => {
     if (profile?.role === 'super_admin') {
       return [
@@ -141,23 +200,7 @@ const Sidebar = () => {
     }
 
     if (profile?.role === 'teacher') {
-      return [
-        { icon: BarChart3, label: t('nav.dashboard'), path: '/teacher/dashboard' },
-        { icon: Users, label: t('nav.students'), path: '/students' },
-        { icon: Calendar, label: t('nav.quickTracking'), path: '/teacher/rapide' },
-        { icon: CheckSquare, label: t('nav.planner'), path: '/teacher/planificateur' },
-        { icon: ClipboardList, label: t('nav.controls'), path: '/teacher/controls' },
-        { icon: Upload, label: t('nav.teachingDocs'), path: '/teacher/documents' },
-        { icon: FileText, label: t('nav.homework'), path: '/teacher/devoirs' },
-        { icon: FileText, label: t('nav.textbook'), path: '/teacher/cahier-de-texte' },
-        { icon: Edit, label: t('nav.appreciations'), path: '/teacher/appreciations' },
-        { icon: CalendarClock, label: t('nav.parentAppointments'), path: '/teacher/appointments' },
-        { section: t('nav.section.schoolLife'), isSection: true },
-        { icon: ImageIcon, label: t('nav.lifeBook'), path: '/school-life/cahier-de-vie' },
-        { icon: Sparkles, label: t('nav.extracurricular'), path: '/school-life/parascolaire' },
-        { icon: Search, label: t('nav.lostFound'), path: '/school-life/objets-perdus' },
-        { icon: AlertTriangle, label: t('nav.reports'), path: '/school-life/signalements' },
-      ];
+      return [{ teacherNav: true }];
     }
 
     const commonItems = [
@@ -241,6 +284,57 @@ const Sidebar = () => {
   const leafActive = (leaf) =>
     leaf.end ? location.pathname === leaf.path : location.pathname.startsWith(leaf.path);
 
+  const renderTeacherNav = () => (
+    <div className="space-y-1">
+      {teacherGroups.map((group) => {
+        const GroupIcon = group.icon;
+        const active = group.matches.some((prefix) => location.pathname.startsWith(prefix));
+        const entryPath = group.path || group.items[0].path;
+        return (
+          <div key={group.key}>
+            <Link
+              to={entryPath}
+              className={cn(
+                'flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors text-sm',
+                active
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              )}
+            >
+              <GroupIcon className="w-5 h-5 flex-shrink-0" />
+              <span className="font-medium truncate">{group.label}</span>
+            </Link>
+
+            {active && group.items && (
+              <div className="ml-4 mt-1 space-y-0.5 border-l border-border pl-2">
+                {group.items.map((item) => {
+                  const ItemIcon = item.icon;
+                  const itemActive = location.pathname === item.path
+                    || location.pathname.startsWith(`${item.path}/`);
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-[13px]',
+                        itemActive
+                          ? 'bg-accent text-accent-foreground font-medium'
+                          : 'text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground'
+                      )}
+                    >
+                      <ItemIcon className="w-4 h-4 flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   // Arborescence finance en accordéon (compte financier) : les pôles sont
   // toujours visibles ; le pôle actif déplie ses onglets, et l'onglet actif ses
   // sous-onglets. Remplace le bandeau d'onglets du haut de l'ancien FinanceShell.
@@ -323,7 +417,7 @@ const Sidebar = () => {
   };
 
   return (
-    <motion.aside
+    <Motion.aside
       initial={{ x: dir === 'rtl' ? 300 : -300 }}
       animate={{ x: 0 }}
       className={cn(
@@ -399,6 +493,9 @@ const Sidebar = () => {
           }
           if (item.financeNav) {
             return <div key="finance-nav">{renderFinanceNav()}</div>;
+          }
+          if (item.teacherNav) {
+            return <div key="teacher-nav">{renderTeacherNav()}</div>;
           }
           const Icon = item.icon;
           let isActive;
@@ -542,7 +639,7 @@ const Sidebar = () => {
         </div>,
         document.body,
       )}
-    </motion.aside>
+    </Motion.aside>
   );
 };
 
