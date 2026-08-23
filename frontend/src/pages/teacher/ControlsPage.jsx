@@ -4,10 +4,12 @@ import { saveBlob } from '../../lib/download';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useI18n } from '../../i18n';
+import { useAuth } from '../../contexts/AuthContext';
 
 const ControlsPage = () => {
   const navigate = useNavigate();
   const { t, lang } = useI18n();
+  const { profile } = useAuth();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   // La dispersion est stockee en francais (valeur metier) : on ne traduit que l'affichage.
   const dispersionLabel = (d) => (
@@ -17,6 +19,7 @@ const ControlsPage = () => {
   // Composant pour afficher une carte de contrôle avec statistiques (optimisé avec cache)
   const ControlCard = ({ control }) => {
     const stats = controlsStatsCache[control.id];
+    const isOwner = control.is_owner ?? control.teacher_id === profile?.id;
 
     return (
       <div className="p-3 sm:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
@@ -46,12 +49,21 @@ const ControlsPage = () => {
                 <FileText className="w-3 h-3 sm:w-4 sm:h-4" />
                 <span className="truncate">{control.class_name}</span>
               </div>
+              {control.subject_name && (
+                <span>{t('cp.subjectLabel', { name: control.subject_name })}</span>
+              )}
+              {control.teacher_name && (
+                <span>{t('cp.teacherLabel', { name: control.teacher_name })}</span>
+              )}
             </div>
+            {!isOwner && (
+              <p className="mb-2 text-xs font-medium text-indigo-600">{t('cp.sharedControl')}</p>
+            )}
             {control.description && (
               <p className="text-xs sm:text-sm text-gray-700 line-clamp-2">{control.description}</p>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          {isOwner && <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
             {control.status === 'planned' && (
               <button
                 onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
@@ -85,11 +97,11 @@ const ControlsPage = () => {
             >
               <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-600" />
             </button>
-          </div>
+          </div>}
         </div>
 
         {/* Statistiques détaillées pour les contrôles terminés */}
-        {control.status === 'completed' && (
+        {isOwner && control.status === 'completed' && (
           <div className="border-t pt-4">
             {statsLoading && !stats ? (
               <div className="text-center text-gray-500 py-2">

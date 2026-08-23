@@ -28,6 +28,42 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
   }
 });
 
+const enrichControls = async (controls, currentUserId = null) => {
+  const list = Array.isArray(controls) ? controls : [];
+  const missingSubjectTeacherIds = [...new Set(
+    list.filter(control => !control.subjects?.name).map(control => control.teacher_id).filter(Boolean)
+  )];
+  const fallbackSubjectByTeacher = new Map();
+
+  if (missingSubjectTeacherIds.length > 0) {
+    const { data: teacherSubjects, error } = await supabase
+      .from('teacher_subjects')
+      .select('teacher_id, subjects(name)')
+      .in('teacher_id', missingSubjectTeacherIds)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Erreur lors de la récupération des matières des contrôles:', error);
+    } else {
+      for (const row of teacherSubjects || []) {
+        if (!fallbackSubjectByTeacher.has(row.teacher_id) && row.subjects?.name) {
+          fallbackSubjectByTeacher.set(row.teacher_id, row.subjects.name);
+        }
+      }
+    }
+  }
+
+  return list.map(control => ({
+    ...control,
+    class_name: control.classes?.name || '',
+    subject_name: control.subjects?.name || fallbackSubjectByTeacher.get(control.teacher_id) || 'Non spécifié',
+    teacher_name: control.profiles
+      ? `${control.profiles.first_name || ''} ${control.profiles.last_name || ''}`.trim()
+      : '',
+    is_owner: currentUserId ? control.teacher_id === currentUserId : undefined
+  }));
+};
+
 // Middleware pour vérifier l'authentification
 const authenticateUser = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -269,31 +305,44 @@ router.post('/controls-plan', authenticateUser, async (req, res) => {
   }
 });
 
-// Récupérer tous les contrôles planifiés du professeur
+// Récupérer tous les contrôles des classes assignées au professeur. Un même
+// calendrier de classe est ainsi partagé entre toutes les matières et tous les
+// professeurs qui interviennent dans cette classe.
 router.get('/controls-plan', authenticateUser, async (req, res) => {
   try {
     const teacher_id = req.user.id;
-    console.log('[DEBUG] Récupération des contrôles planifiés pour teacher_id:', teacher_id);
+
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('class_teachers')
+      .select('class_id')
+      .eq('teacher_id', teacher_id);
+
+    if (assignmentsError) {
+      console.error('Erreur lors de la récupération des classes du professeur:', assignmentsError);
+      return res.status(500).json({ error: 'Erreur serveur', details: assignmentsError });
+    }
+
+    const classIds = [...new Set((assignments || []).map(row => row.class_id).filter(Boolean))];
+    if (classIds.length === 0) return res.json([]);
 
     const { data, error } = await supabase
       .from('controls_plan')
       .select(`
         *,
         classes(name, level),
-        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name),
+        subjects(name)
       `)
-      .eq('teacher_id', teacher_id)
+      .in('class_id', classIds)
       .order('date', { ascending: false })
       .order('start_time', { ascending: true });
 
-    console.log('[DEBUG] Résultat Supabase:', { data, error });
-
     if (error) {
-      console.error('[DEBUG] Erreur lors de la récupération des contrôles planifiés:', error);
+      console.error('Erreur lors de la récupération des contrôles planifiés:', error);
       return res.status(500).json({ error: 'Erreur serveur', details: error });
     }
 
-    res.json(data || []);
+    res.json(await enrichControls(data, teacher_id));
   } catch (error) {
     console.error('[DEBUG] Exception lors de la récupération des contrôles planifiés:', error);
     res.status(500).json({ error: 'Erreur serveur', details: error.message });
@@ -428,7 +477,8 @@ router.get('/controls-plan/class/:classId', authenticateUser, async (req, res) =
       .select(`
         *,
         classes(name),
-        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name, email)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name, email),
+        subjects(name)
       `)
       .eq('class_id', classId)
       .order('date', { ascending: true })
@@ -439,7 +489,7 @@ router.get('/controls-plan/class/:classId', authenticateUser, async (req, res) =
       return res.status(500).json({ error: 'Erreur serveur' });
     }
 
-    res.json(data || []);
+    res.json(await enrichControls(data, userId));
   } catch (error) {
     console.error('Erreur lors de la récupération des contrôles de la classe:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -485,7 +535,8 @@ router.get('/controls-plan-calendar', authenticateUser, async (req, res) => {
       .select(`
         *,
         classes(name, level, school_id),
-        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name),
+        subjects(name)
       `)
       .in('class_id', myClassIds)
       .order('date', { ascending: true })
@@ -504,39 +555,7 @@ router.get('/controls-plan-calendar', authenticateUser, async (req, res) => {
       ? (controls || []).filter(c => c.classes?.school_id === schoolId)
       : (controls || []);
 
-    // 5. Récupérer les matières pour chaque professeur
-    const controlsWithSubjects = await Promise.all(
-      filteredControls.map(async (control) => {
-        try {
-          const { data: subjectData, error: subjectError } = await supabase
-            .from('teacher_subjects')
-            .select('subjects(name)')
-            .eq('teacher_id', control.teacher_id)
-            .limit(1)
-            .single();
-
-          if (subjectError || !subjectData) {
-            return {
-              ...control,
-              subject_name: 'Non spécifié'
-            };
-          }
-
-          return {
-            ...control,
-            subject_name: subjectData.subjects?.name || 'Non spécifié'
-          };
-        } catch (error) {
-          console.error('Erreur lors de la récupération de la matière:', error);
-          return {
-            ...control,
-            subject_name: 'Non spécifié'
-          };
-        }
-      })
-    );
-
-    res.json(controlsWithSubjects || []);
+    res.json(await enrichControls(filteredControls, userId));
   } catch (error) {
     console.error('Erreur lors de la récupération des contrôles planifiés:', error);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -562,7 +581,8 @@ router.get('/admin/controls-plan', authenticateUser, async (req, res) => {
       .select(`
         *,
         classes(name, level, school_id),
-        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name, email)
+        profiles:profiles!controls_plan_teacher_id_fkey(first_name, last_name, email),
+        subjects(name)
       `)
       .order('date', { ascending: true })
       .order('start_time', { ascending: true });
@@ -578,7 +598,7 @@ router.get('/admin/controls-plan', authenticateUser, async (req, res) => {
       data = data.filter(c => c.classes?.school_id === userData.school_id);
     }
 
-    res.json(data);
+    res.json(await enrichControls(data));
   } catch (error) {
     console.error('Erreur lors de la récupération des contrôles planifiés:', error);
     res.status(500).json({ error: 'Erreur serveur' });

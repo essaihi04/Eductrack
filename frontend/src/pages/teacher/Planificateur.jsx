@@ -3,10 +3,12 @@ import { Calendar as CalendarIcon, Clock, FileText, Plus, Edit2, Trash2, Save, X
 import { useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useI18n } from '../../i18n';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Planificateur = () => {
   const navigate = useNavigate();
   const { t, lang } = useI18n();
+  const { profile } = useAuth();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
 
   const [classes, setClasses] = useState([]);
@@ -232,13 +234,33 @@ const Planificateur = () => {
       setShowModal(true);
     };
 
-    const getSubjectColor = (subjectName) => {
-      const colors = [
-        'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-red-500',
-        'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-orange-500'
-      ];
-      const hash = subjectName ? subjectName.split('').reduce((a, b) => a + b.charCodeAt(0), 0) : 0;
-      return colors[hash % colors.length];
+    const classColors = [
+      { event: 'bg-blue-100 text-blue-800 border-blue-200', dot: 'bg-blue-500' },
+      { event: 'bg-green-100 text-green-800 border-green-200', dot: 'bg-green-500' },
+      { event: 'bg-amber-100 text-amber-800 border-amber-200', dot: 'bg-amber-500' },
+      { event: 'bg-red-100 text-red-800 border-red-200', dot: 'bg-red-500' },
+      { event: 'bg-purple-100 text-purple-800 border-purple-200', dot: 'bg-purple-500' },
+      { event: 'bg-pink-100 text-pink-800 border-pink-200', dot: 'bg-pink-500' },
+      { event: 'bg-indigo-100 text-indigo-800 border-indigo-200', dot: 'bg-indigo-500' },
+      { event: 'bg-orange-100 text-orange-800 border-orange-200', dot: 'bg-orange-500' }
+    ];
+
+    const classLegend = Array.from(new Map(
+      calendarControls
+        .filter(control => control.class_id)
+        .map(control => [control.class_id, control])
+    ).values()).sort((a, b) => (a.class_name || '').localeCompare(b.class_name || '', dateLocale));
+    const classColorIndex = new Map(
+      classLegend.map((control, index) => [control.class_id, index % classColors.length])
+    );
+
+    const getClassColor = (control) => {
+      const key = control.class_id || control.class_name || '';
+      if (control.class_id && classColorIndex.has(control.class_id)) {
+        return classColors[classColorIndex.get(control.class_id)];
+      }
+      const hash = key.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+      return classColors[hash % classColors.length];
     };
 
     const days = getDaysInMonth(currentDate);
@@ -270,6 +292,19 @@ const Planificateur = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-2 sm:p-6">
+            {classLegend.length > 0 && (
+              <div className="mb-3 rounded-lg bg-gray-50 p-2 sm:p-3">
+                <p className="mb-2 text-xs font-medium text-gray-600">{t('planif.classLegend')}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  {classLegend.map(control => (
+                    <span key={control.class_id} className="flex items-center gap-1.5 text-xs text-gray-700">
+                      <span className={`h-2.5 w-2.5 rounded-full ${getClassColor(control).dot}`} />
+                      {control.class_name || control.classes?.name || t('planif.unspecified')}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-7 gap-1 sm:gap-2">
               {[0, 1, 2, 3, 4, 5, 6].map((d) => t(`cal.weekday.${d}`)).map(day => (
                 <div key={day} className="text-center text-[10px] sm:text-sm font-medium text-gray-600 p-1 sm:p-2">
@@ -302,18 +337,16 @@ const Planificateur = () => {
                         {controls.length > 0 && (
                           <div className="space-y-0.5 sm:space-y-1">
                             {controls.slice(0, 2).map((control, idx) => {
-                              const subjectName = control.subject_name || t('planif.unspecified');
-                              const colorClass = getSubjectColor(subjectName);
-                              const bgColorClass = colorClass.replace('bg-', 'bg-opacity-20 bg-');
-                              const textColorClass = colorClass.replace('bg-', 'text-');
+                              const className = control.class_name || control.classes?.name || t('planif.unspecified');
+                              const color = getClassColor(control);
                               
                               return (
                                 <div
                                   key={idx}
-                                  className={`text-[8px] sm:text-xs p-0.5 sm:p-1 rounded ${bgColorClass} ${textColorClass} truncate`}
-                                  title={control.name}
+                                  className={`truncate rounded border p-0.5 text-[8px] sm:p-1 sm:text-xs ${color.event}`}
+                                  title={`${className} · ${control.name}`}
                                 >
-                                  {control.name}
+                                  <span className="font-semibold">{className}</span> · {control.name}
                                 </div>
                               );
                             })}
@@ -377,6 +410,12 @@ const Planificateur = () => {
                                 <span className="truncate">{control.subject_name}</span>
                               </div>
                             )}
+                            {control.teacher_name && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{t('planif.teacherLabel')}</span>
+                                <span className="truncate">{control.teacher_name}</span>
+                              </div>
+                            )}
                             {control.description && (
                               <p className="text-gray-700 mt-2 line-clamp-2">{control.description}</p>
                             )}
@@ -386,7 +425,7 @@ const Planificateur = () => {
                           <span className={`px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${getStatusColor(control.status)}`}>
                             {getStatusLabel(control.status)}
                           </span>
-                          {control.status === 'planned' && (
+                          {control.status === 'planned' && control.teacher_id === profile?.id && (
                             <button
                               onClick={() => navigate(`/teacher/rapide?controlId=${control.id}&classId=${control.class_id}&date=${control.date}&name=${encodeURIComponent(control.name)}&description=${encodeURIComponent(control.description || '')}&startTime=${control.start_time || ''}&endTime=${control.end_time || ''}`)}
                               className="px-3 py-1.5 bg-green-600 text-white rounded text-xs sm:text-sm font-medium hover:bg-green-700 transition-colors flex-shrink-0"
