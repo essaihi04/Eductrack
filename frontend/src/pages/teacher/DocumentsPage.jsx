@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Upload, FileText, BookOpen, Edit3, Home, RotateCcw, Star, Trash2, Download, Eye, Users, Calendar, Clock } from 'lucide-react';
 import { saveBlob } from '../../lib/download';
 import { useI18n } from '../../i18n';
+import TaskModal from '../../components/ui/TaskModal';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -464,53 +465,81 @@ const DocumentsPage = () => {
         </div>
       </div>
 
-      {/* Formulaire d'upload */}
-      {showForm && (
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6 border-2 border-blue-200">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-bold text-gray-800">{t('doc.formTitle')}</h2>
+      <TaskModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        onSubmit={handleSubmit}
+        busy={uploading}
+        title={t('doc.formTitle')}
+        subtitle={t('doc.formCompactHint')}
+        closeLabel={t('common.close')}
+        maxWidth="max-w-4xl"
+        footer={(
+          <>
             <button
+              type="button"
               onClick={() => setShowForm(false)}
-              className="text-gray-500 hover:text-gray-700"
+              disabled={uploading}
+              className="flex-1 rounded-lg border border-gray-300 px-5 py-2.5 font-medium text-gray-700 hover:bg-white disabled:opacity-50 sm:flex-none"
             >
-              ✕
+              {t('common.cancel')}
             </button>
-          </div>
-          
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Classe (obligatoire) */}
+            <button
+              type="submit"
+              disabled={uploading}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:flex-none"
+            >
+              {uploading ? (
+                <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />{t('doc.sending')}</>
+              ) : (
+                <><Upload className="h-4 w-4" />{t('doc.sendFile')}</>
+              )}
+            </button>
+          </>
+        )}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {t('doc.targetClasses')} <span className="text-red-500">*</span>
-              </label>
-              <div className="border border-gray-300 rounded-lg p-3 max-h-52 overflow-y-auto space-y-2">
-                {classes.map((cls) => (
-                  <label key={cls.id} className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={formData.classIds.includes(cls.id)}
-                      onChange={() => toggleClassSelection(cls.id)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>{cls.name}</span>
-                  </label>
-                ))}
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <label className="text-sm font-medium text-gray-700">
+                  {t('doc.targetClasses')} <span className="text-red-500">*</span>
+                </label>
+                <span className="text-xs font-medium text-blue-600">
+                  {t('doc.selectedClasses', { n: formData.classIds.length })}
+                </span>
               </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {t('doc.selectedClasses', { n: formData.classIds.length })}
-              </p>
+              <div className="flex min-h-11 flex-wrap gap-2 rounded-lg border border-gray-300 p-2">
+                {classes.map((cls) => {
+                  const selected = formData.classIds.includes(cls.id);
+                  return (
+                    <button
+                      key={cls.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => toggleClassSelection(cls.id)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        selected
+                          ? 'border-blue-600 bg-blue-600 text-white'
+                          : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-blue-300'
+                      }`}
+                    >
+                      {cls.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Type de contenu (obligatoire) */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
                 {t('doc.contentType')} <span className="text-red-500">*</span>
               </label>
               <select
                 value={formData.documentType}
                 onChange={(e) => setFormData({ ...formData, documentType: e.target.value })}
                 required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">{t('doc.pickType')}</option>
                 {DOCUMENT_TYPES.map((type) => (
@@ -519,11 +548,13 @@ const DocumentsPage = () => {
               </select>
             </div>
 
-            {/* Titre (obligatoire) */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {t('doc.fieldTitle')} <span className="text-red-500">*</span>
-              </label>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <label className="text-sm font-medium text-gray-700">
+                  {t('doc.fieldTitle')} <span className="text-red-500">*</span>
+                </label>
+                <span className="text-xs text-gray-500">{t('doc.titleCount', { n: formData.title.length })}</span>
+              </div>
               <input
                 type="text"
                 value={formData.title}
@@ -531,63 +562,17 @@ const DocumentsPage = () => {
                 placeholder={t('doc.titlePlaceholder')}
                 maxLength={60}
                 required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <p className="text-xs text-gray-500 mt-1">{t('doc.titleCount', { n: formData.title.length })}</p>
-            </div>
-
-            {/* Fichier (obligatoire) */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {t('doc.file')} <span className="text-red-500">*</span>
-              </label>
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
-                <input
-                  type="file"
-                  onChange={handleFileChange}
-                  accept=".pdf,.jpg,.jpeg,.png,.gif,.doc,.docx,.ppt,.pptx"
-                  className="hidden"
-                  id="file-upload"
-                />
-                <label
-                  htmlFor="file-upload"
-                  className="cursor-pointer flex flex-col items-center"
-                >
-                  <Upload className="w-12 h-12 text-gray-400 mb-2" />
-                  <p className="text-sm text-gray-600">
-                    {formData.file ? formData.file.name : t('doc.pickFile')}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {t('doc.fileHint')}
-                  </p>
-                </label>
-              </div>
-            </div>
-
-            {/* Description (optionnel) */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                {t('doc.description')}
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder={t('doc.descriptionPlaceholder')}
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
-            {/* Lier à un contrôle (optionnel) */}
             {formData.classIds.length === 1 && controls.length > 0 && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {t('doc.linkControl')}
-                </label>
+                <label className="mb-1 block text-sm font-medium text-gray-700">{t('doc.linkControl')}</label>
                 <select
                   value={formData.controlId}
                   onChange={(e) => setFormData({ ...formData, controlId: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">{t('doc.noControl')}</option>
                   {controls.map((ctrl) => (
@@ -598,37 +583,45 @@ const DocumentsPage = () => {
                 </select>
               </div>
             )}
+          </div>
 
-            {/* Boutons */}
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={uploading}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                {t('doc.file')} <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="file"
+                onChange={handleFileChange}
+                accept=".pdf,.jpg,.jpeg,.png,.gif,.doc,.docx,.ppt,.pptx"
+                className="hidden"
+                id="file-upload"
+              />
+              <label
+                htmlFor="file-upload"
+                className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-center transition-colors hover:border-blue-500 hover:bg-blue-50"
               >
-                {uploading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    {t('doc.sending')}
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-5 h-5" />
-                    {t('doc.sendFile')}
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-              >
-                {t('common.cancel')}
-              </button>
+                <Upload className="mb-1 h-7 w-7 text-blue-500" />
+                <p className="max-w-full truncate text-sm font-medium text-gray-700">
+                  {formData.file ? formData.file.name : t('doc.pickFile')}
+                </p>
+                <p className="mt-0.5 text-xs text-gray-500">{t('doc.fileHint')}</p>
+              </label>
             </div>
-          </form>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">{t('doc.description')}</label>
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder={t('doc.descriptionPlaceholder')}
+                rows={3}
+                className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
         </div>
-      )}
+      </TaskModal>
 
       {/* Liste des documents */}
       {loading ? (

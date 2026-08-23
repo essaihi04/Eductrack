@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useI18n } from '../../i18n';
 import { useAuth } from '../../contexts/AuthContext';
+import TaskModal from '../../components/ui/TaskModal';
 
 const ControlsPage = () => {
   const navigate = useNavigate();
@@ -2213,137 +2214,109 @@ const ControlsPage = () => {
         </div>
       )}
 
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">
-                {editingControl ? t('cp.editControl') : t('cp.newControl')}
-              </h2>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="p-2 hover:bg-gray-100 rounded"
-              >
-                <X className="w-5 h-5" />
+      <TaskModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSubmit={handleSubmit}
+        busy={saving}
+        title={editingControl ? t('cp.editControl') : t('cp.newControl')}
+        subtitle={t('cp.compactFormHint')}
+        closeLabel={t('common.close')}
+        maxWidth="max-w-3xl"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(false)}
+              disabled={saving}
+              className="flex-1 rounded-lg border border-gray-300 px-5 py-2.5 font-medium text-gray-700 hover:bg-white disabled:opacity-50 sm:flex-none"
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:flex-none"
+            >
+              {saving ? t('common.saving') : (editingControl ? t('common.modify') : t('common.create'))}
+            </button>
+          </>
+        )}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">{t('cp.classRequired')}</label>
+            <select
+              value={formData.class_id}
+              onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              required
+            >
+              <option value="">{t('cp.pickClass')}</option>
+              {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">{t('cp.nameRequired')}</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">{t('cp.dateRequired')}</label>
+            <input
+              type="date"
+              value={formData.date}
+              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">{t('home.startTime')}</label>
+              <input type="time" value={formData.start_time} onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">{t('home.endTime')}</label>
+              <input type="time" value={formData.end_time} onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">{t('cp.description')}</label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              rows={3}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">{t('cp.type')}</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setFormData({ ...formData, kind: 'control' })}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${formData.kind !== 'activity' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>
+                {t('cp.control')}
+              </button>
+              <button type="button" onClick={() => setFormData({ ...formData, kind: 'activity' })}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${formData.kind === 'activity' ? 'border-purple-600 bg-purple-600 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}>
+                {t('cp.activityIntegrated')}
               </button>
             </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {t('cp.classRequired')}
-                </label>
-                <select
-                  value={formData.class_id}
-                  onChange={(e) => setFormData({ ...formData, class_id: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                >
-                  <option value="">{t('cp.pickClass')}</option>
-                  {classes.map(cls => (
-                    <option key={cls.id} value={cls.id}>{cls.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {t('cp.nameRequired')}
-                </label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {t('cp.dateRequired')}
-                </label>
-                <input
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {t('home.startTime')}
-                  </label>
-                  <input
-                    type="time"
-                    value={formData.start_time}
-                    onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    {t('home.endTime')}
-                  </label>
-                  <input
-                    type="time"
-                    value={formData.end_time}
-                    onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {t('cp.description')}
-                </label>
-                <textarea
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  rows={3}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t('cp.type')}</label>
-                <div className="flex gap-3">
-                  <button type="button" onClick={() => setFormData({ ...formData, kind: 'control' })}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                      formData.kind !== 'activity' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}>{t('cp.control')}</button>
-                  <button type="button" onClick={() => setFormData({ ...formData, kind: 'activity' })}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                      formData.kind === 'activity' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}>{t('cp.activityIntegrated')}</button>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                >
-                  {saving ? t('common.saving') : (editingControl ? t('common.modify') : t('common.create'))}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
-      )}
+      </TaskModal>
 
       {/* Modal des détails du contrôle */}
       {showDetailsModal && detailsData && (

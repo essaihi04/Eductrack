@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Plus, BookOpen, Calendar, Users, Trash2, Edit2, X, Check, PieChart, Target, TrendingUp, Clock, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, BookOpen, Calendar, Users, Trash2, Edit2, X, PieChart, Target, TrendingUp, Clock, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useI18n } from '../../i18n';
 import { supabase } from '../../lib/supabase';
 import { useSearchParams } from 'react-router-dom';
+import TaskModal from '../../components/ui/TaskModal';
 
 const Devoirs = () => {
   const { t, lang } = useI18n();
@@ -104,7 +105,11 @@ const Devoirs = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => ({
+      ...prev,
+      [name]: value,
+      ...(name === 'classId' ? { studentIds: [] } : {}),
+    }));
   };
 
   const toggleStudentSelection = (studentId) => {
@@ -457,207 +462,137 @@ const Devoirs = () => {
         </>
       )}
 
-      {/* Formulaire (modal) */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl">
-            <Card className="shadow-xl">
-              <CardHeader className="flex flex-row items-start justify-between">
-                <div>
-                  <CardTitle>{editingHomework ? t('hw.editTitle') : t('hw.newTitle')}</CardTitle>
-                  <CardDescription>{t('hw.formSubtitle')}</CardDescription>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => !submitting && setShowForm(false)}
-                  disabled={submitting}
-                  className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {t('hw.close')}
-                </button>
-              </CardHeader>
-              {submitting && (
-                <div className="px-6 -mt-2 pb-2">
-                  <div className="flex items-center gap-2 text-sm text-blue-700 mb-2">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>{editingHomework ? t('hw.updating') : t('hw.sending')}</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-blue-100 overflow-hidden">
-                    <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 animate-[progress_1.2s_ease-in-out_infinite]" style={{ animation: 'progress-slide 1.2s ease-in-out infinite' }} />
-                  </div>
-                </div>
-              )}
-              <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-4">
+      <TaskModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        onSubmit={handleSubmit}
+        busy={submitting}
+        title={editingHomework ? t('hw.editTitle') : t('hw.newTitle')}
+        subtitle={t('hw.formSubtitle')}
+        closeLabel={t('hw.close')}
+        maxWidth="max-w-4xl"
+        footer={(
+          <>
+            <button
+              type="button"
+              onClick={resetForm}
+              disabled={submitting}
+              className="flex-1 rounded-lg border border-gray-300 px-5 py-2.5 font-medium text-gray-700 hover:bg-white disabled:opacity-50 sm:flex-none"
+            >
+              {t('common.cancel')}
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 sm:flex-none"
+            >
+              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              {submitting
+                ? (editingHomework ? t('hw.modifying') : t('hw.sendingShort'))
+                : (editingHomework ? t('common.modify') : t('hw.createAndSend'))}
+            </button>
+          </>
+        )}
+      >
+        {submitting && (
+          <div className="mb-3 rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
+            {editingHomework ? t('hw.updating') : t('hw.sending')}
+          </div>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium">{t('hw.fieldTitle')}</label>
+              <input type="text" name="title" value={formData.title} onChange={handleInputChange} required
+                className="w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder={t('hw.titlePlaceholder')} />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">{t('hw.description')}</label>
+              <textarea name="description" value={formData.description} onChange={handleInputChange} rows={3}
+                className="w-full resize-none rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder={t('hw.descriptionPlaceholder')} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm font-medium block mb-2">{t('hw.fieldTitle')}</label>
-                <input
-                  type="text"
-                  name="title"
-                  value={formData.title}
-                  onChange={handleInputChange}
-                  required
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder={t('hw.titlePlaceholder')}
-                />
+                <label className="mb-1 block text-sm font-medium">{t('hw.classRequired')}</label>
+                <select name="classId" value={formData.classId} onChange={handleInputChange} required
+                  className="w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">{t('hw.pickClass')}</option>
+                  {classes.map(cls => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                </select>
               </div>
-
               <div>
-                <label className="text-sm font-medium block mb-2">{t('hw.description')}</label>
-                <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder={t('hw.descriptionPlaceholder')}
-                />
+                <label className="mb-1 block text-sm font-medium">{t('hw.typeRequired')}</label>
+                <select name="type" value={formData.type} onChange={handleInputChange} required
+                  className="w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="exercice">📝 {t('hw.type.exercice')}</option>
+                  <option value="revision">📚 {t('hw.type.revision')}</option>
+                  <option value="projet">🎯 {t('hw.type.projet')}</option>
+                  <option value="recherche">🔍 {t('hw.type.recherche')}</option>
+                  <option value="presentation">🎤 {t('hw.type.presentation')}</option>
+                </select>
               </div>
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium block mb-2">{t('hw.classRequired')}</label>
-                  <select
-                    name="classId"
-                    value={formData.classId}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">{t('hw.pickClass')}</option>
-                    {classes.map(cls => (
-                      <option key={cls.id} value={cls.id}>{cls.name}</option>
-                    ))}
-                  </select>
-                </div>
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium">{t('hw.dueDateRequired')}</label>
+              <input type="date" name="dueDate" value={formData.dueDate} onChange={handleInputChange} required
+                min={new Date().toISOString().split('T')[0]}
+                className="w-full rounded-lg border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
 
-                <div>
-                  <label className="text-sm font-medium block mb-2">{t('hw.typeRequired')}</label>
-                  <select
-                    name="type"
-                    value={formData.type}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="exercice">📝 {t('hw.type.exercice')}</option>
-                    <option value="revision">📚 {t('hw.type.revision')}</option>
-                    <option value="projet">🎯 {t('hw.type.projet')}</option>
-                    <option value="recherche">🔍 {t('hw.type.recherche')}</option>
-                    <option value="presentation">🎤 {t('hw.type.presentation')}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-2">{t('hw.dueDateRequired')}</label>
-                <input
-                  type="date"
-                  name="dueDate"
-                  value={formData.dueDate}
-                  onChange={handleInputChange}
-                  required
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium block mb-2">{t('hw.targetRequired')}</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="targetType"
-                      value="all"
-                      checked={formData.targetType === 'all'}
-                      onChange={handleInputChange}
-                      className="w-4 h-4 text-blue-600"
-                    />
-                    <span>{t('hw.wholeClass')}</span>
+            <div>
+              <label className="mb-1 block text-sm font-medium">{t('hw.targetRequired')}</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: 'all', label: t('hw.wholeClass') },
+                  { value: 'group', label: t('hw.studentGroup') },
+                ].map((target) => (
+                  <label key={target.value} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${formData.targetType === target.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200'}`}>
+                    <input type="radio" name="targetType" value={target.value} checked={formData.targetType === target.value} onChange={handleInputChange} className="h-4 w-4 text-blue-600" />
+                    <span>{target.label}</span>
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="targetType"
-                      value="group"
-                      checked={formData.targetType === 'group'}
-                      onChange={handleInputChange}
-                      className="w-4 h-4 text-blue-600"
-                    />
-                    <span>{t('hw.studentGroup')}</span>
-                  </label>
-                </div>
+                ))}
               </div>
+            </div>
 
-              {formData.targetType === 'group' && (
-                <div>
-                  <label className="text-sm font-medium block mb-2">
-                    {t('hw.pickStudents', { n: formData.studentIds.length })}
-                  </label>
-                  <div className="border rounded-lg p-3 max-h-60 overflow-y-auto">
-                    {students.length === 0 ? (
-                      <p className="text-sm text-gray-500">
-                        {t('hw.pickClassFirst')}
-                      </p>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-2">
-                        {students.map(student => (
-                          <button
-                            key={student.id}
-                            type="button"
-                            onClick={() => toggleStudentSelection(student.id)}
-                            className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-all ${
-                              formData.studentIds.includes(student.id)
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300'
-                            }`}
-                          >
-                            <span className="text-2xl">{student.avatar || '👤'}</span>
-                            <span className="text-sm font-medium">
-                              {student.first_name} {student.last_name}
-                            </span>
-                            {formData.studentIds.includes(student.id) && (
-                              <Check className="w-4 h-4 text-blue-600 ml-auto" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+            {formData.targetType === 'group' && (
+              <div className="rounded-lg border border-gray-200 p-3">
+                <label className="mb-1 block text-sm font-medium">{t('hw.pickStudents', { n: formData.studentIds.length })}</label>
+                <select
+                  value=""
+                  onChange={(event) => event.target.value && toggleStudentSelection(event.target.value)}
+                  disabled={!formData.classId || students.length === 0}
+                  className="w-full rounded-lg border px-3 py-2 text-sm disabled:bg-gray-100"
+                >
+                  <option value="">{formData.classId ? t('hw.addStudent') : t('hw.pickClassFirst')}</option>
+                  {students.filter((student) => !formData.studentIds.includes(student.id)).map((student) => (
+                    <option key={student.id} value={student.id}>{student.first_name} {student.last_name}</option>
+                  ))}
+                </select>
+                {formData.studentIds.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {formData.studentIds.map((studentId) => {
+                      const student = students.find((item) => item.id === studentId);
+                      if (!student) return null;
+                      return (
+                        <button key={studentId} type="button" onClick={() => toggleStudentSelection(studentId)}
+                          className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-red-100 hover:text-red-700">
+                          {student.first_name} {student.last_name} ×
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      {editingHomework ? t('hw.modifying') : t('hw.sendingShort')}
-                    </>
-                  ) : (
-                    editingHomework ? t('common.modify') : t('hw.createAndSend')
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  disabled={submitting}
-                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {t('common.cancel')}
-                </button>
+                )}
               </div>
-                </form>
-              </CardContent>
-            </Card>
+            )}
           </div>
         </div>
-      )}
+      </TaskModal>
 
       {/* Filtres */}
       {homework.length > 0 && (
