@@ -57,9 +57,9 @@ const MobileNav = () => {
     if (profile?.role === 'teacher') {
       return [
         { icon: BarChart3, label: t('mnav.dashboard'), path: '/teacher/dashboard' },
-        { icon: Calendar, label: t('mnav.tracking'), path: '/teacher/rapide' },
-        { icon: Users, label: t('mnav.students'), path: '/students' },
+        { icon: Users, label: t('nav.teacher.classroom'), path: '/teacher/classroom' },
         { icon: BookOpen, label: t('nav.homework'), path: '/teacher/devoirs' },
+        { icon: ClipboardList, label: t('nav.controls'), path: '/teacher/controls' },
         { icon: Menu, label: t('mnav.more'), path: '#teacher-more', more: true },
       ];
     }

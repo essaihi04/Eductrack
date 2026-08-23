@@ -3,7 +3,8 @@ import {
   TrendingUp, AlertCircle, Star, Users, Filter, Calendar, 
   BookOpen, Phone, Moon, MessageSquare, CheckCircle, Target,
   Lightbulb, ChevronRight, Activity, RefreshCw, Eye, Heart,
-  ThermometerSun, AlertTriangle, Clock, PenLine
+  ThermometerSun, AlertTriangle, Clock, PenLine, Search, ClipboardList,
+  ArrowRight
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -68,10 +69,11 @@ const MetricCard = ({ icon: Icon, label, value, subLabel, accent = 'blue', trend
   );
 };
 
-const ClassMetricsDashboard = () => {
+const ClassMetricsDashboard = ({ mode = 'dashboard' }) => {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const { t, lang } = useI18n();
+  const isClassroom = mode === 'classroom';
   // Locale de formatage des dates alignee sur la langue de l'interface.
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [classes, setClasses] = useState([]);
@@ -80,7 +82,8 @@ const ClassMetricsDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filterBadge, setFilterBadge] = useState('all');
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(isClassroom ? 'students' : 'overview');
+  const [studentSearch, setStudentSearch] = useState('');
   const [classAnalytics, setClassAnalytics] = useState(null);
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -96,7 +99,7 @@ const ClassMetricsDashboard = () => {
 
   useEffect(() => {
     fetchClasses();
-    fetchDashboardSummary();
+    if (!isClassroom) fetchDashboardSummary();
   }, []);
 
   useEffect(() => {
@@ -174,7 +177,7 @@ const ClassMetricsDashboard = () => {
     setRefreshing(true);
     await Promise.all([
       fetchClasses(),
-      fetchDashboardSummary(),
+      isClassroom ? Promise.resolve() : fetchDashboardSummary(),
       selectedClass ? fetchStudentsMetrics() : Promise.resolve(),
       selectedClass ? fetchClassAnalytics() : Promise.resolve()
     ]);
@@ -185,6 +188,10 @@ const ClassMetricsDashboard = () => {
   const unratedCount = students.filter(student => student.badge === 'unrated').length;
 
   const filteredStudents = students.filter(student => {
+    const needle = studentSearch.trim().toLocaleLowerCase(lang === 'ar' ? 'ar-MA' : 'fr-FR');
+    if (needle && !String(student.name || '').toLocaleLowerCase(lang === 'ar' ? 'ar-MA' : 'fr-FR').includes(needle)) {
+      return false;
+    }
     if (filterBadge === 'all') return true;
     if (filterBadge === 'unrated') return student.badge === 'unrated';
     if (filterBadge === 'normal') return !['excellent', 'good', 'alert', 'unrated'].includes(student.badge);
@@ -214,7 +221,7 @@ const ClassMetricsDashboard = () => {
     return (
       <div
         onClick={() => navigate(`/teacher/student/${student.id}`)}
-        className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+        className="group rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:border-blue-200 hover:shadow-md transition-all cursor-pointer"
       >
         <div className="flex items-start justify-between mb-3">
           <div>
@@ -349,6 +356,13 @@ const ClassMetricsDashboard = () => {
             </div>
           )}
         </div>
+
+        <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs">
+          <span className="font-medium text-gray-500">{selectedClassData?.name || t('classHub.class')}</span>
+          <span className="flex items-center gap-1 font-semibold text-blue-600 group-hover:text-blue-700">
+            {t('classHub.openStudent')} <ArrowRight className="h-3.5 w-3.5" />
+          </span>
+        </div>
       </div>
     );
   };
@@ -367,10 +381,10 @@ const ClassMetricsDashboard = () => {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-            <Activity className="w-8 h-8 text-blue-600" />
-            {t('dash.title')}
+            {isClassroom ? <Users className="w-8 h-8 text-blue-600" /> : <Activity className="w-8 h-8 text-blue-600" />}
+            {isClassroom ? t('classHub.title') : t('dash.title')}
           </h1>
-          <p className="text-gray-600 mt-1">{t('dash.subtitle')}</p>
+          <p className="text-gray-600 mt-1">{isClassroom ? t('classHub.subtitle') : t('dash.subtitle')}</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -397,7 +411,7 @@ const ClassMetricsDashboard = () => {
       </div>
 
       {/* Alertes globales */}
-      {dashboardSummary?.alerts?.length > 0 && (
+      {!isClassroom && dashboardSummary?.alerts?.length > 0 && (
         <div className="space-y-2">
           {dashboardSummary.alerts.slice(0, 3).map((alert, idx) => (
             <div 
@@ -421,12 +435,17 @@ const ClassMetricsDashboard = () => {
 
       {/* Navigation par onglets */}
       <div className="flex gap-2 border-b pb-2 overflow-x-auto">
-        {[
+        {(isClassroom ? [
+          { id: 'students', label: t('dash.tab.students'), icon: Users },
+          { id: 'overview', label: t('dash.tab.overview'), icon: Eye },
+          { id: 'trends', label: t('dash.tab.trends'), icon: TrendingUp },
+          { id: 'recommendations', label: t('dash.tab.recommendations'), icon: Lightbulb }
+        ] : [
           { id: 'overview', label: t('dash.tab.overview'), icon: Eye },
           { id: 'students', label: t('dash.tab.students'), icon: Users },
           { id: 'trends', label: t('dash.tab.trends'), icon: TrendingUp },
           { id: 'recommendations', label: t('dash.tab.recommendations'), icon: Lightbulb }
-        ].map(tab => (
+        ]).map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -444,7 +463,11 @@ const ClassMetricsDashboard = () => {
 
       {/* Sélecteur de classe */}
       <div className="flex items-center gap-4">
+        <label className="text-sm font-semibold text-gray-700" htmlFor="teacher-class-selector">
+          {t('classHub.class')}
+        </label>
         <select
+          id="teacher-class-selector"
           value={selectedClass || ''}
           onChange={(e) => setSelectedClass(e.target.value)}
           className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -460,6 +483,47 @@ const ClassMetricsDashboard = () => {
           </div>
         )}
       </div>
+
+      {/* Toutes les actions fréquentes partent du même espace et conservent la
+          classe sélectionnée dans l'écran de destination. */}
+      <Card>
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="min-w-0 lg:me-auto">
+              <p className="font-semibold text-gray-900">{t('classHub.toolsTitle')}</p>
+              <p className="text-xs text-gray-500">
+                {t('classHub.toolsSubtitle', { name: selectedClassData?.name || '—' })}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                disabled={!selectedClass}
+                onClick={() => navigate(`/teacher/rapide?classId=${selectedClass}`)}
+                className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Calendar className="h-4 w-4" /> {t('classHub.startSession')}
+              </button>
+              <button
+                type="button"
+                disabled={!selectedClass}
+                onClick={() => navigate(`/teacher/controls?action=create&classId=${selectedClass}`)}
+                className="flex items-center justify-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+              >
+                <ClipboardList className="h-4 w-4" /> {t('classHub.newControl')}
+              </button>
+              <button
+                type="button"
+                disabled={!selectedClass}
+                onClick={() => navigate(`/teacher/devoirs?action=create&classId=${selectedClass}`)}
+                className="flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                <BookOpen className="h-4 w-4" /> {t('classHub.newHomework')}
+              </button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Onglet: Vue classe (Overview) */}
       {activeTab === 'overview' && (
@@ -543,52 +607,27 @@ const ClassMetricsDashboard = () => {
             </Card>
           )}
 
-          {/* Actions rapides */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">{t('dash.quickActions')}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <button 
-                  onClick={() => navigate('/teacher/rapide')}
-                  className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg text-start transition-colors"
-                >
-                  <Calendar className="w-6 h-6 text-blue-600 mb-2" />
-                  <p className="font-medium text-sm">{t('dash.quickTracking')}</p>
-                </button>
-                <button 
-                  onClick={() => navigate('/teacher/devoirs')}
-                  className="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-start transition-colors"
-                >
-                  <BookOpen className="w-6 h-6 text-green-600 mb-2" />
-                  <p className="font-medium text-sm">{t('dash.homework')}</p>
-                </button>
-                <button 
-                  onClick={() => setActiveTab('students')}
-                  className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-start transition-colors"
-                >
-                  <Users className="w-6 h-6 text-purple-600 mb-2" />
-                  <p className="font-medium text-sm">{t('dash.seeStudents')}</p>
-                </button>
-                <button 
-                  onClick={() => setActiveTab('recommendations')}
-                  className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-start transition-colors"
-                >
-                  <Lightbulb className="w-6 h-6 text-orange-600 mb-2" />
-                  <p className="font-medium text-sm">{t('dash.recommendations')}</p>
-                </button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       )}
 
       {/* Onglet: Élèves */}
       {activeTab === 'students' && (
         <div className="space-y-6">
-          {/* Filtres */}
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <label className="relative block max-w-xl">
+              <span className="sr-only">{t('classHub.searchStudent')}</span>
+              <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="search"
+                value={studentSearch}
+                onChange={(event) => setStudentSearch(event.target.value)}
+                placeholder={t('classHub.searchPlaceholder')}
+                className="w-full rounded-lg border border-gray-300 py-2.5 ps-10 pe-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+
+            {/* Les filtres de besoin restent dans la même page que la liste. */}
+            <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => setFilterBadge('all')}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -637,6 +676,7 @@ const ClassMetricsDashboard = () => {
             >
               {t('dash.filter.unrated', { n: unratedCount })}
             </button>
+            </div>
           </div>
 
           {/* Grille d'élèves */}

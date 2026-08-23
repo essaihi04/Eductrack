@@ -171,6 +171,16 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+// La page /students est un outil administratif très complet. Pour un
+// professeur, on l'oriente vers l'espace de classe dédié afin de ne pas
+// afficher des actions d'inscription, d'accès ou de dossier non autorisées.
+const StudentsRoute = () => {
+  const { profile } = useAuth();
+  return profile?.role === 'teacher'
+    ? <Navigate to="/teacher/classroom" replace />
+    : <StudentsPage />;
+};
+
 function App() {
   return (
     <AuthProvider>
@@ -199,7 +209,7 @@ function App() {
           >
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="behavior" element={<BehaviorDashboard />} />
-            <Route path="students" element={<StudentsPage />} />
+            <Route path="students" element={<StudentsRoute />} />
             <Route path="teachers" element={<TeachersPage />} />
             <Route path="classes" element={<ClassesPage />} />
             <Route path="admin/class-assignment" element={<ClassAssignmentPage />} />
@@ -290,6 +300,8 @@ function App() {
             <Route path="messages/inbox" element={<Navigate to="/whatsapp" replace />} />
             <Route path="messages/connect" element={<Navigate to="/whatsapp" replace />} />
             <Route path="teacher/home" element={<TeacherHome />} />
+            <Route path="teacher/classroom" element={<ClassMetricsDashboard mode="classroom" />} />
+            <Route path="teacher/students" element={<Navigate to="/teacher/classroom" replace />} />
             <Route path="teacher/rapide" element={<SuiviRapide />} />
             <Route path="teacher/suivi" element={<SuiviSeance />} />
             <Route path="teacher/session/:classId/:sessionId" element={<SessionTracking />} />

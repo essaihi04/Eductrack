@@ -146,11 +146,8 @@ const Sidebar = () => {
       key: 'classroom',
       label: t('nav.teacher.classroom'),
       icon: Users,
-      matches: ['/teacher/rapide', '/students', '/teacher/session/', '/teacher/student/'],
-      items: [
-        { icon: Calendar, label: t('nav.quickTracking'), path: '/teacher/rapide' },
-        { icon: Users, label: t('nav.students'), path: '/students' },
-      ],
+      path: '/teacher/classroom',
+      matches: ['/teacher/classroom', '/teacher/rapide', '/students', '/teacher/session/', '/teacher/student/'],
     },
     {
       key: 'teaching',

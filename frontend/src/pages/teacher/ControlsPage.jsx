@@ -1,13 +1,16 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Calendar, Clock, FileText, Plus, Edit2, Trash2, Save, X, CheckCircle, Users, TrendingUp, AlertTriangle, FileCheck, Upload, BarChart3, Edit3, Activity, TrendingDown, Search, ClipboardPaste } from 'lucide-react';
 import { saveBlob } from '../../lib/download';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useI18n } from '../../i18n';
 import { useAuth } from '../../contexts/AuthContext';
 
 const ControlsPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedAction = searchParams.get('action');
+  const requestedClassId = searchParams.get('classId') || '';
   const { t, lang } = useI18n();
   const { profile } = useAuth();
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
@@ -202,6 +205,21 @@ const ControlsPage = () => {
   });
 
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+  useEffect(() => {
+    if (requestedAction !== 'create') return;
+    setEditingControl(null);
+    setFormData({
+      class_id: requestedClassId,
+      name: '',
+      date: '',
+      start_time: '',
+      end_time: '',
+      description: '',
+      kind: 'control'
+    });
+    setShowCreateModal(true);
+  }, [requestedAction, requestedClassId]);
 
   // Debounce pour le filtre de statut
   useEffect(() => {

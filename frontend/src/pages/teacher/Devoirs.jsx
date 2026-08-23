@@ -3,9 +3,13 @@ import { Plus, BookOpen, Calendar, Users, Trash2, Edit2, X, Check, PieChart, Tar
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useI18n } from '../../i18n';
 import { supabase } from '../../lib/supabase';
+import { useSearchParams } from 'react-router-dom';
 
 const Devoirs = () => {
   const { t, lang } = useI18n();
+  const [searchParams] = useSearchParams();
+  const requestedAction = searchParams.get('action');
+  const requestedClassId = searchParams.get('classId') || '';
   const dateLocale = lang === 'ar' ? 'ar-MA' : 'fr-FR';
   const [classes, setClasses] = useState([]);
   const [homework, setHomework] = useState([]);
@@ -34,6 +38,16 @@ const Devoirs = () => {
     fetchClasses();
     fetchHomework();
   }, []);
+
+  useEffect(() => {
+    if (requestedAction !== 'create') return;
+    setEditingHomework(null);
+    setFormData((previous) => ({
+      ...previous,
+      classId: requestedClassId || previous.classId,
+    }));
+    setShowForm(true);
+  }, [requestedAction, requestedClassId]);
 
   useEffect(() => {
     if (formData.classId) {

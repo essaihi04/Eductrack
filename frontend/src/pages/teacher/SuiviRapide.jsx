@@ -106,12 +106,17 @@ const SuiviRapide = () => {
 
     console.log('[DEBUG] URL Parameters:', { controlId, classId, date, name, startTimeParam, endTimeParam });
 
-    if (controlId && classId) {
+    // Depuis « Ma classe », le professeur peut ouvrir directement une séance
+    // avec la bonne classe, même lorsqu'il ne part pas d'un contrôle planifié.
+    if (classId) {
       const params = { classId, startTime: startTimeParam, endTime: endTimeParam };
       console.log('[DEBUG] Setting urlParams and selectedClass:', params);
       setUrlParams(params);
       urlParamsRef.current = params;
       setSelectedClass(classId);
+    }
+
+    if (controlId && classId) {
       setSessionDate(date || new Date().toISOString().split('T')[0]);
       setSessionType('control');
       setControlName(name || '');

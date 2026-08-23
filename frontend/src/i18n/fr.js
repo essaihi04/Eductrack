@@ -186,6 +186,19 @@ export default {
   'dash.tip3': 'Contactez les parents des élèves à risque pour un suivi personnalisé',
   'dash.tip4': 'Utilisez le suivi rapide à chaque séance pour un historique complet',
 
+  // ── Espace de classe unique ───────────────────────────────────────────
+  'classHub.title': 'Ma classe',
+  'classHub.subtitle': 'Élèves, suivi et actions courantes réunis au même endroit',
+  'classHub.class': 'Classe',
+  'classHub.toolsTitle': 'Que souhaitez-vous faire ?',
+  'classHub.toolsSubtitle': 'La classe {{name}} sera déjà sélectionnée.',
+  'classHub.startSession': 'Démarrer une séance',
+  'classHub.newControl': 'Créer un contrôle',
+  'classHub.newHomework': 'Donner un devoir',
+  'classHub.searchStudent': 'Rechercher un élève',
+  'classHub.searchPlaceholder': 'Rechercher un élève par nom…',
+  'classHub.openStudent': 'Ouvrir le suivi',
+
   // ── Rendez-vous parents (professeur) ──────────────────────────────────
   'appt.title': 'Rendez-vous avec les parents',
   'appt.intro': 'Proposez la date et l’heure qui vous conviennent. L’administration valide le créneau puis prévient le parent. Vous pouvez aussi répondre directement au message WhatsApp reçu (ex. « jeudi 10h30 »).',
