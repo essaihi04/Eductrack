@@ -126,7 +126,7 @@ const MobileNav = () => {
     // Student
     if (profile?.role !== 'student') return []; // évite menu élève pour rôles inconnus
     return [
-      { icon: Calendar, label: "Aujourd'hui", path: '/dashboard' },
+      { icon: Calendar, label: 'Accueil', path: '/dashboard' },
       { icon: BookOpen, label: 'Emploi', path: '/student/timetable' },
       { icon: ClipboardList, label: 'Devoirs', path: '/my-assignments' },
       { icon: BarChart3, label: 'Notes', path: '/my-grades' },
