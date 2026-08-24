@@ -533,9 +533,6 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
                   fileSent,
                   fileName: req.file.originalname
                 });
-
-                // Attendre un peu entre chaque envoi pour éviter le rate limiting
-                await new Promise(resolve => setTimeout(resolve, 2000));
               }
             } else {
               console.log(`[Documents][${requestId}] Aucun parent trouvé pour les élèves de la classe`);

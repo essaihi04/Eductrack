@@ -1188,8 +1188,6 @@ L'administration de ${schoolName}`;
       try {
         await sendCredentialsToParent(student);
         successCount++;
-        // Petit délai entre chaque envoi pour éviter de surcharger l'API
-        await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
         console.error(`Erreur envoi pour ${student.first_name} ${student.last_name}:`, error);
         errorCount++;

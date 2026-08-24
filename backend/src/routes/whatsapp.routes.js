@@ -11,7 +11,6 @@ import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendPushToUser } from '../services/webPush.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 import { isSessionReady, sendUnified } from '../services/whatsapp/sendHelpers.js';
-import { generateVariants } from '../services/whatsapp/messageVariants.js';
 import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.js';
 import { enqueueJob } from '../services/jobs/index.js';
 
@@ -516,15 +515,12 @@ router.post('/send', async (req, res) => {
         payload: { message_id: msgLog.id },
         schoolId,
         createdBy: req.user.id,
-        // L'envoi par vagues étale une campagne sur plusieurs heures : elle
-        // franchit la limite de 23 h et se suspend jusqu'au lendemain 7 h.
-        // Chaque reprise refusée consomme une tentative alors qu'elle n'a rien
-        // fait ; avec les 3 tentatives par défaut le job serait abandonné en
-        // trois minutes et les parents restants ne recevraient jamais le
-        // message. Le délai entre tentatives croît (1 min, 2 min, 3 min…) :
-        // 60 tentatives cumulent ~30 h, de quoi traverser une nuit ET une
-        // suspension pour quota de chauffe atteint, qui attend le lendemain.
-        maxAttempts: 60,
+        // Le seul refus temporaire qui subsiste est « numéro Cloud API non
+        // rattaché » : avec les 3 tentatives par défaut le job serait
+        // abandonné en trois minutes. Le délai entre tentatives croît (1 min,
+        // 2 min, 3 min…) : 10 tentatives laissent ~1 h pour rebrancher le
+        // numéro avant d'abandonner.
+        maxAttempts: 10,
       });
     } catch (queueError) {
       // Table jobs absente (ADD_JOBS_QUEUE.sql pas encore exécuté) : on garde le
@@ -776,11 +772,9 @@ router.post('/messages/:messageId/resend', async (req, res) => {
       .filter((c) => allowed.includes(c));
     if (!criteria.length) criteria.push('unread');
     const channel = ['whatsapp', 'app', 'both'].includes(req.body?.channel) ? req.body.channel : 'app';
-    // Deux couches de personnalisation, cumulables. Une relance envoyait
-    // jusqu'ici un texte RIGOUREUSEMENT identique à tout le monde, alors que
-    // les communications planifiées savaient déjà nommer le parent.
-    const personalize = req.body?.personalize === true;   // salutation nominative
-    const varyWording = req.body?.varyWording === true;   // reformulations IA
+    // Salutation nominative : une relance nommait jusqu'ici personne, alors que
+    // les communications planifiées savaient déjà s'adresser au parent.
+    const personalize = req.body?.personalize === true;
     // Planification : ISO ou null. Une date passée = envoi immédiat.
     const scheduledAt = req.body?.scheduled_at && !Number.isNaN(Date.parse(req.body.scheduled_at))
       ? new Date(req.body.scheduled_at)
@@ -843,15 +837,6 @@ router.post('/messages/:messageId/resend', async (req, res) => {
     const channelsCol = channel === 'app' ? 'push' : channel === 'whatsapp' ? 'whatsapp' : 'both';
     const messageType = orig.message_type || 'text';
 
-    // Reformulations générées MAINTENANT et stockées sur le message : le job
-    // les rejoue telles quelles, donc une reprise après coupure ne rappelle pas
-    // l'IA et un parent ne peut pas recevoir deux versions différentes.
-    let variants = null;
-    if (wantWa && varyWording && orig.content) {
-      const generated = await generateVariants(orig.content, { count: 6 });
-      if (generated.length > 1) variants = generated;
-    }
-
     const insertPayload = {
       school_id: orig.school_id,
       sent_by: req.user.id,
@@ -866,16 +851,15 @@ router.post('/messages/:messageId/resend', async (req, res) => {
       channels: channelsCol,
       resend_of: messageId,
       personalize,
-      variants,
       scheduled_at: runAfter,
     };
     let { data: msgLog, error: logErr } = await supabaseAdmin
       .from('whatsapp_messages').insert(insertPayload).select('id').single();
     // Migration ADD_RESEND_SCHEDULING.sql pas encore jouée : on retombe sur les
     // colonnes historiques plutôt que de refuser la relance.
-    if (logErr && /column|resend_of|personalize|variants|scheduled_at/i.test(logErr.message || '')) {
+    if (logErr && /column|resend_of|personalize|scheduled_at/i.test(logErr.message || '')) {
       console.warn('[resend] colonnes de personnalisation absentes — exécutez ADD_RESEND_SCHEDULING.sql');
-      ['resend_of', 'personalize', 'variants', 'scheduled_at'].forEach((k) => delete insertPayload[k]);
+      ['resend_of', 'personalize', 'scheduled_at'].forEach((k) => delete insertPayload[k]);
       insertPayload.status = 'sending';
       ({ data: msgLog, error: logErr } = await supabaseAdmin
         .from('whatsapp_messages').insert(insertPayload).select('id').single());
@@ -895,11 +879,10 @@ router.post('/messages/:messageId/resend', async (req, res) => {
     //
     // Il tournait auparavant dans une boucle lancée après res.json(), vivant en
     // mémoire du process : un redémarrage pm2 en cours de relance perdait tout
-    // le reste sans trace — et une relance de 255 parents dure plusieurs heures
-    // avec la cadence anti-ban. Passer par le job apporte trois choses d'un
-    // coup : la reprise après coupure, la planification (run_after), et la
-    // logique par canal déjà écrite dans runBulkSend (personnalisation,
-    // rotation des formulations, répercussion sur le message d'origine).
+    // le reste sans trace. Passer par le job apporte trois choses d'un coup :
+    // la reprise après coupure, la planification (run_after), et la logique
+    // par canal déjà écrite dans runBulkSend (personnalisation, répercussion
+    // sur le message d'origine).
     let queued = true;
     try {
       await enqueueJob({
@@ -908,9 +891,10 @@ router.post('/messages/:messageId/resend', async (req, res) => {
         schoolId: orig.school_id,
         createdBy: req.user.id,
         runAfter,
-        // Une relance s'étale sur des heures et se suspend hors plage horaire
-        // ou session tombée ; chaque reprise refusée consomme une tentative.
-        maxAttempts: 60,
+        // Le seul refus temporaire qui subsiste est « numéro Cloud API non
+        // rattaché ». Le délai entre tentatives croît (1 min, 2 min, 3 min…) :
+        // 10 tentatives laissent ~1 h pour rebrancher le numéro.
+        maxAttempts: 10,
       });
     } catch (queueError) {
       queued = false;
@@ -931,7 +915,6 @@ router.post('/messages/:messageId/resend', async (req, res) => {
       success: true,
       messageId: msgLog.id,
       totalRecipients: targets.length,
-      variants: variants ? variants.length : 1,
       personalize,
       scheduledAt: runAfter,
     });
@@ -2006,7 +1989,7 @@ router.post('/daily-reports/send-report', async (req, res) => {
       }).eq('id', msgLog.id);
     }
 
-    // Surface la vraie cause d'échec (anti-ban hors créneau, session déconnectée, etc.)
+    // Surface la vraie cause d'échec (numéro non rattaché, refus Meta, etc.)
     res.json({
       success: sent > 0,
       sent, failed, total: contacts.length,

@@ -119,11 +119,11 @@ export async function sendOfficialDocument({ schoolId, phone, category, schoolNa
   if (!doc) return false;
 
   const { label } = DOCUMENT_LABELS[doc.category] || DOCUMENT_LABELS.autre;
-  await sendText(schoolId, phone, `📄 Je vous envoie *${doc.title || label}*…`, { urgent: true });
+  await sendText(schoolId, phone, `📄 Je vous envoie *${doc.title || label}*…`);
 
   const res = await sendDocument(
     schoolId, phone, doc.file_url, fileNameFor(doc),
-    captionFor(doc, schoolName), 'application/pdf', { urgent: true },
+    captionFor(doc, schoolName), 'application/pdf',
   );
 
   if (!res?.success) {
@@ -131,7 +131,6 @@ export async function sendOfficialDocument({ schoolId, phone, category, schoolNa
     await sendText(
       schoolId, phone,
       '⚠️ Le document n\'a pas pu être envoyé. Réessayez dans quelques instants.',
-      { urgent: true },
     );
   }
   return true;

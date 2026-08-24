@@ -1,7 +1,7 @@
 /**
  * Chatbot « visiteur » — répond aux numéros NON rattachés à un parent.
  *
- * Par défaut, un numéro inconnu reçoit un silence total (anti-bruit / anti-ban).
+ * Par défaut, un numéro inconnu reçoit un silence total (anti-bruit).
  * Quand l'école active l'option (whatsapp_school_sessions.public_chatbot_enabled),
  * ces numéros obtiennent un service RESTREINT :
  *
@@ -237,7 +237,7 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
   if (state?.state === 'SCHOOL') {
     const handled = await handleShowcaseReply({ schoolId, phone, schoolName, text: trimmed });
     if (handled) {
-      await sendText(schoolId, phone, footerFor(trimmed), { urgent: true });
+      await sendText(schoolId, phone, footerFor(trimmed));
       await markProcessed(incomingId);
       return true;
     }
@@ -255,7 +255,7 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
   const isGreeting = /^(bonjour|bonsoir|salut|coucou|hi|hello|hey|salam|salem|marhaba|ahlan|السلام|مرحبا|سلام|اهلا)[\s!.?,؟]*$/i.test(trimmed);
   if (!trimmed || cmd === 'menu' || cmd === 'help' || isGreeting) {
     State.setState(schoolId, phone, { state: 'PUBLIC' });
-    await sendText(schoolId, phone, welcomeMessage(schoolName), { urgent: true });
+    await sendText(schoolId, phone, welcomeMessage(schoolName));
     await markProcessed(incomingId);
     return true;
   }
@@ -288,7 +288,7 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
     schoolId, phone, schoolName, text: trimmed, publicOnly: true,
   }).catch((e) => { console.error('[chatbot/public] vitrine:', e.message); return false; });
   if (showcaseHandled) {
-    setTimeout(() => { sendText(schoolId, phone, footerFor(trimmed), { urgent: true }); }, 1500);
+    setTimeout(() => { sendText(schoolId, phone, footerFor(trimmed)); }, 1500);
     await markProcessed(incomingId);
     return true;
   }
@@ -300,7 +300,6 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
       schoolId,
       phone,
       `ℹ️ Posez votre question sur *${schoolName}* (inscription, horaires, règlement, cantine, transport…).\n\n_Je réponds à partir des documents officiels de l'école._`,
-      { urgent: true },
     );
     await markProcessed(incomingId);
     return true;
@@ -308,9 +307,9 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
 
   // Question libre → réponse issue des seuls documents de l'école
   const reply = await answerFromKnowledge({ schoolId, schoolName, question: trimmed });
-  await sendText(schoolId, phone, reply, { urgent: true });
+  await sendText(schoolId, phone, reply);
   setTimeout(() => {
-    sendText(schoolId, phone, footerFor(trimmed), { urgent: true });
+    sendText(schoolId, phone, footerFor(trimmed));
   }, 1500);
   await markProcessed(incomingId, reply);
   return true;

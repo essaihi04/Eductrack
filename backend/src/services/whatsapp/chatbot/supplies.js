@@ -72,7 +72,7 @@ async function sendSectionPdf({ schoolId, phone, section, student }) {
     fileName,
     mimetype: 'application/pdf',
     caption,
-  }, { urgent: true });
+  });
 
   return !!res?.success;
 }
@@ -111,7 +111,7 @@ const NO_DOCUMENT_MSG =
 export async function handleSuppliesRequest({ schoolId, stateSchoolId = schoolId, phone, student, text, fromMenu = false }) {
   const sections = await getActiveSections(schoolId, 'fournitures');
   if (sections.length === 0) {
-    await sendText(schoolId, phone, NO_DOCUMENT_MSG, { urgent: true });
+    await sendText(schoolId, phone, NO_DOCUMENT_MSG);
     return true;
   }
 
@@ -134,7 +134,7 @@ export async function handleSuppliesRequest({ schoolId, stateSchoolId = schoolId
       state: 'SUPPLIES',
       suppliesSectionIds: sections.map((s) => s.id),
     });
-    await sendText(schoolId, phone, levelChoicePrompt(sections), { urgent: true });
+    await sendText(schoolId, phone, levelChoicePrompt(sections));
     return true;
   }
 
@@ -142,7 +142,6 @@ export async function handleSuppliesRequest({ schoolId, stateSchoolId = schoolId
     schoolId,
     phone,
     `🎒 Voici la liste des fournitures pour *${section.level_label}*. _Un instant, je prépare le PDF…_`,
-    { urgent: true },
   );
 
   const ok = await sendSectionPdf({ schoolId, phone, section, student });
@@ -151,7 +150,6 @@ export async function handleSuppliesRequest({ schoolId, stateSchoolId = schoolId
       schoolId,
       phone,
       '⚠️ Le PDF n\'a pas pu être envoyé. Réessayez dans quelques instants.',
-      { urgent: true },
     );
   }
   return true;
@@ -169,7 +167,7 @@ export async function handleSuppliesLevelReply({ schoolId, stateSchoolId = schoo
 
   if (sections.length === 0) {
     State.setMenu(stateSchoolId, phone, 'main');
-    await sendText(schoolId, phone, NO_DOCUMENT_MSG, { urgent: true });
+    await sendText(schoolId, phone, NO_DOCUMENT_MSG);
     return true;
   }
 
@@ -187,7 +185,6 @@ export async function handleSuppliesLevelReply({ schoolId, stateSchoolId = schoo
       schoolId,
       phone,
       `🤔 Niveau non reconnu.\n\n${levelChoicePrompt(ordered)}`,
-      { urgent: true },
     );
     return true;
   }
@@ -197,11 +194,10 @@ export async function handleSuppliesLevelReply({ schoolId, stateSchoolId = schoo
     schoolId,
     phone,
     `🎒 Liste des fournitures pour *${section.level_label}*. _Un instant…_`,
-    { urgent: true },
   );
   const ok = await sendSectionPdf({ schoolId, phone, section, student: null });
   if (!ok) {
-    await sendText(schoolId, phone, '⚠️ Le PDF n\'a pas pu être envoyé. Réessayez dans quelques instants.', { urgent: true });
+    await sendText(schoolId, phone, '⚠️ Le PDF n\'a pas pu être envoyé. Réessayez dans quelques instants.');
   }
   return true;
 }

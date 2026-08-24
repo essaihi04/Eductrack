@@ -137,7 +137,7 @@ export async function maybeHandleDemoParent({ phone, text, schoolId, providerMes
         const password = await tryResetPassword(resolved.id, existing.first_name);
         await sendText(schoolId, phone, welcomeMessage({
           schoolName, student: existing, email: resolved.email, password,
-        }), { urgent: true });
+        }));
         await logIncoming({ phone, schoolId, text, providerMessageId, parentId: resolved.id });
         return true;
       }
@@ -156,7 +156,7 @@ export async function maybeHandleDemoParent({ phone, text, schoolId, providerMes
 
       const password = await tryResetPassword(resolved.id, student.first_name);
       console.log(`[demo-parent] ✓ (parent existant) ${phone} → ${student.first_name} ${student.last_name} (${student.massar_code})`);
-      await sendText(schoolId, phone, welcomeMessage({ schoolName, student, email: resolved.email, password }), { urgent: true });
+      await sendText(schoolId, phone, welcomeMessage({ schoolName, student, email: resolved.email, password }));
       await logIncoming({ phone, schoolId, text, providerMessageId, parentId: resolved.id });
       return true;
     }
@@ -199,14 +199,13 @@ export async function maybeHandleDemoParent({ phone, text, schoolId, providerMes
 
     console.log(`[demo-parent] ✓ ${phone} → ${student.first_name} ${student.last_name} (${student.massar_code})`);
 
-    await sendText(schoolId, phone, welcomeMessage({ schoolName, student, email, password }), { urgent: true });
+    await sendText(schoolId, phone, welcomeMessage({ schoolName, student, email, password }));
     await logIncoming({ phone, schoolId, text, providerMessageId, parentId });
     return true;
   } catch (e) {
     console.error('[demo-parent] Erreur onboarding:', e.message);
     await sendText(schoolId, phone,
-      `⚠️ Une erreur est survenue lors de l'activation de la démo. Réessayez dans un instant.`,
-      { urgent: true }).catch(() => {});
+      `⚠️ Une erreur est survenue lors de l'activation de la démo. Réessayez dans un instant.`).catch(() => {});
     return true; // message consommé malgré l'erreur (pas de fuite vers le chatbot normal)
   }
 }
@@ -262,8 +261,7 @@ async function tryResetPassword(parentId, studentFirstName) {
 /** Réponse « démo complète » (plus d'élève libre) + log. Renvoie true. */
 async function replyDemoFull({ schoolId, phone, schoolName, text, providerMessageId }) {
   await sendText(schoolId, phone,
-    `🚫 *La démo est complète !*\n\nTous les élèves de la classe démo ont déjà un parent associé.\nContactez l'école *${schoolName}* pour réinitialiser la démonstration.`,
-    { urgent: true });
+    `🚫 *La démo est complète !*\n\nTous les élèves de la classe démo ont déjà un parent associé.\nContactez l'école *${schoolName}* pour réinitialiser la démonstration.`);
   await logIncoming({ phone, schoolId, text, providerMessageId, parentId: null });
   return true;
 }

@@ -1038,7 +1038,7 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
         let usedPhone = parent.phones[0];
         for (const phone of parent.phones) {
           usedPhone = phone;
-          waResult = await sendText(schoolId, phone, messageText, { urgent: true });
+          waResult = await sendText(schoolId, phone, messageText);
           if (waResult.success) break;
           console.error('[Parents WhatsApp] send failed, repli numéro suivant', parent.id, phone, waResult.message);
         }
@@ -2569,9 +2569,9 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
       return res.status(400).json({ error: 'Aucun parent avec un numéro WhatsApp pour cette classe.' });
     }
 
-    // Répondre immédiatement : l'envoi (délais anti-ban) est trop long pour une
-    // requête HTTP synchrone (provoquait des timeouts 504). On envoie en arrière-plan,
-    // la progression est visible dans les journaux WhatsApp.
+    // Répondre immédiatement : sur un gros effectif l'envoi reste trop long
+    // pour une requête HTTP synchrone (provoquait des timeouts 504). On envoie
+    // en arrière-plan, la progression est visible dans les journaux WhatsApp.
     res.json({
       started: true,
       total: jobs.length,
@@ -2604,7 +2604,7 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
           let usedPhone = job.phones[0];
           for (const phone of job.phones) {
             usedPhone = phone;
-            waResult = await sendText(schoolId, phone, job.messageText, { urgent: true });
+            waResult = await sendText(schoolId, phone, job.messageText);
             if (waResult.success) break;
             console.error('[Massar WhatsApp] échec, repli numéro suivant', job.parentId, phone, waResult.message);
           }
@@ -3327,7 +3327,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 .single();
 
               if (recipientLog.data) {
-                const waResult = await sendText(schoolId, contact.phone_e164, messageText, { urgent: true });
+                const waResult = await sendText(schoolId, contact.phone_e164, messageText);
 
                 if (waResult.success) {
                   await supabaseAdmin
@@ -3489,7 +3489,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                         .single();
 
                       if (recipientLog.data) {
-                        const waResult = await sendText(student.school_id, contact.phone_e164, messageText, { urgent: true });
+                        const waResult = await sendText(student.school_id, contact.phone_e164, messageText);
 
                         if (waResult.success) {
                           await supabaseAdmin
@@ -5514,11 +5514,11 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             // Envoyer via l'API Cloud selon le type de message
             let waResult;
             if (messageType === 'image' && mediaUrl) {
-              waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '', { urgent: true });
+              waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '');
             } else if (messageType === 'document' && mediaUrl) {
-              waResult = await sendDocument(schoolId, phoneNumber, mediaUrl, fileName || 'document.pdf', messageText || '', undefined, { urgent: true });
+              waResult = await sendDocument(schoolId, phoneNumber, mediaUrl, fileName || 'document.pdf', messageText || '', undefined);
             } else {
-              waResult = await sendText(schoolId, phoneNumber, messageText, { urgent: true });
+              waResult = await sendText(schoolId, phoneNumber, messageText);
             }
 
             if (waResult.success) {

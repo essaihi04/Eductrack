@@ -19,8 +19,8 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText, sendImage } from '../index.js';
 import * as State from './state.js';
 
-// Nombre maximum de photos envoyées d'un coup pour une rubrique (anti-ban et
-// respect du forfait data du parent).
+// Nombre maximum de photos envoyées d'un coup pour une rubrique : au-delà, on
+// noie le parent et on consomme son forfait data pour rien.
 const MAX_IMAGES_PER_TOPIC = 6;
 
 export const CATEGORY_LABELS = {
@@ -252,7 +252,7 @@ async function sendTopicImages(schoolId, phone, items) {
   const withImage = items.filter((it) => it.image_url).slice(0, MAX_IMAGES_PER_TOPIC);
   let sent = 0;
   for (const it of withImage) {
-    const res = await sendImage(schoolId, phone, it.image_url, itemCaption(it), { urgent: true });
+    const res = await sendImage(schoolId, phone, it.image_url, itemCaption(it));
     if (res?.success) sent += 1;
     else console.warn('[showcase] photo non envoyée:', it.title, res?.message || res?.reason || '');
   }
@@ -267,7 +267,7 @@ export async function sendTopic({ schoolId, phone, category, publicOnly = false 
   const items = await getShowcaseItems(schoolId, { category, publicOnly });
   if (items.length === 0) return false;
 
-  await sendText(schoolId, phone, topicText(category, items), { urgent: true });
+  await sendText(schoolId, phone, topicText(category, items));
   await sendTopicImages(schoolId, phone, items);
   return true;
 }
@@ -280,17 +280,16 @@ export async function sendShowcaseMenu({ schoolId, phone, schoolName, publicOnly
 
   const card = profileCard(profile, schoolName);
   if (card && card.split('\n').length > 2) {
-    await sendText(schoolId, phone, card, { urgent: true });
+    await sendText(schoolId, phone, card);
   }
 
   if (groups.length === 0) {
     const contact = contactLines(profile, schoolName);
-    if (contact) await sendText(schoolId, phone, contact, { urgent: true });
+    if (contact) await sendText(schoolId, phone, contact);
     else if (!card || card.split('\n').length <= 2) {
       await sendText(
         schoolId, phone,
         `🏫 Les informations de *${schoolName}* ne sont pas encore publiées ici.\n\n_Contactez l'administration de l'école._`,
-        { urgent: true },
       );
     }
     return;
@@ -311,7 +310,7 @@ export async function sendShowcaseMenu({ schoolId, phone, schoolName, publicOnly
     showcaseCategories: groups.map((g) => g.category),
     showcasePublicOnly: publicOnly,
   });
-  await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
+  await sendText(schoolId, phone, lines.join('\n'));
 }
 
 /**
@@ -331,7 +330,6 @@ export async function handleShowcaseReply({ schoolId, phone, schoolName, text, s
     await sendText(
       schoolId, phone,
       contact || `📞 Les coordonnées de *${schoolName}* ne sont pas encore renseignées ici.`,
-      { urgent: true },
     );
     return true;
   }
@@ -351,7 +349,7 @@ export async function handleShowcaseReply({ schoolId, phone, schoolName, text, s
   const ok = await sendTopic({ schoolId, phone, category, publicOnly });
   if (!ok) {
     const { label } = CATEGORY_LABELS[category] || CATEGORY_LABELS.autre;
-    await sendText(schoolId, phone, `Aucune information publiée pour « ${label} » pour le moment.`, { urgent: true });
+    await sendText(schoolId, phone, `Aucune information publiée pour « ${label} » pour le moment.`);
   }
   return true;
 }
@@ -368,7 +366,7 @@ export async function handleShowcaseQuestion({ schoolId, phone, schoolName, text
     const profile = await getSchoolProfile(schoolId);
     const line = successRateLine(profile);
     if (!line) return false;
-    await sendText(schoolId, phone, `*🏫 ${schoolName}*\n${line}`, { urgent: true });
+    await sendText(schoolId, phone, `*🏫 ${schoolName}*\n${line}`);
     return true;
   }
 
@@ -376,7 +374,7 @@ export async function handleShowcaseQuestion({ schoolId, phone, schoolName, text
     const profile = await getSchoolProfile(schoolId);
     const contact = contactLines(profile, schoolName);
     if (!contact) return false;
-    await sendText(schoolId, phone, contact, { urgent: true });
+    await sendText(schoolId, phone, contact);
     return true;
   }
 

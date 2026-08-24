@@ -7,19 +7,19 @@
 // (status = 'sent') sont ignorés.
 //
 // C'est ce qui manquait avant : la boucle vivait en mémoire du process, et un
-// `pm2 restart` en cours d'envoi (un envoi de 300 parents dure plus d'une heure
-// à cause des délais anti-ban) perdait tout le reste sans que personne ne le
-// sache.
+// `pm2 restart` en cours d'envoi perdait tout le reste sans que personne ne le
+// sache. Avec l'API Cloud officielle il n'y a plus ni délai entre deux envois
+// ni quota journalier : la boucle enchaîne les destinataires à pleine vitesse.
 
 import { supabaseAdmin } from '../../config/supabase.js';
 import { sendPushToUser } from '../webPush.js';
 import { isSessionReady, sendUnified } from './sendHelpers.js';
-import { withGreeting } from './messageVariants.js';
+import { withGreeting } from './messagePersonalization.js';
 
 export const WHATSAPP_BULK_SEND = 'whatsapp_bulk_send';
 
 /**
- * Refus temporaire d'envoi (hors plage horaire, session en pause anti-ban).
+ * Refus temporaire d'envoi (école sans numéro Cloud API rattaché).
  * Interrompt le job sans marquer les destinataires restants en échec : la
  * reprise repart exactement là où l'envoi s'est arrêté.
  */
@@ -30,7 +30,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
   const { data: msg, error: msgError } = await supabaseAdmin
     .from('whatsapp_messages')
-    .select('id, school_id, message_type, content, media_url, file_name, channels, total_recipients, personalize, variants, resend_of')
+    .select('id, school_id, message_type, content, media_url, file_name, channels, total_recipients, personalize, resend_of')
     .eq('id', messageId)
     .single();
 
@@ -45,10 +45,6 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   const wantWa = channels !== 'push';
   const wantPush = channels !== 'whatsapp';
 
-  // Formulations générées à la création du message et stockées : le job les
-  // rejoue telles quelles, donc une reprise après coupure ne rappelle pas l'IA
-  // et un parent ne reçoit jamais deux versions différentes du même message.
-  const variants = Array.isArray(msg.variants) && msg.variants.length ? msg.variants : [message];
   const personalize = msg.personalize === true;
 
   const { data: allRecipients, error: recError } = await supabaseAdmin
@@ -110,9 +106,6 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
   let sentCount = done.length;
   let failedCount = 0;
-  // La rotation démarre sur le nombre de numéros DÉJÀ servis pour qu'une
-  // reprise ne reparte pas systématiquement sur la même formulation.
-  let waIndex = waSentPhones.size;
 
   for (const recipient of todo) {
     const patch = {};
@@ -161,23 +154,19 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
         waOk = true;
       } else {
         try {
-          let body = variants[waIndex % variants.length];
-          waIndex++;
+          let body = message;
           if (personalize) body = withGreeting(body, nameByParent.get(recipient.parent_id));
           const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName });
           if (result.success) {
             waOk = true;
             waSentPhones.add(recipient.phone_e164);
             patch.provider_msg_id = String(result.data?.msgId || '');
-          } else if (result.reason === 'out_of_hours' || result.reason === 'paused' || result.reason === 'session_down' || result.reason === 'daily_quota_exceeded') {
-            // Refus temporaire, pas un échec du destinataire : avec l'envoi par
-            // vagues une campagne s'étale sur plusieurs heures et franchit la
-            // limite de 23 h, tombe sur une pause anti-ban, atteint le quota
-            // de chauffe du jour, ou perd la session WhatsApp en cours de
-            // route. Les marquer en échec les priverait
-            // définitivement du message. On interrompt : le job reprendra une
-            // fois la session revenue, et les destinataires déjà servis sont
-            // ignorés (status = 'sent').
+          } else if (result.reason === 'session_down') {
+            // Refus temporaire, pas un échec du destinataire : le numéro Cloud
+            // API de l'école n'est plus rattaché. Les marquer en échec les
+            // priverait définitivement du message. On interrompt : le job
+            // reprendra une fois le numéro revenu, et les destinataires déjà
+            // servis sont ignorés (status = 'sent').
             throw new SendSuspended(`Envoi suspendu (${result.reason}) — reprise automatique`);
           } else {
             errorMsg = [errorMsg, result.message || 'Erreur WhatsApp'].filter(Boolean).join(' | ');
@@ -229,7 +218,6 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
     // Prolonge le bail du job : un envoi dure bien plus longtemps que le bail
     // par défaut, sans ça il serait considéré orphelin et repris en double.
     await touch({ sent: sentCount, failed: failedCount, total: allRecipients.length });
-    // Pas besoin de waitWasenderInterval : sendText/sendImage intègrent déjà le délai humain anti-ban.
   }
 
   await finalize(messageId, sentCount, failedCount, allRecipients.length);

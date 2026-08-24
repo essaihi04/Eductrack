@@ -44,6 +44,20 @@ import { getDefaultYearBounds, getCurrentSemester, getCurrentAcademicYear } from
 
 const router = Router();
 
+// Numéro du parent → E.164. L'API Cloud de Meta n'accepte qu'un numéro
+// international ; Baileys, lui, se contentait d'un JID « 212…@s.whatsapp.net »
+// construit à la main. Maroc par défaut (06… → +2126…).
+const toE164 = (raw) => {
+  const value = String(raw || '').trim();
+  if (value.startsWith('+')) return value;
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('212')) return `+${digits}`;
+  if (digits.startsWith('0') && digits.length >= 9) return `+212${digits.slice(1)}`;
+  if (digits.length === 9) return `+212${digits}`;
+  return `+${digits}`;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Middleware : toutes les routes nécessitent une authentification
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1254,7 +1268,7 @@ router.post('/student-notes/:studentId/send', requireSchoolAdmin, async (req, re
 
     // ── Canal WhatsApp : PDF avec logo école ──────────────────────────────
     if (wantWhatsapp) {
-      const { sendDocument, getStatus } = await import('../services/whatsapp/index.js');
+      const { sendMediaBuffer, getStatus } = await import('../services/whatsapp/index.js');
       const status = await getStatus(schoolId);
       if (!status?.connected) {
         out.whatsapp = { sent: 0, error: 'Session WhatsApp non connectée' };
@@ -1283,13 +1297,19 @@ router.post('/student-notes/:studentId/send', requireSchoolAdmin, async (req, re
           if (!phone || seenPhones.has(phone)) continue;
           seenPhones.add(phone);
           try {
-            const jid = phone.replace(/^0/, '212').replace(/^\+/, '') + '@s.whatsapp.net';
-            await sendDocument(schoolId, jid, pdfBuffer,
-              `notes_${studentName.replace(/\s+/g, '_')}_S${semester}.pdf`,
-              `📊 Relevé de notes de ${studentName} — Semestre ${semester} (${academic_year})` +
-              (result.general_average != null ? `\nMoyenne générale : ${result.general_average}/20` : '') +
-              (generalRank ? `\nRang : ${generalRank}/${totalStudents}` : '') +
-              (trackingSummary ? `\n\n📋 Suivi en classe :\n${trackingSummary.split(' · ').map(s => `• ${s}`).join('\n')}` : ''));
+            // PDF généré en mémoire → envoi par buffer : l'API Cloud l'uploade
+            // d'abord chez Meta. sendDocument, lui, n'accepte qu'une URL.
+            const waRes = await sendMediaBuffer(schoolId, toE164(phone), pdfBuffer, {
+              type: 'document',
+              fileName: `notes_${studentName.replace(/\s+/g, '_')}_S${semester}.pdf`,
+              mimetype: 'application/pdf',
+              caption:
+                `📊 Relevé de notes de ${studentName} — Semestre ${semester} (${academic_year})` +
+                (result.general_average != null ? `\nMoyenne générale : ${result.general_average}/20` : '') +
+                (generalRank ? `\nRang : ${generalRank}/${totalStudents}` : '') +
+                (trackingSummary ? `\n\n📋 Suivi en classe :\n${trackingSummary.split(' · ').map(s => `• ${s}`).join('\n')}` : ''),
+            });
+            if (!waRes?.success) throw new Error(waRes?.message || 'Envoi WhatsApp refusé');
             sent++;
           } catch (err) {
             errors.push({ parent: `${p.first_name || ''} ${p.last_name || ''}`.trim(), error: err.message });
@@ -1395,7 +1415,7 @@ router.post('/send-whatsapp', requireSchoolAdmin, async (req, res) => {
     }
 
     // Import dynamique pour éviter une dépendance circulaire
-    const { sendDocument, getStatus } = await import('../services/whatsapp/index.js');
+    const { sendMediaBuffer, getStatus } = await import('../services/whatsapp/index.js');
 
     const schoolId = req.user.school_id;
     const status = await getStatus(schoolId);
@@ -1472,10 +1492,14 @@ router.post('/send-whatsapp', requireSchoolAdmin, async (req, res) => {
           logoBuffer
         });
 
-        const jid = parentPhone.replace(/^0/, '212').replace(/^\+/, '') + '@s.whatsapp.net';
         const studentName = `${bulletin.profiles?.first_name || ''} ${bulletin.profiles?.last_name || ''}`;
-        await sendDocument(schoolId, jid, pdfBuffer, `bulletin_${studentName.replace(/\s+/g, '_')}_S${bulletin.semester}.pdf`,
-          `📄 Bulletin scolaire de ${studentName} — Semestre ${bulletin.semester}`);
+        const waRes = await sendMediaBuffer(schoolId, toE164(parentPhone), pdfBuffer, {
+          type: 'document',
+          fileName: `bulletin_${studentName.replace(/\s+/g, '_')}_S${bulletin.semester}.pdf`,
+          mimetype: 'application/pdf',
+          caption: `📄 Bulletin scolaire de ${studentName} — Semestre ${bulletin.semester}`,
+        });
+        if (!waRes?.success) throw new Error(waRes?.message || 'Envoi WhatsApp refusé');
 
         // Mettre à jour le statut
         await supabaseAdmin.from('bulletins').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', bulletinId);

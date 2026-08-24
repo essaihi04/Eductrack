@@ -272,7 +272,7 @@ const ASK_TARGET = [
 export async function startAppointmentFlow({ schoolId, parentInfo, phone, studentId = null }) {
   const kids = await childrenOf(parentInfo.parent_id);
   if (kids.length === 0) {
-    await sendText(parentInfo.school_id, phone, "❌ Aucun élève n'est rattaché à votre compte.", { urgent: true });
+    await sendText(parentInfo.school_id, phone, "❌ Aucun élève n'est rattaché à votre compte.");
     return;
   }
 
@@ -295,7 +295,7 @@ export async function startAppointmentFlow({ schoolId, parentInfo, phone, studen
       '',
       '_Répondez avec le numéro._',
     ];
-    await sendText(parentInfo.school_id, phone, lines.join('\n'), { urgent: true });
+    await sendText(parentInfo.school_id, phone, lines.join('\n'));
     return;
   }
 
@@ -305,7 +305,7 @@ export async function startAppointmentFlow({ schoolId, parentInfo, phone, studen
     apptStudentId: selected,
     studentId: selected,
   });
-  await sendText(parentInfo.school_id, phone, ASK_TARGET, { urgent: true });
+  await sendText(parentInfo.school_id, phone, ASK_TARGET);
 }
 
 /**
@@ -323,13 +323,13 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
     const idx = Number(input) - 1;
     const chosen = kids[idx] || kids.find((k) => k.name.toLowerCase().includes(input.toLowerCase()));
     if (!chosen) {
-      await sendText(schoolIdOut, phone, '❌ Choix invalide. Répondez avec le numéro de l\'enfant.', { urgent: true });
+      await sendText(schoolIdOut, phone, '❌ Choix invalide. Répondez avec le numéro de l\'enfant.');
       return true;
     }
     // `studentId` est aussi posé : l'enfant choisi ici reste sélectionné pour
     // la suite de la conversation (menu, questions libres…).
     State.setState(schoolId, phone, { apptStep: 'target', apptStudentId: chosen.id, studentId: chosen.id });
-    await sendText(schoolIdOut, phone, ASK_TARGET, { urgent: true });
+    await sendText(schoolIdOut, phone, ASK_TARGET);
     return true;
   }
 
@@ -338,8 +338,7 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
     if (input === '1' || /administration|direction|مدير|الإدارة/i.test(input)) {
       State.setState(schoolId, phone, { apptStep: 'subject', apptTargetType: 'administration', apptTeacherId: null });
       await sendText(schoolIdOut, phone,
-        '📝 Quel est l\'*objet* de ce rendez-vous ?\n\n_Écrivez-le en quelques mots (ex. « résultats de mon fils », « problème de transport »)._',
-        { urgent: true });
+        '📝 Quel est l\'*objet* de ce rendez-vous ?\n\n_Écrivez-le en quelques mots (ex. « résultats de mon fils », « problème de transport »)._');
       return true;
     }
     if (input === '2' || /professeur|prof|أستاذ|ustad/i.test(input)) {
@@ -348,8 +347,7 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
       const teachers = await listClassTeachers(child?.class_id);
       if (teachers.length === 0) {
         await sendText(schoolIdOut, phone,
-          '❌ Aucun professeur n\'est encore rattaché à la classe de votre enfant.\n\nVotre demande sera adressée à l\'administration.\n\n📝 Quel est l\'*objet* de ce rendez-vous ?',
-          { urgent: true });
+          '❌ Aucun professeur n\'est encore rattaché à la classe de votre enfant.\n\nVotre demande sera adressée à l\'administration.\n\n📝 Quel est l\'*objet* de ce rendez-vous ?');
         State.setState(schoolId, phone, { apptStep: 'subject', apptTargetType: 'administration', apptTeacherId: null });
         return true;
       }
@@ -365,10 +363,10 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
         '',
         '_Répondez avec le numéro._',
       ];
-      await sendText(schoolIdOut, phone, lines.join('\n'), { urgent: true });
+      await sendText(schoolIdOut, phone, lines.join('\n'));
       return true;
     }
-    await sendText(schoolIdOut, phone, '❌ Répondez *1* (administration) ou *2* (professeur).', { urgent: true });
+    await sendText(schoolIdOut, phone, '❌ Répondez *1* (administration) ou *2* (professeur).');
     return true;
   }
 
@@ -378,26 +376,24 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
     const idx = Number(input) - 1;
     const chosen = list[idx] || list.find((t) => t.name.toLowerCase().includes(input.toLowerCase()));
     if (!chosen) {
-      await sendText(schoolIdOut, phone, '❌ Choix invalide. Répondez avec le numéro du professeur.', { urgent: true });
+      await sendText(schoolIdOut, phone, '❌ Choix invalide. Répondez avec le numéro du professeur.');
       return true;
     }
     State.setState(schoolId, phone, { apptStep: 'subject', apptTeacherId: chosen.id });
     await sendText(schoolIdOut, phone,
-      `📝 Quel est l'*objet* du rendez-vous avec *${chosen.name}* ?\n\n_Écrivez-le en quelques mots._`,
-      { urgent: true });
+      `📝 Quel est l'*objet* du rendez-vous avec *${chosen.name}* ?\n\n_Écrivez-le en quelques mots._`);
     return true;
   }
 
   // ── Étape 4 : objet ──
   if (step === 'subject') {
     if (input.length < 3) {
-      await sendText(schoolIdOut, phone, '❌ Merci de préciser l\'objet du rendez-vous en quelques mots.', { urgent: true });
+      await sendText(schoolIdOut, phone, '❌ Merci de préciser l\'objet du rendez-vous en quelques mots.');
       return true;
     }
     State.setState(schoolId, phone, { apptStep: 'slot', apptSubject: input.slice(0, 300) });
     await sendText(schoolIdOut, phone,
-      '🕐 Avez-vous une *préférence de créneau* ?\n\n_Ex. « jeudi matin », « après 16h ». Tapez *0* pour laisser l\'école choisir._',
-      { urgent: true });
+      '🕐 Avez-vous une *préférence de créneau* ?\n\n_Ex. « jeudi matin », « après 16h ». Tapez *0* pour laisser l\'école choisir._');
     return true;
   }
 
@@ -429,12 +425,11 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
         `L'établissement vous confirmera *la date et l'heure* par ce même canal.`,
         '',
         '_Tapez *menu* pour revenir aux autres options._',
-      ].filter(Boolean).join('\n'), { urgent: true });
+      ].filter(Boolean).join('\n'));
     } catch (e) {
       console.error('[appointments/wa] création:', e.message);
       await sendText(schoolIdOut, phone,
-        "❌ La demande n'a pas pu être enregistrée. Réessayez plus tard ou contactez l'établissement.",
-        { urgent: true });
+        "❌ La demande n'a pas pu être enregistrée. Réessayez plus tard ou contactez l'établissement.");
     }
     State.setMenu(schoolId, phone, 'main');
     return true;
@@ -488,7 +483,7 @@ async function registerProposal({ schoolId, phone, teacher, appointmentId, dateS
     `📝 Objet : ${appt.subject}`,
     '',
     "_L'administration valide le créneau puis prévient le parent. Vous recevrez la confirmation._",
-  ].filter(Boolean).join('\n'), { urgent: true });
+  ].filter(Boolean).join('\n'));
   return true;
 }
 
@@ -512,7 +507,7 @@ export async function handleTeacherAppointmentMessage({ schoolId, phone, text, t
   if (state?.state === 'APPT_TEACHER' && state.apptTeacherDate && state.apptTeacherPendingId) {
     const time = parseTime(input) || (await aiParseSlot(input))?.time;
     if (!time) {
-      await sendText(outSchool, phone, '🕐 Merci d\'indiquer l\'*heure* du rendez-vous (ex. « 10h30 »).', { urgent: true });
+      await sendText(outSchool, phone, '🕐 Merci d\'indiquer l\'*heure* du rendez-vous (ex. « 10h30 »).');
       return true;
     }
     await registerProposal({
@@ -535,8 +530,7 @@ export async function handleTeacherAppointmentMessage({ schoolId, phone, text, t
     if (chosen) {
       State.setState(schoolId, phone, { apptTeacherChoices: null, apptTeacherPendingId: chosen });
       await sendText(outSchool, phone,
-        '📅 Indiquez la *date et l\'heure* que vous proposez (ex. « jeudi 10h30 »).',
-        { urgent: true });
+        '📅 Indiquez la *date et l\'heure* que vous proposez (ex. « jeudi 10h30 »).');
       return true;
     }
   }
@@ -549,8 +543,7 @@ export async function handleTeacherAppointmentMessage({ schoolId, phone, text, t
     if (!appt) return false;
     await markTeacherUnavailable({ appointment: appt, teacherId: prof.id, message: input });
     await sendText(outSchool, phone,
-      "👍 C'est noté : vous n'êtes pas disponible. L'administration prendra le relais.",
-      { urgent: true });
+      "👍 C'est noté : vous n'êtes pas disponible. L'administration prendra le relais.");
     State.resetState(schoolId, phone);
     return true;
   }
@@ -585,7 +578,7 @@ export async function handleTeacherAppointmentMessage({ schoolId, phone, text, t
       '',
       '_Répondez avec le numéro concerné._',
     ];
-    await sendText(outSchool, phone, lines.join('\n'), { urgent: true });
+    await sendText(outSchool, phone, lines.join('\n'));
     return true;
   }
 
@@ -598,8 +591,7 @@ export async function handleTeacherAppointmentMessage({ schoolId, phone, text, t
       apptTeacherChoices: null,
     });
     await sendText(outSchool, phone,
-      `📅 Date retenue : *${dateStr.split('-').reverse().join('/')}*.\n\n🕐 À quelle *heure* ? (ex. « 10h30 »)`,
-      { urgent: true });
+      `📅 Date retenue : *${dateStr.split('-').reverse().join('/')}*.\n\n🕐 À quelle *heure* ? (ex. « 10h30 »)`);
     return true;
   }
 

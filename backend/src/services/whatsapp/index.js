@@ -6,6 +6,11 @@
  * Tout passe par des appels HTTPS Graph API avec un token System User central,
  * chaque école étant identifiée par son `phone_number_id`.
  *
+ * Il n'y a donc PLUS AUCUNE règle d'envoi héritée de Baileys : ni fenêtre
+ * horaire, ni délai « humain » entre deux messages, ni quota journalier de
+ * montée en charge, ni pause anti-ban, ni option `urgent` pour les contourner.
+ * Un envoi part immédiatement, dans l'ordre où il est demandé.
+ *
  * Ce module ne fait plus que deux choses par-dessus `cloudApi.js` :
  *   1. appliquer l'interrupteur global des notifications (outboundGate) ;
  *   2. garder le format de réponse historique { success, data: { msgId } }.
@@ -42,41 +47,40 @@ const notConfigured = async (schoolId) => {
  * @param {string} schoolId
  * @param {string} phone   E.164 (+212600...)
  * @param {string} text
- * @param {object} opts    conservé pour compatibilité (ignoré par le Cloud API)
  */
-export async function sendText(schoolId, phone, text, opts = {}) {
+export async function sendText(schoolId, phone, text) {
   const blocked = blockedIfDisabled(phone);
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendText(schoolId, phone, text, opts);
+  return cloud.sendText(schoolId, phone, text);
 }
 
 /** Envoi image depuis URL. */
-export async function sendImage(schoolId, phone, imageUrl, caption = '', opts = {}) {
+export async function sendImage(schoolId, phone, imageUrl, caption = '') {
   const blocked = blockedIfDisabled(phone);
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendImage(schoolId, phone, imageUrl, caption, opts);
+  return cloud.sendImage(schoolId, phone, imageUrl, caption);
 }
 
 /** Envoi document (PDF, etc.) depuis URL. */
-export async function sendDocument(schoolId, phone, documentUrl, fileName, caption = '', mimetype = 'application/pdf', opts = {}) {
+export async function sendDocument(schoolId, phone, documentUrl, fileName, caption = '', mimetype = 'application/pdf') {
   const blocked = blockedIfDisabled(phone);
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype, opts);
+  return cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype);
 }
 
 /** Envoi média depuis un buffer généré côté backend (bulletins, factures…). */
-export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'document', fileName, mimetype, caption } = {}, opts = {}) {
+export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'document', fileName, mimetype, caption } = {}) {
   const blocked = blockedIfDisabled(phone);
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption }, opts);
+  return cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption });
 }
 
 // ─────────────────────────────────────────────────────────────────────────

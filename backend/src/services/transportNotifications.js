@@ -105,12 +105,11 @@ async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, rec
   }));
   await supabaseAdmin.from('whatsapp_message_recipients').insert(recipientRows);
 
-  // 3) Envoi séquentiel via l'API Cloud
-  // Les notifs transport sont marquées "urgent" pour ignorer la fenêtre horaire stricte
-  // (un parent doit être notifié à 7h du matin si son enfant monte dans le bus).
+  // 3) Envoi séquentiel via l'API Cloud. Aucune fenêtre horaire : un parent
+  //    doit être notifié à 7 h du matin si son enfant monte dans le bus.
   let sentOk = 0, failed = 0;
   for (const r of validRecipients) {
-    const result = await rawSend(schoolId, r.phone, text, { urgent: true });
+    const result = await rawSend(schoolId, r.phone, text);
     const status = result.ok ? 'sent' : 'failed';
     if (result.ok) sentOk++; else failed++;
     await supabaseAdmin
@@ -363,7 +362,7 @@ async function sendDepartureGate(schoolId, parentIds, senderId, label) {
       } else {
         // Repli texte (tant que le template n'est pas configuré)
         const txt = `🚌 *Transport — ${label}*\nLe bus démarre.\n\n• Répondez *BUS OUI* pour recevoir le suivi du bus aujourd'hui (gratuit).\n• Répondez *BUS NON* pour ne pas être notifié aujourd'hui.\n\n📲 _Avec l'application, tout est automatique et gratuit._`;
-        await sendText(schoolId, phone, txt, { urgent: true });
+        await sendText(schoolId, phone, txt);
       }
     } catch (e) {
       console.error('[TransportGate] parent', pid, e.message);

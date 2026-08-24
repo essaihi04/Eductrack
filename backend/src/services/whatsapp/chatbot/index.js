@@ -82,11 +82,11 @@ async function sendPhotoLocalFirst(schoolId, phone, photoUrl, caption) {
   const localPath = join(__dirname, '../../../..', photoUrl);
   if (!photoUrl.startsWith('http') && fs.existsSync(localPath)) {
     const buf = fs.readFileSync(localPath);
-    return sendMediaBuffer(schoolId, phone, buf, { type: 'image', caption }, { urgent: true });
+    return sendMediaBuffer(schoolId, phone, buf, { type: 'image', caption });
   }
   const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
   const url = photoUrl.startsWith('http') ? photoUrl : `${base}${photoUrl}`;
-  return sendImage(schoolId, phone, url, caption, { urgent: true });
+  return sendImage(schoolId, phone, url, caption);
 }
 
 /**
@@ -96,7 +96,7 @@ async function sendPhotoLocalFirst(schoolId, phone, photoUrl, caption) {
  */
 async function sendCustomEntry(schoolId, phone, entry) {
   if (!entry) {
-    return sendText(schoolId, phone, `Ce contenu n'est plus disponible.`, { urgent: true });
+    return sendText(schoolId, phone, `Ce contenu n'est plus disponible.`);
   }
 
   const header = `*${entry.title}*`;
@@ -104,7 +104,7 @@ async function sendCustomEntry(schoolId, phone, entry) {
   const captionFits = entry.media_url && body.length <= 900;
 
   if (!captionFits && (entry.body_text || !entry.media_url)) {
-    await sendText(schoolId, phone, body, { urgent: true });
+    await sendText(schoolId, phone, body);
   }
 
   if (entry.media_url) {
@@ -114,12 +114,12 @@ async function sendCustomEntry(schoolId, phone, entry) {
     } else {
       await sendDocument(
         schoolId, phone, entry.media_url,
-        entry.file_name || `${entry.title}.pdf`, caption, 'application/pdf', { urgent: true },
+        entry.file_name || `${entry.title}.pdf`, caption, 'application/pdf',
       );
     }
   }
 
-  return sendText(schoolId, phone, `_Tapez *menu* pour revenir aux options._`, { urgent: true });
+  return sendText(schoolId, phone, `_Tapez *menu* pour revenir aux options._`);
 }
 
 /**
@@ -131,8 +131,7 @@ async function sendTimetablePdf(schoolId, phone, student) {
     const pdf = await generateTimetablePdfForStudent(student.id);
     if (!pdf?.buffer) {
       await sendText(schoolId, phone,
-        `📅 L'emploi du temps de *${student.first_name}* n'a pas encore été configuré.\n_Contactez l'administration de l'école._`,
-        { urgent: true });
+        `📅 L'emploi du temps de *${student.first_name}* n'a pas encore été configuré.\n_Contactez l'administration de l'école._`);
       return false;
     }
     await sendMediaBuffer(schoolId, phone, pdf.buffer, {
@@ -140,7 +139,7 @@ async function sendTimetablePdf(schoolId, phone, student) {
       fileName: pdf.fileName,
       mimetype: 'application/pdf',
       caption: `📅 Emploi du temps hebdomadaire de *${student.first_name} ${student.last_name}*`,
-    }, { urgent: true });
+    });
     return true;
   } catch (e) {
     console.error('[chatbot] sendTimetablePdf error:', e.message);
@@ -181,7 +180,7 @@ async function sendBulletinPdfs(schoolId, phone, student, semester = null) {
           fileName: pdf.fileName,
           mimetype: 'application/pdf',
           caption: `📄 Bulletin ${b.academic_year} — Semestre ${b.semester}`,
-        }, { urgent: true });
+        });
         count++;
       }
     }
@@ -224,9 +223,9 @@ async function tryShowcaseAnswer({ schoolId, phone, parentInfo, text }) {
 async function maybeAnswerMassar(schoolId, phone, student, parentInfo, text) {
   if (!isMassarQuery(text)) return false;
   const reply = await A.getMassarCode(student, parentInfo);
-  await sendText(schoolId, phone, reply, { urgent: true });
+  await sendText(schoolId, phone, reply);
   setTimeout(() => {
-    sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+    sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`);
   }, 1500);
   return true;
 }
@@ -241,8 +240,7 @@ async function sendDailyReportNow(schoolId, phone, student, parentInfo) {
   await sendText(
     schoolId,
     phone,
-    `📊 Préparation du rapport de suivi de *${student.first_name}*… _un instant._`,
-    { urgent: true }
+    `📊 Préparation du rapport de suivi de *${student.first_name}*… _un instant._`
   );
   try {
     const result = await generatePreview(student.id, schoolId);
@@ -250,8 +248,7 @@ async function sendDailyReportNow(schoolId, phone, student, parentInfo) {
       await sendText(
         schoolId,
         phone,
-        `📊 ${result?.error || "Aucune donnée de suivi disponible aujourd'hui."}\n\n_Le rapport sera consultable dès qu'un professeur aura renseigné une séance._\n\n_Tapez *menu* pour d'autres options._`,
-        { urgent: true }
+        `📊 ${result?.error || "Aucune donnée de suivi disponible aujourd'hui."}\n\n_Le rapport sera consultable dès qu'un professeur aura renseigné une séance._\n\n_Tapez *menu* pour d'autres options._`
       );
       return;
     }
@@ -261,16 +258,16 @@ async function sendDailyReportNow(schoolId, phone, student, parentInfo) {
     if (report.fr && report.ar) msg += '\n\n━━━━━━━━━━━━━━━\n\n';
     if (report.ar) msg += report.ar;
     if (!msg.trim()) {
-      await sendText(schoolId, phone, `📊 Rapport indisponible pour le moment. Réessayez plus tard.`, { urgent: true });
+      await sendText(schoolId, phone, `📊 Rapport indisponible pour le moment. Réessayez plus tard.`);
       return;
     }
-    await sendText(schoolId, phone, msg, { urgent: true });
+    await sendText(schoolId, phone, msg);
     setTimeout(() => {
-      sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+      sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`);
     }, 1500);
   } catch (e) {
     console.error('[chatbot] sendDailyReportNow error:', e.message);
-    await sendText(schoolId, phone, `⚠️ Erreur lors de la génération du rapport. Veuillez réessayer.`, { urgent: true });
+    await sendText(schoolId, phone, `⚠️ Erreur lors de la génération du rapport. Veuillez réessayer.`);
   }
 }
 
@@ -500,7 +497,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
   const children = await getParentChildren(parentInfo.parent_id);
 
   if (children.length === 0) {
-    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro. Contactez ${parentInfo.school_name}.`, { urgent: true });
+    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro. Contactez ${parentInfo.school_name}.`);
     await markProcessed(incomingMsgId);
     return;
   }
@@ -516,7 +513,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
   if (target) {
     const ok = await saveStudentHomeLocation(target.id, location);
     if (!ok) {
-      await sendText(schoolId, phone, `⚠️ Erreur lors de l'enregistrement de votre position. Veuillez réessayer.`, { urgent: true });
+      await sendText(schoolId, phone, `⚠️ Erreur lors de l'enregistrement de votre position. Veuillez réessayer.`);
       await markProcessed(incomingMsgId);
       return;
     }
@@ -526,7 +523,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
       State.setState(schoolId, phone, { lastLocation: location });
       msg += `\n\n_Répondez *tous* pour appliquer cette adresse à tous vos enfants (${children.length})._`;
     }
-    await sendText(schoolId, phone, msg, { urgent: true });
+    await sendText(schoolId, phone, msg);
     await markProcessed(incomingMsgId);
     return;
   }
@@ -550,7 +547,7 @@ async function handleLocationMessage({ location, phone, parentInfo, incomingMsgI
     pendingLocation: location,
     childrenList: children.map((c) => c.id),
   });
-  await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
+  await sendText(schoolId, phone, lines.join('\n'));
   await markProcessed(incomingMsgId);
 }
 
@@ -564,8 +561,7 @@ async function applyLocationToAllChildren({ location, phone, parentInfo }) {
   await sendText(
     parentInfo.school_id,
     phone,
-    `✅ Localisation enregistrée pour *${okCount}/${children.length}* enfant(s).\n📍 ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}\n\n_Tapez *menu* pour d'autres options._`,
-    { urgent: true }
+    `✅ Localisation enregistrée pour *${okCount}/${children.length}* enfant(s).\n📍 ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}\n\n_Tapez *menu* pour d'autres options._`
   );
 }
 
@@ -595,14 +591,13 @@ function photoInstructions(studentName) {
 async function applyProfilePhoto(schoolId, phone, child, photoUrl) {
   const ok = await setStudentAvatarUrl(child.id, photoUrl);
   if (!ok) {
-    await sendText(schoolId, phone, `⚠️ Erreur lors de l'enregistrement de la photo. Veuillez réessayer.`, { urgent: true });
+    await sendText(schoolId, phone, `⚠️ Erreur lors de l'enregistrement de la photo. Veuillez réessayer.`);
     return false;
   }
   await sendText(
     schoolId,
     phone,
-    `✅ *Photo de profil mise à jour* pour *${child.first_name} ${child.last_name}* 📷\n\n_Elle est maintenant visible dans l'application._\n\n_Tapez *menu* pour d'autres options._`,
-    { urgent: true }
+    `✅ *Photo de profil mise à jour* pour *${child.first_name} ${child.last_name}* 📷\n\n_Elle est maintenant visible dans l'application._\n\n_Tapez *menu* pour d'autres options._`
   );
   return true;
 }
@@ -619,7 +614,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
   const children = await getParentChildren(parentInfo.parent_id);
 
   if (children.length === 0) {
-    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro. Contactez ${parentInfo.school_name}.`, { urgent: true });
+    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro. Contactez ${parentInfo.school_name}.`);
     await markProcessed(incomingMsgId);
     return;
   }
@@ -630,7 +625,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
     buffer = await image.download();
   } catch (e) {
     console.error('[chatbot] téléchargement photo échoué:', e.message);
-    await sendText(schoolId, phone, `⚠️ Impossible de télécharger votre photo. Veuillez la renvoyer.`, { urgent: true });
+    await sendText(schoolId, phone, `⚠️ Impossible de télécharger votre photo. Veuillez la renvoyer.`);
     await markProcessed(incomingMsgId);
     return;
   }
@@ -671,7 +666,7 @@ async function handlePhotoMessage({ image, caption, phone, parentInfo, incomingM
     pendingPhotoTargetId: null,
     childrenList: children.map((c) => c.id),
   });
-  await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
+  await sendText(schoolId, phone, lines.join('\n'));
   await markProcessed(incomingMsgId);
 }
 
@@ -729,7 +724,7 @@ function matchChildFromInput(rawText, children) {
 
 async function sendChildSelectionMenu(schoolId, phone, children, parentInfo) {
   if (children.length === 0) {
-    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro.\n\nVeuillez contacter ${parentInfo.school_name} pour configurer votre compte.`, { urgent: true });
+    await sendText(schoolId, phone, `Aucun enfant n'est rattaché à votre numéro.\n\nVeuillez contacter ${parentInfo.school_name} pour configurer votre compte.`);
     return;
   }
 
@@ -758,7 +753,7 @@ async function sendChildSelectionMenu(schoolId, phone, children, parentInfo) {
   // Stocke la liste pour résoudre la sélection
   State.setState(schoolId, phone, { childrenList: children.map((c) => c.id) });
 
-  await sendText(schoolId, phone, lines.join('\n'), { urgent: true });
+  await sendText(schoolId, phone, lines.join('\n'));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -797,7 +792,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
   if (option.menuId) {
     const cap = capabilityForOption(option.menuId, option.id);
     if (cap && !(await isCapabilityEnabled(schoolId, cap.id))) {
-      return sendText(schoolId, phone, `Cette information n'est plus disponible via WhatsApp. Contactez ${parentInfo.school_name} directement.`, { urgent: true });
+      return sendText(schoolId, phone, `Cette information n'est plus disponible via WhatsApp. Contactez ${parentInfo.school_name} directement.`);
     }
   }
 
@@ -818,7 +813,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     if (target === 'ai') {
       State.setAIMode(schoolId, phone);
       const msg = `*💬 Question libre*\n━━━━━━━━━━━━━━━━━━━\n\nPosez votre question sur ${student.first_name} en tant que parent.\n\nExemples :\n• "Comment se débrouille-t-il en maths ?"\n• "Que dois-je payer ce mois-ci ?"\n\n_L'IA répond en se basant uniquement sur les données de votre enfant._\n\nTapez *menu* à tout moment pour revenir au menu principal.`;
-      return sendText(schoolId, phone, msg, { urgent: true });
+      return sendText(schoolId, phone, msg);
     }
     if (target === 'child') {
       const children = await getParentChildren(parentInfo.parent_id);
@@ -835,7 +830,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       if (prof?.home_lat != null && prof?.home_lng != null) {
         current = `\n\n🏠 Adresse actuelle enregistrée :\n📍 ${Number(prof.home_lat).toFixed(6)}, ${Number(prof.home_lng).toFixed(6)}${prof.home_address ? `\n${prof.home_address}` : ''}\n_Envoyez une nouvelle position pour la remplacer._`;
       }
-      return sendText(schoolId, phone, locationInstructions(`${student.first_name} ${student.last_name}`) + current, { urgent: true });
+      return sendText(schoolId, phone, locationInstructions(`${student.first_name} ${student.last_name}`) + current);
     }
     if (target === 'school') {
       // Vitrine de l'école : présentation, puis menu des rubriques illustrées.
@@ -855,7 +850,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       // Active le mode "photo attendue" : la prochaine image reçue sera
       // importée directement comme photo de profil de l'enfant sélectionné.
       State.setState(schoolId, phone, { awaitingPhoto: true });
-      return sendText(schoolId, phone, photoInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
+      return sendText(schoolId, phone, photoInstructions(`${student.first_name} ${student.last_name}`));
     }
     if (target === 'credentials') {
       // Propose : parent uniquement ou parent + enfant
@@ -865,9 +860,9 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
         student,
         target: 'both',
       });
-      await sendText(schoolId, phone, replyMsg, { urgent: true });
+      await sendText(schoolId, phone, replyMsg);
       setTimeout(() => {
-        sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+        sendText(schoolId, phone, `_Tapez *menu* pour d'autres options._`);
       }, 1500);
       return;
     }
@@ -882,16 +877,16 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
       if (option.action === A.getActivePolls) {
         const polls = await A.getActivePollsData(student, parentInfo);
         if (polls.length === 0) {
-          await sendText(schoolId, phone, await A.getActivePolls(student, parentInfo), { urgent: true });
+          await sendText(schoolId, phone, await A.getActivePolls(student, parentInfo));
         } else {
           State.setPollVoting(schoolId, phone, polls);
-          await sendText(schoolId, phone, A.formatPollPrompt(polls[0], 1, polls.length), { urgent: true });
+          await sendText(schoolId, phone, A.formatPollPrompt(polls[0], 1, polls.length));
         }
         return;
       }
 
       const reply = await option.action(student, parentInfo);
-      await sendText(schoolId, phone, reply, { urgent: true });
+      await sendText(schoolId, phone, reply);
 
       // Cas spécial : pour les "Bulletins scolaires" on envoie aussi les PDFs.
       if (option.action === A.getBulletinSummary) {
@@ -914,11 +909,11 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
             const localPath = join(__dirname, '../../../..', it.photo_url);
             if (!it.photo_url.startsWith('http') && fs.existsSync(localPath)) {
               const buf = fs.readFileSync(localPath);
-              res = await sendMediaBuffer(schoolId, phone, buf, { type: 'image', caption }, { urgent: true });
+              res = await sendMediaBuffer(schoolId, phone, buf, { type: 'image', caption });
             } else {
               const base = process.env.PUBLIC_BASE_URL || 'https://etrack.ma';
               const url = it.photo_url.startsWith('http') ? it.photo_url : `${base}${it.photo_url}`;
-              res = await sendImage(schoolId, phone, url, caption, { urgent: true });
+              res = await sendImage(schoolId, phone, url, caption);
             }
             if (res?.success) okCount += 1;
             else console.warn('[chatbot] photo objet perdu NON envoyée:', it.title, res?.message || res?.reason || '');
@@ -966,7 +961,7 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
                 fileName: pdf.fileName,
                 mimetype: 'application/pdf',
                 caption: '📎 Votre facture en PDF',
-              }, { urgent: true });
+              });
             }
           }
         } catch (pdfErr) {
@@ -976,18 +971,18 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
 
       // Petit menu de rappel à la fin
       setTimeout(() => {
-        sendText(schoolId, phone, `_Tapez *menu* pour d'autres options ou choisissez directement un autre numéro._`, { urgent: true });
+        sendText(schoolId, phone, `_Tapez *menu* pour d'autres options ou choisissez directement un autre numéro._`);
       }, 1500);
       return;
     } catch (e) {
       console.error('[chatbot] Erreur exécution option:', e);
-      await sendText(schoolId, phone, `⚠️ Erreur lors de la récupération des données. Veuillez réessayer.`, { urgent: true });
+      await sendText(schoolId, phone, `⚠️ Erreur lors de la récupération des données. Veuillez réessayer.`);
       return;
     }
   }
 
   // Aucune action reconnue
-  await sendText(schoolId, phone, `Option non reconnue. Tapez *menu* pour recommencer.`, { urgent: true });
+  await sendText(schoolId, phone, `Option non reconnue. Tapez *menu* pour recommencer.`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1091,20 +1086,20 @@ async function handleReceptionistMessage({ phone, text, providerMessageId, schoo
 
   const cmd = detectSpecialCommand(text);
   if (cmd === 'menu' || cmd === 'help' || !String(text || '').trim()) {
-    await sendText(schoolId, phone, receptionistWelcome(receptionist, text), { urgent: true });
+    await sendText(schoolId, phone, receptionistWelcome(receptionist, text));
     await markProcessed(incomingMsg?.id);
     return;
   }
 
   const reply = await answerSchoolAI({ messageText: text, schoolInfo: receptionist });
-  await sendText(schoolId, phone, reply, { urgent: true });
+  await sendText(schoolId, phone, reply);
   await supabaseAdmin
     .from('whatsapp_incoming_messages')
     .update({ ai_response_sent: true, ai_response_text: reply })
     .eq('id', incomingMsg?.id);
 
   setTimeout(() => {
-    sendText(schoolId, phone, receptionistFooter(text), { urgent: true });
+    sendText(schoolId, phone, receptionistFooter(text));
   }, 1500);
 
   await markProcessed(incomingMsg?.id);
@@ -1283,7 +1278,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       student: credStudent,
       target: credReq.target,
     });
-    await sendText(parentInfo.school_id, phone, replyMsg, { urgent: true });
+    await sendText(parentInfo.school_id, phone, replyMsg);
     await supabaseAdmin
       .from('whatsapp_incoming_messages')
       .update({ ai_response_sent: true, ai_response_text: replyMsg, category: 'credentials' })
@@ -1397,8 +1392,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     await sendText(
       parentInfo.school_id,
       phone,
-      `✅ C'est noté, vous ne recevrez plus de messages sur WhatsApp.\n\n📲 Vous pouvez toujours tout consulter dans l'application ${parentInfo.school_name}.\n\nPour réactiver WhatsApp, écrivez *START* ou contactez l'école.`,
-      { urgent: true }
+      `✅ C'est noté, vous ne recevrez plus de messages sur WhatsApp.\n\n📲 Vous pouvez toujours tout consulter dans l'application ${parentInfo.school_name}.\n\nPour réactiver WhatsApp, écrivez *START* ou contactez l'école.`
     );
     await markProcessed(incomingMsg?.id);
     return;
@@ -1408,13 +1402,13 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   {
     const t = String(text || '').trim().toLowerCase();
     if (t === 'transport_yes' || t === 'bus oui') {
-      await sendText(parentInfo.school_id, phone, `✅ C'est noté, vous recevrez le suivi du bus aujourd'hui, *gratuitement*. 🚌`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `✅ C'est noté, vous recevrez le suivi du bus aujourd'hui, *gratuitement*. 🚌`);
       await markProcessed(incomingMsg?.id);
       return;
     }
     if (t === 'transport_no' || t === 'bus non') {
       await setTransportSkipToday(parentInfo.parent_id);
-      await sendText(parentInfo.school_id, phone, `Compris 👍 Vous ne recevrez pas les notifications du bus aujourd'hui.`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `Compris 👍 Vous ne recevrez pas les notifications du bus aujourd'hui.`);
       await markProcessed(incomingMsg?.id);
       return;
     }
@@ -1423,7 +1417,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // Réactivation des notifications WhatsApp après un STOP
   if (/^(start|démarrer|demarrer|reprendre|activer|oui je veux)$/i.test(String(text || '').trim())) {
     await setWhatsappOptOut(parentInfo.parent_id, false);
-    await sendText(parentInfo.school_id, phone, `✅ Vos notifications WhatsApp sont réactivées. Tapez *menu* pour commencer.`, { urgent: true });
+    await sendText(parentInfo.school_id, phone, `✅ Vos notifications WhatsApp sont réactivées. Tapez *menu* pour commencer.`);
     await markProcessed(incomingMsg?.id);
     return;
   }
@@ -1487,13 +1481,13 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       try {
         const r = await handleAbsenceReply({ parentInfo, text: trimmed });
         if (r.handled) {
-          await sendText(parentInfo.school_id, phone, r.reply, { urgent: true });
+          await sendText(parentInfo.school_id, phone, r.reply);
           await supabaseAdmin
             .from('whatsapp_incoming_messages')
             .update({ category: 'absence_justification', ai_response_sent: true, ai_response_text: r.reply })
             .eq('id', incomingMsg?.id);
           setTimeout(() => {
-            sendText(parentInfo.school_id, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+            sendText(parentInfo.school_id, phone, `_Tapez *menu* pour d'autres options._`);
           }, 1200);
           await markProcessed(incomingMsg?.id);
           return;
@@ -1520,7 +1514,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       State.setState(schoolId, phone, { pendingPhotoUrl: null, pendingPhotoTargetId: null });
       if (state.studentId) State.setMenu(schoolId, phone, 'main');
       else State.resetState(schoolId, phone);
-      await sendText(parentInfo.school_id, phone, `❌ Photo annulée. Tapez *menu* pour d'autres options.`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `❌ Photo annulée. Tapez *menu* pour d'autres options.`);
       await markProcessed(incomingMsg?.id);
       return;
     }
@@ -1547,8 +1541,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     await sendText(
       parentInfo.school_id,
       phone,
-      `🤔 Réponse non reconnue. Répondez *oui* pour confirmer, *non* pour annuler, ou le *prénom / numéro* de l'enfant.`,
-      { urgent: true }
+      `🤔 Réponse non reconnue. Répondez *oui* pour confirmer, *non* pour annuler, ou le *prénom / numéro* de l'enfant.`
     );
     await markProcessed(incomingMsg?.id);
     return;
@@ -1566,7 +1559,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     if (handled) {
       State.setMenu(schoolId, phone, 'schoollife');
       setTimeout(() => {
-        sendText(parentInfo.school_id, phone, `_Tapez *menu* pour d'autres options._`, { urgent: true });
+        sendText(parentInfo.school_id, phone, `_Tapez *menu* pour d'autres options._`);
       }, 1500);
       await markProcessed(incomingMsg?.id);
       return;
@@ -1620,7 +1613,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       const looksLikeQuestion = !isGreeting && (trimmed.includes(' ') || trimmed.length > 8);
 
       // Accueil
-      await sendText(parentInfo.school_id, phone, `Bonjour ${parentInfo.parent_name} 👋\nBienvenue sur le service WhatsApp de *${parentInfo.school_name}*.`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `Bonjour ${parentInfo.parent_name} 👋\nBienvenue sur le service WhatsApp de *${parentInfo.school_name}*.`);
 
       if (looksLikeQuestion) {
         try {
@@ -1628,7 +1621,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
           // Emploi du temps de la semaine → envoyer le PDF (comme dans les
           // états MENU/AI) au lieu d'une réponse texte de l'IA.
           if (isFullWeekTimetableQuery(text)) {
-            await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
+            await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`);
             await sendTimetablePdf(parentInfo.school_id, phone, student);
             await markProcessed(incomingMsg?.id);
             return;
@@ -1638,7 +1631,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
             return;
           }
           const reply = await answerWithAI({ messageText: text, student, parentInfo });
-          await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+          await sendText(parentInfo.school_id, phone, reply);
           if (isBulletinQuery(text)) {
             await sendBulletinPdfs(parentInfo.school_id, phone, student, detectSemester(text));
           }
@@ -1666,8 +1659,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       await sendText(
         parentInfo.school_id,
         phone,
-        `✅ Enfant sélectionné : *${matched.first_name} ${matched.last_name}*`,
-        { urgent: true }
+        `✅ Enfant sélectionné : *${matched.first_name} ${matched.last_name}*`
       );
       await sendMainMenu(parentInfo.school_id, phone, matched, parentInfo);
       await markProcessed(incomingMsg?.id);
@@ -1724,15 +1716,14 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
         const msg = ok
           ? await locationSavedMessage(locChild, loc)
           : `⚠️ Erreur lors de l'enregistrement de votre position. Veuillez réessayer.`;
-        await sendText(parentInfo.school_id, phone, `${msg}\n\n_Tapez *menu* pour d'autres options._`, { urgent: true });
+        await sendText(parentInfo.school_id, phone, `${msg}\n\n_Tapez *menu* pour d'autres options._`);
         await markProcessed(incomingMsg?.id);
         return;
       }
       await sendText(
         parentInfo.school_id,
         phone,
-        `🤔 Sélection non reconnue. Répondez avec le *numéro* de l'enfant, son *prénom*, ou *0* pour tous.`,
-        { urgent: true }
+        `🤔 Sélection non reconnue. Répondez avec le *numéro* de l'enfant, son *prénom*, ou *0* pour tous.`
       );
       await markProcessed(incomingMsg?.id);
       return;
@@ -1744,8 +1735,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       await sendText(
         parentInfo.school_id,
         phone,
-        `✅ Enfant sélectionné : *${matched.first_name} ${matched.last_name}*`,
-        { urgent: true }
+        `✅ Enfant sélectionné : *${matched.first_name} ${matched.last_name}*`
       );
       await sendMainMenu(parentInfo.school_id, phone, matched, parentInfo);
       await markProcessed(incomingMsg?.id);
@@ -1755,8 +1745,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     await sendText(
       parentInfo.school_id,
       phone,
-      `🤔 Sélection non reconnue. Répondez avec :\n• le *numéro* de l'enfant (1, 2, ١, ٢…)\n• ou son *prénom* / *nom*`,
-      { urgent: true }
+      `🤔 Sélection non reconnue. Répondez avec :\n• le *numéro* de l'enfant (1, 2, ١, ٢…)\n• ou son *prénom* / *nom*`
     );
     await markProcessed(incomingMsg?.id);
     return;
@@ -1765,12 +1754,12 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // Mode AI : forward DeepSeek (l'utilisateur a explicitement choisi cette option)
   if (state.state === 'AI') {
     if (isLocationHelpQuery(text)) {
-      await sendText(parentInfo.school_id, phone, locationInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
+      await sendText(parentInfo.school_id, phone, locationInstructions(`${student.first_name} ${student.last_name}`));
       await markProcessed(incomingMsg?.id);
       return;
     }
     if (isFullWeekTimetableQuery(text)) {
-      await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`);
       await sendTimetablePdf(parentInfo.school_id, phone, student);
       await markProcessed(incomingMsg?.id);
       return;
@@ -1780,7 +1769,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       return;
     }
     const reply = await answerWithAI({ messageText: text, student, parentInfo });
-    await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+    await sendText(parentInfo.school_id, phone, reply);
     if (isBulletinQuery(text)) {
       await sendBulletinPdfs(parentInfo.school_id, phone, student, detectSemester(text));
     }
@@ -1799,27 +1788,27 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     const poll = queue[idx];
     if (!poll) {
       State.setMenu(schoolId, phone, 'schoollife');
-      await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `Tapez *menu* pour revenir au menu.`);
       await markProcessed(incomingMsg?.id);
       return;
     }
     // Accepte un numéro (1, 2, ٢…) OU le texte de l'option ("Oui", "non"…)
     const optIdx = A.matchPollOption(poll, text);
     if (optIdx < 0) {
-      await sendText(parentInfo.school_id, phone, `🤔 Choix non reconnu. ${A.formatPollPrompt(poll, idx + 1, queue.length)}`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `🤔 Choix non reconnu. ${A.formatPollPrompt(poll, idx + 1, queue.length)}`);
       await markProcessed(incomingMsg?.id);
       return;
     }
     const result = await A.recordPollVote(poll, optIdx, parentInfo);
-    await sendText(parentInfo.school_id, phone, result.ok ? result.message : `⚠️ ${result.message}`, { urgent: true });
+    await sendText(parentInfo.school_id, phone, result.ok ? result.message : `⚠️ ${result.message}`);
 
     // Passe au sondage suivant s'il en reste, sinon retour au menu Vie scolaire
     if (idx + 1 < queue.length) {
       State.setState(schoolId, phone, { pollIndex: idx + 1 });
-      await sendText(parentInfo.school_id, phone, A.formatPollPrompt(queue[idx + 1], idx + 2, queue.length), { urgent: true });
+      await sendText(parentInfo.school_id, phone, A.formatPollPrompt(queue[idx + 1], idx + 2, queue.length));
     } else {
       State.setMenu(schoolId, phone, 'schoollife');
-      await sendText(parentInfo.school_id, phone, `Merci ! 🙏 Tapez *menu* pour d'autres options.`, { urgent: true });
+      await sendText(parentInfo.school_id, phone, `Merci ! 🙏 Tapez *menu* pour d'autres options.`);
     }
     await markProcessed(incomingMsg?.id);
     return;
@@ -1860,12 +1849,12 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     if (looksLikeQuestion) {
       console.log(`[chatbot] MENU → IA fallback (texte libre): "${trimmed.substring(0, 40)}"`);
       if (isLocationHelpQuery(text)) {
-        await sendText(parentInfo.school_id, phone, locationInstructions(`${student.first_name} ${student.last_name}`), { urgent: true });
+        await sendText(parentInfo.school_id, phone, locationInstructions(`${student.first_name} ${student.last_name}`));
         await markProcessed(incomingMsg?.id);
         return;
       }
       if (isFullWeekTimetableQuery(text)) {
-        await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`, { urgent: true });
+        await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`);
         await sendTimetablePdf(parentInfo.school_id, phone, student);
         await markProcessed(incomingMsg?.id);
         return;
@@ -1875,7 +1864,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
         return;
       }
       const reply = await answerWithAI({ messageText: text, student, parentInfo });
-      await sendText(parentInfo.school_id, phone, reply, { urgent: true });
+      await sendText(parentInfo.school_id, phone, reply);
       if (isBulletinQuery(text)) {
         await sendBulletinPdfs(parentInfo.school_id, phone, student, detectSemester(text));
       }
@@ -1888,8 +1877,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
         sendText(
           parentInfo.school_id,
           phone,
-          menuFooterForText(text),
-          { urgent: true }
+          menuFooterForText(text)
         );
       }, 1500);
       await markProcessed(incomingMsg?.id);
@@ -1898,7 +1886,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
 
     // Saisie courte non reconnue (probable typo de numéro de menu) :
     // ré-afficher le menu courant.
-    await sendText(parentInfo.school_id, phone, `🤔 Option non reconnue : "${text.substring(0, 30)}".`, { urgent: true });
+    await sendText(parentInfo.school_id, phone, `🤔 Option non reconnue : "${text.substring(0, 30)}".`);
     await sendMenu(parentInfo.school_id, phone, menu, {
       studentName: `${student.first_name} ${student.last_name}`,
       schoolName: parentInfo.school_name,

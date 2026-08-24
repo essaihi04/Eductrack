@@ -145,7 +145,7 @@ async function notifyUsers(userIds, { title, message, data = null, url = null })
 async function staffWhatsApp(schoolId, phone, text) {
   if (!phone) return;
   try {
-    await sendText(schoolId, phone, text, { urgent: true });
+    await sendText(schoolId, phone, text);
   } catch (e) {
     console.error('[appointments] WhatsApp staff:', e.message);
   }

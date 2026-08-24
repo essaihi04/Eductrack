@@ -89,9 +89,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [showResend, setShowResend] = useState(false); // panneau « Renvoyer »
   const [resendCriteria, setResendCriteria] = useState({ unread: true, unresponded: false, undelivered: false, wa_not_sent: false });
   const [resendChannel, setResendChannel] = useState('app'); // app | whatsapp | both
-  // Personnalisation de la relance : salutation nominative et/ou reformulations.
+  // Personnalisation de la relance : salutation nominative.
   const [resendPersonalize, setResendPersonalize] = useState(true);
-  const [resendVaryWording, setResendVaryWording] = useState(true);
   const [resendScheduledAt, setResendScheduledAt] = useState(''); // '' = immédiat
   const [resendBusy, setResendBusy] = useState(false);
   const [resendMsg, setResendMsg] = useState('');
@@ -603,7 +602,6 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
           channel: resendChannel,
           recipient_ids,
           personalize: resendPersonalize,
-          varyWording: resendVaryWording,
           // datetime-local est une heure LOCALE sans fuseau : on la convertit
           // en ISO absolu, sinon le serveur l'interpréterait en UTC et la
           // relance partirait avec une heure de décalage.
@@ -3132,7 +3130,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                 <p className="text-[11px] text-gray-400 mt-1">Le canal est choisi automatiquement par parent : push si l'app est installée, sinon WhatsApp (selon le canal ci-dessus).</p>
               </div>
 
-              {/* Personnalisation : un texte distinct par parent → moins de risque de ban */}
+              {/* Personnalisation : le message s'adresse au parent par son nom */}
               <div className="rounded-lg border border-gray-200 bg-gray-50/60 p-3">
                 <label className="flex items-start gap-2.5 cursor-pointer">
                   <input type="checkbox" className="mt-0.5 w-4 h-4 rounded text-indigo-600"
@@ -3141,8 +3139,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                   <span>
                     <span className="text-sm font-medium text-gray-800">Ajouter le nom du parent</span>
                     <span className="block text-xs text-gray-500 mt-0.5">
-                      Chaque parent reçoit un message distinct au lieu de N copies identiques :
-                      c'est ce que WhatsApp regarde pour repérer les envois de masse.
+                      Le message commence par « Bonjour [nom du parent], » : il est mieux reçu
+                      qu'un texte impersonnel.
                     </span>
                   </span>
                 </label>
@@ -3603,8 +3601,6 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       </div>
                     </div>
 
-                    {/* Anti-répétition : N messages rigoureusement identiques
-                        sont un signal de spam pour WhatsApp. */}
                     {resendChannel !== 'app' && (
                       <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
                         <p className="text-[11px] font-semibold text-gray-500">Personnalisation du texte WhatsApp</p>
@@ -3613,18 +3609,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                             onChange={(e) => setResendPersonalize(e.target.checked)} />
                           <span>
                             Saluer chaque parent par son nom
-                            <span className="block text-[11px] text-gray-400">« Bonjour {'{nom}'}, » en tête du message — chaque destinataire reçoit un texte différent.</span>
-                          </span>
-                        </label>
-                        <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
-                          <input type="checkbox" className="mt-0.5" checked={resendVaryWording}
-                            onChange={(e) => setResendVaryWording(e.target.checked)} />
-                          <span>
-                            Générer plusieurs versions du message
-                            <span className="block text-[11px] text-gray-400">
-                              L'IA reformule le texte en gardant le sens ; les versions alternent entre les destinataires.
-                              Numéros de téléphone, liens, dates et montants sont recopiés à l'identique et vérifiés.
-                            </span>
+                            <span className="block text-[11px] text-gray-400">« Bonjour {'{nom}'}, » en tête du message.</span>
                           </span>
                         </label>
                       </div>

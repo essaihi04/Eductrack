@@ -176,7 +176,7 @@ export async function sendMenu(schoolId, phone, menu, ctx = {}) {
   if (r?.success) return true;
 
   console.warn(`[chatbot] liste Cloud échouée, repli texte:`, r?.message);
-  const res = await sendText(schoolId, phone, renderMenuText(menu, ctx), { urgent: true });
+  const res = await sendText(schoolId, phone, renderMenuText(menu, ctx));
   return !!res.success;
 }
 

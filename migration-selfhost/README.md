@@ -15,8 +15,9 @@ Docker), et la stack Supabase (Docker Compose). Recommandation matérielle :
 | vCPU      | 4       | 6–8         |
 | Disque    | 80 Go NVMe | 160 Go NVMe |
 
-La stack Supabase seule consomme ~2–3 Go de RAM ; le backend Node + Baileys
-~1 Go ; le reste sert de marge à PostgreSQL (cache) et aux pics.
+La stack Supabase seule consomme ~2–3 Go de RAM ; le backend Node ~1 Go ; le
+reste sert de marge à PostgreSQL (cache) et aux pics. (WhatsApp passe par
+l'API Cloud de Meta : aucun processus de messagerie n'est hébergé ici.)
 
 ## Étapes (scripts numérotés)
 

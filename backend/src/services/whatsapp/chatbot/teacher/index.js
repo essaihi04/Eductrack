@@ -113,7 +113,7 @@ async function getSchoolName(schoolId) {
 
 /** Envoi d'une réponse de consultation, suivie du rappel de menu. */
 async function reply(ctx, body) {
-  await sendText(ctx.schoolId, ctx.phone, `${body}\n\n${TEACHER_FOOTER}`, { urgent: true });
+  await sendText(ctx.schoolId, ctx.phone, `${body}\n\n${TEACHER_FOOTER}`);
 }
 
 async function sendMainMenu(ctx) {
@@ -142,8 +142,7 @@ async function executeOption(action, ctx) {
       return sendText(
         ctx.schoolId,
         ctx.phone,
-        `*🎓 Fiche élève*\n━━━━━━━━━━━━━━━━━━━\nÉcrivez le *nom ou le prénom* de l'élève.\n\n_Seuls les élèves de vos classes sont accessibles._`,
-        { urgent: true }
+        `*🎓 Fiche élève*\n━━━━━━━━━━━━━━━━━━━\nÉcrivez le *nom ou le prénom* de l'élève.\n\n_Seuls les élèves de vos classes sont accessibles._`
       );
     }
 
@@ -209,8 +208,7 @@ async function trySendStudentSheet(ctx, input) {
     await sendText(
       ctx.schoolId,
       ctx.phone,
-      `*🎓 Plusieurs élèves correspondent*\n━━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n\n_Répondez avec le numéro._`,
-      { urgent: true }
+      `*🎓 Plusieurs élèves correspondent*\n━━━━━━━━━━━━━━━━━━━\n${lines.join('\n')}\n\n_Répondez avec le numéro._`
     );
     return true;
   }
@@ -299,8 +297,7 @@ export async function handleTeacherMessage({
       await sendText(
         schoolId,
         phone,
-        `Bonjour ${name} 👋\nBienvenue dans votre *espace enseignant* — ${schoolName}.${dualRole ? `\n\n_Tapez *espace* pour basculer vers votre espace parent._` : ''}`,
-        { urgent: true }
+        `Bonjour ${name} 👋\nBienvenue dans votre *espace enseignant* — ${schoolName}.${dualRole ? `\n\n_Tapez *espace* pour basculer vers votre espace parent._` : ''}`
       );
     }
     await sendMainMenu(ctx);
@@ -346,8 +343,7 @@ export async function handleTeacherMessage({
   await sendText(
     schoolId,
     phone,
-    `🤔 Je n'ai pas reconnu « ${input.slice(0, 30)} ».\n\n_Choisissez une option, ou écrivez le nom d'un élève._`,
-    { urgent: true }
+    `🤔 Je n'ai pas reconnu « ${input.slice(0, 30)} ».\n\n_Choisissez une option, ou écrivez le nom d'un élève._`
   );
   await sendMainMenu(ctx);
   await markProcessed(msgId);

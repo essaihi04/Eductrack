@@ -41,17 +41,23 @@ SELECT s.name AS ecole_sans_numero_cloud
   JOIN schools s ON s.id = w.school_id
  WHERE w.phone_number_id IS NULL;
 
--- ─── 3. Vestiges de l'anti-ban (OPTIONNEL — destructif) ──────────────────
--- Ces objets ne servaient qu'à Baileys (quotas de montée en charge, cache
--- « ce numéro existe-t-il sur WhatsApp ? »). Plus aucun code ne les lit.
--- Décommenter pour les supprimer définitivement, une fois la bascule validée.
+-- ─── 3. Vestiges de l'anti-ban (DESTRUCTIF — suppression définitive) ─────
+-- ⚠️ Ces DROP sont IRRÉVERSIBLES : les données de quotas et l'historique des
+--    pauses anti-ban sont perdus. C'est voulu — ces objets ne servaient qu'à
+--    Baileys (montée en charge, pauses, cache « ce numéro existe-t-il sur
+--    WhatsApp ? ») et plus aucune ligne de code ne les lit ni ne les écrit
+--    depuis la suppression des règles d'envoi héritées (2026-08-24).
 --
--- DROP TABLE IF EXISTS whatsapp_quota_daily;
--- DROP TABLE IF EXISTS whatsapp_number_checks;
--- ALTER TABLE whatsapp_school_sessions
---   DROP COLUMN IF EXISTS warmup_started_at,
---   DROP COLUMN IF EXISTS daily_limit_override,
---   DROP COLUMN IF EXISTS wasender_session_id;
+--    Créés par : MIGRATION_BAILEYS.sql (§2 et §5) et ADD_WHATSAPP_NUMBER_CHECKS.sql.
+
+DROP TABLE IF EXISTS whatsapp_quota_daily;
+DROP TABLE IF EXISTS whatsapp_anti_ban_events;
+DROP TABLE IF EXISTS whatsapp_number_checks;
+
+ALTER TABLE whatsapp_school_sessions
+  DROP COLUMN IF EXISTS warmup_started_at,
+  DROP COLUMN IF EXISTS daily_limit_override,
+  DROP COLUMN IF EXISTS wasender_session_id;
 
 -- ─── 4. Vérification ─────────────────────────────────────────────────────
 SELECT school_id, provider, phone_number, phone_number_id, status

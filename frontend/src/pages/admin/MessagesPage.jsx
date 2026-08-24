@@ -209,7 +209,7 @@ const MessagesPage = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Upload media to WasenderAPI via backend proxy
+  // Upload du média via le proxy backend (stockage Supabase)
   const uploadMedia = async () => {
     if (!mediaFile) return null;
     setUploading(true);

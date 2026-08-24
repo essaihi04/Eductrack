@@ -8,8 +8,9 @@
  *
  * Caractéristiques :
  *   - Aucun socket, aucune session : tout passe par des appels HTTPS Graph API.
- *   - Aucune couche anti-ban nécessaire (l'API officielle n'a pas de risque de
- *     blocage pour usage automatisé).
+ *   - Aucune règle d'envoi : ni fenêtre horaire, ni délai entre deux messages,
+ *     ni quota de montée en charge (l'API officielle n'a pas de risque de
+ *     blocage pour usage automatisé). Seules s'appliquent les limites Meta.
  *   - 1 seul token (WA_TOKEN). Chaque école = un phone_number_id distinct,
  *     stocké dans whatsapp_school_sessions.phone_number_id.
  *
@@ -152,7 +153,7 @@ async function waSend(schoolId, payload) {
 // API publique d'envoi (signatures identiques à index.js)
 // ─────────────────────────────────────────────────────────────────────────
 
-export async function sendText(schoolId, phone, text /* , opts */) {
+export async function sendText(schoolId, phone, text) {
   return waSend(schoolId, {
     to: toPlain(phone),
     type: 'text',
@@ -160,7 +161,7 @@ export async function sendText(schoolId, phone, text /* , opts */) {
   });
 }
 
-export async function sendImage(schoolId, phone, imageUrl, caption = '' /* , opts */) {
+export async function sendImage(schoolId, phone, imageUrl, caption = '') {
   return waSend(schoolId, {
     to: toPlain(phone),
     type: 'image',
@@ -168,7 +169,7 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '' /* , opt
   });
 }
 
-export async function sendDocument(schoolId, phone, documentUrl, fileName, caption = '' /* mimetype, opts */) {
+export async function sendDocument(schoolId, phone, documentUrl, fileName, caption = '') {
   return waSend(schoolId, {
     to: toPlain(phone),
     type: 'document',
@@ -181,7 +182,7 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
  * Cloud API : on uploade d'abord le binaire pour obtenir un media_id, puis on
  * envoie le message référençant ce media_id.
  */
-export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'document', fileName, mimetype, caption } = {} /* , opts */) {
+export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'document', fileName, mimetype, caption } = {}) {
   const mediaId = await uploadMedia(schoolId, buffer, mimetype, fileName);
   if (!mediaId) return fail('Upload média Cloud API échoué');
 

@@ -136,7 +136,7 @@ export async function routeNotification({ parentId, schoolId, phone, push, whats
     // Nudge « installez l'app / répondez » uniquement pour les parents sans app.
     let text = whatsappText || '';
     if (nudge && !hasApp) text += nudgeFooter();
-    const r = await sendText(schoolId, phone, text, { urgent: false });
+    const r = await sendText(schoolId, phone, text);
     return {
       channel: free ? 'whatsapp_free' : 'whatsapp_paid',
       success: !!r?.success,

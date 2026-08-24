@@ -2,14 +2,12 @@
 --
 -- Problème résolu : les traitements longs (envoi WhatsApp de masse, imports,
 -- IA, PDF) tournaient en mémoire du process Node après avoir répondu au client.
--- Un envoi de 300 parents dure plus d'une heure à cause des délais anti-ban :
--- tout `pm2 restart` (donc tout déploiement) le coupait net, sans reprise et
+-- Tout `pm2 restart` (donc tout déploiement) les coupait net, sans reprise et
 -- sans que personne ne le sache.
 --
--- Pas de Redis : le worker doit rester DANS le process web, parce que les
--- sockets Baileys y vivent en mémoire (services/whatsapp/baileysClient.js) et
--- ne sont pas partageables entre process. Redis apporterait la persistance
--- mais pas le découplage, qui est sa raison d'être. Postgres suffit.
+-- Pas de Redis : Postgres suffit ici. La file sert à la persistance et à la
+-- reprise après coupure, pas au découplage — le worker tourne dans le process
+-- web.
 --
 -- À exécuter UNE FOIS dans Supabase → SQL Editor.
 
