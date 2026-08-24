@@ -431,6 +431,9 @@ router.post('/credentials/reset', credentialsLimiter, async (req, res) => {
     });
     if (updateError) throw updateError;
 
+    // Empêcher tout cache navigateur/proxy de conserver le mot de passe ou le
+    // PDF confidentiel inclus dans cette réponse à usage unique.
+    res.set({ 'Cache-Control': 'no-store, private', Pragma: 'no-cache' });
     return res.json({
       success: true,
       account: { target, name: accountName, email: accountEmail, password: newPassword },
