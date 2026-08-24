@@ -15,9 +15,40 @@
       rel="stylesheet"
     />
     <title>Bousole — Ensemble, guidons chaque élève</title>
+    <meta name="author" content="BOUSOLE TECHNOLOGIE" />
+    <style>
+      /* Pied de page légal : discret mais bien visible (Meta refuse une
+         mention masquée). Reste sous l'application. */
+      #legal-entity {
+        border-top: 1px solid #e5e7eb;
+        padding: 16px 20px 24px;
+        text-align: center;
+        font-family: "Nunito Sans", -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        font-size: 12px;
+        line-height: 1.7;
+        color: #6b7280;
+        background: #fff;
+      }
+      #legal-entity a { color: #173a59; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Mentions légales en HTML statique : lisibles par les robots qui
+         n'exécutent pas le JS (vérification d'entreprise Meta, qui exige que
+         la raison sociale déclarée apparaisse sur le site). -->
+    <footer id="legal-entity">
+      <p>
+        <strong>BOUSOLE TECHNOLOGIE</strong> — Société à responsabilité limitée à associé unique
+        au capital de 100 000,00 MAD.<br />
+        Siège social : 23 Bd Oukba Ibnou Nafii, Hay Mohammadi, Casablanca 20560, Maroc.<br />
+        RC Casablanca n° 744197 — ICE 004005692000055.<br />
+        Contact : <a href="mailto:contact@etrack.ma">contact@etrack.ma</a> — Tél. +212 641 998 700<br />
+        <a href="/api/legal/privacy">Politique de confidentialité</a> ·
+        <a href="/api/legal/terms">Conditions de service</a> ·
+        <a href="/api/legal/data-deletion">Suppression des données</a>
+      </p>
+    </footer>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

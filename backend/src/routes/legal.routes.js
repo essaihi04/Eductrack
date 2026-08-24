@@ -16,9 +16,22 @@ import express from 'express';
 
 const router = express.Router();
 
-const CONTACT_EMAIL = process.env.LEGAL_CONTACT_EMAIL || 'zizo76416@gmail.com';
+const CONTACT_EMAIL = process.env.LEGAL_CONTACT_EMAIL || 'contact@etrack.ma';
 const APP_NAME = 'Eductrack';
-const UPDATED = '17 juin 2026';
+const UPDATED = '22 août 2026';
+
+// Éditeur du service. La raison sociale EXACTE du Registre du Commerce doit
+// apparaître sur le site : Meta refuse la vérification d'entreprise s'il ne
+// retrouve pas le nom légal déclaré sur le domaine du site web.
+const LEGAL_ENTITY = {
+  name: 'BOUSOLE TECHNOLOGIE',
+  form: 'Société à responsabilité limitée à associé unique (SARL AU)',
+  capital: '100 000,00 MAD',
+  address: '23 Bd Oukba Ibnou Nafii, Hay Mohammadi, Casablanca 20560, Maroc',
+  rc: 'RC Casablanca n° 744197',
+  ice: 'ICE 004005692000055',
+  phone: '+212 641 998 700',
+};
 
 const page = (title, bodyHtml) => `<!DOCTYPE html>
 <html lang="fr">
@@ -37,7 +50,11 @@ const page = (title, bodyHtml) => `<!DOCTYPE html>
 <body>
 ${bodyHtml}
 <footer class="muted">
-  ${APP_NAME} — Contact : <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a><br>
+  <strong>${LEGAL_ENTITY.name}</strong> — ${LEGAL_ENTITY.form}, capital ${LEGAL_ENTITY.capital}.<br>
+  Siège social : ${LEGAL_ENTITY.address}<br>
+  ${LEGAL_ENTITY.rc} — ${LEGAL_ENTITY.ice}<br>
+  ${APP_NAME} est un service édité par ${LEGAL_ENTITY.name}.<br>
+  Contact : <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> — Tél. ${LEGAL_ENTITY.phone}<br>
   Dernière mise à jour : ${UPDATED}
 </footer>
 </body>
