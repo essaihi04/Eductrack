@@ -1,34 +1,56 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { FileText, Eye, RefreshCw } from 'lucide-react';
-import { openPdfUrl } from '../../lib/download';
+import { openBlob } from '../../lib/download';
 import { Card, CardContent } from '../../components/ui/Card';
+import { supabase } from '../../lib/supabase';
+
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const getToken = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token;
+};
 
 const StudentBulletins = () => {
   const [bulletins, setBulletins] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [openingId, setOpeningId] = useState(null);
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-  const getToken = async () => {
-    const { data: { session } } = await (await import('../../lib/supabase')).supabase.auth.getSession();
-    return session?.access_token;
-  };
-
-  useEffect(() => { fetchBulletins(); }, []);
-
-  const fetchBulletins = async () => {
+  const fetchBulletins = useCallback(async () => {
     try {
+      setError('');
       const token = await getToken();
       const res = await fetch(`${apiUrl}/api/bulletins/my`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) setBulletins(await res.json());
-    } catch (e) { console.error(e); }
+      const data = await res.json().catch(() => ([]));
+      if (!res.ok) throw new Error(data?.error || 'Impossible de charger tes bulletins.');
+      setBulletins(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error(e);
+      setError(e?.message || 'Impossible de charger tes bulletins.');
+    }
     finally { setLoading(false); }
-  };
+  }, []);
+
+  useEffect(() => { fetchBulletins(); }, [fetchBulletins]);
 
   const openPdf = async (bulletinId) => {
-    const token = await getToken();
-    await openPdfUrl(`${apiUrl}/api/bulletins/pdf/${bulletinId}?token=${token}`, `bulletin_${bulletinId}.pdf`);
+    setOpeningId(bulletinId);
+    setError('');
+    try {
+      const token = await getToken();
+      const response = await fetch(`${apiUrl}/api/bulletins/pdf/${bulletinId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(`Impossible d’ouvrir le bulletin (${response.status}).`);
+      await openBlob(await response.blob(), `bulletin_${bulletinId}.pdf`);
+    } catch (openError) {
+      setError(openError?.message || 'Impossible d’ouvrir ce bulletin.');
+    } finally {
+      setOpeningId(null);
+    }
   };
 
   const mentionColor = (avg) => {
@@ -40,10 +62,14 @@ const StudentBulletins = () => {
   };
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold flex items-center gap-2">
-        <FileText className="w-6 h-6 text-blue-600" /> Mes Bulletins
+        <FileText className="w-6 h-6 text-blue-600" /> Mes bulletins
       </h1>
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12"><RefreshCw className="w-6 h-6 animate-spin text-gray-400" /></div>
@@ -52,12 +78,12 @@ const StudentBulletins = () => {
           {bulletins.map(b => (
             <Card key={b.id} className="hover:shadow-md transition-shadow">
               <CardContent className="pt-5">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h3 className="font-semibold text-lg">
                       {b.academic_year} — Semestre {b.semester}
                     </h3>
-                    <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-gray-500">
                       <span>Moyenne : <strong className={mentionColor(b.general_average)}>
                         {b.general_average != null ? `${Number(b.general_average).toFixed(2)}/20` : '—'}
                       </strong></span>
@@ -70,9 +96,10 @@ const StudentBulletins = () => {
                       )}
                     </div>
                   </div>
-                  <button onClick={() => openPdf(b.id)}
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">
-                    <Eye className="w-4 h-4" /> Voir PDF
+                  <button onClick={() => openPdf(b.id)} disabled={openingId === b.id}
+                    className="flex shrink-0 items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-60">
+                    {openingId === b.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                    {openingId === b.id ? 'Ouverture…' : 'Voir le PDF'}
                   </button>
                 </div>
 

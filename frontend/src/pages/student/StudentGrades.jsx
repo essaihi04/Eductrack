@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
 
@@ -123,7 +124,7 @@ const StudentGrades = () => {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">📝 Mes notes</h1>
+          <h1 className="text-2xl font-bold">Mes résultats</h1>
           <p className="text-muted-foreground mt-2">Tes notes, lisibles en 5 secondes</p>
         </div>
         <Card className="border-red-200 bg-red-50">
@@ -136,11 +137,35 @@ const StudentGrades = () => {
     );
   }
 
+  if (allGrades.length === 0) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Mes résultats</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Notes, contrôles et progression au même endroit</p>
+        </div>
+        <Card className="border-dashed">
+          <CardContent className="p-8 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-2xl">📝</div>
+            <h2 className="mt-4 text-lg font-semibold">Aucune note publiée pour le moment</h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+              Tes notes apparaîtront ici dès leur publication. En attendant, tu peux consulter ta progression ou tes bulletins.
+            </p>
+            <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
+              <Link to="/student/level" className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Ma progression</Link>
+              <Link to="/student/bulletins" className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-accent">Mes bulletins</Link>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">📝 Mes notes</h1>
-        <p className="text-muted-foreground mt-2">Tes notes, lisibles en 5 secondes</p>
+        <h1 className="text-2xl font-bold">Mes résultats</h1>
+        <p className="text-muted-foreground mt-1">Notes, contrôles et progression au même endroit</p>
       </div>
 
       <Card>

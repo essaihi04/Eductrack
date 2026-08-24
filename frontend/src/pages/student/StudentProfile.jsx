@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import { Lock, Moon, Sun, Save, AlertCircle, CheckCircle, Eye, EyeOff, User, Camera } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
@@ -15,50 +14,10 @@ const AVATARS = [
   { emoji: '👧' },
   { emoji: '👦' },
   { emoji: '🧕' },
-  { emoji: '🎨' },
-  { emoji: '🎭' },
-  { emoji: '🎬' },
-  { emoji: '🎵' },
-  { emoji: '🎸' },
-  { emoji: '🎹' },
-  { emoji: '🎤' },
-  { emoji: '📷' },
-  { emoji: '🎮' },
   { emoji: '🎯' },
-  { emoji: '🚗' },
-  { emoji: '🚙' },
-  { emoji: '🏎️' },
-  { emoji: '🏍️' },
-  { emoji: '🚲' },
   { emoji: '🚀' },
   { emoji: '⚽' },
-  { emoji: '🏀' },
-  { emoji: '🎾' },
-  { emoji: '🏈' },
-  { emoji: '⚾' },
-  { emoji: '🎱' },
-  { emoji: '🏊' },
-  { emoji: '🏃' },
-  { emoji: '🚴' },
-  { emoji: '💻' },
-  { emoji: '📱' },
-  { emoji: '🖥️' },
-  { emoji: '🎧' },
-  { emoji: '📺' },
-  { emoji: '📸' },
   { emoji: '📚' },
-  { emoji: '✈️' },
-  { emoji: '🌍' },
-  { emoji: '🍕' },
-  { emoji: '🍔' },
-  { emoji: '☕' },
-  { emoji: '🕌' },
-  { emoji: '🤲' },
-  { emoji: '📿' },
-  { emoji: '📖' },
-  { emoji: '🙏' },
-  { emoji: '🌙' },
-  { emoji: '⭐' },
 ];
 
 const StudentProfile = () => {
@@ -169,7 +128,7 @@ const StudentProfile = () => {
   const validatePassword = (password) => {
     const hasLetters = /[a-zA-Z]/.test(password);
     const hasNumbers = /\d/.test(password);
-    const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+    const hasSpecialChar = /[^A-Za-z0-9]/.test(password);
     const isLongEnough = password.length >= 8;
 
     return {
@@ -285,29 +244,16 @@ const StudentProfile = () => {
   return (
     <div className="space-y-8 pb-8">
       {/* En-tête */}
-      <div className="flex items-center justify-between">
+      <div>
         <div>
-          <h1 className="text-3xl font-bold">Mon Profil</h1>
-          <p className="text-muted-foreground mt-2">Gérez vos informations personnelles et préférences</p>
+          <h1 className="text-2xl font-bold">Mon profil</h1>
+          <p className="text-muted-foreground mt-1">Mon avatar, mon téléphone et la sécurité de mon compte</p>
         </div>
-        <button
-          onClick={handleThemeChange}
-          className="p-3 rounded-lg bg-muted hover:bg-muted/80 transition-colors"
-          title={`Passer au thème ${theme === 'light' ? 'sombre' : 'clair'}`}
-        >
-          {theme === 'light' ? (
-            <Moon className="w-6 h-6" />
-          ) : (
-            <Sun className="w-6 h-6" />
-          )}
-        </button>
       </div>
 
       {/* Messages */}
       {message.text && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
+        <div
           className={`p-4 rounded-lg flex items-center gap-3 ${
             message.type === 'success'
               ? 'bg-green-50 border border-green-200'
@@ -322,14 +268,14 @@ const StudentProfile = () => {
           <p className={message.type === 'success' ? 'text-green-800' : 'text-red-800'}>
             {message.text}
           </p>
-        </motion.div>
+        </div>
       )}
 
       {/* Section Avatar et Infos de Base */}
       <Card>
         <CardHeader>
-          <CardTitle>Photo de profil</CardTitle>
-          <CardDescription>Importez votre photo ou choisissez un avatar</CardDescription>
+          <CardTitle>Mon avatar</CardTitle>
+          <CardDescription>Importe une photo ou choisis un avatar</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
@@ -379,9 +325,7 @@ const StudentProfile = () => {
 
             {/* Liste d'avatars */}
             {showAvatarList && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
+              <div
                 className="pt-4 border-t"
               >
                 <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
@@ -402,7 +346,7 @@ const StudentProfile = () => {
                     </button>
                   ))}
                 </div>
-              </motion.div>
+              </div>
             )}
           </div>
         </CardContent>
@@ -411,38 +355,11 @@ const StudentProfile = () => {
       {/* Section Informations Personnelles */}
       <Card>
         <CardHeader>
-          <CardTitle>Informations Personnelles</CardTitle>
-          <CardDescription>Mettez à jour vos informations de profil</CardDescription>
+          <CardTitle>Mes informations</CardTitle>
+          <CardDescription>Tu peux modifier ton numéro de téléphone</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={updateProfile} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium block mb-2">Prénom</label>
-                <input
-                  type="text"
-                  name="firstName"
-                  value={formData.firstName}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  disabled
-                />
-                <p className="text-xs text-muted-foreground mt-1">Non modifiable</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium block mb-2">Nom</label>
-                <input
-                  type="text"
-                  name="lastName"
-                  value={formData.lastName}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  disabled
-                />
-                <p className="text-xs text-muted-foreground mt-1">Non modifiable</p>
-              </div>
-            </div>
-
             <div>
               <label className="text-sm font-medium block mb-2">Téléphone</label>
               <input
@@ -471,7 +388,7 @@ const StudentProfile = () => {
       <Card>
         <CardHeader>
           <CardTitle>Sécurité</CardTitle>
-          <CardDescription>Gérez votre mot de passe et vos paramètres de sécurité</CardDescription>
+          <CardDescription>Change ton mot de passe en toute sécurité</CardDescription>
         </CardHeader>
         <CardContent>
           {!showPasswordForm ? (
@@ -600,7 +517,7 @@ const StudentProfile = () => {
       <Card>
         <CardHeader>
           <CardTitle>Préférences</CardTitle>
-          <CardDescription>Personnalisez votre expérience</CardDescription>
+          <CardDescription>Choisis l’affichage qui te convient</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
@@ -622,24 +539,19 @@ const StudentProfile = () => {
             </button>
           </div>
 
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-900">
-              💡 Conseil: Utilisez le thème sombre pour réduire la fatigue oculaire lors de longues sessions d'étude.
-            </p>
-          </div>
         </CardContent>
       </Card>
 
       {/* Section Compte */}
-      <Card className="border-red-200">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-red-600">Zone de Danger</CardTitle>
-          <CardDescription>Actions irréversibles</CardDescription>
+          <CardTitle>Ma session</CardTitle>
+          <CardDescription>Quitter le compte sur cet appareil</CardDescription>
         </CardHeader>
         <CardContent>
           <button
             onClick={signOut}
-            className="w-full px-4 py-2 bg-red-50 border border-red-200 text-red-600 rounded-lg hover:bg-red-100 transition-colors font-medium"
+            className="w-full px-4 py-2 bg-muted border text-foreground rounded-lg hover:bg-accent transition-colors font-medium"
           >
             Déconnexion
           </button>

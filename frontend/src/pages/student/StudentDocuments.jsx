@@ -1,50 +1,46 @@
-import { useMemo, useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { saveBlob } from '../../lib/download';
 import { FileText, Download, Eye, Search, Filter, AlertCircle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
 import DocumentViewerModal from '../../components/DocumentViewerModal';
 
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 const StudentDocuments = () => {
-  const { profile } = useAuth();
   const [documents, setDocuments] = useState([]);
-  const [filteredDocuments, setFilteredDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [isDocumentModalOpen, setIsDocumentModalOpen] = useState(false);
+  const [error, setError] = useState('');
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
-  useEffect(() => {
-    fetchDocuments();
-  }, []);
-
-  useEffect(() => {
-    filterDocuments();
-  }, [documents, searchTerm, filterType]);
-
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     try {
+      setError('');
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
       const res = await fetch(`${apiUrl}/api/students/me/documents`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ([]));
+      if (!res.ok) throw new Error(data?.error || 'Impossible de charger tes ressources.');
       setDocuments(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching documents:', error);
+      setError(error?.message || 'Impossible de charger tes ressources.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const filterDocuments = () => {
+  useEffect(() => {
+    fetchDocuments();
+  }, [fetchDocuments]);
+
+  const filteredDocuments = useMemo(() => {
     let filtered = documents;
 
     if (searchTerm) {
@@ -59,8 +55,8 @@ const StudentDocuments = () => {
       filtered = filtered.filter(doc => doc.document_type === filterType);
     }
 
-    setFilteredDocuments(filtered);
-  };
+    return filtered;
+  }, [documents, filterType, searchTerm]);
 
   const markDocumentAsViewed = async (documentId) => {
     try {
@@ -229,30 +225,44 @@ const StudentDocuments = () => {
     );
   }
 
+  if (error) {
+    return (
+      <Card className="mx-auto max-w-xl border-red-200 bg-red-50">
+        <CardContent className="space-y-3 p-6 text-center">
+          <p className="font-semibold text-red-800">Impossible de charger tes ressources</p>
+          <p className="text-sm text-red-700">{error}</p>
+          <button type="button" onClick={fetchDocuments} className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white">
+            Réessayer
+          </button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">📂 Documents</h1>
+          <h1 className="text-2xl font-bold">Mes ressources</h1>
           <p className="text-muted-foreground mt-2">
             {unreadCount > 0 ? (
               <span className="text-orange-600 font-medium">
-                {unreadCount} nouveau(x) document(s) à consulter
+                {unreadCount} nouvelle{unreadCount > 1 ? 's' : ''} ressource{unreadCount > 1 ? 's' : ''} à consulter
               </span>
             ) : (
-              "Tous vos documents sont à jour"
+              documents.length > 0 ? 'Tout est consulté' : 'Cours, exercices et documents de tes professeurs'
             )}
           </p>
         </div>
         {unreadCount > 0 && (
           <div className="flex items-center gap-2 px-4 py-2 bg-orange-100 text-orange-700 rounded-full font-medium">
             <AlertCircle className="w-5 h-5" />
-            {unreadCount} nouveau(x)
+            {unreadCount} nouvelle{unreadCount > 1 ? 's' : ''}
           </div>
         )}
       </div>
 
-      <Card>
+      {documents.length > 0 && <Card>
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex-1 relative">
@@ -282,7 +292,7 @@ const StudentDocuments = () => {
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card>}
 
       {filteredDocuments.length === 0 ? (
         <Card>
@@ -293,8 +303,8 @@ const StudentDocuments = () => {
             </h3>
             <p className="text-sm text-gray-600">
               {documents.length === 0
-                ? 'Vos professeurs n\'ont pas encore ajouté de documents.'
-                : 'Essayez de modifier votre recherche ou vos filtres.'}
+                ? 'Tes professeurs n\'ont pas encore ajouté de ressource.'
+                : 'Modifie ta recherche ou tes filtres.'}
             </p>
           </CardContent>
         </Card>
@@ -323,12 +333,9 @@ const StudentDocuments = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {items.map((doc, index) => (
-                    <motion.div
+                  {items.map((doc) => (
+                    <div
                       key={doc.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.03 }}
                     >
                       <Card
                         onClick={() => handleDocumentClick(doc)}
@@ -387,7 +394,7 @@ const StudentDocuments = () => {
                           </button>
                         </CardContent>
                       </Card>
-                    </motion.div>
+                    </div>
                   ))}
                 </div>
               </div>

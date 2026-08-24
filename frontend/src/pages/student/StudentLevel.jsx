@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
 
@@ -253,6 +253,34 @@ const StudentLevel = () => {
     );
   }
 
+  if (!computed.total) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Ma progression</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Comprendre mes efforts sans fausse alerte</p>
+        </div>
+        <Card className="border-dashed">
+          <CardContent className="p-7 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-2xl">📈</div>
+            <h2 className="mt-4 text-lg font-semibold">Les indicateurs arrivent après les premières séances</h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
+              Aucune séance n’est encore enregistrée. Un score à 0 % serait trompeur : pour le moment, il n’y a simplement pas assez de données.
+            </p>
+            <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
+              <Link to="/my-grades" className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
+                Voir mes notes
+              </Link>
+              <Link to="/student/badges" className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-accent">
+                Voir mes badges
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -312,10 +340,7 @@ const StudentLevel = () => {
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-6 mb-6">
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 200 }}
+                <div
                   className={`w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold shadow-lg ${
                     classRanking.rank === 1 ? 'bg-yellow-400 text-yellow-900' :
                     classRanking.rank === 2 ? 'bg-gray-300 text-gray-800' :
@@ -324,7 +349,7 @@ const StudentLevel = () => {
                   }`}
                 >
                   {classRanking.rank === 1 ? '🥇' : classRanking.rank === 2 ? '🥈' : classRanking.rank === 3 ? '🥉' : `${classRanking.rank}e`}
-                </motion.div>
+                </div>
                 <div>
                   <p className="text-2xl font-bold text-indigo-800">
                     {classRanking.rank}{classRanking.rank === 1 ? 'er' : 'e'} / {classRanking.totalClasses}
@@ -338,11 +363,8 @@ const StudentLevel = () => {
                 {classRanking.ranking.map((cls, i) => {
                   const isMyClass = cls.classId === classRanking.myClass?.classId;
                   return (
-                    <motion.div
+                    <div
                       key={cls.classId}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.05 }}
                       className={`flex items-center gap-3 p-2.5 rounded-lg border ${
                         isMyClass ? 'border-indigo-400 bg-indigo-100 shadow-sm' : 'border-gray-200 bg-white'
                       }`}
@@ -366,7 +388,7 @@ const StudentLevel = () => {
                       }`}>
                         {cls.score}%
                       </div>
-                    </motion.div>
+                    </div>
                   );
                 })}
               </div>

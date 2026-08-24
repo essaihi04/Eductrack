@@ -46,6 +46,18 @@ const MobileNav = () => {
     { icon: CalendarClock, label: t('nav.parentAppointments'), path: '/teacher/appointments' },
   ] : [];
 
+  const studentSecondaryItems = profile?.role === 'student' ? [
+    { icon: FileText, label: 'Ressources', path: '/student/documents' },
+    { icon: GraduationCap, label: 'Progression', path: '/student/level' },
+    { icon: Award, label: 'Badges', path: '/student/badges' },
+    { icon: FileText, label: 'Bulletins', path: '/student/bulletins' },
+    { icon: Edit, label: 'Mon profil', path: '/profile' },
+  ] : [];
+
+  const secondaryItems = profile?.role === 'teacher'
+    ? teacherSecondaryItems
+    : studentSecondaryItems;
+
   const getNavItems = () => {
     if (profile?.role === 'super_admin') {
       return [
@@ -114,11 +126,11 @@ const MobileNav = () => {
     // Student
     if (profile?.role !== 'student') return []; // évite menu élève pour rôles inconnus
     return [
-      { icon: Calendar, label: 'Mon jour', path: '/dashboard' },
-      { icon: GraduationCap, label: 'Niveau', path: '/student/level' },
+      { icon: Calendar, label: "Aujourd'hui", path: '/dashboard' },
+      { icon: BookOpen, label: 'Emploi', path: '/student/timetable' },
       { icon: ClipboardList, label: 'Devoirs', path: '/my-assignments' },
       { icon: BarChart3, label: 'Notes', path: '/my-grades' },
-      { icon: Award, label: 'Badges', path: '/student/badges' },
+      { icon: Menu, label: 'Plus', path: '#student-more', more: true },
     ];
   };
 
@@ -128,7 +140,7 @@ const MobileNav = () => {
 
   return (
     <>
-      {profile?.role === 'teacher' && moreOpen && (
+      {(profile?.role === 'teacher' || profile?.role === 'student') && moreOpen && (
         <>
           <button
             type="button"
@@ -149,7 +161,7 @@ const MobileNav = () => {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-1.5">
-              {teacherSecondaryItems.map((item) => {
+              {secondaryItems.map((item) => {
                 const Icon = item.icon;
                 const active = location.pathname.startsWith(item.path);
                 return (
@@ -179,9 +191,9 @@ const MobileNav = () => {
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.more
-            ? teacherSecondaryItems.some((secondary) => location.pathname.startsWith(secondary.path))
+            ? secondaryItems.some((secondary) => location.pathname.startsWith(secondary.path))
             : item.childPaths
-              ? location.pathname === item.path || item.childPaths.some((path) => location.pathname.startsWith(`${path}/`))
+              ? location.pathname === item.path || item.childPaths.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`))
               : location.pathname === item.path;
           if (item.more) {
             return (
@@ -205,7 +217,7 @@ const MobileNav = () => {
               key={item.path}
               to={item.path}
               className={cn(
-                'flex flex-col items-center justify-center flex-1 h-full gap-1 text-xs transition-colors',
+                'relative flex flex-col items-center justify-center flex-1 h-full gap-1 text-xs transition-colors',
                 isActive
                   ? 'text-primary'
                   : 'text-muted-foreground'

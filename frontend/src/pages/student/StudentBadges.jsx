@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
 
@@ -12,14 +11,11 @@ const categoryColors = {
   global: { bg: 'bg-pink-50', border: 'border-pink-200', text: 'text-pink-700', bar: 'bg-pink-500', label: 'Global' },
 };
 
-const BadgeCard = ({ badge, earned = false, delay = 0 }) => {
+const BadgeCard = ({ badge, earned = false }) => {
   const colors = categoryColors[badge.category] || categoryColors.global;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ delay: delay * 0.05 }}
+    <div
       className={`relative p-4 rounded-xl border-2 ${earned ? `${colors.border} ${colors.bg}` : 'border-gray-200 bg-white'} transition-all hover:shadow-md`}
     >
       {earned && (
@@ -41,10 +37,8 @@ const BadgeCard = ({ badge, earned = false, delay = 0 }) => {
                 <span className={`font-medium ${badge.pct >= 75 ? 'text-green-600' : badge.pct >= 50 ? 'text-yellow-600' : 'text-gray-500'}`}>{badge.pct}%</span>
               </div>
               <div className="w-full h-2 rounded-full bg-gray-200 overflow-hidden">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${badge.pct}%` }}
-                  transition={{ delay: delay * 0.05 + 0.2, duration: 0.5 }}
+                <div
+                  style={{ width: `${badge.pct}%` }}
                   className={`h-full rounded-full ${colors.bar}`}
                 />
               </div>
@@ -55,13 +49,14 @@ const BadgeCard = ({ badge, earned = false, delay = 0 }) => {
           </span>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 
 const StudentBadges = () => {
   const [badges, setBadges] = useState({ earned: [], inProgress: [], totalSessions: 0 });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     fetchBadges();
@@ -69,6 +64,7 @@ const StudentBadges = () => {
 
   const fetchBadges = async () => {
     try {
+      setError('');
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -76,10 +72,16 @@ const StudentBadges = () => {
       const res = await fetch(`${apiUrl}/api/students/me/badges`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
-      setBadges(data);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Impossible de charger tes badges.');
+      setBadges({
+        earned: Array.isArray(data?.earned) ? data.earned : [],
+        inProgress: Array.isArray(data?.inProgress) ? data.inProgress : [],
+        totalSessions: Number(data?.totalSessions || 0),
+      });
     } catch (error) {
       console.error('Error fetching badges:', error);
+      setError(error?.message || 'Impossible de charger tes badges.');
     } finally {
       setLoading(false);
     }
@@ -89,10 +91,42 @@ const StudentBadges = () => {
     return <div className="p-8 text-center text-muted-foreground">Chargement des badges...</div>;
   }
 
+  if (error) {
+    return (
+      <Card className="mx-auto max-w-xl border-red-200 bg-red-50">
+        <CardContent className="space-y-3 p-6 text-center">
+          <p className="font-semibold text-red-800">Impossible de charger tes badges</p>
+          <p className="text-sm text-red-700">{error}</p>
+          <button type="button" onClick={fetchBadges} className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white">Réessayer</button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (badges.totalSessions === 0) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Mes badges</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Des encouragements basés sur tes efforts réels</p>
+        </div>
+        <Card className="border-dashed">
+          <CardContent className="p-8 text-center">
+            <div className="text-5xl">🚀</div>
+            <h2 className="mt-4 text-lg font-semibold">Tes premiers badges arriveront bientôt</h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
+              Dès qu’une séance sera enregistrée, ta présence, ta participation et ton travail feront progresser tes badges.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">🧠 Badges</h1>
+        <h1 className="text-2xl font-bold">Mes badges</h1>
         <p className="text-muted-foreground mt-2">
           {badges.totalSessions > 0
             ? `${badges.earned.length} badge${badges.earned.length > 1 ? 's' : ''} gagné${badges.earned.length > 1 ? 's' : ''} sur ${badges.totalSessions} séance${badges.totalSessions > 1 ? 's' : ''}`
@@ -103,9 +137,7 @@ const StudentBadges = () => {
 
       {/* Résumé rapide */}
       {badges.earned.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
+        <div
           className="flex items-center gap-3 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200 rounded-xl"
         >
           <div className="text-4xl">🏆</div>
@@ -118,7 +150,7 @@ const StudentBadges = () => {
               }
             </p>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {/* Badges en cours */}
@@ -130,8 +162,8 @@ const StudentBadges = () => {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {badges.inProgress.map((badge, i) => (
-                <BadgeCard key={badge.id} badge={badge} earned={false} delay={i} />
+              {badges.inProgress.map((badge) => (
+                <BadgeCard key={badge.id} badge={badge} earned={false} />
               ))}
             </div>
           </CardContent>
@@ -152,8 +184,8 @@ const StudentBadges = () => {
         <CardContent>
           {badges.earned.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {badges.earned.map((badge, i) => (
-                <BadgeCard key={badge.id} badge={badge} earned={true} delay={i} />
+              {badges.earned.map((badge) => (
+                <BadgeCard key={badge.id} badge={badge} earned={true} />
               ))}
             </div>
           ) : (
@@ -167,21 +199,6 @@ const StudentBadges = () => {
         </CardContent>
       </Card>
 
-      {/* Message motivant si pas de sessions */}
-      {badges.totalSessions === 0 && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center py-8 px-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-200"
-        >
-          <div className="text-5xl mb-4">🚀</div>
-          <h3 className="text-lg font-bold text-blue-800 mb-2">Prêt à commencer ?</h3>
-          <p className="text-sm text-blue-700 max-w-md mx-auto">
-            Dès ta première séance enregistrée, tu commenceras à débloquer des badges.
-            Présence, participation, devoirs... chaque effort compte !
-          </p>
-        </motion.div>
-      )}
     </div>
   );
 };

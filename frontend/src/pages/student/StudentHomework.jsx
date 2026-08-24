@@ -1,60 +1,39 @@
-import { useMemo, useState, useEffect } from 'react';
-import { BookOpen, Calendar, CheckCircle, Clock, AlertCircle, Upload, FileText } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
-import { useAuth } from '../../contexts/AuthContext';
+import { useCallback, useMemo, useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { BookOpen, Calendar, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Card, CardContent } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
 
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 const StudentHomework = () => {
-  const { profile } = useAuth();
   const [homework, setHomework] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
-  useEffect(() => {
-    fetchHomework();
-  }, []);
-
-  const fetchHomework = async () => {
+  const fetchHomework = useCallback(async () => {
     try {
+      setError('');
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
       const res = await fetch(`${apiUrl}/api/students/me/homework`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ([]));
+      if (!res.ok) throw new Error(data?.error || 'Impossible de charger tes devoirs.');
       setHomework(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching homework:', error);
+      setError(error?.message || 'Impossible de charger tes devoirs.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleSubmit = async (homeworkId) => {
-    // Pour l'instant, juste une soumission simulée
-    // Plus tard, on pourra ajouter l'upload de fichiers
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-
-      const res = await fetch(`${apiUrl}/api/students/me/homework/${homeworkId}/submit`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ fileUrl: null })
-      });
-
-      if (res.ok) {
-        await fetchHomework();
-      }
-    } catch (error) {
-      console.error('Error submitting homework:', error);
-    }
-  };
+  useEffect(() => {
+    fetchHomework();
+  }, [fetchHomework]);
 
   const getTypeIcon = (type) => {
     const icons = {
@@ -185,23 +164,37 @@ const StudentHomework = () => {
     });
     return Object.entries(grouped)
       .map(([subject, items]) => {
-        const pending = items.filter(h => !h.homework_submissions?.[0] || h.homework_submissions?.[0]?.status !== 'submitted');
+        const pending = items.filter((item) => !['submitted', 'graded'].includes(item.homework_submissions?.[0]?.status));
         return { subject, items, pendingCount: pending.length };
       })
       .sort((a, b) => b.pendingCount - a.pendingCount || a.subject.localeCompare(b.subject));
   }, [homework]);
 
   if (loading) {
-    return <div className="p-8">Chargement...</div>;
+    return <div className="flex min-h-[45vh] items-center justify-center text-sm text-muted-foreground">Chargement de tes devoirs…</div>;
   }
 
+  if (error) {
+    return (
+      <Card className="mx-auto max-w-xl border-red-200 bg-red-50">
+        <CardContent className="space-y-3 p-6 text-center">
+          <p className="font-semibold text-red-800">Impossible de charger tes devoirs</p>
+          <p className="text-sm text-red-700">{error}</p>
+          <button type="button" onClick={fetchHomework} className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white">Réessayer</button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const pendingCount = homework.filter((item) => !['submitted', 'graded'].includes(item.homework_submissions?.[0]?.status)).length;
+
   return (
-    <div className="p-8 space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       {/* En-tête */}
       <div>
-        <h1 className="text-3xl font-bold">📘 Mes devoirs</h1>
+        <h1 className="text-2xl font-bold">Mes devoirs</h1>
         <p className="text-muted-foreground mt-2">
-          {homework.filter(h => !h.homework_submissions?.[0]).length} devoir(s) à faire
+          {pendingCount > 0 ? `${pendingCount} devoir${pendingCount > 1 ? 's' : ''} à faire` : 'Tout est à jour'}
         </p>
       </div>
 
@@ -210,8 +203,13 @@ const StudentHomework = () => {
         {homework.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
-              <BookOpen className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-              <p className="text-gray-500">Aucun devoir pour le moment</p>
+              <BookOpen className="w-12 h-12 mx-auto text-blue-400 mb-4" />
+              <p className="font-semibold">Aucun devoir pour le moment</p>
+              <p className="mt-1 text-sm text-muted-foreground">Tu peux consulter ton emploi ou les ressources ajoutées par tes professeurs.</p>
+              <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
+                <Link to="/student/timetable" className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Voir mon emploi</Link>
+                <Link to="/student/documents" className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-accent">Voir mes ressources</Link>
+              </div>
             </CardContent>
           </Card>
         ) : (

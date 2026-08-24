@@ -246,15 +246,17 @@ const Sidebar = () => {
 
     // Student menu
     return [
-      { icon: Calendar, label: '📅 Mon jour', path: '/dashboard' },
-      { icon: BookOpen, label: '📋 Mon emploi', path: '/student/timetable' },
-      { icon: GraduationCap, label: '🎯 Mon niveau', path: '/student/level' },
-      { icon: ClipboardList, label: '📘 Mes devoirs', path: '/my-assignments' },
-      { icon: BarChart3, label: '📝 Mes notes', path: '/my-grades' },
-      { icon: FileText, label: '📂 Documents', path: '/student/documents' },
-      { icon: Award, label: '🧠 Badges', path: '/student/badges' },
-      { icon: FileText, label: '📄 Bulletins', path: '/student/bulletins' },
-      { icon: Edit, label: '👤 Profil', path: '/profile' },
+      { icon: Calendar, label: "Aujourd'hui", path: '/dashboard' },
+      { icon: BookOpen, label: 'Mon emploi', path: '/student/timetable' },
+      { icon: ClipboardList, label: 'Mes devoirs', path: '/my-assignments' },
+      {
+        icon: BarChart3,
+        label: 'Mes résultats',
+        path: '/my-grades',
+        childPaths: ['/student/level', '/student/badges'],
+      },
+      { icon: FileText, label: 'Mes ressources', path: '/student/documents' },
+      { icon: FileText, label: 'Mes bulletins', path: '/student/bulletins' },
     ];
   };
 
@@ -487,7 +489,7 @@ const Sidebar = () => {
             isActive = domainForPath(location.pathname, profile?.role)?.domain.key === item.domainKey;
           } else if (item.childPaths) {
             isActive = location.pathname === item.path
-              || item.childPaths.some((path) => location.pathname.startsWith(`${path}/`));
+              || item.childPaths.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`));
           } else {
             isActive = location.pathname === item.path;
           }

@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useCallback, useState, useEffect } from 'react';
 import { Calendar, Clock, User, MapPin } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import { supabase } from '../../lib/supabase';
@@ -26,37 +25,40 @@ const SUBJECT_COLORS = [
   { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', dot: 'bg-cyan-500' },
 ];
 
+const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 const StudentTimetable = () => {
   const [timetable, setTimetable] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeDay, setActiveDay] = useState(null);
+  const [error, setError] = useState('');
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
-  useEffect(() => {
-    // Set today as active day
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const today = dayNames[new Date().getDay()];
-    setActiveDay(today === 'sunday' ? 'monday' : today);
-    fetchTimetable();
-  }, []);
-
-  const fetchTimetable = async () => {
+  const fetchTimetable = useCallback(async () => {
     try {
+      setError('');
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
       const res = await fetch(`${apiUrl}/api/students/me/timetable`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ([]));
+      if (!res.ok) throw new Error(data?.error || 'Impossible de charger ton emploi du temps.');
       setTimetable(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Error fetching timetable:', error);
+      setError(error?.message || 'Impossible de charger ton emploi du temps.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const today = dayNames[new Date().getDay()];
+    setActiveDay(today === 'sunday' ? 'monday' : today);
+    fetchTimetable();
+  }, [fetchTimetable]);
 
   // Build color map by subject
   const subjectColorMap = {};
@@ -86,14 +88,26 @@ const StudentTimetable = () => {
     );
   }
 
+  if (error) {
+    return (
+      <Card className="mx-auto max-w-xl border-red-200 bg-red-50">
+        <CardContent className="space-y-3 p-6 text-center">
+          <p className="font-semibold text-red-800">Impossible de charger ton emploi du temps</p>
+          <p className="text-sm text-red-700">{error}</p>
+          <button type="button" onClick={fetchTimetable} className="rounded-xl bg-red-700 px-4 py-2 text-sm font-semibold text-white">Réessayer</button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (timetable.length === 0) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Calendar className="w-6 h-6" /> Mon emploi du temps
+            <Calendar className="w-6 h-6" /> Mon emploi
           </h1>
-          <p className="text-muted-foreground mt-1">Emploi du temps hebdomadaire</p>
+          <p className="text-muted-foreground mt-1">Mes cours de la semaine</p>
         </div>
         <Card>
           <CardContent className="p-12 text-center">
@@ -112,9 +126,9 @@ const StudentTimetable = () => {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Calendar className="w-6 h-6" /> Mon emploi du temps
+          <Calendar className="w-6 h-6" /> Mon emploi
         </h1>
-        <p className="text-muted-foreground mt-1">Emploi du temps hebdomadaire</p>
+        <p className="text-muted-foreground mt-1">Mes cours de la semaine</p>
       </div>
 
       {/* Day tabs */}
@@ -154,12 +168,7 @@ const StudentTimetable = () => {
       </div>
 
       {/* Day schedule */}
-      <motion.div
-        key={activeDay}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.15 }}
-      >
+      <div key={activeDay}>
         {activeDaySlots.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
@@ -174,11 +183,8 @@ const StudentTimetable = () => {
               const teacherName = slot.teacher ? `${slot.teacher.first_name} ${slot.teacher.last_name}` : null;
 
               return (
-                <motion.div
+                <div
                   key={slot.id || idx}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: idx * 0.05 }}
                 >
                   <div className={`flex gap-4 p-4 rounded-xl border ${colors.bg} ${colors.border}`}>
                     {/* Time column */}
@@ -223,12 +229,12 @@ const StudentTimetable = () => {
                       </div>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               );
             })}
           </div>
         )}
-      </motion.div>
+      </div>
 
       {/* Legend */}
       {uniqueSubjects.length > 0 && (
