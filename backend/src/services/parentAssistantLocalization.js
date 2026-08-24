@@ -17,6 +17,7 @@ const AR_ACTION_LABELS = {
   'schoollife.lost_items': 'الأشياء الضائعة',
   'schoollife.polls': 'استطلاعات الرأي',
   'schoollife.supplies': 'اللوازم المدرسية',
+  'account.credentials': 'بيانات الدخول وكلمات السر',
   'main.massar': 'رمز مسار',
 };
 
@@ -24,6 +25,7 @@ const AR_SECTION_LABELS = {
   pedagogy: 'الدراسة',
   finance: 'الأداءات',
   schoollife: 'الحياة المدرسية',
+  account: 'الحساب والولوج',
 };
 
 const TEXT = {
@@ -41,6 +43,11 @@ const TEXT = {
     suppliesReady: 'Voici la liste officielle des fournitures pour **{{level}}**.',
     suppliesDownload: 'Télécharger la liste complète — {{level}}',
     suppliesMore: 'La liste complète est disponible dans le PDF ci-dessous.',
+    credentialsIntro: "Les logins sont visibles ci-dessous. Pour votre sécurité, un mot de passe existant ne peut jamais être relu : vous pouvez le remplacer après confirmation de votre mot de passe parent.",
+    credentialsUnavailable: 'Aucun compte de connexion disponible.',
+    currentPasswordIncorrect: 'Le mot de passe parent actuel est incorrect.',
+    passwordPolicy: 'Le nouveau mot de passe doit contenir au moins 8 caractères, une lettre, un chiffre et un caractère spécial.',
+    credentialResetFailed: 'La réinitialisation a échoué. Réessayez dans quelques instants.',
   },
   ar: {
     serverError: 'حدث خطأ في الخادم',
@@ -56,6 +63,11 @@ const TEXT = {
     suppliesReady: 'هذه هي اللائحة الرسمية للوازم المستوى **{{level}}**.',
     suppliesDownload: 'تحميل اللائحة الكاملة — {{level}}',
     suppliesMore: 'اللائحة الكاملة متاحة في ملف PDF أسفله.',
+    credentialsIntro: 'بيانات الدخول ظاهرة أسفله. حفاظًا على الأمان، لا يمكن إظهار كلمة سر قديمة: يمكنكم تعويضها بعد تأكيد كلمة سر حساب ولي الأمر.',
+    credentialsUnavailable: 'لا يوجد أي حساب دخول متاح.',
+    currentPasswordIncorrect: 'كلمة السر الحالية لحساب ولي الأمر غير صحيحة.',
+    passwordPolicy: 'يجب أن تتضمن كلمة السر الجديدة 8 رموز على الأقل وحرفًا ورقمًا ورمزًا خاصًا.',
+    credentialResetFailed: 'تعذرت إعادة التعيين. حاولوا من جديد بعد قليل.',
   },
 };
 

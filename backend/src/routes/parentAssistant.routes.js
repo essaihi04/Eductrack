@@ -14,15 +14,19 @@
  * Monté sur /api/parent/assistant.
  */
 import express from 'express';
-import { supabaseAdmin } from '../config/supabase.js';
+import rateLimit from 'express-rate-limit';
+import { createPublicAuthClient, supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import * as A from '../services/whatsapp/chatbot/answers.js';
 import { answerWithAI } from '../services/whatsapp/chatbot/ai.js';
 import { isSuppliesQuery } from '../services/whatsapp/chatbot/suppliesQuery.js';
+import { detectCredentialRequest } from '../services/whatsapp/chatbot/credentials.js';
 import {
   getActiveSections, getSectionById, matchSectionForLevel,
 } from '../services/whatsapp/chatbot/knowledge.js';
 import { generateSectionPdf } from '../services/whatsapp/chatbot/suppliesPdf.js';
+import { isStrongPassword } from '../services/parentCredentialSecurity.js';
+import { buildParentCredentialsPdf } from '../services/parentCredentialsPdf.js';
 import {
   CAPABILITIES, isCapabilityEnabled, disabledCapabilities,
 } from '../services/whatsapp/chatbot/capabilities.js';
@@ -65,12 +69,14 @@ const HANDLERS = {
 };
 
 const SUPPLIES_ACTION = 'schoollife.supplies';
+const CREDENTIALS_ACTION = 'account.credentials';
 
 /** Regroupement affiché dans l'interface, avec son emoji d'ambiance. */
 const SECTIONS = [
   { menu: 'pedagogy', section: 'main.pedagogy', label: 'Scolarité', emoji: '📚', mood: 'study' },
   { menu: 'finance', section: 'main.finance', label: 'Paiements', emoji: '💰', mood: 'money' },
   { menu: 'schoollife', section: 'main.schoollife', label: 'Vie scolaire', emoji: '🎒', mood: 'fun' },
+  { menu: 'account', section: 'main.account', label: 'Compte et accès', emoji: '🔐', mood: 'idle' },
 ];
 
 const OPTION_EMOJI = {
@@ -81,6 +87,7 @@ const OPTION_EMOJI = {
   'finance.due_dates': '📆', 'finance.payment_info': '🏦',
   'schoollife.extracurricular': '✨', 'schoollife.feed': '📸',
   'schoollife.lost_items': '🔍', 'schoollife.polls': '🗳️', 'schoollife.supplies': '🎒',
+  'account.credentials': '🔑',
   'main.massar': '🆔',
 };
 
@@ -89,7 +96,7 @@ const OPTION_EMOJI = {
 async function buildParentInfo(req) {
   const { data: profile } = await supabaseAdmin
     .from('profiles')
-    .select('id, first_name, last_name, school_id, schools(name)')
+    .select('id, first_name, last_name, email, school_id, schools(name)')
     .eq('id', req.user.id)
     .single();
 
@@ -98,6 +105,7 @@ async function buildParentInfo(req) {
     parent_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'Parent',
     school_id: profile?.school_id || req.user.school_id || null,
     school_name: profile?.schools?.name || 'École',
+    parent_email: profile?.email || null,
   };
 }
 
@@ -117,7 +125,9 @@ function toMarkdown(whatsappText) {
 
 /** Options accessibles d'une section, telles qu'affichées en boutons. */
 async function sectionOptions(schoolId, menu, locale) {
-  const caps = CAPABILITIES.filter((c) => c.menu === menu && (HANDLERS[c.id] || c.id === SUPPLIES_ACTION));
+  const caps = CAPABILITIES.filter((c) => (
+    c.menu === menu && (HANDLERS[c.id] || c.id === SUPPLIES_ACTION || c.id === CREDENTIALS_ACTION)
+  ));
   const out = [];
   for (const cap of caps) {
     if (!(await isCapabilityEnabled(schoolId, cap.id))) continue;
@@ -224,6 +234,54 @@ async function suppliesResponse({ schoolId, student, locale, sectionId = null })
   };
 }
 
+async function profileLogin(profileId, fallback = null) {
+  const { data } = await supabaseAdmin.auth.admin.getUserById(profileId);
+  return data?.user?.email || fallback || null;
+}
+
+async function credentialsResponse({ parentInfo, student, locale }) {
+  const accounts = [];
+  const parentEmail = await profileLogin(parentInfo.parent_id, parentInfo.parent_email);
+  if (parentEmail) {
+    accounts.push({
+      target: 'parent',
+      name: parentInfo.parent_name,
+      email: parentEmail,
+    });
+  }
+
+  if (student) {
+    const studentEmail = await profileLogin(student.id, student.email);
+    if (studentEmail) {
+      accounts.push({
+        target: 'student',
+        child_id: student.id,
+        name: [student.first_name, student.last_name].filter(Boolean).join(' '),
+        email: studentEmail,
+      });
+    }
+  }
+
+  if (accounts.length === 0) {
+    return {
+      blocks: [{ type: 'text', markdown: assistantText('credentialsUnavailable', locale) }],
+      mood: 'idle',
+    };
+  }
+
+  return {
+    blocks: [
+      { type: 'text', markdown: assistantText('credentialsIntro', locale) },
+      {
+        type: 'credentials',
+        endpoint: '/api/parent/assistant/credentials/reset',
+        accounts,
+      },
+    ],
+    mood: 'idle',
+  };
+}
+
 // ── Menu interactif ───────────────────────────────────────────────────────
 
 router.get('/menu', async (req, res) => {
@@ -294,6 +352,100 @@ router.get('/supplies/:sectionId/pdf', async (req, res) => {
   }
 });
 
+const credentialsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives. Réessayez dans 15 minutes.' },
+});
+
+// Réinitialisation volontaire et confirmée. Le mot de passe n'est jamais
+// persisté : il revient une seule fois avec un PDF généré en mémoire.
+router.post('/credentials/reset', credentialsLimiter, async (req, res) => {
+  try {
+    const locale = normalizeAssistantLocale(req.body?.lang);
+    const {
+      target, child_id: childId, current_password: currentPassword, new_password: newPassword,
+    } = req.body || {};
+    if (!['parent', 'student'].includes(target) || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: assistantText('credentialResetFailed', locale) });
+    }
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({ error: assistantText('passwordPolicy', locale) });
+    }
+
+    const parentInfo = await buildParentInfo(req);
+    if (!(await isCapabilityEnabled(parentInfo.school_id, CREDENTIALS_ACTION))) {
+      return res.status(403).json({ error: assistantText('contentUnavailable', locale) });
+    }
+    const { data: parentAuth } = await supabaseAdmin.auth.admin.getUserById(parentInfo.parent_id);
+    if (!parentAuth?.user?.email) {
+      return res.status(400).json({ error: assistantText('credentialsUnavailable', locale) });
+    }
+
+    const verificationClient = createPublicAuthClient();
+    const { error: signInError } = await verificationClient.auth.signInWithPassword({
+      email: parentAuth.user.email,
+      password: currentPassword,
+    });
+    if (signInError) {
+      return res.status(401).json({ error: assistantText('currentPasswordIncorrect', locale) });
+    }
+
+    let profileId = parentInfo.parent_id;
+    let accountName = parentInfo.parent_name;
+    let accountEmail = parentAuth.user.email;
+    let accountRole = locale === 'ar' ? 'ولي أمر' : 'Parent';
+
+    if (target === 'student') {
+      const student = childId ? await loadParentChild(parentInfo.parent_id, childId) : null;
+      if (!student || student.school_id !== parentInfo.school_id) {
+        return res.status(403).json({ error: assistantText('childForbidden', locale) });
+      }
+      const { data: studentAuth } = await supabaseAdmin.auth.admin.getUserById(student.id);
+      if (!studentAuth?.user?.email) {
+        return res.status(400).json({ error: assistantText('credentialsUnavailable', locale) });
+      }
+      profileId = student.id;
+      accountName = [student.first_name, student.last_name].filter(Boolean).join(' ');
+      accountEmail = studentAuth.user.email;
+      accountRole = locale === 'ar' ? 'تلميذ(ة)' : 'Élève';
+    }
+
+    // Préparer le document avant la mutation : une erreur de génération ne
+    // doit jamais changer le mot de passe sans pouvoir le rendre au parent.
+    const pdf = await buildParentCredentialsPdf({
+      schoolId: parentInfo.school_id,
+      schoolName: parentInfo.school_name,
+      accountName,
+      accountRole,
+      email: accountEmail,
+      password: newPassword,
+      locale,
+    });
+
+    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(profileId, {
+      password: newPassword,
+    });
+    if (updateError) throw updateError;
+
+    return res.json({
+      success: true,
+      account: { target, name: accountName, email: accountEmail, password: newPassword },
+      pdf: {
+        name: pdf.fileName,
+        mime_type: 'application/pdf',
+        base64: pdf.buffer.toString('base64'),
+      },
+    });
+  } catch (error) {
+    console.error('Erreur assistant réinitialisation identifiants:', error);
+    return res.status(500).json({ error: assistantText('credentialResetFailed', req.body?.lang) });
+  }
+});
+
 // ── Conversation ──────────────────────────────────────────────────────────
 
 router.post('/message', async (req, res) => {
@@ -329,6 +481,16 @@ router.post('/message', async (req, res) => {
         return res.json(await suppliesResponse({ schoolId, student, locale, sectionId }));
       }
 
+      if (action === CREDENTIALS_ACTION) {
+        if (!(await isCapabilityEnabled(schoolId, CREDENTIALS_ACTION))) {
+          return res.json({
+            blocks: [{ type: 'text', markdown: assistantText('disabledInfo', locale, { school: parentInfo.school_name }) }],
+            mood: 'blocked',
+          });
+        }
+        return res.json(await credentialsResponse({ parentInfo, student, locale }));
+      }
+
       if (!HANDLERS[action]) return res.status(400).json({ error: assistantText('unknownAction', locale) });
 
       // Double contrôle : le bouton peut venir d'un menu affiché avant que
@@ -362,6 +524,16 @@ router.post('/message', async (req, res) => {
       }
       if (!student) return res.status(400).json({ error: assistantText('selectChild', locale) });
       return res.json(await suppliesResponse({ schoolId, student, locale }));
+    }
+
+    if (detectCredentialRequest(question).wants) {
+      if (!(await isCapabilityEnabled(schoolId, CREDENTIALS_ACTION))) {
+        return res.json({
+          blocks: [{ type: 'text', markdown: assistantText('disabledInfo', locale, { school: parentInfo.school_name }) }],
+          mood: 'blocked',
+        });
+      }
+      return res.json(await credentialsResponse({ parentInfo, student, locale }));
     }
 
     // Un contenu de l'école déclenché par mot-clé prime sur l'IA.

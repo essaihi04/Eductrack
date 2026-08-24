@@ -14,6 +14,17 @@ if (!supabaseUrl || !supabaseAnonKey) {
 // Client pour les opérations publiques
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Client jetable pour une vérification d'identité ponctuelle. Une nouvelle
+// instance évite qu'une connexion par mot de passe ne modifie la session du
+// client public partagé entre plusieurs requêtes du serveur.
+export const createPublicAuthClient = () => createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
+
 // Client admin pour les opérations privilégiées
 export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 

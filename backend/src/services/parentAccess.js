@@ -55,7 +55,7 @@ export async function loadParentChild(parentId, childId) {
   // croire à tort que l'enfant n'était pas rattaché.
   const { data: student, error } = await supabaseAdmin
     .from('profiles')
-    .select('id, first_name, last_name, class_id, school_id, massar_code, massar_secret, classes:classes!fk_profiles_class(id, name, level)')
+    .select('id, first_name, last_name, email, class_id, school_id, massar_code, massar_secret, classes:classes!fk_profiles_class(id, name, level)')
     .eq('id', childId)
     .single();
   if (error) throw error;

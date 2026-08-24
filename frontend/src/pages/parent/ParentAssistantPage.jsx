@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import {
   Send, Sparkles, Download, RefreshCw, X, UserRound, LayoutGrid,
-  MessageCircle, ChevronLeft, ChevronRight,
+  MessageCircle, ChevronLeft, ChevronRight, KeyRound, ShieldCheck, Copy,
+  Eye, EyeOff, FileDown, Wand2, CheckCircle2,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
@@ -353,11 +354,288 @@ const MessageBlock = ({ block }) => {
 
   if (block.type === 'secure_file') return <SecureFileBlock block={block} />;
 
+  if (block.type === 'credentials') return <CredentialManagerBlock block={block} />;
+
   return (
     <div
       className="bg-card border rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-sm leading-relaxed shadow-sm"
       dangerouslySetInnerHTML={{ __html: renderMarkdown(block.markdown || '') }}
     />
+  );
+};
+
+const EMPTY_CREDENTIAL_FORM = { currentPassword: '', newPassword: '', confirmPassword: '' };
+
+const credentialPasswordChecks = (value) => ({
+  length: value.length >= 8,
+  letter: /[A-Za-z]/.test(value),
+  number: /\d/.test(value),
+  special: /[^A-Za-z0-9]/.test(value),
+});
+
+const secureRandomPassword = () => {
+  const sets = {
+    upper: 'ABCDEFGHJKLMNPQRSTUVWXYZ',
+    lower: 'abcdefghijkmnopqrstuvwxyz',
+    number: '23456789',
+    special: '!@#$%&*?',
+  };
+  const pick = (set) => set[window.crypto.getRandomValues(new Uint32Array(1))[0] % set.length];
+  const all = Object.values(sets).join('');
+  const chars = [pick(sets.upper), pick(sets.lower), pick(sets.number), pick(sets.special)];
+  while (chars.length < 14) chars.push(pick(all));
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swap = window.crypto.getRandomValues(new Uint32Array(1))[0] % (index + 1);
+    [chars[index], chars[swap]] = [chars[swap], chars[index]];
+  }
+  return chars.join('');
+};
+
+const downloadBase64Pdf = (pdf) => {
+  const binary = window.atob(pdf.base64);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: pdf.mime_type || 'application/pdf' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = pdf.name || 'Identifiants.pdf';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const CredentialManagerBlock = ({ block }) => {
+  const { t, lang, dir } = useI18n();
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState(EMPTY_CREDENTIAL_FORM);
+  const [visible, setVisible] = useState(false);
+  const [resultVisible, setResultVisible] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+
+  const choose = (account) => {
+    setSelected(account);
+    setForm(EMPTY_CREDENTIAL_FORM);
+    setVisible(false);
+    setResult(null);
+    setError('');
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError('');
+    if (form.newPassword !== form.confirmPassword) {
+      setError(t('passist.credentialsMismatch'));
+      return;
+    }
+    if (Object.values(credentialPasswordChecks(form.newPassword)).some((valid) => !valid)) {
+      setError(t('passist.credentialsWeak'));
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const headers = await authHeaders();
+      const response = await fetch(`${apiUrl.replace(/\/$/, '')}${block.endpoint}`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: selected.target,
+          child_id: selected.child_id || null,
+          current_password: form.currentPassword,
+          new_password: form.newPassword,
+          lang,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || t('passist.credentialsResetError'));
+      setResult(data);
+      setResultVisible(false);
+      setForm(EMPTY_CREDENTIAL_FORM);
+    } catch (resetError) {
+      setError(resetError.message || t('passist.credentialsResetError'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="w-full space-y-2 rounded-2xl border bg-card p-3 shadow-sm" dir={dir}>
+      <div className="flex items-start gap-2">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+          <KeyRound className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">{t('passist.credentialsTitle')}</p>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">{t('passist.credentialsSecure')}</p>
+        </div>
+      </div>
+
+      {!selected && !result && (
+        <div className="space-y-1.5">
+          {(block.accounts || []).map((account) => (
+            <div key={`${account.target}:${account.child_id || 'self'}`} className="rounded-xl border bg-muted/30 p-2.5">
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold">
+                    {t(account.target === 'parent' ? 'passist.credentialsParent' : 'passist.credentialsStudent')} — {account.name}
+                  </p>
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" dir="ltr">{account.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => choose(account)}
+                  className="shrink-0 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  {t('passist.credentialsReset')}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selected && !result && (
+        <form onSubmit={submit} className="space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="truncate text-xs font-semibold">{selected.name}</p>
+            <button type="button" onClick={() => setSelected(null)} className="text-[11px] text-muted-foreground hover:text-foreground">
+              {t('common.cancel')}
+            </button>
+          </div>
+          <p className="text-[10px] leading-relaxed text-muted-foreground">{t('passist.credentialsConfirmIdentity')}</p>
+
+          <CredentialPasswordInput
+            label={t('passist.credentialsCurrentParent')}
+            value={form.currentPassword}
+            visible={visible}
+            onChange={(value) => setForm((current) => ({ ...current, currentPassword: value }))}
+          />
+          <div className="flex items-end gap-1.5">
+            <div className="min-w-0 flex-1">
+              <CredentialPasswordInput
+                label={t('passist.credentialsNew')}
+                value={form.newPassword}
+                visible={visible}
+                onChange={(value) => setForm((current) => ({ ...current, newPassword: value }))}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const generated = secureRandomPassword();
+                setForm((current) => ({ ...current, newPassword: generated, confirmPassword: generated }));
+                setVisible(true);
+              }}
+              className="mb-px flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-card text-primary hover:bg-primary/5"
+              aria-label={t('passist.credentialsGenerate')}
+              title={t('passist.credentialsGenerate')}
+            >
+              <Wand2 className="h-4 w-4" />
+            </button>
+          </div>
+          <CredentialPasswordInput
+            label={t('passist.credentialsConfirm')}
+            value={form.confirmPassword}
+            visible={visible}
+            onChange={(value) => setForm((current) => ({ ...current, confirmPassword: value }))}
+          />
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setVisible((current) => !current)}
+              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              {visible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              {t(visible ? 'passist.credentialsHide' : 'passist.credentialsShow')}
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !form.currentPassword || !form.newPassword || !form.confirmPassword}
+              className="rounded-lg bg-primary px-3 py-2 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              {busy ? t('passist.credentialsResetting') : t('passist.credentialsConfirmReset')}
+            </button>
+          </div>
+          {error && <p className="rounded-lg bg-red-50 px-2 py-1.5 text-[11px] text-red-700">{error}</p>}
+        </form>
+      )}
+
+      {result?.success && (
+        <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2.5">
+          <div className="flex items-center gap-1.5 text-emerald-800">
+            <CheckCircle2 className="h-4 w-4" />
+            <p className="text-xs font-semibold">{t('passist.credentialsSuccess')}</p>
+          </div>
+          <p className="text-[10px] leading-relaxed text-emerald-800">{t('passist.credentialsOneTime')}</p>
+          <CredentialValue label={t('passist.credentialsLogin')} value={result.account.email} copyLabel={t('passist.credentialsCopy')} copiedLabel={t('passist.credentialsCopied')} />
+          <CredentialValue
+            label={t('passist.credentialsPassword')}
+            value={resultVisible ? result.account.password : '••••••••••••'}
+            copyValue={result.account.password}
+            copyLabel={t('passist.credentialsCopy')}
+            copiedLabel={t('passist.credentialsCopied')}
+            action={(
+              <button type="button" onClick={() => setResultVisible((current) => !current)} className="p-1 text-muted-foreground hover:text-foreground">
+                {resultVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            )}
+          />
+          <button
+            type="button"
+            onClick={() => downloadBase64Pdf(result.pdf)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-[11px] font-semibold text-white hover:bg-emerald-800"
+          >
+            <FileDown className="h-4 w-4" /> {t('passist.credentialsDownloadPdf')}
+          </button>
+          {result.account.target === 'parent' && (
+            <p className="text-[10px] leading-relaxed text-amber-800">{t('passist.credentialsReconnect')}</p>
+          )}
+          <button type="button" onClick={() => { setResult(null); setSelected(null); }} className="w-full text-center text-[10px] text-muted-foreground hover:text-foreground">
+            {t('passist.credentialsBack')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CredentialPasswordInput = ({ label, value, visible, onChange }) => (
+  <label className="block text-[10px] font-medium text-foreground">
+    <span className="mb-1 block">{label}</span>
+    <input
+      type={visible ? 'text' : 'password'}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      autoComplete="off"
+      className="h-9 w-full rounded-lg border bg-card px-2.5 font-mono text-xs focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15"
+    />
+  </label>
+);
+
+const CredentialValue = ({ label, value, copyValue = value, copyLabel, copiedLabel, action = null }) => {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(copyValue);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-card px-2.5 py-2">
+      <p className="text-[9px] font-medium uppercase text-muted-foreground">{label}</p>
+      <div className="mt-0.5 flex items-center gap-1">
+        <code className="min-w-0 flex-1 truncate text-[11px]" dir="ltr">{value}</code>
+        {action}
+        <button type="button" onClick={copy} className="p-1 text-muted-foreground hover:text-foreground" aria-label={copied ? copiedLabel : copyLabel}>
+          {copied ? <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+    </div>
   );
 };
 

@@ -8,6 +8,7 @@ import {
   sectionLabel,
 } from './parentAssistantLocalization.js';
 import { isSuppliesQuery } from './whatsapp/chatbot/suppliesQuery.js';
+import { isStrongPassword, passwordPolicy } from './parentCredentialSecurity.js';
 
 test('la langue de l’assistant est normalisée sans ambiguïté', () => {
   assert.equal(normalizeAssistantLocale('ar-MA'), 'ar');
@@ -45,4 +46,15 @@ test('les fournitures sont reconnues en français, arabe et darija', () => {
   assert.equal(isSuppliesQuery('فين نلقى لائحة اللوازم المدرسية؟'), true);
   assert.equal(isSuppliesQuery('3afak lwazim dyal 2AP'), true);
   assert.equal(isSuppliesQuery('Quel est son emploi du temps ?'), false);
+});
+
+test('les mots de passe réinitialisés respectent la politique parent', () => {
+  assert.equal(isStrongPassword('Simple2026'), false);
+  assert.equal(isStrongPassword('Solide#2026'), true);
+  assert.deepEqual(passwordPolicy('Solide#2026'), {
+    length: true,
+    letter: true,
+    number: true,
+    special: true,
+  });
 });
