@@ -16,6 +16,7 @@ const AR_ACTION_LABELS = {
   'schoollife.feed': 'دفتر الحياة المدرسية',
   'schoollife.lost_items': 'الأشياء الضائعة',
   'schoollife.polls': 'استطلاعات الرأي',
+  'schoollife.supplies': 'اللوازم المدرسية',
   'main.massar': 'رمز مسار',
 };
 
@@ -35,6 +36,11 @@ const TEXT = {
     selectChild: 'Sélectionnez un enfant',
     emptyMessage: 'Message vide',
     aiDisabled: 'Les questions libres ne sont pas activées. Utilisez les boutons ci-dessous pour consulter les informations disponibles.',
+    suppliesUnavailable: "La liste des fournitures scolaires n'a pas encore été publiée par l'école.",
+    suppliesChooseLevel: "La classe de l'enfant ne permet pas de choisir automatiquement la bonne liste. Sélectionnez le niveau concerné.",
+    suppliesReady: 'Voici la liste officielle des fournitures pour **{{level}}**.',
+    suppliesDownload: 'Télécharger la liste complète — {{level}}',
+    suppliesMore: 'La liste complète est disponible dans le PDF ci-dessous.',
   },
   ar: {
     serverError: 'حدث خطأ في الخادم',
@@ -45,6 +51,11 @@ const TEXT = {
     selectChild: 'اختاروا الابن المعني',
     emptyMessage: 'الرسالة فارغة',
     aiDisabled: 'الأسئلة الحرة غير مفعلة. استعملوا الأزرار أسفله للاطلاع على المعلومات المتاحة.',
+    suppliesUnavailable: 'لم تنشر المؤسسة لائحة اللوازم المدرسية بعد.',
+    suppliesChooseLevel: 'لا يسمح قسم الابن باختيار اللائحة المناسبة تلقائيًا. اختاروا المستوى المعني.',
+    suppliesReady: 'هذه هي اللائحة الرسمية للوازم المستوى **{{level}}**.',
+    suppliesDownload: 'تحميل اللائحة الكاملة — {{level}}',
+    suppliesMore: 'اللائحة الكاملة متاحة في ملف PDF أسفله.',
   },
 };
 

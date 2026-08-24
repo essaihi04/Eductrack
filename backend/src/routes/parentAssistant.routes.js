@@ -18,6 +18,11 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import * as A from '../services/whatsapp/chatbot/answers.js';
 import { answerWithAI } from '../services/whatsapp/chatbot/ai.js';
+import { isSuppliesQuery } from '../services/whatsapp/chatbot/suppliesQuery.js';
+import {
+  getActiveSections, getSectionById, matchSectionForLevel,
+} from '../services/whatsapp/chatbot/knowledge.js';
+import { generateSectionPdf } from '../services/whatsapp/chatbot/suppliesPdf.js';
 import {
   CAPABILITIES, isCapabilityEnabled, disabledCapabilities,
 } from '../services/whatsapp/chatbot/capabilities.js';
@@ -59,6 +64,8 @@ const HANDLERS = {
   'main.massar': A.getMassarCode,
 };
 
+const SUPPLIES_ACTION = 'schoollife.supplies';
+
 /** Regroupement affiché dans l'interface, avec son emoji d'ambiance. */
 const SECTIONS = [
   { menu: 'pedagogy', section: 'main.pedagogy', label: 'Scolarité', emoji: '📚', mood: 'study' },
@@ -73,7 +80,7 @@ const OPTION_EMOJI = {
   'finance.balance': '💰', 'finance.last_invoice': '🧾', 'finance.history': '💳',
   'finance.due_dates': '📆', 'finance.payment_info': '🏦',
   'schoollife.extracurricular': '✨', 'schoollife.feed': '📸',
-  'schoollife.lost_items': '🔍', 'schoollife.polls': '🗳️',
+  'schoollife.lost_items': '🔍', 'schoollife.polls': '🗳️', 'schoollife.supplies': '🎒',
   'main.massar': '🆔',
 };
 
@@ -110,13 +117,111 @@ function toMarkdown(whatsappText) {
 
 /** Options accessibles d'une section, telles qu'affichées en boutons. */
 async function sectionOptions(schoolId, menu, locale) {
-  const caps = CAPABILITIES.filter((c) => c.menu === menu && HANDLERS[c.id]);
+  const caps = CAPABILITIES.filter((c) => c.menu === menu && (HANDLERS[c.id] || c.id === SUPPLIES_ACTION));
   const out = [];
   for (const cap of caps) {
     if (!(await isCapabilityEnabled(schoolId, cap.id))) continue;
     out.push({ action: cap.id, label: actionLabel(cap.id, cap.label, locale), emoji: OPTION_EMOJI[cap.id] || '•' });
   }
   return out;
+}
+
+function suppliesAcademicYear(section) {
+  if (section?.document?.academic_year) return section.document.academic_year;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  if (month >= 9) return `${year}-${year + 1}`;
+  if (month <= 2) return `${year - 1}-${year}`;
+  return `${year}-${year + 1}`;
+}
+
+function suppliesPreview(content) {
+  if (content && typeof content === 'object' && Array.isArray(content.groups)) {
+    const output = [];
+    let itemCount = 0;
+    for (const group of content.groups) {
+      const items = (group?.items || []).filter((item) => {
+        const label = String(item?.label || '').trim();
+        return label && !/^UPLOAD\b/i.test(label);
+      });
+      if (items.length === 0) continue;
+      output.push(`**${String(group.title || '').trim() || '—'}**`);
+      for (const item of items) {
+        const quantity = String(item.quantity || '').trim();
+        const label = String(item.label || '').trim();
+        const note = String(item.note || '').trim();
+        output.push(`- ${[quantity, label].filter(Boolean).join(' ')}${note ? ` — ${note}` : ''}`.slice(0, 180));
+        itemCount += 1;
+        if (itemCount >= 8) break;
+      }
+      if (itemCount >= 8) break;
+    }
+    return output.join('\n');
+  }
+
+  const lines = String(content || '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-•*\s]+/, '').trim())
+    .filter(Boolean);
+  return lines.slice(0, 8).map((line) => `- ${line.slice(0, 150)}`).join('\n');
+}
+
+function readySuppliesResponse(section, locale) {
+  const level = section.level_label || section.level_code || '—';
+  const preview = suppliesPreview(section.content);
+  const text = [
+    assistantText('suppliesReady', locale, { level }),
+    preview,
+    assistantText('suppliesMore', locale),
+  ].filter(Boolean).join('\n\n');
+
+  return {
+    blocks: [
+      { type: 'text', markdown: text },
+      {
+        type: 'secure_file',
+        endpoint: `/api/parent/assistant/supplies/${section.id}/pdf`,
+        name: assistantText('suppliesDownload', locale, { level }),
+      },
+    ],
+    mood: 'fun',
+  };
+}
+
+async function suppliesResponse({ schoolId, student, locale, sectionId = null }) {
+  const sections = await getActiveSections(schoolId, 'fournitures');
+  if (sections.length === 0) {
+    return {
+      blocks: [{ type: 'text', markdown: assistantText('suppliesUnavailable', locale) }],
+      mood: 'fun',
+    };
+  }
+
+  let section = sectionId ? sections.find((item) => item.id === sectionId) : null;
+  if (sectionId && !section) {
+    return {
+      blocks: [{ type: 'text', markdown: assistantText('contentUnavailable', locale) }],
+      mood: 'idle',
+    };
+  }
+
+  if (!section) {
+    const studentLevel = student?.classes?.level || student?.class_name || student?.classes?.name;
+    section = matchSectionForLevel(studentLevel, sections);
+  }
+  if (!section && sections.length === 1) section = sections[0];
+  if (section) return readySuppliesResponse(section, locale);
+
+  return {
+    blocks: [{ type: 'text', markdown: assistantText('suppliesChooseLevel', locale) }],
+    suggestions: sections.map((item) => ({
+      action: `${SUPPLIES_ACTION}:${item.id}`,
+      label: item.level_label || item.level_code || '—',
+      emoji: '📘',
+    })),
+    mood: 'fun',
+  };
 }
 
 // ── Menu interactif ───────────────────────────────────────────────────────
@@ -159,6 +264,36 @@ router.get('/menu', async (req, res) => {
   }
 });
 
+// PDF généré à la demande. L'URL reste derrière l'authentification parent :
+// le frontend le télécharge avec le jeton courant au lieu de publier un lien.
+router.get('/supplies/:sectionId/pdf', async (req, res) => {
+  try {
+    const parentInfo = await buildParentInfo(req);
+    if (!(await isCapabilityEnabled(parentInfo.school_id, SUPPLIES_ACTION))) {
+      return res.status(403).json({ error: assistantText('contentUnavailable', req.query.lang) });
+    }
+
+    const section = await getSectionById(req.params.sectionId);
+    if (!section || section.school_id !== parentInfo.school_id || section.document?.category !== 'fournitures') {
+      return res.status(404).json({ error: assistantText('contentUnavailable', req.query.lang) });
+    }
+
+    const { buffer, fileName } = await generateSectionPdf({
+      schoolId: parentInfo.school_id,
+      section,
+      title: 'Fournitures scolaires',
+      academicYear: suppliesAcademicYear(section),
+    });
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Erreur assistant fournitures PDF:', error);
+    return res.status(500).json({ error: assistantText('serverError', req.query.lang) });
+  }
+});
+
 // ── Conversation ──────────────────────────────────────────────────────────
 
 router.post('/message', async (req, res) => {
@@ -182,6 +317,18 @@ router.post('/message', async (req, res) => {
 
     // ── Bouton : donnée du référentiel ──
     if (action) {
+      if (action === SUPPLIES_ACTION || action.startsWith(`${SUPPLIES_ACTION}:`)) {
+        if (!(await isCapabilityEnabled(schoolId, SUPPLIES_ACTION))) {
+          return res.json({
+            blocks: [{ type: 'text', markdown: assistantText('disabledInfo', locale, { school: parentInfo.school_name }) }],
+            mood: 'blocked',
+          });
+        }
+        if (!student) return res.status(400).json({ error: assistantText('selectChild', locale) });
+        const sectionId = action.startsWith(`${SUPPLIES_ACTION}:`) ? action.slice(SUPPLIES_ACTION.length + 1) : null;
+        return res.json(await suppliesResponse({ schoolId, student, locale, sectionId }));
+      }
+
       if (!HANDLERS[action]) return res.status(400).json({ error: assistantText('unknownAction', locale) });
 
       // Double contrôle : le bouton peut venir d'un menu affiché avant que
@@ -205,6 +352,17 @@ router.post('/message', async (req, res) => {
     // ── Message libre ──
     const question = String(text || '').trim();
     if (!question) return res.status(400).json({ error: assistantText('emptyMessage', locale) });
+
+    if (isSuppliesQuery(question)) {
+      if (!(await isCapabilityEnabled(schoolId, SUPPLIES_ACTION))) {
+        return res.json({
+          blocks: [{ type: 'text', markdown: assistantText('disabledInfo', locale, { school: parentInfo.school_name }) }],
+          mood: 'blocked',
+        });
+      }
+      if (!student) return res.status(400).json({ error: assistantText('selectChild', locale) });
+      return res.json(await suppliesResponse({ schoolId, student, locale }));
+    }
 
     // Un contenu de l'école déclenché par mot-clé prime sur l'IA.
     const hit = await matchCustomEntryByKeyword(schoolId, question);
@@ -274,6 +432,7 @@ const FOLLOW_UPS = {
   'finance.last_invoice': ['finance.history', 'finance.payment_info'],
   'finance.history': ['finance.balance'],
   'finance.due_dates': ['finance.payment_info'],
+  'schoollife.supplies': ['schoollife.extracurricular'],
 };
 
 const DEFAULT_SUGGESTIONS = ['pedagogy.tracking', 'pedagogy.homework', 'finance.balance'];

@@ -7,6 +7,7 @@ import {
   normalizeAssistantLocale,
   sectionLabel,
 } from './parentAssistantLocalization.js';
+import { isSuppliesQuery } from './whatsapp/chatbot/suppliesQuery.js';
 
 test('la langue de l’assistant est normalisée sans ambiguïté', () => {
   assert.equal(normalizeAssistantLocale('ar-MA'), 'ar');
@@ -37,4 +38,11 @@ test('les messages système sont localisés et interpolés', () => {
     assistantText('disabledInfo', 'ar', { school: 'Albaida' }),
     'لم تعد Albaida تتيح هذه المعلومة. يُرجى التواصل مباشرة مع المؤسسة.',
   );
+});
+
+test('les fournitures sont reconnues en français, arabe et darija', () => {
+  assert.equal(isSuppliesQuery('Je cherche la liste des fournitures'), true);
+  assert.equal(isSuppliesQuery('فين نلقى لائحة اللوازم المدرسية؟'), true);
+  assert.equal(isSuppliesQuery('3afak lwazim dyal 2AP'), true);
+  assert.equal(isSuppliesQuery('Quel est son emploi du temps ?'), false);
 });

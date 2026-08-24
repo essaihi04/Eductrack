@@ -16,27 +16,8 @@ import { sendText, sendMediaBuffer } from '../index.js';
 import * as State from './state.js';
 import { getActiveSections, matchSectionFromText, matchSectionForLevel, normalizeText } from './knowledge.js';
 import { generateSectionPdf } from './suppliesPdf.js';
-
-// Mots-clés « fournitures » (FR / AR / darija latine)
-const SUPPLIES_KEYWORDS_RE = new RegExp(
-  [
-    // Français
-    'fourniture', 'fournitures', 'liste scolaire', 'liste de rentree', 'liste de rentrée',
-    'materiel scolaire', 'matériel scolaire', 'affaires scolaires', 'cartable',
-    'liste des affaires', 'papeterie', 'liste des livres', 'liste du materiel',
-    // Arabe
-    'لوازم', 'اللوازم', 'اللوازم المدرسية', 'الادوات المدرسية', 'الأدوات المدرسية',
-    'ادوات مدرسية', 'المستلزمات', 'مستلزمات', 'لائحة اللوازم', 'الكتب المدرسية',
-    // Darija latine
-    'lawazim', 'lwazim', 'adawat', 'lista dyal', 'cartabl',
-  ].join('|'),
-  'i',
-);
-
-/** Le parent demande-t-il la liste des fournitures ? */
-export function isSuppliesQuery(text) {
-  return SUPPLIES_KEYWORDS_RE.test(String(text || ''));
-}
+import { isSuppliesQuery } from './suppliesQuery.js';
+export { isSuppliesQuery };
 
 /**
  * Année scolaire affichée sur le PDF : celle saisie sur le document, sinon

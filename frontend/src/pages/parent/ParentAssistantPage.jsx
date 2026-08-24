@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { Send, Sparkles, Download, RefreshCw, ChevronDown, X, UserRound } from 'lucide-react';
+import {
+  Send, Sparkles, Download, RefreshCw, X, UserRound, LayoutGrid,
+  MessageCircle, ChevronLeft, ChevronRight,
+} from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { preferredParentChild, rememberParentChild } from '../../lib/parentNavigation';
 import { useParentAssistant } from '../../contexts/ParentAssistantContext';
@@ -51,6 +54,8 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
   const [mood, setMood] = useState('hello');
   const [thinking, setThinking] = useState(false);
   const [openSection, setOpenSection] = useState(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [contextSuggestions, setContextSuggestions] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -69,6 +74,8 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
     rememberParentChild(nextChildId);
     setMood('hello');
     setOpenSection(null);
+    setActionMenuOpen(false);
+    setContextSuggestions([]);
     setInput('');
     setError('');
     setMessages([greetingMessage()]);
@@ -118,6 +125,9 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
       return;
     }
     setError('');
+    setActionMenuOpen(false);
+    setOpenSection(null);
+    setContextSuggestions([]);
 
     setMessages((m) => [...m, { from: 'me', text: label || text }]);
     setInput('');
@@ -135,10 +145,10 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
       if (!res.ok) throw new Error(data.error || t('passist.sendError'));
 
       setMood(data.mood || 'idle');
+      setContextSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
       setMessages((m) => [...m, {
         from: 'bot',
         blocks: data.blocks || [],
-        suggestions: data.suggestions || [],
       }]);
     } catch (e) {
       setMood('idle');
@@ -241,21 +251,6 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
                   <MessageBlock key={bi} block={block} />
                 ))}
 
-                {msg.suggestions?.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-0.5">
-                    {msg.suggestions.map((s) => (
-                      <button
-                        key={s.action}
-                        type="button"
-                        disabled={thinking}
-                        onClick={() => send({ action: s.action, label: `${s.emoji} ${s.label}` })}
-                        className="text-xs px-2.5 py-1.5 rounded-full border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {s.emoji} {s.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )
@@ -275,76 +270,55 @@ export const ParentAssistantPanel = ({ compact = false, onClose, requestedChildI
         <div ref={endRef} />
       </div>
 
-      {/* Boutons de navigation : le parent ne tape jamais un numéro */}
-      {menu && children.length > 0 && (
-        <div className="bg-card border-x px-3 py-2 space-y-2 max-h-52 overflow-y-auto">
-          <div className="flex flex-wrap gap-1.5">
-            {(menu.sections || []).map((s) => (
-              <button
-                key={s.menu}
-                type="button"
-                disabled={thinking}
-                onClick={() => setOpenSection(openSection === s.menu ? null : s.menu)}
-                className={`text-xs px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-50 ${
-                  openSection === s.menu ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted'
-                }`}
-              >
-                {s.emoji} {s.label}
-                <ChevronDown className={`w-3 h-3 transition-transform ${openSection === s.menu ? 'rotate-180' : ''}`} />
-              </button>
-            ))}
-            {(menu.shortcuts || []).map((s) => (
-              <button
-                key={s.action}
-                type="button"
-                disabled={thinking}
-                onClick={() => send({ action: s.action, label: `${s.emoji} ${s.label}` })}
-                className="text-xs px-3 py-1.5 rounded-full border hover:bg-muted transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {s.emoji} {s.label}
-              </button>
-            ))}
-          </div>
-
-          {openSection && (
-            <div className="flex flex-wrap gap-1.5 pt-1 border-t">
-              {(menu.sections || []).find((s) => s.menu === openSection)?.options?.map((o) => (
-                <button
-                  key={o.action}
-                  type="button"
-                  disabled={thinking}
-                  onClick={() => { send({ action: o.action, label: `${o.emoji} ${o.label}` }); setOpenSection(null); }}
-                  className="text-xs px-2.5 py-1.5 rounded-lg bg-muted hover:bg-muted/70 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {o.emoji} {o.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Saisie libre */}
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (input.trim()) send({ text: input.trim() }); }}
-        className="flex items-center gap-2 p-3 bg-card border rounded-b-2xl"
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={!childId || !menu?.ai_enabled || thinking}
-          placeholder={!childId ? t('passist.noChildShort') : menu?.ai_enabled ? t('passist.placeholder') : t('passist.aiDisabled')}
-          className="flex-1 text-sm border rounded-full px-4 py-2.5 bg-background disabled:opacity-60"
+      {/* Le sélecteur remplace temporairement le composeur. Il n'occupe donc
+          plus l'écran quand le parent lit la conversation. */}
+      {actionMenuOpen && menu && children.length > 0 ? (
+        <ActionPicker
+          menu={menu}
+          openSection={openSection}
+          setOpenSection={setOpenSection}
+          suggestions={contextSuggestions}
+          thinking={thinking}
+          rtl={rtl}
+          t={t}
+          onSelect={(item) => send({ action: item.action, label: `${item.emoji} ${item.label}` })}
+          onClose={() => { setActionMenuOpen(false); setOpenSection(null); }}
         />
-        <button
-          type="submit"
-          disabled={!childId || !input.trim() || thinking || !menu?.ai_enabled}
-          className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center disabled:opacity-40 hover:bg-primary/90 transition-colors shrink-0"
-          aria-label={t('passist.send')}
+      ) : (
+        <form
+          onSubmit={(e) => { e.preventDefault(); if (input.trim()) send({ text: input.trim() }); }}
+          className="flex items-center gap-2 p-3 bg-card border rounded-b-2xl"
         >
-          {thinking ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className={`w-4 h-4 ${rtl ? 'rotate-180' : ''}`} />}
-        </button>
-      </form>
+          <button
+            type="button"
+            onClick={() => { setActionMenuOpen(true); setOpenSection(null); }}
+            disabled={!childId || !menu || thinking}
+            aria-label={t('passist.actionsOpen')}
+            aria-expanded="false"
+            className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/5 text-primary transition hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <LayoutGrid className="h-[18px] w-[18px]" />
+            {contextSuggestions.length > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-amber-500" />
+            )}
+          </button>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={!childId || !menu?.ai_enabled || thinking}
+            placeholder={!childId ? t('passist.noChildShort') : menu?.ai_enabled ? t('passist.placeholder') : t('passist.aiDisabled')}
+            className="min-w-0 flex-1 rounded-full border bg-background px-4 py-2.5 text-sm disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={!childId || !input.trim() || thinking || !menu?.ai_enabled}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+            aria-label={t('passist.send')}
+          >
+            {thinking ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className={`h-4 w-4 ${rtl ? 'rotate-180' : ''}`} />}
+          </button>
+        </form>
+      )}
 
       <p className="shrink-0 py-1.5 text-[10px] text-center text-muted-foreground flex items-center justify-center gap-1">
         <Sparkles className="w-3 h-3" /> {t('passist.disclaimer')}
@@ -377,6 +351,8 @@ const MessageBlock = ({ block }) => {
     );
   }
 
+  if (block.type === 'secure_file') return <SecureFileBlock block={block} />;
+
   return (
     <div
       className="bg-card border rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-sm leading-relaxed shadow-sm"
@@ -384,6 +360,158 @@ const MessageBlock = ({ block }) => {
     />
   );
 };
+
+const SecureFileBlock = ({ block }) => {
+  const { t, lang } = useI18n();
+  const [status, setStatus] = useState('idle');
+
+  const download = async () => {
+    if (status === 'loading') return;
+    setStatus('loading');
+    try {
+      const headers = await authHeaders();
+      const separator = block.endpoint.includes('?') ? '&' : '?';
+      const response = await fetch(
+        `${apiUrl.replace(/\/$/, '')}${block.endpoint}${separator}lang=${encodeURIComponent(lang)}`,
+        { headers },
+      );
+      if (!response.ok) throw new Error(t('passist.downloadError'));
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const disposition = response.headers.get('content-disposition') || '';
+      const fileName = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'fournitures.pdf';
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setStatus('done');
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={download}
+        disabled={status === 'loading'}
+        className="flex w-full items-center gap-2 rounded-xl border bg-card px-3 py-2.5 text-start transition-colors hover:bg-muted disabled:opacity-60"
+      >
+        {status === 'loading'
+          ? <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-primary" />
+          : <Download className="h-4 w-4 shrink-0 text-primary" />}
+        <span className="min-w-0 flex-1 truncate text-sm">{block.name}</span>
+        <span className="text-[10px] font-medium uppercase text-muted-foreground">
+          {status === 'loading' ? t('passist.downloading') : 'PDF'}
+        </span>
+      </button>
+      {status === 'error' && <p className="px-2 text-xs text-red-600">{t('passist.downloadError')}</p>}
+    </div>
+  );
+};
+
+const ActionPicker = ({
+  menu, openSection, setOpenSection, suggestions, thinking, rtl, t, onSelect, onClose,
+}) => {
+  const section = (menu.sections || []).find((item) => item.menu === openSection);
+  const BackIcon = rtl ? ChevronRight : ChevronLeft;
+  const uniqueSuggestions = suggestions.filter((item, index, items) => (
+    items.findIndex((candidate) => candidate.action === item.action) === index
+  ));
+
+  return (
+    <div className="shrink-0 rounded-b-2xl border bg-card px-3 py-2.5 shadow-[0_-8px_24px_rgba(15,23,42,0.06)]">
+      <div className="mb-2 flex items-center gap-2">
+        {section ? (
+          <button
+            type="button"
+            onClick={() => setOpenSection(null)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-muted-foreground hover:bg-muted"
+            aria-label={t('passist.backToTopics')}
+          >
+            <BackIcon className="h-4 w-4" />
+          </button>
+        ) : (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <LayoutGrid className="h-4 w-4" />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold">{section?.label || t('passist.actionsTitle')}</p>
+          <p className="truncate text-[10px] text-muted-foreground">{t('passist.actionsHint')}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex items-center gap-1 rounded-full border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+        >
+          <MessageCircle className="h-3.5 w-3.5" />
+          {t('passist.actionsClose')}
+        </button>
+      </div>
+
+      <div className="max-h-40 space-y-2 overflow-y-auto pe-1">
+        {section ? (
+          <div className="grid grid-cols-2 gap-1.5">
+            {(section.options || []).map((item) => (
+              <ActionButton key={item.action} item={item} disabled={thinking} onSelect={onSelect} />
+            ))}
+          </div>
+        ) : (
+          <>
+            {uniqueSuggestions.length > 0 && (
+              <div>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t('passist.suggestionsTitle')}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {uniqueSuggestions.map((item) => (
+                    <ActionButton key={item.action} item={item} disabled={thinking} onSelect={onSelect} compact />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-1.5">
+              {(menu.sections || []).map((item) => (
+                <button
+                  key={item.menu}
+                  type="button"
+                  disabled={thinking}
+                  onClick={() => setOpenSection(item.menu)}
+                  className="flex min-h-10 items-center gap-2 rounded-xl border px-3 py-2 text-start text-xs font-medium transition hover:border-primary/40 hover:bg-primary/5 disabled:opacity-50"
+                >
+                  <span className="text-base">{item.emoji}</span>
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {rtl ? <ChevronLeft className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                </button>
+              ))}
+              {(menu.shortcuts || []).map((item) => (
+                <ActionButton key={item.action} item={item} disabled={thinking} onSelect={onSelect} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ActionButton = ({ item, disabled, onSelect, compact = false }) => (
+  <button
+    type="button"
+    disabled={disabled}
+    onClick={() => onSelect(item)}
+    className={`${compact ? 'rounded-full px-2.5 py-1.5' : 'min-h-10 rounded-xl px-3 py-2'} flex items-center gap-2 border bg-muted/50 text-start text-xs transition hover:border-primary/40 hover:bg-primary/10 disabled:opacity-50`}
+  >
+    <span className="shrink-0">{item.emoji}</span>
+    <span className="min-w-0 flex-1 truncate">{item.label}</span>
+  </button>
+);
 
 // Compatibilité avec les anciens favoris /parent/assistant : la route ouvre
 // désormais la bulle flottante puis revient à l'accueil parent.
