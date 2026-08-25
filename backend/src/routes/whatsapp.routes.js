@@ -15,6 +15,7 @@ import { isSessionReady, sendUnified } from '../services/whatsapp/sendHelpers.js
 import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.js';
 import { enqueueJob } from '../services/jobs/index.js';
 import { whatsappOptedOut } from '../services/notificationRouter.js';
+import { prepareVoiceNote } from '../services/whatsapp/voiceNote.js';
 
 const router = express.Router();
 
@@ -1747,6 +1748,102 @@ router.post('/cloud/verify', async (req, res) => {
   } catch (error) {
     console.error('Erreur cloud verify:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// POST /inbox/voice — note vocale enregistree au micro depuis l'application.
+// Body : { phone, base64, mimetype, parentId? }
+//
+// L'enregistrement arrive dans le format du navigateur (WebM sur Chrome, Ogg
+// sur Firefox, MP4 sur Safari) ; voiceNote.js le remet au format attendu par
+// l'API Cloud avant l'envoi.
+router.post('/inbox/voice', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { phone, base64, mimetype, parentId } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'Numéro de téléphone requis' });
+    if (!base64) return res.status(400).json({ error: 'Enregistrement vide' });
+
+    if (!(await isSessionReady(schoolId))) {
+      return res.status(400).json({ error: 'Aucune session WhatsApp connectée.' });
+    }
+
+    // Même règle que pour un message écrit : on n'écrit pas le premier à un
+    // parent désabonné, sauf s'il vient d'ouvrir la conversation.
+    if (parentId && (await whatsappOptedOut(parentId)) && !(await serviceWindowOpen(phone))) {
+      return res.status(400).json({
+        error: "Ce parent s'est désabonné de WhatsApp (STOP). Il reste joignable par notification dans l'application.",
+      });
+    }
+
+    const raw = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!raw.length) return res.status(400).json({ error: 'Enregistrement illisible' });
+    if (raw.length > 16 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Note vocale trop longue (16 Mo maximum).' });
+    }
+
+    let audio;
+    try {
+      audio = await prepareVoiceNote(raw, mimetype);
+    } catch (e) {
+      // ffmpeg absent : le message doit être explicite, sinon l'école croit à
+      // une panne alors qu'il manque un paquet sur le serveur.
+      const missing = /introuvable|ENOENT/i.test(e.message || '');
+      return res.status(400).json({
+        error: missing
+          ? "Conversion audio indisponible sur le serveur : installez ffmpeg (apt install ffmpeg), ou enregistrez depuis Firefox ou Safari."
+          : `Conversion de l'enregistrement impossible : ${e.message}`,
+      });
+    }
+
+    // Trace dans l'historique, comme un envoi direct : la note apparaît dans le
+    // fil de la conversation et dans les journaux de l'école.
+    const { data: msgLog } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .insert({
+        school_id: schoolId,
+        sent_by: req.user.id,
+        message_type: 'audio',
+        content: '🎤 Note vocale',
+        file_name: audio.fileName,
+        recipient_filter: { direct: true, phone, voice: true },
+        total_recipients: 1,
+        status: 'sending',
+        category: resolveCategoryForSending(null, req.user?.role),
+      })
+      .select()
+      .single();
+
+    if (msgLog) {
+      await supabaseAdmin.from('whatsapp_message_recipients').insert({
+        message_id: msgLog.id, parent_id: parentId || null, phone_e164: phone, status: 'pending',
+      });
+    }
+
+    const result = await sendMediaBuffer(schoolId, phone, audio.buffer, {
+      type: 'audio', fileName: audio.fileName, mimetype: audio.mimetype,
+    });
+
+    if (msgLog) {
+      await supabaseAdmin.from('whatsapp_message_recipients').update(
+        result.success
+          ? { status: 'sent', provider_msg_id: String(result.data?.msgId || ''), sent_at: new Date().toISOString() }
+          : { status: 'failed', error_message: result.message || 'Erreur envoi' },
+      ).eq('message_id', msgLog.id).eq('phone_e164', phone);
+
+      await supabaseAdmin.from('whatsapp_messages').update({
+        status: result.success ? 'completed' : 'failed',
+        sent_count: result.success ? 1 : 0,
+        failed_count: result.success ? 0 : 1,
+        updated_at: new Date().toISOString(),
+      }).eq('id', msgLog.id);
+    }
+
+    if (!result.success) return res.status(400).json({ error: result.message || 'Envoi refusé par WhatsApp' });
+    res.json({ success: true, messageId: msgLog?.id || null });
+  } catch (error) {
+    console.error('Erreur note vocale:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
