@@ -96,6 +96,9 @@ async function sendWa(people, message, schoolId, event) {
     try {
       await sendWhatsAppResponse(e164, message, schoolId, {
         category: 'pedagogical',
+        // Notification proactive vers le PERSONNEL : la fenêtre 24 h s'applique
+        // aussi à lui. L'objet du template est dérivé du texte du message.
+        template: 'information',
         recipientFilter: { event },
       });
     } catch (e) { console.error('[approvals] WhatsApp:', e.message); }

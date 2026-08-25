@@ -6,6 +6,7 @@ import path from 'path';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { supabaseAdmin } from '../config/supabase.js';
+import { isApnsConfigured, sendApnsToTokens } from './apnsPush.js';
 
 let messaging = null;
 let configured = false;
@@ -64,15 +65,30 @@ export const isFcmConfigured = () => configured;
  * @param {{ title: string, body: string, url?: string, tag?: string }} payload
  */
 export async function sendFcmToUser(userId, payload) {
-  if (!configured || !userId) return { sent: 0 };
+  if (!userId || (!configured && !isApnsConfigured())) return { sent: 0 };
 
   const { data: rows } = await supabaseAdmin
     .from('device_tokens')
-    .select('id, token')
+    .select('id, token, platform')
     .eq('user_id', userId);
   if (!rows?.length) return { sent: 0 };
 
-  const tokens = rows.map((r) => r.token);
+  // iOS parle APNs en direct (jeton APNs brut, illisible par FCM) ; Android et
+  // le reste passent par FCM. Cf. apnsPush.js pour le pourquoi.
+  const iosTokens = rows.filter((r) => r.platform === 'ios').map((r) => r.token);
+  const tokens = rows.filter((r) => r.platform !== 'ios').map((r) => r.token);
+
+  let sentIos = 0;
+  if (iosTokens.length) {
+    const res = await sendApnsToTokens(iosTokens, payload);
+    sentIos = res.sent;
+    if (res.stale.length) {
+      await supabaseAdmin.from('device_tokens').delete().in('token', res.stale);
+    }
+  }
+
+  if (!configured || !tokens.length) return { sent: sentIos };
+
   // Message DATA-ONLY : la notification est construite en natif par
   // SchoolMessagingService (APK) — seul moyen d'afficher le logo de l'école
   // en icône ronde (largeIcon), le nom de l'école en sous-titre, l'image
@@ -112,18 +128,18 @@ export async function sendFcmToUser(userId, payload) {
     });
   } catch (e) {
     console.error('[FCM] sendEachForMulticast:', e.message);
-    return { sent: 0 };
+    return { sent: sentIos };
   }
 
   if (stale.length) {
     await supabaseAdmin.from('device_tokens').delete().in('token', stale);
   }
-  return { sent };
+  return { sent: sent + sentIos };
 }
 
 /** Un utilisateur a-t-il au moins un appareil natif enregistré ? */
 export async function userHasDeviceToken(userId) {
-  if (!configured || !userId) return false;
+  if (!userId || (!configured && !isApnsConfigured())) return false;
   const { data } = await supabaseAdmin
     .from('device_tokens')
     .select('id')

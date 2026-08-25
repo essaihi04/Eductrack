@@ -1,8 +1,10 @@
-name: Build iOS IPA
+name: Build iOS IPA (test, non signe)
 
+# Build de controle : verifie que le projet iOS compile. L'IPA produit n'est PAS
+# signe, donc ininstallable sur un iPhone — pour TestFlight/App Store, utiliser
+# build-ios-appstore.yml.
+# Declenchement manuel uniquement : les runners macOS sont factures 10x.
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -31,14 +33,8 @@ jobs:
         working-directory: edtrack-capacitor
         run: ./node_modules/.bin/cap sync ios
 
-      - name: Disable ATS (allow HTTP) in Info.plist
-        working-directory: edtrack-capacitor
-        run: |
-          PLIST="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Set :NSAppTransportSecurity:NSAllowsArbitraryLoads true" "$PLIST" 2>/dev/null || true
-          echo "ATS disabled"
+      # NOTE : ne PAS desactiver ATS (NSAllowsArbitraryLoads). etrack.ma est en
+      # HTTPS ; Apple exige une justification pour cette cle et rejette souvent.
 
       - name: Resolve Swift Package dependencies
         working-directory: edtrack-capacitor/ios/App

@@ -1,6 +1,6 @@
 {
   "appId": "org.edtrack.app",
-  "appName": "Eductrack",
+  "appName": "Bousole",
   "webDir": "www",
   "bundledWebRuntime": false,
   "server": {

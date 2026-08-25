@@ -269,7 +269,14 @@ router.post('/homework', async (req, res) => {
           const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
             category: 'pedagogical',
             // Notification proactive : hors fenêtre 24 h, seul un template passe.
-            template: 'information',
+            // `{{1}}` reçoit la CLASSE et non l'élève : le devoir est donné à
+            // toute la classe et `parentLinks` ne porte pas le nom de l'enfant.
+            template: 'devoir',
+            templateParams: [
+              classInfo?.name || 'la classe',
+              subjectLabel || type || 'cours',
+              dueDateFormatted,
+            ],
             senderId: req.user.id,
             recipientFilter: {
               event: 'homework_assigned',

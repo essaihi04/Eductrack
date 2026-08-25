@@ -517,6 +517,10 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
                 // Envoyer le fichier (depuis le buffer en mémoire) avec la légende
                 const fileSent = await sendWhatsAppFileBuffer(e164Phone, req.file.buffer, req.file.originalname, req.file.mimetype, messageCaption, schoolId, {
                   category: 'pedagogical',
+                  // Partage proactif : hors fenetre 24 h, on annonce le document
+                  // par template et le fichier suit des que le parent repond.
+                  template: 'document',
+                  templateParams: [title || req.file.originalname, documentType || 'document'],
                   senderId: req.user.id,
                   recipientFilter: {
                     event: 'document_shared',

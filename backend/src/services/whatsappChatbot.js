@@ -13,7 +13,7 @@
 
 import { handleIncomingWhatsAppMessage as v2Handler } from './whatsapp/chatbot/index.js';
 import { sendText, sendMediaBuffer, getStatus } from './whatsapp/index.js';
-import { sendUtility } from './whatsapp/utility.js';
+import { sendUtility, sendUtilityMedia } from './whatsapp/utility.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import path from 'path';
 import fs from 'fs';
@@ -210,7 +210,16 @@ export async function sendWhatsAppFileBuffer(phoneNumber, buffer, fileName, mime
     if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) { type = 'image'; mt = `image/${ext === 'jpg' ? 'jpeg' : ext}`; }
     else if (['mp4', 'mov', 'webm'].includes(ext)) { type = 'video'; mt = `video/${ext}`; }
     else if (ext === 'pdf') mt = 'application/pdf';
-    const result = await sendMediaBuffer(schoolId, phoneNumber, buffer, { type, fileName, mimetype: mt, caption });
+    // Comme sendWhatsAppResponse, cette fonction sert au chatbot (fenêtre
+    // ouverte) ET aux partages proactifs de documents. Dans ce second cas
+    // l'appelant fournit un template : hors fenêtre, Meta refuse le fichier,
+    // on annonce donc le document et il partira dès que le parent répondra.
+    const result = opts.template
+      ? await sendUtilityMedia(schoolId, phoneNumber, {
+          buffer, type, fileName, mimetype: mt, caption,
+          template: opts.template, params: opts.templateParams || [],
+        })
+      : await sendMediaBuffer(schoolId, phoneNumber, buffer, { type, fileName, mimetype: mt, caption });
     await logWhatsAppSend({ schoolId, phoneNumber, content: caption || '', messageType: type, fileName, category: opts.category, senderId: opts.senderId, parentId: opts.parentId, recipientFilter: opts.recipientFilter, status: result.success ? 'sent' : 'failed', errorMessage: result.success ? null : (result.message || 'Erreur envoi fichier') });
     return !!result.success;
   } catch (e) {

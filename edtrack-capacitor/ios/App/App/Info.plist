@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Eductrack</string>
+	<string>Bousole</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -30,8 +30,17 @@
 	<string>Main</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
+	<!-- Reveil de l'app par une notification silencieuse (content-available). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<!-- Evite la question « export compliance » a chaque envoi TestFlight :
+	     l'app n'utilise que le HTTPS standard d'iOS. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -49,6 +58,12 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Eductrack utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Eductrack utilise l'appareil photo pour prendre la photo d'un élève ou photographier un document à joindre à son dossier.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Eductrack accède à vos photos pour joindre une image à un dossier élève, un devoir ou un message envoyé aux parents.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Eductrack enregistre dans votre photothèque les images et documents que vous téléchargez depuis l'application.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Eductrack utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
 </dict>
