@@ -305,7 +305,7 @@ async function getParentByPhone(phone, schoolId = null) {
     // Fallback : profiles.phone
     let q = supabaseAdmin
       .from('profiles')
-      .select('id, school_id, first_name, last_name, schools(name)')
+      .select('id, school_id, first_name, last_name, preferred_language, schools(name)')
       .eq('role', 'parent')
       .eq('phone', phone);
     if (schoolId) q = q.eq('school_id', schoolId);
@@ -321,7 +321,7 @@ async function getParentByPhone(phone, schoolId = null) {
   // Charge nom + école
   const { data: profile } = await supabaseAdmin
     .from('profiles')
-    .select('id, first_name, last_name, school_id, schools(name)')
+    .select('id, first_name, last_name, school_id, preferred_language, schools(name)')
     .eq('id', parentId)
     .single();
 
@@ -346,6 +346,9 @@ async function getParentByPhone(phone, schoolId = null) {
     parent_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
     school_id: profile.school_id,
     school_name: profile.schools?.name || 'École',
+    // Langue portee par parentInfo plutot que par un parametre supplementaire :
+    // les 13 fonctions de reponse le recoivent deja, aucune signature a changer.
+    lang: profile.preferred_language === 'ar' ? 'ar' : 'fr',
   };
 }
 

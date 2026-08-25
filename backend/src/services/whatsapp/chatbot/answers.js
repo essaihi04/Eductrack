@@ -6,21 +6,26 @@
  */
 
 import { supabaseAdmin } from '../../../config/supabase.js';
+import { tr, langOf, localeOf } from './answersI18n.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers de formatage
 // ─────────────────────────────────────────────────────────────────────────
 
-const fmtDate = (iso) => {
+// `lang` est optionnel : les fonctions non encore traduites continuent
+// d'appeler fmtDate(iso) / fmtMoney(n) sans rien changer.
+const fmtDate = (iso, lang = 'fr') => {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+    return new Date(iso).toLocaleDateString(localeOf(lang), { day: '2-digit', month: 'short', year: 'numeric' });
   } catch { return iso; }
 };
 
-const fmtMoney = (n, currency = 'MAD') => {
+const fmtMoney = (n, currency = 'MAD', lang = 'fr') => {
   const v = Number(n || 0);
-  return `${v.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} ${currency}`;
+  // Le dirham s'écrit « MAD » en chiffres occidentaux dans les deux langues :
+  // c'est la forme utilisée sur les factures marocaines.
+  return `${v.toLocaleString(localeOf(lang), { maximumFractionDigits: 2 })} ${currency}`;
 };
 
 const scoreEmoji = (score, max = 20) => {
@@ -34,40 +39,35 @@ const scoreEmoji = (score, max = 20) => {
 
 const header = (title, emoji) => `*${emoji} ${title}*\n━━━━━━━━━━━━━━━━━━━`;
 const footer = (schoolName) => `\n━━━━━━━━━━━━━━━━━━━\n🏫 ${schoolName || 'École'}`;
-const noClassMessage = (student, parentInfo, title, emoji) =>
-  `${header(title, emoji)}\n\n` +
-  `ℹ️ *${student.first_name}* n'est pas encore affecté(e) à une classe.\n\n` +
-  `Les données de classe seront disponibles dès que l'établissement aura effectué cette affectation.` +
-  footer(parentInfo.school_name);
+const noClassMessage = (student, parentInfo, title, emoji) => {
+  const t = tr(langOf(parentInfo));
+  return `${header(title, emoji)}\n\n` +
+    `ℹ️ ${t('common.noClass', { name: student.first_name })}\n\n` +
+    t('common.noClassHint') +
+    footer(parentInfo.school_name);
+};
 
 // ─────────────────────────────────────────────────────────────────────────
 // PÉDAGOGIE
 // ─────────────────────────────────────────────────────────────────────────
 
 // Helpers pour libellés du suivi pédagogique (alignés avec la fiche "Suivi rapide" du prof)
-const presenceLabel = (p) => ({
-  present: '✅ Présent',
-  absent: '❌ Absent',
-  late: '⏰ Retard',
-}[p] || '—');
+/**
+ * Libellé traduit d'une valeur d'énumération.
+ * Une valeur inconnue (nouvelle option ajoutée côté prof, non encore traduite)
+ * est affichée telle quelle plutôt que masquée : mieux vaut un mot brut qu'une
+ * information perdue.
+ */
+const labelFrom = (t, prefixe, valeur) => {
+  if (!valeur) return '—';
+  const cle = `${prefixe}.${valeur}`;
+  const label = t(cle);
+  return label === cle ? `▫️ ${valeur}` : label;
+};
 
-const disciplineLabel = (d) => ({
-  excellent: '🟢 Excellent',
-  concentre: '🟢 Concentré',
-  good: '🟢 Bon',
-  correct: '🔵 Correct',
-  agite: '🟠 Agité',
-  perturbateur: '🔴 Perturbateur',
-  bad: '🔴 Mauvais',
-}[d] || (d ? `▫️ ${d}` : '—'));
-
-const participationLabel = (p) => ({
-  excellent: '🟢 Excellente',
-  bonne: '🔵 Bonne',
-  moyenne: '🟡 Moyenne',
-  faible: '🟠 Faible',
-  passive: '🔴 Passive',
-}[p] || (p ? `▫️ ${p}` : '—'));
+const presenceLabel = (p, t) => labelFrom(t, 'ped.presence', p);
+const disciplineLabel = (d, t) => labelFrom(t, 'ped.disc', d);
+const participationLabel = (p, t) => labelFrom(t, 'ped.part', p);
 
 /** P1 — Dernier suivi (5 dernières séances renseignées par les profs) */
 export async function getLastControlGrades(student, parentInfo) {
@@ -84,9 +84,12 @@ export async function getLastControlGrades(student, parentInfo) {
     .order('created_at', { ascending: false })
     .limit(5);
 
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
+
   const valid = (tracking || []).filter((t) => t.session);
   if (valid.length === 0) {
-    return `${header('Dernier suivi', '📝')}\n\nAucun suivi enregistré pour le moment.${footer(parentInfo.school_name)}`;
+    return `${header(tt('ped.lastTracking'), '📝')}\n\n${tt('ped.noTracking')}${footer(parentInfo.school_name)}`;
   }
 
   // Trier par date décroissante (le filter created_at ci-dessus peut différer
@@ -94,22 +97,26 @@ export async function getLastControlGrades(student, parentInfo) {
   valid.sort((a, b) => (b.session.date || '').localeCompare(a.session.date || ''));
 
   const lines = valid.map((t) => {
-    const subj = t.session.subjects?.name || 'Séance';
-    const date = fmtDate(t.session.date);
+    const subj = t.session.subjects?.name || tt('common.session');
+    const date = fmtDate(t.session.date, lang);
     const teacher = t.session.profiles
       ? `${t.session.profiles.first_name || ''} ${t.session.profiles.last_name || ''}`.trim()
       : '';
     let block = `*${subj}* — _${date}_${teacher ? ` (${teacher})` : ''}\n`;
-    block += `   ${presenceLabel(t.presence)}`;
-    if (t.participation) block += `\n   👋 Participation : ${participationLabel(t.participation)}`;
-    if (t.discipline) block += `\n   🧘 Discipline : ${disciplineLabel(t.discipline)}`;
-    if (t.attitude) block += `\n   🙂 Attitude : ${disciplineLabel(t.attitude)}`;
-    if (t.homework) block += `\n   📚 Devoirs : ${t.homework === 'fait' ? '✅ Fait' : t.homework === 'non_fait' ? '❌ Non fait' : t.homework}`;
+    block += `   ${presenceLabel(t.presence, tt)}`;
+    if (t.participation) block += `\n   ${tt('ped.participation')} : ${participationLabel(t.participation, tt)}`;
+    if (t.discipline) block += `\n   ${tt('ped.discipline')} : ${disciplineLabel(t.discipline, tt)}`;
+    if (t.attitude) block += `\n   ${tt('ped.attitude')} : ${disciplineLabel(t.attitude, tt)}`;
+    if (t.homework) {
+      const hw = t.homework === 'fait' ? tt('ped.done') : t.homework === 'non_fait' ? tt('ped.notDone') : t.homework;
+      block += `\n   ${tt('ped.homework')} : ${hw}`;
+    }
+    // Le commentaire est écrit par le professeur : affiché tel quel.
     if (t.comment) block += `\n   💬 _${String(t.comment).slice(0, 120)}_`;
     return block;
   });
 
-  return `${header(`Dernier suivi — ${student.first_name}`, '📝')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  return `${header(tt('ped.lastTrackingFor', { name: student.first_name }), '📝')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
 /** P2 — Bilan par matière (statistiques sur le suivi par matière) */
@@ -120,14 +127,17 @@ export async function getAverageBySubject(student, parentInfo) {
     .eq('student_id', student.id)
     .limit(500);
 
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
+
   const valid = (tracking || []).filter((t) => t.session?.subjects);
   if (valid.length === 0) {
-    return `${header('Bilan par matière', '📊')}\n\nAucune donnée de suivi disponible pour le moment.${footer(parentInfo.school_name)}`;
+    return `${header(tt('ped.summary'), '📊')}\n\n${tt('ped.noData')}${footer(parentInfo.school_name)}`;
   }
 
   const bySubject = {};
   valid.forEach((t) => {
-    const name = t.session.subjects.name || 'Autre';
+    const name = t.session.subjects.name || tt('common.other');
     if (!bySubject[name]) bySubject[name] = { total: 0, present: 0, absent: 0, late: 0, goodPart: 0, goodDisc: 0 };
     const s = bySubject[name];
     s.total += 1;
@@ -144,11 +154,13 @@ export async function getAverageBySubject(student, parentInfo) {
       const presPct = Math.round((s.present / s.total) * 100);
       const partPct = Math.round((s.goodPart / s.total) * 100);
       const indic = presPct >= 90 ? '🟢' : presPct >= 75 ? '🔵' : presPct >= 60 ? '🟡' : '🔴';
-      let line = `${indic} *${name}* — ${s.total} séance${s.total > 1 ? 's' : ''}\n`;
-      line += `   ✅ Présence : *${presPct}%*`;
-      if (s.absent > 0) line += `  ❌ ${s.absent} absence${s.absent > 1 ? 's' : ''}`;
-      if (s.late > 0) line += `  ⏰ ${s.late} retard${s.late > 1 ? 's' : ''}`;
-      if (s.goodPart > 0) line += `\n   👋 Bonne participation : ${partPct}%`;
+      // Pluriels par clés distinctes : l'arabe ne se pluralise pas par un « s ».
+      const nbSeances = tt(s.total > 1 ? 'ped.sessionCountPlural' : 'ped.sessionCount', { count: s.total });
+      let line = `${indic} *${name}* — ${nbSeances}\n`;
+      line += `   ${tt('ped.attendanceRate')} : *${presPct}%*`;
+      if (s.absent > 0) line += `  ${tt(s.absent > 1 ? 'ped.absenceCountPlural' : 'ped.absenceCount', { count: s.absent })}`;
+      if (s.late > 0) line += `  ${tt(s.late > 1 ? 'ped.lateCountPlural' : 'ped.lateCount', { count: s.late })}`;
+      if (s.goodPart > 0) line += `\n   ${tt('ped.goodParticipation')} : ${partPct}%`;
       return line;
     });
 
@@ -157,7 +169,8 @@ export async function getAverageBySubject(student, parentInfo) {
   const presentTotal = valid.filter((t) => t.presence === 'present').length;
   const globalPct = total > 0 ? Math.round((presentTotal / total) * 100) : 0;
 
-  return `${header(`Bilan — ${student.first_name}`, '📊')}\n\n${lines.join('\n\n')}\n\n━━━━━━━━━━━━━━━━━━━\n📈 *Présence globale : ${globalPct}%* (${total} séance${total > 1 ? 's' : ''})${footer(parentInfo.school_name)}`;
+  const totalSeances = tt(total > 1 ? 'ped.sessionCountPlural' : 'ped.sessionCount', { count: total });
+  return `${header(tt('ped.summaryFor', { name: student.first_name }), '📊')}\n\n${lines.join('\n\n')}\n\n━━━━━━━━━━━━━━━━━━━\n${tt('ped.globalAttendance', { pct: globalPct })} (${totalSeances})${footer(parentInfo.school_name)}`;
 }
 
 /** P3 — Présence / absences de la semaine en cours */
@@ -186,8 +199,11 @@ export async function getWeeklyAttendance(student, parentInfo) {
   const valid = (tracking || []).filter(
     (t) => t.session?.date && t.session.date >= mondayISO && t.session.date <= sundayISO
   );
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
+
   if (valid.length === 0) {
-    return `${header('Présence cette semaine', '📅')}\n\nAucune séance enregistrée cette semaine.${footer(parentInfo.school_name)}`;
+    return `${header(tt('ped.weekly'), '📅')}\n\n${tt('ped.noSessionThisWeek')}${footer(parentInfo.school_name)}`;
   }
 
   const present = valid.filter((t) => t.presence === 'present').length;
@@ -198,15 +214,15 @@ export async function getWeeklyAttendance(student, parentInfo) {
 
   const absences = valid
     .filter((t) => t.presence === 'absent')
-    .map((t) => `   • ${fmtDate(t.session.date)} — ${t.session.subjects?.name || 'Séance'}`);
+    .map((t) => `   • ${fmtDate(t.session.date, lang)} — ${t.session.subjects?.name || tt('common.session')}`);
 
-  let body = `✅ Présent : *${present}/${total}* (${pct}%)\n`;
-  if (late > 0) body += `⏰ Retards : *${late}*\n`;
+  let body = `${tt('ped.present')} : *${present}/${total}* (${pct}%)\n`;
+  if (late > 0) body += `${tt('ped.lates')} : *${late}*\n`;
   if (absent > 0) {
-    body += `❌ Absences : *${absent}*\n\n_Détail des absences :_\n${absences.join('\n')}`;
+    body += `${tt('ped.absences')} : *${absent}*\n\n${tt('ped.absenceDetail')}\n${absences.join('\n')}`;
   }
 
-  return `${header(`Présence — ${student.first_name}`, '📅')}\n\n${body}${footer(parentInfo.school_name)}`;
+  return `${header(tt('ped.weeklyFor', { name: student.first_name }), '📅')}\n\n${body}${footer(parentInfo.school_name)}`;
 }
 
 /**
@@ -226,30 +242,33 @@ export async function getUnjustifiedAbsences(student, parentInfo) {
     .order('created_at', { ascending: false })
     .limit(60);
 
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
+
   const valid = (tracking || []).filter((t) => t.session?.date);
   if (valid.length === 0) {
-    return `${header('Absences à justifier', '📝')}\n\n✅ Aucune absence en attente de justification pour *${student.first_name}*. Merci !${footer(parentInfo.school_name)}`;
+    return `${header(tt('ped.unjustified'), '📝')}\n\n${tt('ped.noUnjustified', { name: student.first_name })}${footer(parentInfo.school_name)}`;
   }
 
   // Regroupement par jour
   const byDate = {};
-  valid.forEach((t) => { (byDate[t.session.date] ||= []).push(t.session.subjects?.name || 'Séance'); });
+  valid.forEach((t) => { (byDate[t.session.date] ||= []).push(t.session.subjects?.name || tt('common.session')); });
   const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
 
-  let body = `Voici les absences de *${student.first_name}* en attente de justification :\n\n`;
+  let body = `${tt('ped.unjustifiedIntro', { name: student.first_name })}\n\n`;
   dates.forEach((d) => {
     const subjects = [...new Set(byDate[d])];
-    body += `📅 *${fmtDate(d)}*\n   ${subjects.map((s) => `• ${s}`).join('\n   ')}\n`;
+    body += `📅 *${fmtDate(d, lang)}*\n   ${subjects.map((s) => `• ${s}`).join('\n   ')}\n`;
   });
-  body += `\n📝 *Pour justifier*, répondez simplement à ce message en indiquant le motif (maladie, rendez-vous médical, raison familiale…). Votre justification sera enregistrée automatiquement.`;
+  body += `\n${tt('ped.howToJustify')}`;
 
-  return `${header('Absences à justifier', '📝')}\n\n${body}${footer(parentInfo.school_name)}`;
+  return `${header(tt('ped.unjustified'), '📝')}\n\n${body}${footer(parentInfo.school_name)}`;
 }
 
 /** P4 — Devoirs à faire (homework non rendus) */
 export async function getPendingHomework(student, parentInfo) {
   if (!student.class_id) {
-    return noClassMessage(student, parentInfo, 'Devoirs à faire', '✍️');
+    return noClassMessage(student, parentInfo, tr(langOf(parentInfo))('ped.homeworkTitle'), '✍️');
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -279,33 +298,42 @@ export async function getPendingHomework(student, parentInfo) {
     );
   });
 
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
+
   if (filtered.length === 0) {
-    return `${header('Devoirs à faire', '✍️')}\n\n🎉 Aucun devoir en attente !\nVotre enfant est à jour.${footer(parentInfo.school_name)}`;
+    return `${header(tt('ped.homeworkTitle'), '✍️')}\n\n${tt('ped.noHomework')}${footer(parentInfo.school_name)}`;
   }
 
   const lines = filtered.map((h) => {
-    const due = fmtDate(h.due_date);
+    const due = fmtDate(h.due_date, lang);
     const isOverdue = h.due_date < today;
+    // Titre et description sont saisis par le professeur : affichés tels quels.
     const desc = h.description ? `\n   _${h.description.substring(0, 100)}${h.description.length > 100 ? '…' : ''}_` : '';
-    const overdueTag = isOverdue ? '\n   ⚠️ *EN RETARD*' : '';
-    return `📌 *${h.title}*\n   ⏰ ${isOverdue ? 'Était dû' : 'À rendre'} : *${due}*${overdueTag}${desc}`;
+    const overdueTag = isOverdue ? `\n   ${tt('ped.overdueTag')}` : '';
+    return `📌 *${h.title}*\n   ⏰ ${isOverdue ? tt('ped.wasDue') : tt('ped.toSubmit')} : *${due}*${overdueTag}${desc}`;
   });
 
-  return `${header(`Devoirs — ${student.first_name}`, '✍️')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  return `${header(tt('ped.homeworkFor', { name: student.first_name }), '✍️')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
 /** P5 — Programme de demain (cours + devoirs à rendre + contrôles) */
 export async function getTodaySchedule(student, parentInfo) {
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
+
   if (!student.class_id) {
-    return noClassMessage(student, parentInfo, 'Programme de demain', '📆');
+    return noClassMessage(student, parentInfo, tt('ped.tomorrowProgram'), '📆');
   }
 
   const JS_TO_KEY = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const DAY_FR = { monday: 'Lundi', tuesday: 'Mardi', wednesday: 'Mercredi', thursday: 'Jeudi', friday: 'Vendredi', saturday: 'Samedi', sunday: 'Dimanche' };
   const tomorrow = new Date(Date.now() + 86400000);
   const tomorrowISO = tomorrow.toISOString().slice(0, 10);
   const tomorrowKey = JS_TO_KEY[tomorrow.getDay()];
-  const tomorrowFR = DAY_FR[tomorrowKey] || fmtDate(tomorrowISO);
+  // Le nom du jour vient du dictionnaire : le week-end se teste sur la CLÉ
+  // anglaise, jamais sur le libellé affiché, qui change avec la langue.
+  const nomJour = tt(`ped.day.${tomorrowKey}`);
+  const estWeekEnd = tomorrowKey === 'saturday' || tomorrowKey === 'sunday';
 
   const parts = [];
 
@@ -323,7 +351,7 @@ export async function getTodaySchedule(student, parentInfo) {
       const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
       const typeIcon = s.type === 'control' ? '📝' : s.type === 'exam' ? '📋' : '📚';
       const topic = s.topic ? ` — _${s.topic}_` : '';
-      return `${typeIcon} *${time}* — ${s.subjects?.name || 'Cours'}${topic}`;
+      return `${typeIcon} *${time}* — ${s.subjects?.name || tt('ped.course')}${topic}`;
     });
   } else {
     // Fallback emploi du temps hebdomadaire
@@ -338,15 +366,15 @@ export async function getTodaySchedule(student, parentInfo) {
         const time = `${(s.start_time || '').slice(0, 5)} – ${(s.end_time || '').slice(0, 5)}`;
         const teacherName = s.teacher ? ` — _${`${s.teacher.first_name} ${s.teacher.last_name}`.trim()}_` : '';
         const room = s.room ? ` _(${s.room})_` : '';
-        return `📚 *${time}* — ${s.subject?.name || 'Cours'}${teacherName}${room}`;
+        return `📚 *${time}* — ${s.subject?.name || tt('ped.course')}${teacherName}${room}`;
       });
     }
   }
 
   if (coursLines.length > 0) {
-    parts.push(`📅 *Cours du ${tomorrowFR} :*\n${coursLines.join('\n')}`);
+    parts.push(`${tt('ped.coursesOf', { day: nomJour })}\n${coursLines.join('\n')}`);
   } else {
-    parts.push(`📅 *Cours :* Aucune séance prévue ${tomorrowFR === 'Dimanche' || tomorrowFR === 'Samedi' ? '(week-end)' : 'demain'}.`);
+    parts.push(estWeekEnd ? tt('ped.coursesNoneWeekend') : tt('ped.coursesNone'));
   }
 
   // ── 2. Devoirs à rendre demain ──
@@ -371,9 +399,9 @@ export async function getTodaySchedule(student, parentInfo) {
       const desc = h.description ? ` — _${h.description.substring(0, 80)}_` : '';
       return `   📌 *${h.title}*${desc}`;
     });
-    parts.push(`✍️ *Devoirs à rendre demain :*\n${hwLines.join('\n')}`);
+    parts.push(`${tt('ped.hwTomorrow')}\n${hwLines.join('\n')}`);
   } else {
-    parts.push(`✍️ *Devoirs à rendre demain :* ✅ Aucun`);
+    parts.push(tt('ped.hwTomorrowNone'));
   }
 
   // ── 3. Contrôles prévus demain ──
@@ -386,20 +414,21 @@ export async function getTodaySchedule(student, parentInfo) {
 
   if (controls && controls.length > 0) {
     const ctrlLines = controls.map((c) => {
-      const subj = c.subjects?.name || c.name || 'Contrôle';
+      const subj = c.subjects?.name || c.name || tt('ped.control');
       const type = c.type ? ` _(${c.type})_` : '';
       return `   📝 *${subj}*${type}`;
     });
-    parts.push(`⚠️ *Contrôles demain :*\n${ctrlLines.join('\n')}`);
+    parts.push(`${tt('ped.controlsTomorrow')}\n${ctrlLines.join('\n')}`);
   }
 
-  return `${header(`Programme — ${tomorrowFR} ${fmtDate(tomorrowISO)}`, '📆')}\n\n${parts.join('\n\n')}${footer(parentInfo.school_name)}`;
+  const titre = tt('ped.programFor', { day: nomJour, date: fmtDate(tomorrowISO, lang) });
+  return `${header(titre, '📆')}\n\n${parts.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
 /** P6 — Documents partagés par les profs */
 export async function getRecentDocuments(student, parentInfo) {
   if (!student.class_id) {
-    return noClassMessage(student, parentInfo, 'Documents partagés', '📎');
+    return noClassMessage(student, parentInfo, tr(langOf(parentInfo))('ped.documents'), '📎');
   }
 
   // La vraie table est `teaching_documents` (l'ancienne `documents` est vide).
@@ -410,30 +439,25 @@ export async function getRecentDocuments(student, parentInfo) {
     .order('created_at', { ascending: false })
     .limit(5);
 
-  if (!docs || docs.length === 0) {
-    return `${header('Documents partagés', '📎')}\n\nAucun document partagé pour le moment.${footer(parentInfo.school_name)}`;
-  }
+  const lang = langOf(parentInfo);
+  const tt = tr(lang);
 
-  const typeLabel = {
-    cours: 'Cours',
-    exercice: 'Exercice',
-    correction: 'Correction',
-    support: 'Support',
-    devoir: 'Devoir',
-    rattrapage: 'Rattrapage',
-    approfondissement: 'Approfondissement',
-  };
+  if (!docs || docs.length === 0) {
+    return `${header(tt('ped.documents'), '📎')}\n\n${tt('ped.noDocuments')}${footer(parentInfo.school_name)}`;
+  }
 
   const lines = docs.map((d) => {
     const teacher = d.profiles
       ? `${d.profiles.first_name || ''} ${d.profiles.last_name || ''}`.trim()
-      : 'Enseignant';
+      : tt('ped.teacher');
     const subj = d.subjects?.name ? ` — ${d.subjects.name}` : '';
-    const type = typeLabel[d.document_type] || d.document_type || 'Document';
-    return `📄 *${d.title || d.file_name}*\n   � ${type}${subj}\n   👨‍🏫 ${teacher}\n   📅 ${fmtDate(d.created_at)}`;
+    const cle = `ped.docType.${d.document_type}`;
+    const type = tt(cle) !== cle ? tt(cle) : (d.document_type || tt('ped.doc'));
+    // 📁 remplace un caractère corrompu qui traînait dans cette ligne.
+    return `📄 *${d.title || d.file_name}*\n   📁 ${type}${subj}\n   👨‍🏫 ${teacher}\n   📅 ${fmtDate(d.created_at, lang)}`;
   });
 
-  return `${header('Documents récents', '📎')}\n\n${lines.join('\n\n')}\n\n_Connectez-vous à l'application pour les télécharger._${footer(parentInfo.school_name)}`;
+  return `${header(tt('ped.documentsRecent'), '📎')}\n\n${lines.join('\n\n')}\n\n${tt('ped.docHint')}${footer(parentInfo.school_name)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -448,8 +472,11 @@ export async function getFinanceBalance(student, parentInfo) {
     .eq('student_id', student.id)
     .neq('status', 'cancelled');
 
+  const lang = langOf(parentInfo);
+  const t = tr(lang);
+
   if (!invoices || invoices.length === 0) {
-    return `${header('Situation financière', '💰')}\n\nAucune facture émise pour ${student.first_name}.${footer(parentInfo.school_name)}`;
+    return `${header(t('finance.situation'), '💰')}\n\n${t('finance.noInvoice', { name: student.first_name })}${footer(parentInfo.school_name)}`;
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -460,18 +487,23 @@ export async function getFinanceBalance(student, parentInfo) {
   const overdueAmount = overdue.reduce((s, i) => s + (Number(i.total) - Number(i.amount_paid || 0)), 0);
   const currency = invoices[0]?.currency || 'MAD';
 
-  const status = totalDue <= 0 ? '✅ À jour' : overdueAmount > 0 ? '⚠️ Impayés en retard' : '🟡 Reste à payer';
+  const status = totalDue <= 0
+    ? t('finance.statusUpToDate')
+    : overdueAmount > 0 ? t('finance.statusOverdue') : t('finance.statusRemaining');
 
   let body = `${status}\n\n`;
-  body += `💵 Total facturé : *${fmtMoney(totalAll, currency)}*\n`;
-  body += `✅ Payé : *${fmtMoney(totalPaid, currency)}*\n`;
-  body += `🔴 Reste dû : *${fmtMoney(totalDue, currency)}*\n`;
+  body += `${t('finance.totalBilled')} : *${fmtMoney(totalAll, currency, lang)}*\n`;
+  body += `${t('finance.paid')} : *${fmtMoney(totalPaid, currency, lang)}*\n`;
+  body += `${t('finance.stillDue')} : *${fmtMoney(totalDue, currency, lang)}*\n`;
   if (overdueAmount > 0) {
-    body += `\n⏰ *${overdue.length} facture${overdue.length > 1 ? 's' : ''} en retard*\n`;
-    body += `Montant en retard : *${fmtMoney(overdueAmount, currency)}*`;
+    // Le pluriel arabe ne se forme pas comme le français : deux clés distinctes
+    // plutôt qu'un « s » ajouté à la volée.
+    const cle = overdue.length > 1 ? 'finance.lateCountPlural' : 'finance.lateCount';
+    body += `\n${t(cle, { count: overdue.length })}\n`;
+    body += `${t('finance.lateAmount')} : *${fmtMoney(overdueAmount, currency, lang)}*`;
   }
 
-  return `${header(`Finance — ${student.first_name}`, '💰')}\n\n${body}${footer(parentInfo.school_name)}`;
+  return `${header(t('finance.titleFor', { name: student.first_name }), '💰')}\n\n${body}${footer(parentInfo.school_name)}`;
 }
 
 /** F2 — Dernière facture */
@@ -485,34 +517,35 @@ export async function getLastInvoice(student, parentInfo) {
     .limit(1)
     .maybeSingle();
 
+  const lang = langOf(parentInfo);
+  const t = tr(lang);
+
   if (!inv) {
-    return `${header('Dernière facture', '🧾')}\n\nAucune facture émise pour ${student.first_name}.${footer(parentInfo.school_name)}`;
+    return `${header(t('invoice.last'), '🧾')}\n\n${t('finance.noInvoice', { name: student.first_name })}${footer(parentInfo.school_name)}`;
   }
 
   const remaining = Number(inv.total) - Number(inv.amount_paid || 0);
-  const statusLabel = {
-    issued: '🟡 Émise',
-    partial: '🟠 Partiellement payée',
-    paid: '✅ Payée',
-    overdue: '🔴 En retard',
-  }[inv.status] || inv.status;
+  const statusLabel = t(`invoice.status.${inv.status}`) === `invoice.status.${inv.status}`
+    ? inv.status                       // statut inconnu : on montre la valeur brute
+    : t(`invoice.status.${inv.status}`);
 
-  let body = `📋 N° *${inv.invoice_number}*\n`;
-  if (inv.period_label) body += `📅 Période : *${inv.period_label}*\n`;
+  let body = `${t('invoice.number')} *${inv.invoice_number}*\n`;
+  if (inv.period_label) body += `${t('invoice.period')} : *${inv.period_label}*\n`;
   body += `\n${statusLabel}\n\n`;
-  body += `💵 Total : *${fmtMoney(inv.total, inv.currency)}*\n`;
-  body += `✅ Payé : *${fmtMoney(inv.amount_paid, inv.currency)}*\n`;
-  body += `🔴 Reste : *${fmtMoney(remaining, inv.currency)}*\n`;
-  if (inv.due_date) body += `⏰ Échéance : *${fmtDate(inv.due_date)}*\n`;
+  body += `${t('invoice.total')} : *${fmtMoney(inv.total, inv.currency, lang)}*\n`;
+  body += `${t('finance.paid')} : *${fmtMoney(inv.amount_paid, inv.currency, lang)}*\n`;
+  body += `${t('invoice.remaining')} : *${fmtMoney(remaining, inv.currency, lang)}*\n`;
+  if (inv.due_date) body += `${t('invoice.dueDate')} : *${fmtDate(inv.due_date, lang)}*\n`;
 
   if (inv.lines && inv.lines.length > 0) {
-    body += `\n*Détail :*\n`;
+    // Les libellés de lignes sont saisis par l'école : on ne les traduit pas.
+    body += `\n${t('invoice.detail')}\n`;
     inv.lines.slice(0, 6).forEach((l) => {
-      body += `   • ${l.description} — ${fmtMoney(l.amount, inv.currency)}\n`;
+      body += `   • ${l.description} — ${fmtMoney(l.amount, inv.currency, lang)}\n`;
     });
   }
 
-  return `${header('Dernière facture', '🧾')}\n\n${body}${footer(parentInfo.school_name)}`;
+  return `${header(t('invoice.last'), '🧾')}\n\n${body}${footer(parentInfo.school_name)}`;
 }
 
 /** F3 — Historique des 3 derniers paiements */
@@ -525,24 +558,24 @@ export async function getPaymentHistory(student, parentInfo) {
     .order('payment_date', { ascending: false })
     .limit(5);
 
+  const lang = langOf(parentInfo);
+  const t = tr(lang);
+
   if (!payments || payments.length === 0) {
-    return `${header('Historique paiements', '💳')}\n\nAucun paiement enregistré pour ${student.first_name}.${footer(parentInfo.school_name)}`;
+    return `${header(t('payments.history'), '💳')}\n\n${t('payments.none', { name: student.first_name })}${footer(parentInfo.school_name)}`;
   }
 
-  const methodLabel = {
-    cash: '💵 Espèces',
-    bank_transfer: '🏦 Virement',
-    check: '📝 Chèque',
-    card: '💳 Carte',
-    online: '🌐 En ligne',
+  const methodLabel = (m) => {
+    const label = t(`payments.method.${m}`);
+    return label === `payments.method.${m}` ? m : label; // mode inconnu : valeur brute
   };
 
   const lines = payments.map((p) => {
     const period = p.invoice?.period_label ? ` (${p.invoice.period_label})` : '';
-    return `✅ *${fmtMoney(p.amount)}* — ${fmtDate(p.payment_date)}\n   📋 Reçu N° ${p.receipt_number}${period}\n   ${methodLabel[p.method] || p.method}`;
+    return `✅ *${fmtMoney(p.amount, 'MAD', lang)}* — ${fmtDate(p.payment_date, lang)}\n   ${t('payments.receipt')} ${p.receipt_number}${period}\n   ${methodLabel(p.method)}`;
   });
 
-  return `${header('Derniers paiements', '💳')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  return `${header(t('payments.latest'), '💳')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
 /** F4 — Échéancier à venir (factures non payées avec date d'échéance) */
@@ -557,19 +590,23 @@ export async function getUpcomingDueDates(student, parentInfo) {
 
   const pending = (invoices || []).filter((i) => (Number(i.total) - Number(i.amount_paid || 0)) > 0);
 
+  const lang = langOf(parentInfo);
+  const t = tr(lang);
+
   if (pending.length === 0) {
-    return `${header('Échéancier', '📅')}\n\n🎉 Aucun paiement en attente !\nVous êtes à jour.${footer(parentInfo.school_name)}`;
+    return `${header(t('due.title'), '📅')}\n\n${t('due.allClear')}${footer(parentInfo.school_name)}`;
   }
 
   const lines = pending.map((i) => {
     const remaining = Number(i.total) - Number(i.amount_paid || 0);
     const isOverdue = i.due_date && i.due_date < today;
     const icon = isOverdue ? '🔴' : '🟡';
-    const label = i.period_label || `Facture ${i.invoice_number}`;
-    return `${icon} *${label}* — ${fmtMoney(remaining, i.currency)}\n   ⏰ ${isOverdue ? 'Retard depuis' : 'À régler avant'} le *${fmtDate(i.due_date)}*`;
+    const label = i.period_label || t('due.invoiceLabel', { number: i.invoice_number });
+    const quand = isOverdue ? t('due.lateSince') : t('due.payBefore');
+    return `${icon} *${label}* — ${fmtMoney(remaining, i.currency, lang)}\n   ⏰ ${quand} *${fmtDate(i.due_date, lang)}*`;
   });
 
-  return `${header('Échéancier à venir', '📅')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
+  return `${header(t('due.upcoming'), '📅')}\n\n${lines.join('\n\n')}${footer(parentInfo.school_name)}`;
 }
 
 /** F5 — Coordonnées de paiement de l'école */
@@ -580,8 +617,10 @@ export async function getSchoolPaymentInfo(student, parentInfo) {
     .eq('id', parentInfo.school_id)
     .single();
 
+  const t = tr(langOf(parentInfo));
+
   if (!school) {
-    return `${header('Coordonnées', '📞')}\n\nInformations indisponibles.`;
+    return `${header(t('contact.title'), '📞')}\n\n${t('contact.unavailable')}`;
   }
 
   let body = `🏫 *${school.name}*\n`;
@@ -589,12 +628,13 @@ export async function getSchoolPaymentInfo(student, parentInfo) {
   if (school.phone) body += `📞 ${school.phone}\n`;
   if (school.email) body += `✉️ ${school.email}\n`;
   if (school.payment_info) {
-    body += `\n*Modalités de paiement :*\n${school.payment_info}`;
+    // Texte saisi par l'école : affiché tel quel, jamais traduit.
+    body += `\n${t('contact.terms')}\n${school.payment_info}`;
   } else {
-    body += `\n_Pour plus d'informations sur les modalités de paiement, contactez l'école._`;
+    body += `\n${t('contact.termsHint')}`;
   }
 
-  return `${header('Contact & Paiement', '📞')}\n\n${body}${footer(school.name)}`;
+  return `${header(t('contact.payment'), '📞')}\n\n${body}${footer(school.name)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -642,8 +682,10 @@ export async function getBulletinSummary(student, parentInfo) {
     .order('semester', { ascending: false })
     .limit(4);
 
+  const tt = tr(langOf(parentInfo));
+
   if (!bulletins || bulletins.length === 0) {
-    return `${header('Bulletins scolaires', '📄')}\n\nAucun bulletin publié pour le moment.${footer(parentInfo.school_name)}`;
+    return `${header(tt('ped.bulletins'), '📄')}\n\n${tt('ped.noBulletins')}${footer(parentInfo.school_name)}`;
   }
 
   const lines = bulletins.map(b => {
@@ -651,10 +693,12 @@ export async function getBulletinSummary(student, parentInfo) {
     const rank = b.general_rank ? `${b.general_rank}/${b.total_students_in_class || '?'}` : '—';
     const emoji = b.general_average >= 14 ? '🟢' : b.general_average >= 10 ? '🟡' : '🔴';
     const mention = b.mention ? ` (${b.mention})` : '';
-    return `${emoji} *${b.academic_year} — S${b.semester}*\n   📊 Moyenne : *${avg}/20*${mention}\n   🏅 Rang : *${rank}*`;
+    const entete = tt('ped.semesterLabel', { year: b.academic_year, n: b.semester });
+    return `${emoji} *${entete}*\n   ${tt('ped.average')} : *${avg}/20*${mention}\n   ${tt('ped.rank')} : *${rank}*`;
   });
 
-  return `${header('Bulletins scolaires', '📄')}\n\n${lines.join('\n\n')}\n\n� _Le(s) bulletin(s) PDF arrivent juste après ce message._${footer(parentInfo.school_name)}`;
+  // Le 📎 remplace un caractère corrompu présent dans cette ligne.
+  return `${header(tt('ped.bulletins'), '📄')}\n\n${lines.join('\n\n')}\n\n${tt('ped.bulletinPdfHint')}${footer(parentInfo.school_name)}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
