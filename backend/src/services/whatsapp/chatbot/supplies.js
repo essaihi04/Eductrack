@@ -12,7 +12,8 @@
  */
 
 import { supabaseAdmin } from '../../../config/supabase.js';
-import { sendText, sendMediaBuffer } from '../index.js';
+import { sendText } from '../index.js';
+import { sendUtilityMedia } from '../utility.js';
 import * as State from './state.js';
 import { getActiveSections, matchSectionFromText, matchSectionForLevel, normalizeText } from './knowledge.js';
 import { generateSectionPdf } from './suppliesPdf.js';
@@ -67,11 +68,17 @@ async function sendSectionPdf({ schoolId, phone, section, student }) {
     '_Liste officielle de l\'école, à préparer pour la rentrée._',
   ].filter((l) => l !== null).join('\n');
 
-  const res = await sendMediaBuffer(schoolId, phone, buffer, {
+  // En fenetre ouverte (le parent vient de demander) le PDF part directement.
+  // Hors fenetre — envoi proactif de rentree — Meta refuse le document : on
+  // annonce la liste par template et le PDF suit des que le parent repond.
+  const res = await sendUtilityMedia(schoolId, phone, {
+    buffer,
     type: 'document',
     fileName,
     mimetype: 'application/pdf',
     caption,
+    template: 'fournitures',
+    params: [section.level_label],
   });
 
   return !!res?.success;

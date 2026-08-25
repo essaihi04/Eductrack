@@ -206,6 +206,34 @@ export const TEMPLATES = {
   },
 
   /**
+   * FOURNITURES SCOLAIRES.
+   *
+   * La réponse existe déjà dans le chatbot (chatbot/supplies.js) mais ne part
+   * qu'en RÉACTION à une question du parent, donc toujours en fenêtre ouverte.
+   * Ce template permet l'inverse : pousser la liste à la rentrée, sans
+   * attendre que le parent la demande. Le PDF ne peut pas voyager dans un
+   * template texte — on annonce la liste et le document part dès la réponse.
+   */
+  fournitures: {
+    env: 'WA_TPL_FOURNITURES',
+    name: process.env.WA_TPL_FOURNITURES || null,
+    params: ['niveau'],
+    definition: {
+      name: 'fournitures_scolaires',
+      category: 'UTILITY',
+      language: 'fr',
+      body: 'Bonjour, la liste des fournitures scolaires pour {{1}} est disponible. Répondez à ce message pour la recevoir en PDF, ou retrouvez-la dans votre espace parent.',
+      example: ['la 5ème année primaire'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، لائحة اللوازم المدرسية الخاصة بـ {{1}} متوفرة. ردّوا على هذه الرسالة لاستلامها بصيغة PDF، أو اطّلعوا عليها في فضاء ولي الأمر.',
+        example: ['السنة الخامسة ابتدائي'],
+      },
+    },
+  },
+
+  /**
    * PREMIER CONTACT — pour un numéro qui n'a JAMAIS écrit à l'école.
    *
    * Sans lui, un tel parent est injoignable autrement que par template, et
