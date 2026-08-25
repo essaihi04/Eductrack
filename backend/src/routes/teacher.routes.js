@@ -49,13 +49,17 @@ async function handlePresenceNotification({ presence, existing, rowId, sessionId
     : (sessionInfo.start_time ? sessionInfo.start_time.slice(0, 5) : '');
   const schoolId = sessionInfo.school_id;
 
-  const sendToParents = async (message, event) => {
+  // `tpl` : template utilitaire employe hors fenetre 24 h. Sans lui, Meta
+  // refuserait ces notifications proactives (le parent n'a pas ecrit avant).
+  const sendToParents = async (message, event, tpl = { template: 'information' }) => {
     for (const link of parentLinks) {
       const parentPhone = link.profiles?.phone;
       if (!parentPhone) continue;
       const e164Phone = parentPhone.startsWith('+') ? parentPhone : `+${parentPhone}`;
       await sendWhatsAppResponse(e164Phone, message, schoolId, {
         category: 'pedagogical',
+        template: tpl.template,
+        templateParams: tpl.params || [],
         senderId,
         recipientFilter: { event, student_id: studentId, student_name: studentName, session_id: sessionId, date: sessionInfo.date },
       });
@@ -70,7 +74,10 @@ async function handlePresenceNotification({ presence, existing, rowId, sessionId
     if (lessonTopic) msg += `\n📖 Leçon: ${lessonTopic}`;
     if (timeSlot) msg += `\n🕐 Horaire: ${timeSlot}`;
     msg += `\n\n📝 *Pour justifier cette absence*, répondez simplement à ce message en indiquant le motif (maladie, rendez-vous médical, raison familiale…). Votre réponse sera transmise automatiquement à l'établissement.\n\n━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
-    await sendToParents(msg, 'absence_notification');
+    await sendToParents(msg, 'absence_notification', {
+      template: 'absence',
+      params: [studentName, dateLabel, subjectName || timeSlot || 'seance'],
+    });
     if (rowId) await supabaseAdmin.from('session_tracking').update({ absence_notified: true }).eq('id', rowId);
     return;
   }

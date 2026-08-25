@@ -13,6 +13,7 @@
 
 import { handleIncomingWhatsAppMessage as v2Handler } from './whatsapp/chatbot/index.js';
 import { sendText, sendMediaBuffer, getStatus } from './whatsapp/index.js';
+import { sendUtility } from './whatsapp/utility.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import path from 'path';
 import fs from 'fs';
@@ -97,7 +98,15 @@ export async function sendWhatsAppResponse(phoneNumber, message, schoolId, opts 
     });
     return false;
   }
-  const result = await sendText(schoolId, phoneNumber, message);
+  // Cette fonction sert à DEUX usages : les réponses du chatbot (fenêtre 24 h
+  // ouverte par définition) et les notifications PROACTIVES du personnel
+  // enseignant (absences…). Pour ces dernières, l'appelant fournit un template
+  // utilitaire : hors fenêtre, le texte libre serait refusé par Meta.
+  const result = opts.template
+    ? await sendUtility(schoolId, phoneNumber, {
+        text: message, template: opts.template, params: opts.templateParams || [],
+      })
+    : await sendText(schoolId, phoneNumber, message);
   await logWhatsAppSend({
     schoolId, phoneNumber, content: message, messageType: 'text',
     category: opts.category, senderId: opts.senderId, parentId: opts.parentId,

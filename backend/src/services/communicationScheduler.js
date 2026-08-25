@@ -16,6 +16,7 @@ import { whatsappOptedOut } from './notificationRouter.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendText, sendImage, sendDocument } from './whatsapp/index.js';
+import { sendUtility, serviceWindowOpen } from './whatsapp/utility.js';
 import { sendPushToUser } from './webPush.js';
 
 // Année scolaire courante au format slash "YYYY/YYYY" (rentrée en septembre).
@@ -318,9 +319,20 @@ export async function sendCommunication(comm) {
         } else {
           const waText = waTextFor(p);
           let r;
-          if (isImage) r = await sendImage(comm.school_id, p.phone, comm.attachment_url, waText);
-          else if (isDoc) r = await sendDocument(comm.school_id, p.phone, comm.attachment_url, comm.attachment_name || 'document.pdf', waText);
-          else r = await sendText(comm.school_id, p.phone, waText);
+          // Fenêtre 24 h ouverte → message complet avec sa pièce jointe.
+          // Fermée → Meta n'accepte qu'un template : on annonce l'objet et on
+          // invite le parent à répondre, ce qui rouvre la fenêtre et permet
+          // alors d'envoyer le contenu et le fichier normalement.
+          if (await serviceWindowOpen(p.phone)) {
+            if (isImage) r = await sendImage(comm.school_id, p.phone, comm.attachment_url, waText);
+            else if (isDoc) r = await sendDocument(comm.school_id, p.phone, comm.attachment_url, comm.attachment_name || 'document.pdf', waText);
+            else r = await sendText(comm.school_id, p.phone, waText);
+          } else {
+            r = await sendUtility(comm.school_id, p.phone, {
+              template: 'information',
+              params: [comm.title || "une communication de l'établissement"],
+            });
+          }
           if (r?.success) {
             waOk = true;
             if (r.data?.msgId) patch.provider_msg_id = String(r.data.msgId);

@@ -278,6 +278,8 @@ router.post('/controls-plan', authenticateUser, async (req, res) => {
             const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
             await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
               category: 'pedagogical',
+              // Notification proactive : hors fenêtre 24 h, seul un template passe.
+              template: 'information',
               senderId: teacher_id,
               recipientFilter: {
                 event: 'control_planned',

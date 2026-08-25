@@ -13,7 +13,7 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUser, isPushConfigured } from './webPush.js';
 import { userHasDeviceToken } from './fcmPush.js';
-import { sendText } from './whatsapp/index.js';
+import { sendUtility } from './whatsapp/utility.js';
 
 /** Le parent a-t-il installé l'app ? (abonnement Web Push OU jeton d'appareil natif) */
 export async function parentHasApp(parentId) {
@@ -113,11 +113,17 @@ export async function setWhatsappOptOut(parentId, optedOut) {
  * @param {string} p.schoolId
  * @param {string} p.phone           numéro WhatsApp E.164 (peut être null)
  * @param {object} p.push            payload push { title, body, url?, tag? }
- * @param {string} p.whatsappText    texte WhatsApp (fallback)
- * @param {Function} [p.whatsappSend] envoi WhatsApp custom (ex. avec retry) → { success }
- * @returns {Promise<{ channel: 'push'|'whatsapp'|'optout', success: boolean, raw?: object }>}
+ * @param {string} p.whatsappText    texte WhatsApp, utilisé si la fenêtre 24 h est ouverte
+ * @param {string} [p.template]     clé du registre de templates (services/whatsapp/templates.js),
+ *                                  utilisée hors fenêtre 24 h. Sans elle, l'envoi
+ *                                  hors fenêtre échoue avec `reason: 'no_template'`.
+ * @param {Array}  [p.templateParams] valeurs des {{1}}, {{2}}… dans l'ordre
+ * @returns {Promise<{ channel: 'push'|'whatsapp_free'|'whatsapp_paid'|'optout', success: boolean, raw?: object }>}
  */
-export async function routeNotification({ parentId, schoolId, phone, push, whatsappText, nudge = true }) {
+export async function routeNotification({
+  parentId, schoolId, phone, push, whatsappText, nudge = true,
+  template = null, templateParams = [],
+}) {
   const hasApp = await parentHasApp(parentId);
 
   // 1. App installée → push gratuit (web + natif, via sendPushToUser)
@@ -132,11 +138,16 @@ export async function routeNotification({ parentId, schoolId, phone, push, whats
 
   // 2. WhatsApp sauf opt-out
   if (phone && !(await whatsappOptedOut(parentId))) {
-    const free = await whatsappWindowOpen(parentId); // fenêtre 24h ouverte → gratuit
     // Nudge « installez l'app / répondez » uniquement pour les parents sans app.
+    // Il n'a de sens que sur le texte libre : un template ne peut pas le porter.
     let text = whatsappText || '';
     if (nudge && !hasApp) text += nudgeFooter();
-    const r = await sendText(schoolId, phone, text);
+
+    // sendUtility tranche seul entre texte libre (fenêtre 24 h ouverte, gratuit)
+    // et template approuvé (hors fenêtre, payant). La fenêtre y est mesurée sur
+    // le NUMÉRO, ce qui couvre aussi les destinataires sans parent_id.
+    const r = await sendUtility(schoolId, phone, { text, template, params: templateParams });
+    const free = r.channel === 'free_text';
     return {
       channel: free ? 'whatsapp_free' : 'whatsapp_paid',
       success: !!r?.success,

@@ -1268,7 +1268,8 @@ router.post('/student-notes/:studentId/send', requireSchoolAdmin, async (req, re
 
     // ── Canal WhatsApp : PDF avec logo école ──────────────────────────────
     if (wantWhatsapp) {
-      const { sendMediaBuffer, getStatus } = await import('../services/whatsapp/index.js');
+      const { getStatus } = await import('../services/whatsapp/index.js');
+      const { sendUtilityMedia } = await import('../services/whatsapp/utility.js');
       const status = await getStatus(schoolId);
       if (!status?.connected) {
         out.whatsapp = { sent: 0, error: 'Session WhatsApp non connectée' };
@@ -1299,8 +1300,13 @@ router.post('/student-notes/:studentId/send', requireSchoolAdmin, async (req, re
           try {
             // PDF généré en mémoire → envoi par buffer : l'API Cloud l'uploade
             // d'abord chez Meta. sendDocument, lui, n'accepte qu'une URL.
-            const waRes = await sendMediaBuffer(schoolId, toE164(phone), pdfBuffer, {
-              type: 'document',
+            // Hors fenêtre 24 h, Meta refuse un document : sendUtilityMedia
+            // envoie alors le template d'annonce, et le PDF part dès que le
+            // parent répond (sa réponse rouvre la fenêtre).
+            const waRes = await sendUtilityMedia(schoolId, toE164(phone), {
+              buffer: pdfBuffer,
+              template: 'document',
+              params: [studentName, `relevé de notes du semestre ${semester}`],
               fileName: `notes_${studentName.replace(/\s+/g, '_')}_S${semester}.pdf`,
               mimetype: 'application/pdf',
               caption:
@@ -1415,7 +1421,8 @@ router.post('/send-whatsapp', requireSchoolAdmin, async (req, res) => {
     }
 
     // Import dynamique pour éviter une dépendance circulaire
-    const { sendMediaBuffer, getStatus } = await import('../services/whatsapp/index.js');
+    const { getStatus } = await import('../services/whatsapp/index.js');
+    const { sendUtilityMedia } = await import('../services/whatsapp/utility.js');
 
     const schoolId = req.user.school_id;
     const status = await getStatus(schoolId);
@@ -1493,8 +1500,10 @@ router.post('/send-whatsapp', requireSchoolAdmin, async (req, res) => {
         });
 
         const studentName = `${bulletin.profiles?.first_name || ''} ${bulletin.profiles?.last_name || ''}`;
-        const waRes = await sendMediaBuffer(schoolId, toE164(parentPhone), pdfBuffer, {
-          type: 'document',
+        const waRes = await sendUtilityMedia(schoolId, toE164(parentPhone), {
+          buffer: pdfBuffer,
+          template: 'document',
+          params: [studentName, `bulletin du semestre ${bulletin.semester}`],
           fileName: `bulletin_${studentName.replace(/\s+/g, '_')}_S${bulletin.semester}.pdf`,
           mimetype: 'application/pdf',
           caption: `📄 Bulletin scolaire de ${studentName} — Semestre ${bulletin.semester}`,

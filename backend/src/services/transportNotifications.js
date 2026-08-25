@@ -6,20 +6,21 @@
 //    avec fallback sur profiles.phone si non configuré.
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUsers } from './webPush.js';
-import { sendText } from './whatsapp/index.js';
 import { parentHasApp, whatsappOptedOut, whatsappWindowOpen, isTransportSkippedToday } from './notificationRouter.js';
-import * as cloud from './whatsapp/cloudApi.js';
+import { sendUtility, serviceWindowOpen } from './whatsapp/utility.js';
 
 // Porte d'entrée transport : quand activée, les SUIVIS (monté/approche/déposé)
 // ne partent en WhatsApp qu'aux parents sans app ayant une fenêtre 24h ouverte
 // (= ils ont cliqué « Voir les détails » au départ). À activer une fois le
 // template Cloud à boutons approuvé par Meta.
 const TRANSPORT_GATE = process.env.TRANSPORT_GATE_ENABLED === 'true';
-const TRANSPORT_TEMPLATE = process.env.WA_TRANSPORT_TEMPLATE || null;
 
 // Envoi via l'API Cloud officielle de Meta
-async function rawSend(schoolId, phone, text, opts = {}) {
-  const result = await sendText(schoolId, phone, text, opts);
+async function rawSend(schoolId, phone, text, { template = null, params = [] } = {}) {
+  // sendUtility envoie le texte libre si la fenêtre 24 h est ouverte, et
+  // bascule sur le template fourni sinon. Les suivis n'en fournissent aucun :
+  // ils sont déjà filtrés en amont sur la fenêtre.
+  const result = await sendUtility(schoolId, phone, { text, template, params });
   return { ok: !!result.success, data: result.data, error: result.message };
 }
 
@@ -71,6 +72,12 @@ async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, rec
         if (TRANSPORT_GATE && !(await whatsappWindowOpen(r.parent_id))) continue; // pas cliqué « Voir détails »
       }
     }
+    // Les SUIVIS (monté / approche / déposé) tombent plusieurs fois par jour.
+    // Hors fenêtre 24 h ils seraient refusés par Meta, et les passer en template
+    // payant coûterait cher pour une information de faible valeur : on les
+    // laisse tomber silencieusement. Le parent équipé de l'app a déjà son push.
+    // Un message `critical` (absence) part quand même, via template si besoin.
+    if (!critical && !(await serviceWindowOpen(r.phone))) continue;
     validRecipients.push(r);
   }
   if (validRecipients.length === 0) return { ok: true, sent: 0, failed: 0, skipped: candidates.length };
@@ -109,7 +116,11 @@ async function sendTransportWhatsApp({ schoolId, senderId, recipients, text, rec
   //    doit être notifié à 7 h du matin si son enfant monte dans le bus.
   let sentOk = 0, failed = 0;
   for (const r of validRecipients) {
-    const result = await rawSend(schoolId, r.phone, text);
+    // Une absence (`critical`) doit passer même hors fenêtre 24 h : elle
+    // dispose alors du template générique d'information.
+    const result = await rawSend(schoolId, r.phone, text, critical
+      ? { template: 'information', params: ['le transport scolaire de votre enfant'] }
+      : {});
     const status = result.ok ? 'sent' : 'failed';
     if (result.ok) sentOk++; else failed++;
     await supabaseAdmin
@@ -348,7 +359,6 @@ export async function notifyTripStarted(tripId) {
  * Sinon → repli texte « Répondez OUI / NON ».
  */
 async function sendDepartureGate(schoolId, parentIds, senderId, label) {
-  const isCloud = await cloud.isCloudSchool(schoolId);
   for (const pid of parentIds) {
     try {
       if (await parentHasApp(pid)) continue;        // a l'app → push gratuit
@@ -356,14 +366,12 @@ async function sendDepartureGate(schoolId, parentIds, senderId, label) {
       const phone = await getParentWhatsAppPhone(pid);
       if (!phone) continue;
 
-      if (isCloud && TRANSPORT_TEMPLATE) {
-        // Template approuvé avec boutons quick-reply « Voir détails » / « Je ne veux pas »
-        await cloud.sendTemplate(schoolId, phone, TRANSPORT_TEMPLATE, 'fr');
-      } else {
-        // Repli texte (tant que le template n'est pas configuré)
-        const txt = `🚌 *Transport — ${label}*\nLe bus démarre.\n\n• Répondez *BUS OUI* pour recevoir le suivi du bus aujourd'hui (gratuit).\n• Répondez *BUS NON* pour ne pas être notifié aujourd'hui.\n\n📲 _Avec l'application, tout est automatique et gratuit._`;
-        await sendText(schoolId, phone, txt);
-      }
+      // Fenêtre 24 h ouverte → texte libre, plus riche et gratuit.
+      // Fermée → template approuvé à boutons « Voir le suivi » / « Pas aujourd'hui ».
+      // sendUtility tranche seul : l'ancien code envoyait un template payant
+      // même à un parent qui venait d'écrire.
+      const txt = `🚌 *Transport — ${label}*\nLe bus démarre.\n\n• Répondez *BUS OUI* pour recevoir le suivi du bus aujourd'hui (gratuit).\n• Répondez *BUS NON* pour ne pas être notifié aujourd'hui.\n\n📲 _Avec l'application, tout est automatique et gratuit._`;
+      await sendUtility(schoolId, phone, { text: txt, template: 'transport', params: [label] });
     } catch (e) {
       console.error('[TransportGate] parent', pid, e.message);
     }

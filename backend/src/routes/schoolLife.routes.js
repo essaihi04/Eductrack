@@ -7,6 +7,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 import { sendText, sendImage, getStatus } from '../services/whatsapp/index.js';
+import { sendUtility, serviceWindowOpen, subjectFromText } from '../services/whatsapp/utility.js';
 import { requiresApproval, createApprovalRequest } from '../services/approvals.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
 
@@ -89,8 +90,14 @@ async function notifyUsers(userIds, { title, message, type = 'system', data = nu
   }
 }
 
-/** Envoi WhatsApp best-effort à une liste de téléphones (texte + image optionnelle). */
-async function broadcastWhatsApp(schoolId, phones, text, imageRelUrl = null) {
+/**
+ * Envoi WhatsApp best-effort à une liste de téléphones (texte + image optionnelle).
+ *
+ * Hors fenêtre 24 h, Meta refuse texte libre et image : on bascule sur le
+ * template « information », qui annonce l'objet et invite le parent à répondre.
+ * @param {string} [subject] objet affiché dans le template ; dérivé du texte si absent.
+ */
+async function broadcastWhatsApp(schoolId, phones, text, imageRelUrl = null, subject = null) {
   if (!schoolId || !phones || phones.length === 0) return { sent: 0 };
   try {
     if (!(await getStatus(schoolId)).connected) return { sent: 0, reason: 'not_connected' };
@@ -98,11 +105,16 @@ async function broadcastWhatsApp(schoolId, phones, text, imageRelUrl = null) {
     return { sent: 0, reason: 'not_connected' };
   }
   const imgAbs = imageRelUrl ? absoluteUrl(imageRelUrl) : null;
+  const objet = subject || subjectFromText(text);
   let sent = 0;
   for (const phone of phones) {
     try {
-      if (imgAbs) await sendImage(schoolId, phone, imgAbs, text);
-      else await sendText(schoolId, phone, text);
+      if (await serviceWindowOpen(phone)) {
+        if (imgAbs) await sendImage(schoolId, phone, imgAbs, text);
+        else await sendText(schoolId, phone, text);
+      } else {
+        await sendUtility(schoolId, phone, { template: 'information', params: [objet] });
+      }
       sent += 1;
     } catch (e) {
       console.error('[schoolLife] WhatsApp send fail', phone, e.message);

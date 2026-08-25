@@ -3,7 +3,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
-import { sendText, sendMediaBuffer, getStatus } from '../services/whatsapp/index.js';
+import { sendText, getStatus } from '../services/whatsapp/index.js';
+import { sendUtility, sendUtilityMedia, serviceWindowOpen } from '../services/whatsapp/utility.js';
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeEnrollmentMap, activeStudentIdSet } from '../utils/enrollmentScope.js';
@@ -1914,8 +1915,13 @@ router.post('/daily-reports/send-pdf-report', async (req, res) => {
     let sent = 0, failed = 0;
     const errors = new Set();
     for (const contact of contacts) {
-      const result = await sendMediaBuffer(schoolId, contact.phone_e164, out.pdfBuffer, {
-        type: 'document', fileName: out.fileName, mimetype: 'application/pdf', caption,
+      // Hors fenêtre 24 h, Meta refuse le PDF : on envoie le template
+      // d'annonce, et le document part dès que le parent répond.
+      const result = await sendUtilityMedia(schoolId, contact.phone_e164, {
+        buffer: out.pdfBuffer,
+        template: 'document',
+        params: [studentName, 'rapport pédagogique de suivi'],
+        fileName: out.fileName, mimetype: 'application/pdf', caption,
       });
       const ok = result?.success;
       if (!ok && result?.message) errors.add(result.reason || result.message);
@@ -2050,7 +2056,11 @@ router.post('/daily-reports/send-report', async (req, res) => {
     for (const contact of contacts) {
       let contactSuccess = true;
       let lastErr = null;
-      for (let i = 0; i < textChunks.length; i++) {
+      // Hors fenêtre 24 h, un rapport découpé en plusieurs messages libres est
+      // impossible : la boucle ci-dessous ne tourne pas et on envoie à la place
+      // une annonce par template (bloc juste après).
+      const windowOpen = await serviceWindowOpen(contact.phone_e164);
+      for (let i = 0; windowOpen && i < textChunks.length; i++) {
         try {
           const chunkLabel = textChunks.length > 1 ? ` (${i + 1}/${textChunks.length})` : '';
           console.log(`[SendReport] Sending to ${contact.phone_e164}${chunkLabel}, chunkLen=${textChunks[i].length}`);
@@ -2068,6 +2078,20 @@ router.post('/daily-reports/send-report', async (req, res) => {
           errorMessages.add(lastErr);
           contactSuccess = false;
           break;
+        }
+      }
+
+      // Fenêtre fermée : annonce par template. Le rapport complet partira
+      // dès que le parent répondra, sa réponse rouvrant la fenêtre 24 h.
+      if (!windowOpen) {
+        const ann = await sendUtility(schoolId, contact.phone_e164, {
+          template: 'document',
+          params: [studentName, 'rapport pédagogique complet'],
+        });
+        contactSuccess = !!ann?.success;
+        if (!contactSuccess) {
+          lastErr = ann?.message || 'Échec de l\'annonce du rapport';
+          errorMessages.add(lastErr);
         }
       }
 

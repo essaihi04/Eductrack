@@ -22,7 +22,7 @@
 
 import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUser } from './webPush.js';
-import { sendText } from './whatsapp/index.js';
+import { sendUtility } from './whatsapp/utility.js';
 import { routeNotification } from './notificationRouter.js';
 
 // Rôles qui voient et arbitrent les demandes de rendez-vous.
@@ -141,11 +141,15 @@ async function notifyUsers(userIds, { title, message, data = null, url = null })
   ));
 }
 
-/** WhatsApp best-effort vers un membre du personnel (jamais bloquant). */
+/**
+ * WhatsApp best-effort vers un membre du personnel (jamais bloquant).
+ * La fenêtre 24 h s'applique au personnel comme aux parents : hors fenêtre,
+ * on bascule sur le template générique (objet dérivé du texte).
+ */
 async function staffWhatsApp(schoolId, phone, text) {
   if (!phone) return;
   try {
-    await sendText(schoolId, phone, text);
+    await sendUtility(schoolId, phone, { text, template: 'information' });
   } catch (e) {
     console.error('[appointments] WhatsApp staff:', e.message);
   }
@@ -460,6 +464,10 @@ async function notifyParentConfirmed(appt) {
       tag: 'appointment',
     },
     whatsappText: waText,
+    // Hors fenêtre 24 h, le texte ci-dessus (multi-lignes) ne passe pas :
+    // on retombe sur le template utilitaire à paramètres courts.
+    template: 'rendezVous',
+    templateParams: [appt.subject, slot, avec],
   }).catch((e) => {
     console.error('[appointments] notifyParentConfirmed:', e.message);
     return { channel: 'error', success: false };
@@ -521,6 +529,11 @@ export async function declineAppointment({ appointment, staffUser, note = null }
       tag: 'appointment',
     },
     whatsappText: waText,
+    // Un refus ne rentre pas dans le template « rendez-vous confirmé » :
+    // on passe par le template générique, qui invite le parent à répondre
+    // (sa réponse rouvre la fenêtre 24 h et permet d'expliquer en texte libre).
+    template: 'information',
+    templateParams: [`votre demande de rendez-vous « ${updated.subject} »`],
   }).catch(() => ({ channel: 'error' }));
 
   await notifyUsers([updated.parent_id], {
