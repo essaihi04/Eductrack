@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { resolveLogoUrl } from '../lib/schoolLogo';
 
 /**
  * Écran de bienvenue animé aux couleurs de l'école.
@@ -10,6 +11,9 @@ import { useEffect, useRef, useState } from 'react';
  *
  * - `ready`  : quand true, le splash reste affiché jusqu'à MIN_MS puis
  *              s'estompe et appelle `onDone`.
+ * - Le logo Bousole n'est JAMAIS utilisé comme patience : tant que le logo de
+ *   l'école n'est pas connu on affiche une pastille neutre, sinon l'utilisateur
+ *   voit d'abord Bousole puis son école (double logo au démarrage).
  * - Le logo est mis en cache par utilisateur (localStorage) pour que
  *   l'animation soit instantanée dès le prochain chargement, avant même
  *   que le profil ne soit chargé.
@@ -19,23 +23,30 @@ const MIN_MS = 1700;   // durée minimale d'affichage (laisse l'effet respirer)
 const EXIT_MS = 450;   // durée du fondu de sortie (= transition CSS)
 
 const cacheKey = (email) => `boussoule.splash.${String(email || '').trim().toLowerCase()}`;
+// Repli quand l'email n'est pas encore connu (les toutes premières frames d'un
+// rechargement) : la derniere ecole affichee sur cet appareil.
+const LAST_KEY = 'boussoule.splash.last';
 
 /** Mémorise le logo + nom d'école pour cet utilisateur (appelé par AuthContext). */
 export function cacheSplashSchool(email, school) {
   if (!email || !school) return;
   try {
-    localStorage.setItem(cacheKey(email), JSON.stringify({
+    const entry = JSON.stringify({
       logo_url: school.logo_url || null,
       name: school.name || '',
-    }));
+    });
+    localStorage.setItem(cacheKey(email), entry);
+    localStorage.setItem(LAST_KEY, entry);
   } catch (_) { /* stockage plein / privé : ignoré */ }
 }
 
 /** Relit le logo + nom d'école mémorisés pour cet utilisateur. */
 export function readSplashCache(email) {
-  if (!email) return null;
   try {
-    const raw = localStorage.getItem(cacheKey(email));
+    // Email connu : on ne montre que SON ecole (appareil partage au secretariat
+    // -> jamais le logo de l'etablissement precedent). Email pas encore charge :
+    // on prend la derniere ecole vue sur cet appareil.
+    const raw = email ? localStorage.getItem(cacheKey(email)) : localStorage.getItem(LAST_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch (_) {
     return null;
@@ -59,7 +70,14 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
     return () => clearTimeout(t);
   }, [ready, exiting]);
 
-  const showLogo = logoUrl && !logoBroken;
+  // `logo_url` peut être un chemin relatif ou contenir un schéma abîmé
+  // (« https//… ») : on le normalise, sinon l'image casse et on retombait sur
+  // le logo Bousole.
+  const resolvedLogo = resolveLogoUrl(logoUrl);
+  const showLogo = resolvedLogo && !logoBroken;
+  // Pas de logo d'école exploitable : initiale du nom, et le logo Bousole
+  // seulement pour un compte sans école (super admin).
+  const initial = (schoolName || '').trim().charAt(0).toUpperCase();
 
   return (
     <div
@@ -80,19 +98,23 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
         >
           {showLogo ? (
             <img
-              src={logoUrl}
+              src={resolvedLogo}
               alt=""
               onError={() => setLogoBroken(true)}
               className="w-full h-full object-contain p-2"
               draggable="false"
             />
-          ) : (
+          ) : initial ? (
+            <span className="font-display text-4xl font-semibold text-[hsl(207_59%_22%)]">{initial}</span>
+          ) : ready ? (
             <img
               src="/brand/boussoule-logo.png"
               alt="Logo Bousole"
               className="w-full h-full object-contain p-2"
               draggable="false"
             />
+          ) : (
+            <span className="h-14 w-14 rounded-2xl bg-black/5 animate-pulse" aria-hidden="true" />
           )}
           <span className="et-splash-shine" aria-hidden="true" />
         </div>
@@ -100,7 +122,7 @@ const SchoolSplash = ({ logoUrl, schoolName, ready, onDone }) => {
 
       <div className="et-splash-text mt-7 text-center px-6">
         <div className="font-display text-2xl font-semibold text-foreground">
-          {schoolName || 'Bousole'}
+          {schoolName || (ready ? 'Bousole' : ' ')}
         </div>
         <div className="mt-1.5 text-sm text-muted-foreground">
           {ready ? 'Bienvenue !' : 'Préparation de votre espace…'}
