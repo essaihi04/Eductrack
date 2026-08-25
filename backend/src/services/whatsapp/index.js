@@ -17,7 +17,8 @@
  */
 
 import * as cloud from './cloudApi.js';
-import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
+import { isOutboundBlocked, isChatbotContext, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
+import { logOutgoing } from './outgoingLog.js';
 
 const fail = (message, extra = {}) => ({ success: false, message, ...extra });
 
@@ -38,6 +39,16 @@ const notConfigured = async (schoolId) => {
   return fail('Numéro WhatsApp non configuré pour cette école (API Cloud)', { reason: 'session_down' });
 };
 
+// Journalise UNIQUEMENT les envois faits pendant le traitement d'un message
+// entrant (contexte chatbot). Les campagnes ont déjà leur propre trace dans
+// whatsapp_messages : les journaliser ici les afficherait deux fois dans le
+// fil de conversation.
+const traced = async (schoolId, phone, meta, send) => {
+  const result = await send();
+  if (isChatbotContext()) logOutgoing(schoolId, phone, meta, result);
+  return result;
+};
+
 // ─────────────────────────────────────────────────────────────────────────
 // API publique d'envoi
 // ─────────────────────────────────────────────────────────────────────────
@@ -53,7 +64,7 @@ export async function sendText(schoolId, phone, text) {
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendText(schoolId, phone, text);
+  return traced(schoolId, phone, { type: 'text', body: text }, () => cloud.sendText(schoolId, phone, text));
 }
 
 /** Envoi image depuis URL. */
@@ -62,7 +73,8 @@ export async function sendImage(schoolId, phone, imageUrl, caption = '') {
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendImage(schoolId, phone, imageUrl, caption);
+  return traced(schoolId, phone, { type: 'image', body: caption, mediaUrl: imageUrl },
+    () => cloud.sendImage(schoolId, phone, imageUrl, caption));
 }
 
 /** Envoi document (PDF, etc.) depuis URL. */
@@ -71,7 +83,8 @@ export async function sendDocument(schoolId, phone, documentUrl, fileName, capti
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype);
+  return traced(schoolId, phone, { type: 'document', body: caption, mediaUrl: documentUrl, fileName },
+    () => cloud.sendDocument(schoolId, phone, documentUrl, fileName, caption, mimetype));
 }
 
 /** Envoi média depuis un buffer généré côté backend (bulletins, factures…). */
@@ -80,7 +93,8 @@ export async function sendMediaBuffer(schoolId, phone, buffer, { type = 'documen
   if (blocked) return blocked;
   const missing = await notConfigured(schoolId);
   if (missing) return missing;
-  return cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption });
+  return traced(schoolId, phone, { type, body: caption, fileName },
+    () => cloud.sendMediaBuffer(schoolId, phone, buffer, { type, fileName, mimetype, caption }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────

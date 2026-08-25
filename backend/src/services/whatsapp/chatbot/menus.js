@@ -14,6 +14,7 @@
 import * as A from './answers.js';
 import { sendText } from '../index.js';
 import * as cloud from '../cloudApi.js';
+import { logOutgoing } from '../outgoingLog.js';
 import { capabilityForOption, isCapabilityEnabled } from './capabilities.js';
 import { customOptionsForMenu } from './customEntries.js';
 
@@ -173,7 +174,13 @@ export function renderMenuText(menu, ctx = {}) {
  */
 export async function sendMenu(schoolId, phone, menu, ctx = {}) {
   const r = await cloud.sendListMenu(schoolId, phone, menu, ctx);
-  if (r?.success) return true;
+  if (r?.success) {
+    // La liste native passe par cloudApi sans traverser whatsapp/index.js :
+    // sans cette ligne, le menu manquerait dans la boîte de réception et
+    // l'école verrait la réponse du parent sortir de nulle part.
+    logOutgoing(schoolId, phone, { type: 'text', body: renderMenuText(menu, ctx) }, r);
+    return true;
+  }
 
   console.warn(`[chatbot] liste Cloud échouée, repli texte:`, r?.message);
   const res = await sendText(schoolId, phone, renderMenuText(menu, ctx));

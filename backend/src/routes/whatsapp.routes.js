@@ -1148,7 +1148,7 @@ router.get('/conversations', async (req, res) => {
     // réinjectés dans le fil pour que l'école voie la conversation complète.
     let incomingQuery = supabaseAdmin
       .from('whatsapp_incoming_messages')
-      .select('id, phone_e164, parent_id, message_text, ai_response_text, ai_response_sent, received_at, category')
+      .select('id, phone_e164, parent_id, message_text, ai_response_text, ai_response_sent, received_at, category, media_path, media_type, media_mimetype, media_filename')
       .order('received_at', { ascending: false })
       .limit(3000);
     if (schoolId) incomingQuery = incomingQuery.eq('school_id', schoolId);
@@ -1182,7 +1182,13 @@ router.get('/conversations', async (req, res) => {
       conv.messages.push({
         id: `in-${r.id}`,
         content: r.message_text || '',
-        messageType: 'text',
+        // Le binaire vit dans le bucket PRIVE : on ne renvoie pas d'URL ici,
+        // seulement de quoi en demander une signee a l'ouverture du fil.
+        messageType: r.media_type || 'text',
+        mediaMessageId: r.media_path ? r.id : null,
+        mediaType: r.media_type || null,
+        mediaMimetype: r.media_mimetype || null,
+        fileName: r.media_filename || null,
         status: 'received',
         createdAt: r.received_at,
         direction: 'incoming'
@@ -1205,6 +1211,45 @@ router.get('/conversations', async (req, res) => {
         });
       }
     });
+
+    // ── Réponses du CHATBOT (journal des envois automatiques) ────────────────
+    // Sans elles, l'école voit la question du parent puis un blanc, alors que
+    // le robot a repondu menu, PDF ou confirmation. On se limite aux fils deja
+    // constitues : un envoi n'existe jamais sans conversation.
+    if (Object.keys(conversationMap).length > 0) {
+      let logQuery = supabaseAdmin
+        .from('whatsapp_outgoing_log')
+        .select('id, phone_e164, body, message_type, media_url, file_name, status, error_message, created_at, source')
+        .order('created_at', { ascending: false })
+        .limit(4000);
+      if (schoolId) logQuery = logQuery.eq('school_id', schoolId);
+      const { data: outLog, error: outErr } = await logQuery;
+
+      // Table absente (ADD_WHATSAPP_INBOX.sql pas encore joue) : on continue
+      // sans ces messages plutot que de casser toute la boite de reception.
+      if (outErr) {
+        console.warn('[conversations] journal des envois indisponible:', outErr.message);
+      } else {
+        (outLog || []).forEach((o) => {
+          const conv = conversationMap[o.phone_e164];
+          if (!conv) return;
+          conv.messages.push({
+            id: `bot-log-${o.id}`,
+            content: o.body || '',
+            messageType: o.message_type || 'text',
+            mediaUrl: o.media_url || null,
+            fileName: o.file_name || null,
+            status: o.status,
+            errorMessage: o.error_message,
+            createdAt: o.created_at,
+            sentAt: o.created_at,
+            senderName: '🤖 Chatbot',
+            direction: 'outgoing',
+            isBot: true,
+          });
+        });
+      }
+    }
 
     // ── Identité des numéros sans parent rattaché (professeurs, personnel) ────
     const unknownPhones = Object.values(conversationMap)
@@ -1234,6 +1279,20 @@ router.get('/conversations', async (req, res) => {
 
     // Sort messages within each conversation and set lastMessageAt
     const conversations = Object.values(conversationMap).map(conv => {
+      // Anti-doublon : la reponse du chatbot etait deja recopiee sur le message
+      // entrant (ai_response_text). Depuis le journal des envois, elle arrive
+      // aussi par sa propre ligne — on garde celle du journal, plus complete.
+      const logged = conv.messages.filter((m) => String(m.id).startsWith('bot-log-'));
+      if (logged.length) {
+        conv.messages = conv.messages.filter((m) => {
+          if (!String(m.id).startsWith('bot-') || String(m.id).startsWith('bot-log-')) return true;
+          const body = String(m.content || '').trim();
+          const t = new Date(m.createdAt).getTime();
+          return !logged.some((l) =>
+            String(l.content || '').trim() === body &&
+            Math.abs(new Date(l.createdAt).getTime() - t) < 120000);
+        });
+      }
       conv.messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       const last = conv.messages[conv.messages.length - 1];
       conv.lastMessageAt = last ? last.createdAt : null;
@@ -1675,6 +1734,38 @@ router.post('/cloud/verify', async (req, res) => {
   } catch (error) {
     console.error('Erreur cloud verify:', error);
     res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// POST /inbox/media-urls — URL signées des pièces jointes d'un fil.
+// Les binaires reçus (notes vocales surtout) vivent dans le bucket PRIVÉ : rien
+// ne doit être servi par une URL devinable. Le front demande donc des liens
+// courts au moment d'ouvrir une conversation, et seulement pour celle-ci.
+router.post('/inbox/media-urls', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean).slice(0, 100) : [];
+    if (!ids.length) return res.json({ urls: {} });
+
+    let q = supabaseAdmin
+      .from('whatsapp_incoming_messages')
+      .select('id, media_path, school_id')
+      .in('id', ids);
+    if (schoolId) q = q.eq('school_id', schoolId);   // scope école
+    const { data: rows, error } = await q;
+    if (error) throw error;
+
+    const { signedUrl } = await import('../utils/storage.js');
+    const urls = {};
+    for (const row of rows || []) {
+      if (!row.media_path) continue;
+      const url = await signedUrl(row.media_path, 3600);
+      if (url) urls[row.id] = url;
+    }
+    res.json({ urls });
+  } catch (error) {
+    console.error('Erreur inbox media-urls:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 

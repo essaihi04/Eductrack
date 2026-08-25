@@ -13,7 +13,7 @@ import {
   ChevronDown, X, Clock, CheckCircle, AlertCircle, RefreshCw, Eye,
   Smartphone, Wifi, WifiOff, QrCode, Info, Plus, Trash2,
   Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowDownLeft, ArrowLeft,
-  Bot, Sparkles,
+  Bot, Sparkles, Mic,
   Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2, Shield
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
@@ -160,6 +160,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [conversations, setConversations] = useState([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [selectedConv, setSelectedConv] = useState(null);
+  // URL signées des pièces jointes REÇUES : les binaires vivent dans le bucket
+  // privé, on ne demande des liens qu'à l'ouverture d'une conversation.
+  const [inboxMediaUrls, setInboxMediaUrls] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [inboxFilter, setInboxFilter] = useState('all');
   const [inboxView, setInboxView] = useState('conversations');
@@ -766,6 +769,30 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   useEffect(() => {
     if (selectedConv && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConv]);
+
+  // Pièces jointes du fil ouvert → URL signées (1 h). On ne redemande que les
+  // manquantes : rouvrir la même conversation ne relance pas d'appel.
+  useEffect(() => {
+    if (!selectedConv) return;
+    const ids = selectedConv.messages
+      .map((m) => m.mediaMessageId)
+      .filter((id) => id && !inboxMediaUrls[id]);
+    if (!ids.length) return;
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const res = await fetch(`${apiUrl}/api/admin/whatsapp/inbox/media-urls`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [...new Set(ids)] }),
+        });
+        const data = await res.json();
+        if (data.urls) setInboxMediaUrls((prev) => ({ ...prev, ...data.urls }));
+      } catch (e) {
+        console.error('Erreur URL pièces jointes:', e);
+      }
+    })();
+  }, [selectedConv, apiUrl, inboxMediaUrls]);
 
   const filteredConversations = conversations.filter(conv => {
     const matchesSearch = !searchQuery ||
@@ -1406,9 +1433,20 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     return { label: '', cls: '', avatar: 'from-green-400 to-green-600' };
   };
   const msgTypeIcon = (type) => {
-    if (type === 'image') return <Image className="w-3.5 h-3.5" />;
+    if (type === 'image' || type === 'sticker') return <Image className="w-3.5 h-3.5" />;
+    if (type === 'audio') return <Mic className="w-3.5 h-3.5" />;
+    if (type === 'video') return <Paperclip className="w-3.5 h-3.5" />;
     if (type === 'document') return <FileText className="w-3.5 h-3.5" />;
     return null;
+  };
+
+  // Fenêtre de service Meta : tant qu'un message du parent date de moins de
+  // 24 h, l'école peut répondre librement (et gratuitement). Passé ce délai,
+  // seul un template approuvé part — d'où l'avertissement dans l'en-tête.
+  const serviceWindow = (conv) => {
+    if (!conv?.lastIncomingAt) return { open: false, hoursLeft: 0 };
+    const elapsed = (Date.now() - new Date(conv.lastIncomingAt).getTime()) / 3600000;
+    return { open: elapsed < 24, hoursLeft: Math.max(0, Math.floor(24 - elapsed)) };
   };
 
   const inboxTotalSent = conversations.reduce((s, c) => s + c.totalSent, 0);
@@ -2535,9 +2573,19 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                    <p className="text-xs text-gray-500 flex items-center gap-1 flex-wrap">
                       <Phone className="w-3 h-3" />{selectedConv.phone} · {selectedConv.messageCount} msg
                       {selectedConv.totalReceived > 0 && <span className="text-blue-600">· {selectedConv.totalReceived} reçu(s)</span>}
+                      {(() => {
+                        const w = serviceWindow(selectedConv);
+                        return w.open ? (
+                          <span className="text-emerald-600 font-medium">· 💬 Réponse libre encore {w.hoursLeft} h</span>
+                        ) : (
+                          <span className="text-amber-600 font-medium" title="Passé 24 h sans message du parent, Meta n'accepte plus que les modèles approuvés.">
+                            · ⏳ Hors fenêtre 24 h
+                          </span>
+                        );
+                      })()}
                     </p>
                   </div>
                   {selectedConv.awaitingReply && (
@@ -2579,11 +2627,70 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                                 {msg.studentName && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full ml-auto">{msg.studentName}</span>}
                               </div>
                             )}
-                            {msg.messageType !== 'text' && !msg.isAiReport && (
+                            {/* Pièce jointe REÇUE : note vocale, photo, PDF, vidéo.
+                                L'URL signée arrive à l'ouverture du fil ; tant qu'elle
+                                n'est pas là, on annonce le type plutôt qu'un vide. */}
+                            {msg.mediaMessageId ? (() => {
+                              const url = inboxMediaUrls[msg.mediaMessageId];
+                              if (!url) {
+                                return (
+                                  <div className="flex items-center gap-1.5 mb-1.5 text-gray-500">
+                                    {msgTypeIcon(msg.mediaType)}
+                                    <span className="text-xs italic">Chargement de la pièce jointe…</span>
+                                  </div>
+                                );
+                              }
+                              if (msg.mediaType === 'audio') {
+                                return (
+                                  <div className="mb-1.5">
+                                    <div className="flex items-center gap-1.5 text-gray-600 mb-1">
+                                      <Mic className="w-3.5 h-3.5" />
+                                      <span className="text-[11px] font-medium">Message vocal</span>
+                                    </div>
+                                    <audio controls preload="none" src={url} className="w-full max-w-[260px] h-9" />
+                                  </div>
+                                );
+                              }
+                              if (msg.mediaType === 'image' || msg.mediaType === 'sticker') {
+                                return (
+                                  <a href={url} target="_blank" rel="noreferrer" className="block mb-1.5">
+                                    <img src={url} alt={msg.fileName || 'Photo reçue'}
+                                      className="rounded-md max-h-64 w-auto object-cover border border-gray-200" />
+                                  </a>
+                                );
+                              }
+                              if (msg.mediaType === 'video') {
+                                return <video controls preload="none" src={url} className="rounded-md max-h-64 mb-1.5 w-full" />;
+                              }
+                              return (
+                                <a href={url} target="_blank" rel="noreferrer"
+                                  className="flex items-center gap-2 mb-1.5 p-2 rounded-md bg-gray-50 border border-gray-200 hover:bg-gray-100">
+                                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                  <span className="text-xs font-medium text-gray-700 truncate">{msg.fileName || 'Pièce jointe'}</span>
+                                  <Download className="w-3.5 h-3.5 text-gray-400 ml-auto flex-shrink-0" />
+                                </a>
+                              );
+                            })() : msg.messageType !== 'text' && !msg.isAiReport && (
                               <div className="flex items-center gap-1.5 mb-1.5 text-green-700">
                                 {msgTypeIcon(msg.messageType)}
                                 <span className="text-xs font-medium">{msg.fileName || (msg.messageType === 'image' ? 'Image' : 'Document')}</span>
                               </div>
+                            )}
+                            {/* Pièce jointe ENVOYÉE : l'URL est publique, l'image
+                                s'affiche directement dans la bulle. */}
+                            {!incoming && msg.mediaUrl && msg.messageType === 'image' && (
+                              <a href={msg.mediaUrl} target="_blank" rel="noreferrer" className="block mb-1.5">
+                                <img src={msg.mediaUrl} alt={msg.fileName || 'Image envoyée'}
+                                  className="rounded-md max-h-64 w-auto object-cover border border-gray-200" />
+                              </a>
+                            )}
+                            {!incoming && msg.mediaUrl && msg.messageType !== 'image' && (
+                              <a href={msg.mediaUrl} target="_blank" rel="noreferrer"
+                                className="flex items-center gap-2 mb-1.5 p-2 rounded-md bg-white/60 border border-gray-200 hover:bg-white">
+                                <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                <span className="text-xs font-medium text-gray-700 truncate">{msg.fileName || 'Pièce jointe'}</span>
+                                <Download className="w-3.5 h-3.5 text-gray-400 ml-auto flex-shrink-0" />
+                              </a>
                             )}
                             {msg.content && <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">{msg.content}</p>}
                             {msg.errorMessage && (
