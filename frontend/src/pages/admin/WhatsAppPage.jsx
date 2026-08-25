@@ -1582,6 +1582,29 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
+
+  // Date à afficher pour un envoi. created_at est l'instant du CLIC, pas celui
+  // du départ : un envoi programmé la nuit pour le lendemain matin s'affichait
+  // à 1 h du matin. On montre donc la date qui a du sens selon l'état :
+  //   programmé et pas encore parti → la date prévue
+  //   terminé ou échoué             → la date de fin d'envoi (updated_at)
+  //   en cours                      → la date de création
+  const sendDate = (msg) => {
+    if (!msg) return { text: '', title: '' };
+    const created = formatFullDate(msg.created_at);
+    const scheduled = msg.scheduled_at ? new Date(msg.scheduled_at) : null;
+    const notSentYet = ['pending', 'scheduled'].includes(msg.status);
+
+    if (scheduled && notSentYet && scheduled.getTime() > Date.now()) {
+      return { text: `⏳ Prévu le ${formatFullDate(msg.scheduled_at)}`, title: `Créé le ${created}` };
+    }
+    const done = ['completed', 'failed', 'sent'].includes(msg.status);
+    const when = done && msg.updated_at ? msg.updated_at : msg.created_at;
+    return {
+      text: formatFullDate(when),
+      title: when === msg.created_at ? '' : `Créé le ${created} · envoyé le ${formatFullDate(when)}`,
+    };
+  };
   // Retire les lignes contenant un lien brut (ex. « 📎 doc.pdf : https://…supabase.co/… »)
   // du corps affiché : la pièce jointe est déjà présentée à part (media_url / file_name).
   const stripMediaLinks = (text) => {
@@ -2225,7 +2248,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-gray-800 truncate">{msg.content || `[${typeLabel(msg.message_type)}]`}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">{formatFullDate(msg.created_at)}</p>
+                          <p className="text-xs text-gray-500 mt-0.5" title={sendDate(msg).title}>{sendDate(msg).text}</p>
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             {statusBadge(msg.status)}
                             {msg.channels && msg.channels !== 'whatsapp' && (
@@ -4335,7 +4358,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     </a>
                   )}
                   <div className="flex gap-3 mt-2 text-xs text-gray-500">
-                    <span>{formatFullDate(detailMessage.message.created_at)}</span>
+                    <span title={sendDate(detailMessage.message).title}>{sendDate(detailMessage.message).text}</span>
                     {statusBadge(detailMessage.message.status)}
                   </div>
                 </div>
