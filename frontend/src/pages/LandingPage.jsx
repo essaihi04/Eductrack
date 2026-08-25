@@ -114,6 +114,22 @@ const LandingPage = () => {
         <RoleExperience />
         <CapabilitiesAndCTA onRegister={() => navigate('/register')} />
       </main>
+
+      <footer className="border-t border-[#173A59]/10 bg-white px-5 py-6 text-center text-xs leading-7 text-[#173A59]/60">
+        <p>
+          <strong>BOUSOLE TECHNOLOGIE</strong> — Société à responsabilité limitée à associé unique au capital de 100 000,00 MAD.
+          <br />
+          Siège social : 23 Bd Oukba Ibnou Nafii, Hay Mohammadi, Casablanca 20560, Maroc.
+          <br />
+          RC Casablanca n° 744197 — ICE 004005692000055.
+          <br />
+          Contact : <a href="mailto:contact@etrack.ma" className="text-[#173A59]">contact@etrack.ma</a> — Tél. +212 641 998 700
+          <br />
+          <a href="/api/legal/privacy" className="text-[#173A59]">Politique de confidentialité</a> ·{' '}
+          <a href="/api/legal/terms" className="text-[#173A59]">Conditions de service</a> ·{' '}
+          <a href="/api/legal/data-deletion" className="text-[#173A59]">Suppression des données</a>
+        </p>
+      </footer>
     </div>
     </MotionConfig>
   );
