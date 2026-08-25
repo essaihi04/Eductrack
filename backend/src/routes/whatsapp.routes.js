@@ -30,6 +30,26 @@ const getSchoolId = (req) => {
 // Exécute une requête .in(...) par lots et agrège les résultats. Évite le
 // « Bad Request » de PostgREST quand la liste d'IDs est trop longue (URL trop
 // longue) — fréquent dès que l'école a beaucoup d'élèves/parents.
+// PostgREST (Supabase) plafonne CHAQUE requête à 1 000 lignes, `.limit(3000)`
+// compris : au-delà, les lignes excédentaires sont abandonnées sans erreur.
+// Cette pagination va chercher la suite page par page, jusqu'à `max`.
+const PAGE_SIZE = 1000;
+const selectPaged = async (queryFn, max = 3000, label = '') => {
+  const out = [];
+  for (let from = 0; from < max; from += PAGE_SIZE) {
+    const to = Math.min(from + PAGE_SIZE, max) - 1;
+    const { data, error } = await queryFn().range(from, to);
+    if (error) throw error;
+    if (!data?.length) break;
+    out.push(...data);
+    if (data.length < to - from + 1) break;   // dernière page
+  }
+  if (out.length >= max && label) {
+    console.warn(`[${label}] plafond de ${max} lignes atteint — historique tronqué`);
+  }
+  return out;
+};
+
 const selectInChunks = async (ids, queryFn, chunkSize = 200) => {
   const out = [];
   for (let i = 0; i < ids.length; i += chunkSize) {
@@ -1048,21 +1068,34 @@ router.get('/conversations', async (req, res) => {
       msgQuery = msgQuery.in('category', allowedCatsConv);
     }
 
-    const { data: messages, error: msgError } = await msgQuery;
+    // Les 400 campagnes les plus récentes : la boîte est une vue de
+    // conversations, pas une archive (l'onglet Historique, lui, remonte tout).
+    // Sans cette borne, la requête est de toute façon coupée à 1 000 par
+    // PostgREST, mais en silence.
+    const { data: messages, error: msgError } = await msgQuery.limit(400);
     if (msgError) throw msgError;
 
     // Get all recipients
     const messageIds = (messages || []).map(m => m.id);
     let allRecipients = [];
     if (messageIds.length > 0) {
-      // Batch in chunks of 50 to avoid query limits
+      // Par lots de 50 messages, ET page par page : un seul envoi de masse
+      // dépasse à lui seul le millier de destinataires. Sans pagination, les
+      // lignes en trop étaient perdues sans bruit — l'envoi partait bien, mais
+      // n'apparaissait jamais dans la boîte, et la conversation ne remontait
+      // pas en tête de liste.
       for (let i = 0; i < messageIds.length; i += 50) {
         const chunk = messageIds.slice(i, i + 50);
-        const { data: recs } = await supabaseAdmin
-          .from('whatsapp_message_recipients')
-          .select('id, message_id, parent_id, phone_e164, status, error_message, sent_at')
-          .in('message_id', chunk);
-        if (recs) allRecipients = allRecipients.concat(recs);
+        const recs = await selectPaged(
+          () => supabaseAdmin
+            .from('whatsapp_message_recipients')
+            .select('id, message_id, parent_id, phone_e164, status, error_message, sent_at')
+            .in('message_id', chunk)
+            .order('id', { ascending: true }),   // ordre stable = pages fiables
+          20000,
+          'conversations/destinataires',
+        );
+        allRecipients = allRecipients.concat(recs);
       }
     }
 
@@ -1114,11 +1147,16 @@ router.get('/conversations', async (req, res) => {
       return conversationMap[phone];
     };
 
+    // Index par id : avec la pagination, la liste des destinataires peut
+    // compter des dizaines de milliers de lignes — une recherche linéaire par
+    // ligne rendrait la boîte lente à ouvrir.
+    const messageById = new Map((messages || []).map(m => [m.id, m]));
+
     allRecipients.forEach(r => {
       const phone = r.phone_e164;
       ensureConv(phone, r.parent_id);
 
-      const msg = messages.find(m => m.id === r.message_id);
+      const msg = messageById.get(r.message_id);
       if (msg) {
         const isCompReport = msg.recipient_filter?.type === 'comprehensive_report';
         conversationMap[phone].messages.push({
@@ -1153,23 +1191,24 @@ router.get('/conversations', async (req, res) => {
     const INCOMING_BASE = 'id, phone_e164, parent_id, message_text, ai_response_text, ai_response_sent, received_at, category';
     const INCOMING_MEDIA = ', media_path, media_type, media_mimetype, media_filename';
 
-    const fetchIncoming = async (columns) => {
+    const incomingQuery = (columns) => () => {
       let q = supabaseAdmin
         .from('whatsapp_incoming_messages')
         .select(columns)
-        .order('received_at', { ascending: false })
-        .limit(3000);
+        .order('received_at', { ascending: false });
       if (schoolId) q = q.eq('school_id', schoolId);
       if (allowedCatsConv) q = q.in('category', allowedCatsConv);
       return q;
     };
 
-    let { data: incomingRows, error: incError } = await fetchIncoming(INCOMING_BASE + INCOMING_MEDIA);
-    if (incError && /media_(path|type|mimetype|filename)|column/i.test(incError.message || '')) {
+    let incomingRows = [];
+    try {
+      incomingRows = await selectPaged(incomingQuery(INCOMING_BASE + INCOMING_MEDIA), 3000, 'conversations/entrants');
+    } catch (incError) {
+      if (!/media_(path|type|mimetype|filename)|column/i.test(incError.message || '')) throw incError;
       console.warn('[conversations] colonnes média absentes — exécutez ADD_WHATSAPP_INBOX.sql');
-      ({ data: incomingRows, error: incError } = await fetchIncoming(INCOMING_BASE));
+      incomingRows = await selectPaged(incomingQuery(INCOMING_BASE), 3000, 'conversations/entrants');
     }
-    if (incError) throw incError;
 
     let incoming = incomingRows || [];
     // Périmètre pédagogique restreint : on ne montre que les parents autorisés
@@ -1231,13 +1270,21 @@ router.get('/conversations', async (req, res) => {
     // le robot a repondu menu, PDF ou confirmation. On se limite aux fils deja
     // constitues : un envoi n'existe jamais sans conversation.
     if (Object.keys(conversationMap).length > 0) {
-      let logQuery = supabaseAdmin
-        .from('whatsapp_outgoing_log')
-        .select('id, phone_e164, body, message_type, media_url, file_name, status, error_message, created_at, source')
-        .order('created_at', { ascending: false })
-        .limit(4000);
-      if (schoolId) logQuery = logQuery.eq('school_id', schoolId);
-      const { data: outLog, error: outErr } = await logQuery;
+      const logQuery = () => {
+        let q = supabaseAdmin
+          .from('whatsapp_outgoing_log')
+          .select('id, phone_e164, body, message_type, media_url, file_name, status, error_message, created_at, source')
+          .order('created_at', { ascending: false });
+        if (schoolId) q = q.eq('school_id', schoolId);
+        return q;
+      };
+      let outLog = [];
+      let outErr = null;
+      try {
+        outLog = await selectPaged(logQuery, 4000, 'conversations/journal');
+      } catch (e) {
+        outErr = e;
+      }
 
       // Table absente (ADD_WHATSAPP_INBOX.sql pas encore joue) : on continue
       // sans ces messages plutot que de casser toute la boite de reception.
