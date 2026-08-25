@@ -236,11 +236,41 @@ async function uploadMedia(schoolId, buffer, mimetype, fileName) {
  * Les rowId reprennent le format "menuId:optionId" pour rester compatibles
  * avec matchMenuOption() existant.
  */
+// Limites Meta pour une ligne de liste interactive.
+const LIST_TITLE_MAX = 24;
+const LIST_DESC_MAX = 72;
+
+/** Coupe à N caractères en comptant les points de code (les emojis en occupent plusieurs). */
+function cut(text, max) {
+  const chars = [...String(text ?? '')];
+  return chars.length <= max ? String(text ?? '') : chars.slice(0, max).join('');
+}
+
+/**
+ * Titre d'une ligne de liste. Meta impose 24 caractères ; on coupe sur un MOT
+ * entier plutôt qu'en plein milieu (« Poser une question li » → « Poser une
+ * question… »), et l'appelant reporte le libellé complet en description.
+ */
+function listRowTitle(text) {
+  const full = String(text ?? '').trim();
+  if ([...full].length <= LIST_TITLE_MAX) return full;
+  const troncon = cut(full, LIST_TITLE_MAX - 1);         // place pour l'ellipse
+  const espace = troncon.lastIndexOf(' ');
+  // On ne recule au mot précédent que si cela laisse un titre encore lisible.
+  const base = espace > LIST_TITLE_MAX / 2 ? troncon.slice(0, espace) : troncon;
+  return `${base.replace(/[\s,;:.…-]+$/, '')}…`;
+}
+
 export async function sendListMenu(schoolId, phone, menu, ctx = {}) {
-  const rows = menu.options.slice(0, 10).map((opt) => ({
-    id: `${menu.id}:${opt.id}`,
-    title: `${opt.emoji ? opt.emoji + ' ' : ''}${opt.label}`.slice(0, 24),
-  }));
+  const rows = menu.options.slice(0, 10).map((opt) => {
+    const full = `${opt.emoji ? opt.emoji + ' ' : ''}${opt.label}`;
+    const title = listRowTitle(full);
+    // Titre tronqué → le libellé complet est repris en description (72 car.),
+    // affichée sous le titre : plus rien n'est illisible.
+    return title === full
+      ? { id: `${menu.id}:${opt.id}`, title }
+      : { id: `${menu.id}:${opt.id}`, title, description: cut(opt.label, LIST_DESC_MAX) };
+  });
 
   const bodyLines = [];
   if (ctx.studentName) bodyLines.push(`👶 ${ctx.studentName}`);
