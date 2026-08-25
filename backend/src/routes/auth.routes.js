@@ -292,13 +292,22 @@ router.put('/profile', async (req, res) => {
       return res.status(401).json({ error: 'Utilisateur non authentifié' });
     }
 
-    const { first_name, last_name, phone, avatar, avatar_url } = req.body;
+    const { first_name, last_name, phone, avatar, avatar_url, preferred_language } = req.body;
 
     const updateData = {};
     if (phone !== undefined) updateData.phone = phone;
     if (avatar !== undefined) updateData.avatar = avatar;
     // avatar_url: null pour revenir à l'avatar emoji après une photo importée
     if (avatar_url !== undefined) updateData.avatar_url = avatar_url;
+    // Langue choisie dans le sélecteur de l'app. Elle sert AUSSI aux envois
+    // WhatsApp (texte du chatbot et langue des templates), d'où le passage en
+    // base : le localStorage seul restait invisible du serveur.
+    if (preferred_language !== undefined) {
+      if (preferred_language !== null && !['fr', 'ar'].includes(preferred_language)) {
+        return res.status(400).json({ error: 'Langue non supportée' });
+      }
+      updateData.preferred_language = preferred_language;
+    }
 
     const { data, error } = await supabaseAdmin
       .from('profiles')

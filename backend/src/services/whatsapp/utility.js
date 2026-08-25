@@ -63,6 +63,12 @@ const ARABE = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
 export async function preferredLanguage(phone) {
   const p = norm(phone);
   if (!p) return 'fr';
+
+  // 1. Choix EXPLICITE du sélecteur de langue de l'app : il prime sur tout.
+  const explicite = await langueChoisie(p);
+  if (explicite) return explicite;
+
+  // 2. Aucun choix enregistré → langue devinée du dernier message reçu.
   const { data, error } = await supabaseAdmin
     .from('whatsapp_incoming_messages')
     .select('message_text')
@@ -71,6 +77,37 @@ export async function preferredLanguage(phone) {
     .limit(1);
   if (error) return 'fr';
   return ARABE.test(data?.[0]?.message_text || '') ? 'ar' : 'fr';
+}
+
+/**
+ * Langue explicitement choisie par le titulaire de ce numéro, ou null.
+ * On tente parent_contacts (numéro WhatsApp déclaré) puis profiles.phone,
+ * dans le même ordre que la résolution du chatbot.
+ */
+async function langueChoisie(phoneNormalise) {
+  // Le client Supabase ne LÈVE pas sur erreur SQL, il la renvoie dans `error` :
+  // si ADD_PREFERRED_LANGUAGE.sql n'a pas encore été exécuté, la colonne est
+  // absente et il faut le détecter ici, sinon on croirait à « aucun choix ».
+  const { data: contacts, error: errContact } = await supabaseAdmin
+    .from('parent_contacts')
+    .select('profiles:parent_id!inner(preferred_language)')
+    .eq('phone_e164', phoneNormalise)
+    .eq('channel', 'whatsapp')
+    .limit(1);
+  if (errContact) {
+    console.warn('[whatsapp/utility] langue préférée indisponible — exécutez ADD_PREFERRED_LANGUAGE.sql :', errContact.message);
+    return null;
+  }
+  const viaContact = contacts?.[0]?.profiles?.preferred_language;
+  if (viaContact) return viaContact;
+
+  const { data: profils, error: errProfil } = await supabaseAdmin
+    .from('profiles')
+    .select('preferred_language')
+    .eq('phone', phoneNormalise)
+    .limit(1);
+  if (errProfil) return null;
+  return profils?.[0]?.preferred_language || null;
 }
 
 /**
