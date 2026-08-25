@@ -441,3 +441,112 @@ export async function parseIncoming(body) {
 
   return { from, text, id, schoolId, location, image };
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Profil du numéro (photo, à propos, description, contacts)
+//
+// Un numéro rattaché à l'API Cloud n'est plus utilisable dans l'application
+// WhatsApp : la photo de profil et les infos de la fiche entreprise ne se
+// modifient QUE par l'API (ou via WhatsApp Manager). C'est ce que font les
+// fonctions ci-dessous.
+//
+// La photo passe par l'API d'upload « resumable » de Meta, en deux temps :
+//   1. ouverture d'une session d'upload sur l'APP    → id de session
+//   2. envoi du binaire dans cette session           → « handle » réutilisable
+// puis le handle est posé sur le profil du numéro.
+// ─────────────────────────────────────────────────────────────────────────
+
+const APP_ID = () => process.env.WA_APP_ID;
+
+const PROFILE_FIELDS = 'about,address,description,email,profile_picture_url,websites,vertical';
+
+/** Fiche entreprise du numéro de l'école. */
+export async function getBusinessProfile(schoolId) {
+  const phoneNumberId = await getPhoneNumberId(schoolId);
+  if (!phoneNumberId) return fail('Aucun numéro Cloud API rattaché à cette école');
+  if (!TOKEN()) return fail('WA_TOKEN manquant (token Cloud API non configuré)');
+  try {
+    const res = await fetch(
+      `${GRAPH}/${phoneNumberId}/whatsapp_business_profile?fields=${PROFILE_FIELDS}`,
+      { headers: { Authorization: `Bearer ${TOKEN()}` } },
+    );
+    const data = await res.json();
+    if (!res.ok) return fail(data?.error?.message || `HTTP ${res.status}`);
+    return { success: true, profile: data?.data?.[0] || {} };
+  } catch (e) {
+    return fail(e.message || 'Erreur réseau Cloud API');
+  }
+}
+
+/**
+ * Met à jour la fiche entreprise. Seuls les champs fournis sont envoyés :
+ * Meta remplace ce qu'il reçoit et laisse le reste intact.
+ * @param {object} fields { about, address, description, email, websites[], vertical, profile_picture_handle }
+ */
+export async function updateBusinessProfile(schoolId, fields = {}) {
+  const phoneNumberId = await getPhoneNumberId(schoolId);
+  if (!phoneNumberId) return fail('Aucun numéro Cloud API rattaché à cette école');
+  if (!TOKEN()) return fail('WA_TOKEN manquant (token Cloud API non configuré)');
+
+  const body = { messaging_product: 'whatsapp' };
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== undefined && v !== null && v !== '') body[k] = v;
+  }
+  if (Object.keys(body).length === 1) return fail('Aucun champ à mettre à jour');
+
+  const { ok, data } = await graphPost(`${phoneNumberId}/whatsapp_business_profile`, body);
+  if (!ok) return fail(data?.error?.message || 'Mise à jour du profil refusée');
+  return { success: true };
+}
+
+/**
+ * Upload « resumable » d'un binaire sur l'app Meta → handle réutilisable.
+ * Nécessite WA_APP_ID (l'app à laquelle le System User a accès).
+ * @returns {Promise<{success: boolean, handle?: string, message?: string}>}
+ */
+export async function uploadResumable(buffer, mimetype = 'image/jpeg', fileName = 'photo.jpg') {
+  if (!APP_ID()) return fail('WA_APP_ID manquant (identifiant de l\'app Meta)');
+  if (!TOKEN()) return fail('WA_TOKEN manquant (token Cloud API non configuré)');
+
+  try {
+    // 1. Ouvrir la session d'upload
+    const qs = new URLSearchParams({
+      file_name: fileName,
+      file_length: String(buffer.length),
+      file_type: mimetype,
+    });
+    const openRes = await fetch(`${GRAPH}/${APP_ID()}/uploads?${qs}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN()}` },
+    });
+    const openData = await openRes.json();
+    if (!openRes.ok || !openData?.id) {
+      return fail(openData?.error?.message || 'Ouverture de la session d\'upload refusée');
+    }
+
+    // 2. Envoyer le binaire. Cet appel exige le schéma « OAuth », pas « Bearer ».
+    const putRes = await fetch(`${GRAPH}/${openData.id}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `OAuth ${TOKEN()}`,
+        file_offset: '0',
+        'Content-Type': 'application/octet-stream',
+      },
+      body: buffer,
+    });
+    const putData = await putRes.json();
+    if (!putRes.ok || !putData?.h) {
+      return fail(putData?.error?.message || 'Envoi du fichier refusé');
+    }
+    return { success: true, handle: putData.h };
+  } catch (e) {
+    return fail(e.message || 'Erreur réseau upload Meta');
+  }
+}
+
+/** Pose une nouvelle photo de profil sur le numéro de l'école. */
+export async function setProfilePicture(schoolId, buffer, mimetype = 'image/jpeg', fileName = 'photo.jpg') {
+  const up = await uploadResumable(buffer, mimetype, fileName);
+  if (!up.success) return up;
+  return updateBusinessProfile(schoolId, { profile_picture_handle: up.handle });
+}

@@ -171,6 +171,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [cloudLoading, setCloudLoading] = useState(false);
   const [cloudError, setCloudError] = useState('');
   const [cloudPin, setCloudPin] = useState(null);
+  // Profil du numéro : photo + fiche entreprise. Un numéro Cloud API ne
+  // s'ouvre plus dans l'application WhatsApp, tout se règle ici.
+  const [waProfile, setWaProfile] = useState(null);
+  const [waProfileForm, setWaProfileForm] = useState({ about: '', description: '', email: '', address: '', website: '', vertical: 'EDU' });
+  const [waProfileBusy, setWaProfileBusy] = useState(false);
+  const [waProfileMsg, setWaProfileMsg] = useState('');
+  const [waProfileError, setWaProfileError] = useState('');
+  const waPhotoInputRef = useRef(null);
 
   // ===================== TAB: PLANNING (communications) =====================
   const [comms, setComms] = useState([]);
@@ -937,6 +945,76 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   };
 
   const isCloudConnected = Boolean(sessionStatus?.connected);
+
+  // ── Profil du numéro WhatsApp (photo + fiche entreprise) ────────────────
+  const fetchWaProfile = useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/cloud/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.success) return;                       // numéro pas encore rattaché
+      setWaProfile(data.profile || {});
+      setWaProfileForm({
+        about: data.profile?.about || '',
+        description: data.profile?.description || '',
+        email: data.profile?.email || '',
+        address: data.profile?.address || '',
+        website: data.profile?.websites?.[0] || '',
+        vertical: data.profile?.vertical || 'EDU',
+      });
+    } catch (e) {
+      console.error('Erreur fetch profil WhatsApp:', e);
+    }
+  }, [apiUrl]);
+
+  useEffect(() => {
+    if (isCloudConnected) fetchWaProfile();
+  }, [isCloudConnected, fetchWaProfile]);
+
+  // payload : { photo_base64 } ou { use_school_logo } ou les champs texte.
+  const saveWaProfile = async (payload) => {
+    setWaProfileBusy(true); setWaProfileMsg(''); setWaProfileError('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/cloud/profile`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (data.profile) setWaProfile(data.profile);
+        setWaProfileMsg(data.photo_updated
+          ? 'Photo de profil mise à jour. Elle peut mettre quelques minutes à apparaître chez les parents.'
+          : 'Profil mis à jour.');
+      } else {
+        setWaProfileError(data.error || 'Mise à jour impossible.');
+      }
+    } catch (e) {
+      console.error('Erreur maj profil WhatsApp:', e);
+      setWaProfileError('Erreur de connexion au serveur.');
+    } finally { setWaProfileBusy(false); }
+  };
+
+  const handleWaPhotoPick = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';                               // re-sélection du même fichier possible
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      setWaProfileError('Formats acceptés : JPEG, PNG ou WebP.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setWaProfileError('Image trop lourde (5 Mo maximum).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => saveWaProfile({ photo_base64: String(reader.result), mimetype: file.type });
+    reader.onerror = () => setWaProfileError('Lecture du fichier impossible.');
+    reader.readAsDataURL(file);
+  };
 
   // ===================== PLANNING LOGIC =====================
   const fetchComms = useCallback(async () => {
@@ -3514,6 +3592,134 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                 </div>
               )}
             </div>
+
+            {/* Profil du numéro : photo + fiche entreprise. Avec l'API Cloud,
+                le numéro ne s'ouvre plus dans l'application WhatsApp — c'est
+                le seul endroit où l'école peut changer sa photo. */}
+            {isCloudConnected && (
+              <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-indigo-600" /> Profil du numéro WhatsApp
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Ce que les parents voient quand ils ouvrent la conversation. Le numéro étant
+                    rattaché à l'API officielle, il ne s'ouvre plus dans l'application WhatsApp :
+                    la photo et la fiche se modifient ici.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 flex-wrap">
+                  {waProfile?.profile_picture_url ? (
+                    <img src={waProfile.profile_picture_url} alt="Photo de profil WhatsApp"
+                      className="w-20 h-20 rounded-full object-cover border border-gray-200" />
+                  ) : (
+                    <div className="w-20 h-20 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center">
+                      <Image className="w-7 h-7 text-gray-400" />
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input ref={waPhotoInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+                        className="hidden" onChange={handleWaPhotoPick} />
+                      <button type="button" disabled={waProfileBusy}
+                        onClick={() => waPhotoInputRef.current?.click()}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
+                        <Image className="w-4 h-4" /> Changer la photo
+                      </button>
+                      <button type="button" disabled={waProfileBusy}
+                        onClick={() => saveWaProfile({ use_school_logo: true })}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                        Utiliser le logo de l'école
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-400">
+                      L'image est recadrée en carré (640 × 640). JPEG, PNG ou WebP, 5 Mo maximum.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">
+                      À propos <span className="font-normal text-gray-400">(139 caractères max)</span>
+                    </label>
+                    <input type="text" maxLength={139} value={waProfileForm.about}
+                      onChange={(e) => setWaProfileForm({ ...waProfileForm, about: e.target.value })}
+                      placeholder="Ex : Groupe Scolaire Al Amal — service aux familles"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Description</label>
+                    <textarea rows={2} maxLength={512} value={waProfileForm.description}
+                      onChange={(e) => setWaProfileForm({ ...waProfileForm, description: e.target.value })}
+                      placeholder="Présentation de l'établissement affichée dans la fiche."
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">
+                      Catégorie <span className="font-normal text-gray-400">(affichée sous le nom de l'établissement)</span>
+                    </label>
+                    <select value={waProfileForm.vertical}
+                      onChange={(e) => setWaProfileForm({ ...waProfileForm, vertical: e.target.value })}
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
+                      <option value="EDU">Éducation</option>
+                      <option value="NONPROFIT">Association / à but non lucratif</option>
+                      <option value="PROF_SERVICES">Services professionnels</option>
+                      <option value="OTHER">Autre</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">E-mail</label>
+                    <input type="email" value={waProfileForm.email}
+                      onChange={(e) => setWaProfileForm({ ...waProfileForm, email: e.target.value })}
+                      placeholder="contact@ecole.ma"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Site web</label>
+                    <input type="url" value={waProfileForm.website}
+                      onChange={(e) => setWaProfileForm({ ...waProfileForm, website: e.target.value })}
+                      placeholder="https://ecole.ma"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-semibold text-gray-700 block mb-1">Adresse</label>
+                    <input type="text" value={waProfileForm.address}
+                      onChange={(e) => setWaProfileForm({ ...waProfileForm, address: e.target.value })}
+                      placeholder="Adresse de l'établissement"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                </div>
+
+                {waProfileError && (
+                  <div className="flex items-center gap-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                    <p className="text-sm text-red-800">{waProfileError}</p>
+                  </div>
+                )}
+                {waProfileMsg && (
+                  <div className="flex items-center gap-2 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <p className="text-sm text-emerald-800">{waProfileMsg}</p>
+                  </div>
+                )}
+
+                <button type="button" disabled={waProfileBusy}
+                  onClick={() => saveWaProfile({
+                    about: waProfileForm.about,
+                    description: waProfileForm.description,
+                    email: waProfileForm.email,
+                    address: waProfileForm.address,
+                    websites: waProfileForm.website ? [waProfileForm.website] : [],
+                    vertical: waProfileForm.vertical,
+                  })}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium">
+                  {waProfileBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                  Enregistrer la fiche
+                </button>
+              </div>
+            )}
 
             {sessionStatus?.connected && (
               <div className="flex items-center gap-3 p-4 bg-green-50 rounded-lg border border-green-200">

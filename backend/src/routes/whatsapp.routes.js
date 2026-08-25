@@ -1644,6 +1644,110 @@ router.post('/cloud/verify', async (req, res) => {
   }
 });
 
+// ==================== PROFIL DU NUMÉRO (Cloud API) ====================
+//
+// Un numéro rattaché à l'API Cloud ne s'ouvre plus dans l'application
+// WhatsApp : sa photo de profil et sa fiche entreprise ne peuvent plus être
+// changées depuis le téléphone. Ces deux routes rendent la main à l'école.
+
+// Photo de profil WhatsApp : carrée, JPEG. Meta refuse en dessous de 192 px et
+// recadre tout ce qui ne l'est pas — on normalise donc avant l'envoi.
+const toWhatsAppAvatar = async (buffer) => {
+  const sharp = (await import('sharp')).default;
+  return sharp(buffer)
+    .resize(640, 640, { fit: 'cover', position: 'centre' })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+};
+
+// GET /cloud/profile — fiche entreprise actuelle du numéro de l'école
+router.get('/cloud/profile', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const result = await cloud.getBusinessProfile(schoolId);
+    if (!result.success) return res.status(400).json({ error: result.message });
+    res.json({ success: true, profile: result.profile });
+  } catch (error) {
+    console.error('Erreur cloud profile GET:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// POST /cloud/profile — met à jour la fiche et/ou la photo de profil.
+// Body : { about, description, email, address, websites[], vertical,
+//          photo_base64, mimetype, use_school_logo }
+router.post('/cloud/profile', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const {
+      about, description, email, address, websites, vertical,
+      photo_base64: photoBase64, use_school_logo: useSchoolLogo,
+    } = req.body || {};
+
+    // 1. Photo : fichier envoyé par l'admin, ou logo déjà enregistré de l'école
+    let photoBuffer = null;
+    if (photoBase64) {
+      photoBuffer = Buffer.from(String(photoBase64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    } else if (useSchoolLogo) {
+      const { data: school } = await supabaseAdmin
+        .from('schools').select('logo_url').eq('id', schoolId).maybeSingle();
+      if (!school?.logo_url) {
+        return res.status(400).json({ error: "Cette école n'a pas encore de logo enregistré." });
+      }
+      const { fetchSchoolLogoBuffer } = await import('../services/schoolLogo.js');
+      photoBuffer = await fetchSchoolLogoBuffer(school.logo_url);
+      if (!photoBuffer) return res.status(400).json({ error: 'Logo de l\'école illisible.' });
+    }
+
+    let photoUpdated = false;
+    if (photoBuffer) {
+      let avatar;
+      try {
+        avatar = await toWhatsAppAvatar(photoBuffer);
+      } catch (e) {
+        return res.status(400).json({ error: `Image illisible (${e.message}). Utilisez un JPEG ou un PNG.` });
+      }
+      const pic = await cloud.setProfilePicture(schoolId, avatar, 'image/jpeg', 'profile.jpg');
+      if (!pic.success) return res.status(400).json({ error: pic.message });
+      photoUpdated = true;
+    }
+
+    // 2. Champs texte (facultatifs, indépendants de la photo)
+    const fields = { about, description, email, address, vertical };
+    if (Array.isArray(websites) && websites.length) fields.websites = websites.filter(Boolean);
+    const hasFields = Object.values(fields).some((v) => v !== undefined && v !== null && v !== '');
+
+    if (hasFields) {
+      const upd = await cloud.updateBusinessProfile(schoolId, fields);
+      if (!upd.success) {
+        return res.status(400).json({
+          error: upd.message,
+          // La photo est déjà passée : le dire évite un second envoi inutile.
+          photo_updated: photoUpdated,
+        });
+      }
+    }
+
+    if (!photoUpdated && !hasFields) {
+      return res.status(400).json({ error: 'Rien à mettre à jour.' });
+    }
+
+    const refreshed = await cloud.getBusinessProfile(schoolId);
+    res.json({
+      success: true,
+      photo_updated: photoUpdated,
+      profile: refreshed.success ? refreshed.profile : null,
+    });
+  } catch (error) {
+    console.error('Erreur cloud profile POST:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // ==================== SESSION MANAGEMENT ====================
 
 // DELETE /sessions/:sessionId — détache le numéro Cloud API de cette école.
