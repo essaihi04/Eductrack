@@ -817,7 +817,7 @@ router.get('/messages/:messageId/details', async (req, res) => {
         ? await selectInChunks(studentIds, (chunk) =>
             supabaseAdmin
               .from('profiles')
-              .select('id, first_name, last_name, class_id, classes!fk_profiles_class(name)')
+              .select('id, first_name, last_name, level, class_id, classes!fk_profiles_class(name, level)')
               .in('id', chunk))
         : [];
 
@@ -831,6 +831,10 @@ router.get('/messages/:messageId/details', async (req, res) => {
           id: st.id,
           name: `${st.first_name || ''} ${st.last_name || ''}`.trim(),
           className: st.classes?.name || null,
+          // Niveau de la classe, ou à défaut celui porté par l'élève : sur une
+          // campagne large, c'est le niveau qui parle (« tout le 1BAC »), pas
+          // la liste des classes une par une.
+          classLevel: st.classes?.level || st.level || null,
         });
         childrenByParent.set(l.parent_id, list);
       }
@@ -841,6 +845,7 @@ router.get('/messages/:messageId/details', async (req, res) => {
         // Une famille peut avoir plusieurs enfants dans l'école : on liste les
         // classes distinctes, sans répétition.
         r.classNames = [...new Set(children.map(c => c.className).filter(Boolean))];
+        r.classLevels = [...new Set(children.map(c => c.classLevel).filter(Boolean))];
       });
     }
 

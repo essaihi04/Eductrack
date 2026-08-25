@@ -4467,6 +4467,56 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     </div>
                   );
                 })()}
+
+                {/* Récapitulatif des classes et niveaux touchés. Sur 300
+                    destinataires, parcourir la liste ligne à ligne ne dit pas
+                    QUI a été visé : ce bandeau répond à la question d'un coup
+                    d'œil, et permet de vérifier le ciblage d'une campagne. */}
+                {(() => {
+                  const recs = detailMessage.recipients || [];
+                  const byClass = new Map();
+                  const levels = new Set();
+                  recs.forEach(r => {
+                    (r.classNames || []).forEach(c => byClass.set(c, (byClass.get(c) || 0) + 1));
+                    (r.classLevels || []).forEach(l => levels.add(l));
+                  });
+                  if (byClass.size === 0) return null;
+                  const classes = [...byClass.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+                  const shown = classes.slice(0, 12);
+                  const rest = classes.length - shown.length;
+                  const withoutClass = recs.filter(r => !(r.classNames?.length)).length;
+                  return (
+                    <div className="mb-2 rounded-lg border border-indigo-100 bg-indigo-50/50 px-2.5 py-2">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="text-[11px] font-semibold text-indigo-900">
+                          🎓 {classes.length} classe(s){levels.size > 0 ? ` · ${levels.size} niveau(x)` : ''}
+                        </span>
+                        {levels.size > 0 && (
+                          <span className="text-[10px] text-indigo-700">{[...levels].sort().join(' · ')}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {shown.map(([name, count]) => (
+                          <span key={name} className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-indigo-200 text-indigo-800 font-medium">
+                            {name} <span className="text-indigo-400">({count})</span>
+                          </span>
+                        ))}
+                        {rest > 0 && (
+                          <span className="text-[10px] text-indigo-600" title={classes.slice(12).map(([n, c]) => `${n} (${c})`).join(' | ')}>
+                            +{rest} autre(s)
+                          </span>
+                        )}
+                        {withoutClass > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-gray-200 text-gray-500"
+                            title="Destinataires sans enfant rattaché à une classe (personnel, numéro inconnu…)">
+                            sans classe ({withoutClass})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="space-y-1 max-h-60 overflow-y-auto">
                   {(detailMessage.recipients || []).map(r => (
                     <div key={r.id} className="py-1.5 px-2 bg-gray-50 rounded text-sm">
