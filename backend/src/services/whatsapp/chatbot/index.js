@@ -1401,12 +1401,14 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // (id boutons Cloud : transport_yes / transport_no ; repli texte : BUS OUI / BUS NON)
   {
     const t = String(text || '').trim().toLowerCase();
-    if (t === 'transport_yes' || t === 'bus oui') {
+    // Les libellés des boutons du template `transport_depart` sont acceptés en
+    // repli : si la charge utile venait à manquer, Meta renvoie le texte affiché.
+    if (t === 'transport_yes' || t === 'bus oui' || t === 'voir le suivi') {
       await sendText(parentInfo.school_id, phone, `✅ C'est noté, vous recevrez le suivi du bus aujourd'hui, *gratuitement*. 🚌`);
       await markProcessed(incomingMsg?.id);
       return;
     }
-    if (t === 'transport_no' || t === 'bus non') {
+    if (t === 'transport_no' || t === 'bus non' || t === "pas aujourd'hui") {
       await setTransportSkipToday(parentInfo.parent_id);
       await sendText(parentInfo.school_id, phone, `Compris 👍 Vous ne recevrez pas les notifications du bus aujourd'hui.`);
       await markProcessed(incomingMsg?.id);

@@ -120,7 +120,7 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
     phone,
     tpl.name,
     tpl.definition.language || 'fr',
-    buildComponents(finalParams)
+    buildComponents(finalParams, tpl.definition.buttonPayloads || [])
   );
   return { ...r, channel: 'template', paid: true };
 }
@@ -177,7 +177,7 @@ export async function sendUtilityMedia(schoolId, phone, {
   }
 
   const r = await cloud.sendTemplate(
-    schoolId, phone, tpl.name, tpl.definition.language || 'fr', buildComponents(params)
+    schoolId, phone, tpl.name, tpl.definition.language || 'fr', buildComponents(params, tpl.definition.buttonPayloads || [])
   );
   // Succès = l'ANNONCE est partie ; le PDF suivra quand le parent répondra.
   return { ...r, channel: 'template_announce', paid: true, mediaDeferred: true };
