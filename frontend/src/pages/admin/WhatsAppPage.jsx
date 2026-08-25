@@ -177,6 +177,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [apiLogsTotal, setApiLogsTotal] = useState(0);
   const [apiLogsLastPage, setApiLogsLastPage] = useState(1);
   const messagesEndRef = useRef(null);
+  // Fil de discussion : on ne recolle en bas que si l'utilisateur y est deja
+  // (comportement WhatsApp). Sinon on affiche une pastille « nouveaux messages »
+  // et on laisse sa position de lecture intacte.
+  const threadScrollRef = useRef(null);
+  const threadAtBottomRef = useRef(true);
+  const threadKeyRef = useRef(null);
+  const threadCountRef = useRef(0);
+  const [newBelowCount, setNewBelowCount] = useState(0);
 
   // Inline compose in inbox
   const [directMsg, setDirectMsg] = useState('');
@@ -675,8 +683,11 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   };
 
   // ===================== INBOX LOGIC =====================
-  const fetchConversations = useCallback(async () => {
-    setInboxLoading(true);
+  // `silent` : rafraichissement de fond (minuterie). On ne bascule pas la liste
+  // sur le spinner, sinon les lignes sont demontees et le defilement en cours
+  // repart du haut.
+  const fetchConversations = useCallback(async (silent = false) => {
+    if (!silent) setInboxLoading(true);
     try {
       const token = await getAuthToken();
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/conversations`, {
@@ -685,7 +696,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       const data = await res.json();
       if (data.success) setConversations(data.conversations || []);
     } catch (error) { console.error('Erreur conversations:', error); }
-    finally { setInboxLoading(false); setConvFetchedAt(Date.now()); }
+    finally { if (!silent) setInboxLoading(false); setConvFetchedAt(Date.now()); }
   }, [apiUrl]);
 
   const fetchApiLogs = useCallback(async (page = 1) => {
@@ -717,7 +728,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   // arrivent en continu, l'onglet ne doit pas rester figé.
   useEffect(() => {
     if (activeTab !== 'inbox' || inboxView !== 'conversations') return;
-    const id = setInterval(fetchConversations, 30000);
+    const id = setInterval(() => fetchConversations(true), 30000);
     return () => clearInterval(id);
   }, [activeTab, inboxView, fetchConversations]);
 
@@ -775,9 +786,41 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     setPendingConv(null);
   }, [pendingConv, activeTab, inboxLoading, convFetchedAt, conversations]);
 
+  const scrollThreadToBottom = useCallback((behavior = 'smooth') => {
+    const el = threadScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    threadAtBottomRef.current = true;
+    setNewBelowCount(0);
+  }, []);
+
+  const handleThreadScroll = useCallback(() => {
+    const el = threadScrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    threadAtBottomRef.current = atBottom;
+    if (atBottom) setNewBelowCount(0);
+  }, []);
+
+  // Ouverture d'un fil -> on colle en bas. Nouveaux messages sur un fil deja
+  // ouvert -> on ne bouge que si l'utilisateur lisait deja le bas.
   useEffect(() => {
-    if (selectedConv && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-  }, [selectedConv]);
+    if (!selectedConv) { threadKeyRef.current = null; threadCountRef.current = 0; setNewBelowCount(0); return; }
+    const count = selectedConv.messages?.length || 0;
+    if (threadKeyRef.current !== selectedConv.phone) {
+      threadKeyRef.current = selectedConv.phone;
+      threadCountRef.current = count;
+      threadAtBottomRef.current = true;
+      setNewBelowCount(0);
+      requestAnimationFrame(() => scrollThreadToBottom('auto'));
+      return;
+    }
+    const added = count - threadCountRef.current;
+    threadCountRef.current = count;
+    if (added <= 0) return;
+    if (threadAtBottomRef.current) scrollThreadToBottom('smooth');
+    else setNewBelowCount(n => n + added);
+  }, [selectedConv, scrollThreadToBottom]);
 
   // Pièces jointes du fil ouvert → URL signées (1 h). On ne redemande que les
   // manquantes : rouvrir la même conversation ne relance pas d'appel.
@@ -1060,9 +1103,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
         }));
         setDirectMsg('');
         removeDirectFile();
-        setTimeout(() => {
-          if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
+        setTimeout(() => scrollThreadToBottom('smooth'), 100);
       } else {
         setDirectError(data.error || 'Erreur lors de l\'envoi');
       }
@@ -2783,7 +2824,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     <span className="text-[10px] px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium whitespace-nowrap">En attente de réponse</span>
                   )}
                 </div>
-                <div className="flex-1 min-w-0 overflow-y-auto px-4 py-4 space-y-3">
+                <div className="flex-1 min-w-0 relative flex flex-col overflow-hidden">
+                <div ref={threadScrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
                   {selectedConv.messages.map((msg, idx) => {
                     const showDate = idx === 0 || new Date(msg.createdAt).toDateString() !== new Date(selectedConv.messages[idx - 1].createdAt).toDateString();
                     const incoming = msg.direction === 'incoming';
@@ -2899,6 +2941,16 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     );
                   })}
                   <div ref={messagesEndRef} />
+                </div>
+                  {newBelowCount > 0 && (
+                    <button
+                      onClick={() => scrollThreadToBottom('smooth')}
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5 rounded-full bg-green-600 px-3.5 py-1.5 text-xs font-medium text-white shadow-lg hover:bg-green-700"
+                    >
+                      <ArrowDownLeft className="w-3.5 h-3.5 -rotate-45" />
+                      {newBelowCount} nouveau{newBelowCount > 1 ? 'x' : ''} message{newBelowCount > 1 ? 's' : ''}
+                    </button>
+                  )}
                 </div>
                 {/* Compose bar */}
                 <div className="bg-white border-t border-gray-200 flex-shrink-0">
