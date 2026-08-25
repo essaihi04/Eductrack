@@ -550,3 +550,56 @@ export async function setProfilePicture(schoolId, buffer, mimetype = 'image/jpeg
   if (!up.success) return up;
   return updateBusinessProfile(schoolId, { profile_picture_handle: up.handle });
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// État d'un numéro chez Meta (nom affiché, examen, qualité, palier d'envoi)
+// ─────────────────────────────────────────────────────────────────────────
+
+const NUMBER_FIELDS = [
+  'verified_name',            // nom affiché soumis
+  'display_phone_number',     // numéro tel que Meta l'affiche
+  'name_status',              // APPROVED | PENDING_REVIEW | DECLINED | EXPIRED | NONE | AVAILABLE_WITHOUT_REVIEW
+  'code_verification_status', // VERIFIED | NOT_VERIFIED | EXPIRED
+  'quality_rating',           // GREEN | YELLOW | RED
+  'messaging_limit_tier',     // TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED
+  'platform_type',
+].join(',');
+
+/**
+ * Fiche technique du numéro de l'école telle que Meta la voit.
+ *
+ * `name_status` est le champ décisif : tant qu'il n'est pas APPROVED (ou
+ * AVAILABLE_WITHOUT_REVIEW), les parents qui n'ont pas enregistré le contact
+ * voient le numéro brut au lieu du nom de l'établissement.
+ */
+export async function getNumberInfo(schoolId) {
+  const phoneNumberId = await getPhoneNumberId(schoolId);
+  if (!phoneNumberId) return fail('Aucun numéro Cloud API rattaché à cette école');
+  if (!TOKEN()) return fail('WA_TOKEN manquant (token Cloud API non configuré)');
+  try {
+    const res = await fetch(`${GRAPH}/${phoneNumberId}?fields=${NUMBER_FIELDS}`, {
+      headers: { Authorization: `Bearer ${TOKEN()}` },
+    });
+    const data = await res.json();
+    if (!res.ok) return fail(data?.error?.message || `HTTP ${res.status}`);
+    return { success: true, number: data };
+  } catch (e) {
+    return fail(e.message || 'Erreur réseau Cloud API');
+  }
+}
+
+/**
+ * Demande un NOUVEAU nom affiché pour le numéro : Meta ouvre un examen, et le
+ * nom ne change chez les destinataires qu'une fois approuvé. L'ancien nom
+ * reste actif entre-temps — une demande refusée ne casse donc rien.
+ */
+export async function requestDisplayName(schoolId, newName) {
+  const phoneNumberId = await getPhoneNumberId(schoolId);
+  if (!phoneNumberId) return fail('Aucun numéro Cloud API rattaché à cette école');
+  const name = String(newName || '').trim();
+  if (!name) return fail('Nom affiché requis');
+
+  const { ok, data } = await graphPost(`${phoneNumberId}`, { new_display_name: name });
+  if (!ok) return fail(data?.error?.message || 'Demande de nom affiché refusée');
+  return { success: true };
+}

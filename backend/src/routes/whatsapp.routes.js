@@ -1645,6 +1645,54 @@ router.post('/cloud/verify', async (req, res) => {
   }
 });
 
+// ==================== ÉTAT ET NOM AFFICHÉ DU NUMÉRO ====================
+
+// GET /cloud/number-status — ce que Meta sait du numéro : nom affiché et son
+// examen, vérification, qualité, palier d'envoi. C'est ici que l'école voit si
+// son nom s'affichera chez les parents qui n'ont pas enregistré le contact.
+router.get('/cloud/number-status', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const result = await cloud.getNumberInfo(schoolId);
+    if (!result.success) return res.status(400).json({ error: result.message });
+    res.json({ success: true, number: result.number });
+  } catch (error) {
+    console.error('Erreur cloud number-status:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
+// POST /cloud/display-name — demande l'examen d'un nouveau nom affiché.
+// Body : { name }
+router.post('/cloud/display-name', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    const name = String(req.body?.name || '').trim();
+    if (name.length < 3) return res.status(400).json({ error: 'Nom affiché trop court.' });
+
+    const result = await cloud.requestDisplayName(schoolId, name);
+    if (!result.success) return res.status(400).json({ error: result.message });
+
+    // Le nom local suit la demande : c'est celui que l'école vient de choisir,
+    // même si Meta ne l'appliquera qu'après examen.
+    await supabaseAdmin
+      .from('whatsapp_school_sessions')
+      .update({ session_name: name, updated_at: new Date().toISOString() })
+      .eq('school_id', schoolId);
+    cloud.invalidateCache(schoolId);
+
+    const refreshed = await cloud.getNumberInfo(schoolId);
+    res.json({ success: true, number: refreshed.success ? refreshed.number : null });
+  } catch (error) {
+    console.error('Erreur cloud display-name:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
+
 // ==================== PROFIL DU NUMÉRO (Cloud API) ====================
 //
 // Un numéro rattaché à l'API Cloud ne s'ouvre plus dans l'application

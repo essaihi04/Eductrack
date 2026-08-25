@@ -25,6 +25,25 @@ const ADMIN_HUB_ROLES = ['admin', 'school_admin', 'pedagogical_director', 'pedag
 
 // Catégories d'activité proposées pour la fiche WhatsApp de l'établissement
 // (sous-ensemble de l'énumération Meta, celles qui ont un sens pour une école).
+// État d'examen du nom affiché par Meta. Tant qu'il n'est pas approuvé, les
+// parents qui n'ont pas enregistré le contact voient le numéro brut.
+const WA_NAME_STATUS = {
+  APPROVED: { label: 'Approuvé — les parents voient le nom de l\'école', tone: 'emerald' },
+  AVAILABLE_WITHOUT_REVIEW: { label: 'Actif (sans examen requis)', tone: 'emerald' },
+  PENDING_REVIEW: { label: 'En cours d\'examen par Meta', tone: 'amber' },
+  DECLINED: { label: 'Refusé par Meta — choisissez un autre nom', tone: 'red' },
+  EXPIRED: { label: 'Expiré — à soumettre de nouveau', tone: 'red' },
+  NONE: { label: 'Aucun nom soumis', tone: 'gray' },
+};
+
+const WA_TIERS = {
+  TIER_250: '250 conversations / jour',
+  TIER_1K: '1 000 conversations / jour',
+  TIER_10K: '10 000 conversations / jour',
+  TIER_100K: '100 000 conversations / jour',
+  TIER_UNLIMITED: 'Illimité',
+};
+
 const WA_VERTICALS = [
   { value: 'EDU', label: 'Éducation' },
   { value: 'NONPROFIT', label: 'Association / à but non lucratif' },
@@ -188,6 +207,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [waProfileMsg, setWaProfileMsg] = useState('');
   const [waProfileError, setWaProfileError] = useState('');
   const waPhotoInputRef = useRef(null);
+  // Fiche technique du numéro chez Meta (nom affiché et son examen, qualité…)
+  const [waNumber, setWaNumber] = useState(null);
+  const [waNameInput, setWaNameInput] = useState('');
+  const [waNameBusy, setWaNameBusy] = useState(false);
+  const [waNameMsg, setWaNameMsg] = useState('');
+  const [waNameError, setWaNameError] = useState('');
 
   // ===================== TAB: PLANNING (communications) =====================
   const [comms, setComms] = useState([]);
@@ -983,9 +1008,50 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     }
   }, [apiUrl]);
 
+  const fetchWaNumber = useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/cloud/number-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!data.success) return;
+      setWaNumber(data.number || null);
+      setWaNameInput(data.number?.verified_name || '');
+    } catch (e) {
+      console.error('Erreur fetch numéro WhatsApp:', e);
+    }
+  }, [apiUrl]);
+
   useEffect(() => {
-    if (isCloudConnected) fetchWaProfile();
-  }, [isCloudConnected, fetchWaProfile]);
+    if (isCloudConnected) { fetchWaProfile(); fetchWaNumber(); }
+  }, [isCloudConnected, fetchWaProfile, fetchWaNumber]);
+
+  // Nouveau nom affiché : Meta ouvre un examen, l'ancien nom reste actif d'ici là.
+  const requestWaDisplayName = async () => {
+    const name = waNameInput.trim();
+    if (name.length < 3) { setWaNameError('Nom trop court.'); return; }
+    setWaNameBusy(true); setWaNameMsg(''); setWaNameError('');
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/cloud/display-name`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (data.number) setWaNumber(data.number);
+        setWaNameMsg('Demande envoyée. Meta examine le nom (quelques minutes à 48 h) ; l\'ancien nom reste actif d\'ici là.');
+        fetchStatus();
+      } else {
+        setWaNameError(data.error || 'Demande impossible.');
+      }
+    } catch (e) {
+      console.error('Erreur demande nom affiché:', e);
+      setWaNameError('Erreur de connexion au serveur.');
+    } finally { setWaNameBusy(false); }
+  };
 
   // payload : { photo_base64 } ou { use_school_logo } ou les champs texte.
   const saveWaProfile = async (payload) => {
@@ -3526,11 +3592,79 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
               </div>
 
               {isCloudConnected ? (
-                <div className="flex items-center gap-3 p-4 bg-white rounded-lg border border-emerald-200">
-                  <CheckCircle className="w-6 h-6 text-emerald-600" />
-                  <div>
-                    <p className="font-medium text-emerald-800">Numéro officiel connecté</p>
-                    <p className="text-sm text-emerald-700">{sessionStatus?.session?.phone || '—'}</p>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 p-4 bg-white rounded-lg border border-emerald-200">
+                    <CheckCircle className="w-6 h-6 text-emerald-600" />
+                    <div>
+                      <p className="font-medium text-emerald-800">Numéro officiel connecté</p>
+                      <p className="text-sm text-emerald-700">{sessionStatus?.session?.phone || '—'}</p>
+                    </div>
+                  </div>
+
+                  {/* Nom affiché : c'est lui que voient les parents qui n'ont
+                      pas enregistré le contact, une fois approuvé par Meta. */}
+                  <div className="p-4 bg-white rounded-lg border border-gray-200 space-y-3">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">Nom affiché chez les parents</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Sans lui, un parent qui n'a pas enregistré le numéro voit les chiffres bruts.
+                        </p>
+                      </div>
+                      {waNumber?.name_status && (() => {
+                        const st = WA_NAME_STATUS[waNumber.name_status] || WA_NAME_STATUS.NONE;
+                        const tones = {
+                          emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                          amber: 'bg-amber-50 text-amber-700 border-amber-200',
+                          red: 'bg-red-50 text-red-700 border-red-200',
+                          gray: 'bg-gray-50 text-gray-600 border-gray-200',
+                        };
+                        return (
+                          <span className={`text-[11px] font-medium px-2 py-1 rounded-full border ${tones[st.tone]}`}>
+                            {st.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input type="text" value={waNameInput} maxLength={75}
+                        onChange={(e) => setWaNameInput(e.target.value)}
+                        placeholder="Ex : Groupe Scolaire Al Amal"
+                        className="flex-1 min-w-[200px] rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500" />
+                      <button type="button" disabled={waNameBusy || waNameInput.trim() === (waNumber?.verified_name || '')}
+                        onClick={requestWaDisplayName}
+                        className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm font-medium">
+                        {waNameBusy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        Demander l'approbation
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-gray-400">
+                      Le nom doit correspondre à l'établissement réel (registre de commerce, site).
+                      Un nom générique, un slogan ou une adresse web se font refuser.
+                    </p>
+
+                    {(waNumber?.quality_rating || waNumber?.messaging_limit_tier) && (
+                      <div className="flex items-center gap-4 text-[11px] text-gray-500 pt-1 border-t border-gray-100">
+                        {waNumber?.quality_rating && <span>Qualité du numéro : <strong>{waNumber.quality_rating}</strong></span>}
+                        {waNumber?.messaging_limit_tier && (
+                          <span>Volume autorisé : <strong>{WA_TIERS[waNumber.messaging_limit_tier] || waNumber.messaging_limit_tier}</strong></span>
+                        )}
+                      </div>
+                    )}
+
+                    {waNameError && (
+                      <div className="flex items-center gap-2 p-2.5 bg-red-50 rounded-lg border border-red-200">
+                        <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                        <p className="text-sm text-red-800">{waNameError}</p>
+                      </div>
+                    )}
+                    {waNameMsg && (
+                      <div className="flex items-center gap-2 p-2.5 bg-emerald-50 rounded-lg border border-emerald-200">
+                        <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        <p className="text-sm text-emerald-800">{waNameMsg}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : cloudStep === 'done' ? (
