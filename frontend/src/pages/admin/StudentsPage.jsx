@@ -100,6 +100,7 @@ const StudentsPage = () => {
     // v2 — Documents du dossier + signature
     inscriptionDocuments: {}, inscriptionSignature: '',
     // Parents (saisie inline en création)
+    whatsappConsent: false,
     parent1: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'pere', maritalStatus: '' },
     parent2: { lastName: '', firstName: '', email: '', phone: '', cin: '', profession: '', relationship: 'mere', maritalStatus: '' },
   };
@@ -693,7 +694,11 @@ const StudentsPage = () => {
           try {
             const ar = await fetch(`${apiUrl}/api/admin/students/${savedStudent.id}/add-parents`, {
               method: 'POST', headers: { ...authHeaders, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contacts: [c], academic_year: toSlashYear(year) }),
+              body: JSON.stringify({
+                contacts: [c],
+                academic_year: toSlashYear(year),
+                whatsapp_consent: formData.whatsappConsent === true,
+              }),
             });
             if (ar.ok) {
               savedParents.push({
@@ -1790,6 +1795,20 @@ L'administration de ${schoolName}`;
                     <>
                       {parentForm('parent1', 'Parent 1')}
                       {parentForm('parent2', 'Parent 2')}
+                      {/* Consentement WhatsApp : Meta exige de pouvoir prouver que le
+                          destinataire a accepté. Même libellé que la fiche d'inscription. */}
+                      <label className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-2.5 cursor-pointer">
+                        <input type="checkbox" className="mt-0.5"
+                          checked={formData.whatsappConsent === true}
+                          onChange={(e) => setFormData((f) => ({ ...f, whatsappConsent: e.target.checked }))} />
+                        <span className="text-xs text-gray-700">
+                          <b>J'accepte de recevoir les communications de l'école sur WhatsApp</b>
+                          <span className="block text-[11px] text-gray-500 mt-0.5">
+                            Absences, notes, factures et annonces. Le parent pourra se désabonner à tout
+                            moment en répondant STOP.
+                          </span>
+                        </span>
+                      </label>
                       <p className="text-xs text-gray-500">Un parent n'est enregistré que s'il a un <b>nom + un téléphone</b>.</p>
                     </>
                   )}

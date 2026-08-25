@@ -103,6 +103,10 @@ export const TEMPLATES = {
         { type: 'QUICK_REPLY', text: 'Voir le suivi' },
         { type: 'QUICK_REPLY', text: 'Pas aujourd\'hui' },
       ],
+      // Charge utile renvoyée par le webhook au clic, dans l'ordre des boutons.
+      // Indispensable : sans elle, Meta renvoie le LIBELLÉ du bouton, que le
+      // chatbot ne reconnaît pas (il attend transport_yes / transport_no).
+      buttonPayloads: ['transport_yes', 'transport_no'],
     },
   },
 
@@ -155,11 +159,26 @@ export function getTemplate(key) {
   return t;
 }
 
-/** Construit le tableau `components` attendu par l'API Cloud. */
-export function buildComponents(values = []) {
-  if (!values.length) return [];
-  return [{
-    type: 'body',
-    parameters: values.map((v) => ({ type: 'text', text: sanitizeParam(v) })),
-  }];
+/**
+ * Construit le tableau `components` attendu par l'API Cloud.
+ * @param {Array}  values   valeurs des {{1}}, {{2}}… du corps
+ * @param {Array} [payloads] charges utiles des boutons quick-reply, dans l'ordre
+ */
+export function buildComponents(values = [], payloads = []) {
+  const components = [];
+  if (values.length) {
+    components.push({
+      type: 'body',
+      parameters: values.map((v) => ({ type: 'text', text: sanitizeParam(v) })),
+    });
+  }
+  payloads.forEach((payload, index) => {
+    components.push({
+      type: 'button',
+      sub_type: 'quick_reply',
+      index: String(index),
+      parameters: [{ type: 'payload', payload }],
+    });
+  });
+  return components;
 }

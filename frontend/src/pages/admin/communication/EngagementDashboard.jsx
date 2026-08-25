@@ -143,9 +143,12 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
               <StatCard icon={Smartphone} iconCls="text-indigo-600" title="Parents avec l'app"
                 value={cov?.parentsTotal ? `${Math.round((cov.parentsWithApp / cov.parentsTotal) * 100)}%` : '—'}
                 sub={`${cov?.parentsWithApp || 0} / ${cov?.parentsTotal || 0} parents — canal gratuit`} />
-              <StatCard icon={BellOff} iconCls="text-red-500" title="Opt-out WhatsApp"
-                value={cov?.parentsOptedOut ?? 0}
-                sub={`${cov?.parentsWithWhatsapp || 0} parents avec numéro WhatsApp`} />
+              {/* Consentement : Meta exige de pouvoir prouver l'accord de chaque
+                  destinataire, et les désabonnements pèsent sur la qualité du numéro. */}
+              <StatCard icon={BellOff} iconCls={cov?.parentsOptedOut ? 'text-red-500' : 'text-emerald-600'}
+                title="Consentement WhatsApp"
+                value={cov?.parentsWithWhatsapp ? `${cov.consentRate ?? 0}%` : '—'}
+                sub={`${cov?.parentsOptedIn || 0} accord(s) / ${cov?.parentsWithWhatsapp || 0} joignables · ${cov?.parentsOptedOut || 0} désabonné(s)`} />
             </div>
 
             {/* Canaux utilisés + timeline */}

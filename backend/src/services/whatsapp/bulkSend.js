@@ -76,6 +76,28 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
     throw new Error('Session WhatsApp non connectée — nouvelle tentative plus tard');
   }
 
+  // Désabonnés (STOP) : filet de sécurité pour TOUS les envois qui passent par
+  // ce job — envoi du hub, relance, envoi planifié. La route d'envoi les écarte
+  // déjà, mais une relance rejoue des destinataires enregistrés AVANT le STOP.
+  // Le canal app reste servi : le parent garde le contenu dans l'application.
+  const optedOutParents = new Set();
+  if (wantWa) {
+    const pids = [...new Set(todo.map((r) => r.parent_id).filter(Boolean))];
+    for (let i = 0; i < pids.length; i += 200) {
+      const { data: contacts } = await supabaseAdmin
+        .from('parent_contacts')
+        .select('parent_id, consent_status')
+        .eq('channel', 'whatsapp')
+        .in('parent_id', pids.slice(i, i + 200));
+      (contacts || []).forEach((c) => {
+        if (c.consent_status === 'opted_out') optedOutParents.add(c.parent_id);
+      });
+    }
+    if (optedOutParents.size) {
+      console.log(`[bulkSend] ${optedOutParents.size} parent(s) désabonné(s) — WhatsApp ignoré, app conservée`);
+    }
+  }
+
   const nameByParent = new Map();
   if (personalize && wantWa) {
     const pids = [...new Set(todo.map((r) => r.parent_id).filter(Boolean))];
@@ -145,8 +167,11 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
       }
     }
 
-    // 2. Canal WhatsApp
-    if (wantWa && recipient.phone_e164) {
+    // 2. Canal WhatsApp — jamais vers un parent désabonné
+    const waOptedOut = recipient.parent_id && optedOutParents.has(recipient.parent_id);
+    if (waOptedOut) {
+      errorMsg = [errorMsg, 'Parent désabonné (STOP)'].filter(Boolean).join(' | ');
+    } else if (wantWa && recipient.phone_e164) {
       // waSentPhones contient les numéros servis lors des passages précédents
       // (wa_status = 'sent') ET ceux servis dans cette boucle : un parent déjà
       // couvert n'est jamais réexpédié, et son wa_status reste 'sent'.
@@ -187,7 +212,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
 
     // wa_status suit le canal WhatsApp SEUL : c'est lui qui rend une reprise
     // possible sans redoubler les envois déjà partis.
-    if (wantWa && recipient.phone_e164) {
+    if (wantWa && recipient.phone_e164 && !waOptedOut) {
       patch.wa_status = waOk ? 'sent' : 'failed';
     }
 

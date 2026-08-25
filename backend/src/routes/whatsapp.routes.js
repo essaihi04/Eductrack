@@ -14,6 +14,7 @@ import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
 import { isSessionReady, sendUnified } from '../services/whatsapp/sendHelpers.js';
 import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.js';
 import { enqueueJob } from '../services/jobs/index.js';
+import { whatsappOptedOut } from '../services/notificationRouter.js';
 
 const router = express.Router();
 
@@ -424,12 +425,20 @@ router.post('/send', async (req, res) => {
 
     const contacts = await selectInChunks(
       parentIds,
-      (chunk) => supabaseAdmin.from('parent_contacts').select('parent_id, phone_e164, is_primary').in('parent_id', chunk).eq('channel', 'whatsapp').order('is_primary', { ascending: false })
+      (chunk) => supabaseAdmin.from('parent_contacts').select('parent_id, phone_e164, is_primary, consent_status').in('parent_id', chunk).eq('channel', 'whatsapp').order('is_primary', { ascending: false })
+    );
+
+    // Parents désabonnés (STOP) : plus AUCUN WhatsApp, quel que soit le canal
+    // demandé. Ils gardent la notification dans l'app — le contenu reste donc
+    // consultable, c'est ce que promet le message de confirmation du STOP.
+    const optedOutParents = new Set(
+      (contacts || []).filter((c) => c.consent_status === 'opted_out').map((c) => c.parent_id)
     );
 
     // Un numéro par parent (préférence au principal)
     const parentPhoneMap = {};
     (contacts || []).forEach(c => {
+      if (optedOutParents.has(c.parent_id)) return;
       if (!parentPhoneMap[c.parent_id]) {
         parentPhoneMap[c.parent_id] = c.phone_e164;
       }
@@ -572,6 +581,16 @@ router.post('/send-direct', async (req, res) => {
 
     if (!(await isSessionReady(schoolId))) {
       return res.status(400).json({ error: 'Aucune session WhatsApp connectée.' });
+    }
+
+    // Parent désabonné (STOP) : on refuse d'écrire le premier. En revanche, si
+    // la fenêtre de service est ouverte (le parent vient d'écrire), c'est une
+    // RÉPONSE dans une conversation qu'il a lui-même ouverte — la bloquer
+    // laisserait sa question sans réponse.
+    if (parentId && (await whatsappOptedOut(parentId)) && !(await serviceWindowOpen(phone))) {
+      return res.status(400).json({
+        error: "Ce parent s'est désabonné de WhatsApp (STOP). Il reste joignable par notification dans l'application.",
+      });
     }
 
     const messageType = type || 'text';
@@ -1306,7 +1325,7 @@ router.get('/engagement/summary', async (req, res) => {
     }
 
     // Couverture école : parents, app installée, opt-out, numéro WhatsApp
-    let parentsTotal = 0, parentsWithApp = 0, parentsOptedOut = 0, parentsWithWhatsapp = 0;
+    let parentsTotal = 0, parentsWithApp = 0, parentsOptedOut = 0, parentsWithWhatsapp = 0, parentsOptedIn = 0;
     if (schoolId) {
       const { data: parentProfiles } = await supabaseAdmin
         .from('profiles')
@@ -1321,13 +1340,23 @@ router.get('/engagement/summary', async (req, res) => {
         parentsWithApp = new Set((subs || []).map(s => s.user_id)).size;
         const waContacts = await selectInChunks(pIds, (chunk) =>
           supabaseAdmin.from('parent_contacts').select('parent_id, consent_status').eq('channel', 'whatsapp').in('parent_id', chunk));
-        const withWa = new Set(); const opted = new Set();
+        // Un parent compte une fois, au statut le plus fort qu'il porte : un
+        // refus l'emporte sur un accord, sinon ajouter un second numéro
+        // suffirait à effacer un STOP.
+        const withWa = new Set();
+        const rank = { opted_out: 3, opted_in: 2, pending: 1 };
+        const statusByParent = new Map();
         (waContacts || []).forEach(c => {
           withWa.add(c.parent_id);
-          if (c.consent_status === 'opted_out') opted.add(c.parent_id);
+          const st = c.consent_status || 'pending';
+          const cur = statusByParent.get(c.parent_id);
+          if (!cur || (rank[st] || 0) > (rank[cur] || 0)) statusByParent.set(c.parent_id, st);
         });
         parentsWithWhatsapp = withWa.size;
-        parentsOptedOut = opted.size;
+        for (const st of statusByParent.values()) {
+          if (st === 'opted_out') parentsOptedOut++;
+          else if (st === 'opted_in') parentsOptedIn++;
+        }
       }
     }
 
@@ -1351,7 +1380,11 @@ router.get('/engagement/summary', async (req, res) => {
         responseRate: reached ? Math.round((responded / reached) * 100) : 0,
       },
       channels: { waSent, waDelivered, pushSent, appInbox },
-      coverage: { parentsTotal, parentsWithApp, parentsOptedOut, parentsWithWhatsapp },
+      coverage: {
+        parentsTotal, parentsWithApp, parentsOptedOut, parentsWithWhatsapp, parentsOptedIn,
+        // Taux de consentement tracé, sur les parents joignables par WhatsApp.
+        consentRate: parentsWithWhatsapp ? Math.round((parentsOptedIn / parentsWithWhatsapp) * 100) : 0,
+      },
       byDay,
     });
   } catch (error) {

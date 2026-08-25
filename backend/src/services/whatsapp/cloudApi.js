@@ -411,7 +411,11 @@ export async function parseIncoming(body) {
     msg.interactive?.list_reply?.id ||
     msg.interactive?.button_reply?.id ||
     msg.text?.body ||
-    msg.button?.text || // réponse à un bouton de template
+    // Réponse à un bouton de template : le `payload` (défini à l'envoi) est
+    // stable, alors que `text` est le libellé affiché — traduit ou reformulé,
+    // il ne correspondrait plus aux mots-clés attendus par le chatbot.
+    msg.button?.payload ||
+    msg.button?.text ||
     msg.image?.caption ||
     msg.document?.caption ||
     '';
