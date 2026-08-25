@@ -1198,7 +1198,14 @@ router.get('/conversations', async (req, res) => {
           status: r.status,
           errorMessage: r.error_message,
           sentAt: r.sent_at,
-          createdAt: msg.created_at,
+          // Le fil suit la date d'ENVOI, pas celle de création du message.
+          // Une relance programmée est créée au moment du clic (1 h du matin)
+          // mais ne part qu'à l'heure prévue (9 h 33) : afficher la création
+          // datait le message de la nuit et empêchait la conversation de
+          // remonter en tête alors que l'envoi venait de partir.
+          // Repli sur created_at pour un envoi encore en attente ou échoué,
+          // qui n'a pas de date d'envoi.
+          createdAt: r.sent_at || msg.created_at,
           senderName: isCompReport ? `📊 Rapport complet` : (msg.sender ? `${msg.sender.first_name} ${msg.sender.last_name}` : null),
           studentName: isCompReport ? (msg.recipient_filter?.student_name || '') : undefined,
           direction: 'outgoing',
