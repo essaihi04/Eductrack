@@ -164,6 +164,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   // privé, on ne demande des liens qu'à l'ouverture d'une conversation.
   const [inboxMediaUrls, setInboxMediaUrls] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [highlightMsgId, setHighlightMsgId] = useState(null); // message atteint par la recherche
   const [inboxFilter, setInboxFilter] = useState('all');
   const [inboxView, setInboxView] = useState('conversations');
   // Contact à ouvrir dans la boîte de réception depuis un autre onglet
@@ -794,10 +795,16 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     })();
   }, [selectedConv, apiUrl, inboxMediaUrls]);
 
+  // Recherche : contact OU contenu des messages. Elle porte sur l'historique
+  // déjà chargé — c'est ce que la boîte affiche, donc ce que l'utilisateur
+  // s'attend à pouvoir retrouver.
+  const searchTerm = searchQuery.trim().toLowerCase();
+
   const filteredConversations = conversations.filter(conv => {
-    const matchesSearch = !searchQuery ||
-      (conv.parentName && conv.parentName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      conv.phone.includes(searchQuery);
+    const matchesSearch = !searchTerm ||
+      (conv.parentName && conv.parentName.toLowerCase().includes(searchTerm)) ||
+      conv.phone.includes(searchQuery.trim()) ||
+      conv.messages.some(m => (m.content || '').toLowerCase().includes(searchTerm));
     const matchesFilter = inboxFilter === 'all' ||
       (inboxFilter === 'awaiting' && conv.awaitingReply) ||
       (inboxFilter === 'received' && conv.totalReceived > 0) ||
@@ -805,6 +812,48 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       (inboxFilter === 'failed' && conv.totalFailed > 0);
     return matchesSearch && matchesFilter;
   });
+
+  // Messages contenant le terme cherché, du plus récent au plus ancien.
+  // Deux caractères minimum : en dessous, tout ressort et le résultat est inutile.
+  const messageHits = useMemo(() => {
+    if (searchTerm.length < 2) return [];
+    const hits = [];
+    for (const conv of conversations) {
+      for (const msg of conv.messages) {
+        const content = msg.content || '';
+        const at = content.toLowerCase().indexOf(searchTerm);
+        if (at === -1) continue;
+        // Extrait centré sur le terme trouvé, plutôt que le début du message.
+        const from = Math.max(0, at - 40);
+        hits.push({
+          conv,
+          msg,
+          snippet: (from > 0 ? '…' : '') + content.slice(from, at + searchTerm.length + 60).trim()
+            + (at + searchTerm.length + 60 < content.length ? '…' : ''),
+        });
+        if (hits.length >= 200) break;
+      }
+      if (hits.length >= 200) break;
+    }
+    return hits.sort((a, b) => new Date(b.msg.createdAt) - new Date(a.msg.createdAt)).slice(0, 50);
+  }, [conversations, searchTerm]);
+
+  // Ouvre la conversation et amène le message trouvé à l'écran.
+  const jumpToMessage = (conv, msgId) => {
+    setSelectedConv(conv);
+    setHighlightMsgId(msgId);
+  };
+
+  useEffect(() => {
+    if (!highlightMsgId) return;
+    // Laisse le fil se peindre (et le scroll automatique vers le bas se faire)
+    // avant de remonter jusqu'au message cherché.
+    const t = setTimeout(() => {
+      document.getElementById(`msg-${highlightMsgId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    const clear = setTimeout(() => setHighlightMsgId(null), 4000);
+    return () => { clearTimeout(t); clearTimeout(clear); };
+  }, [highlightMsgId, selectedConv]);
 
   const awaitingCount = conversations.filter(c => c.awaitingReply).length;
 
@@ -2437,7 +2486,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Rechercher..." className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 bg-gray-50" />
+                      placeholder="Rechercher un contact ou un message…"
+                      className="w-full pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 bg-gray-50" />
+                    {searchQuery && (
+                      <button type="button" onClick={() => setSearchQuery('')} title="Effacer"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-200">
+                        <X className="w-3.5 h-3.5 text-gray-400" />
+                      </button>
+                    )}
                   </div>
                   <div className="flex gap-1 flex-wrap">
                     {[
@@ -2454,6 +2510,38 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     ))}
                   </div>
                 </div>
+
+                {/* Résultats dans le contenu des messages : la liste des
+                    conversations ne dit pas OÙ le terme apparaît, ce bloc si. */}
+                {searchTerm.length >= 2 && (
+                  <div className="border-b border-gray-100 bg-amber-50/40 max-h-64 overflow-y-auto flex-shrink-0">
+                    <p className="px-3 py-1.5 text-[11px] font-semibold text-amber-800 sticky top-0 bg-amber-50">
+                      {messageHits.length === 0
+                        ? 'Aucun message ne contient ce terme'
+                        : `${messageHits.length} message(s) trouvé(s)${messageHits.length === 50 ? ' (50 premiers)' : ''}`}
+                    </p>
+                    {messageHits.map(({ conv, msg, snippet }) => (
+                      <button key={`hit-${msg.id}`} type="button"
+                        onClick={() => jumpToMessage(conv, msg.id)}
+                        className="w-full text-left px-3 py-2 border-t border-amber-100/70 hover:bg-amber-100/50">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {msg.direction === 'incoming'
+                            ? <ArrowDownLeft className="w-3 h-3 text-blue-500 flex-shrink-0" />
+                            : <ArrowUpRight className="w-3 h-3 text-green-600 flex-shrink-0" />}
+                          <span className="text-[11px] font-semibold text-gray-700 truncate">
+                            {conv.parentName || conv.phone}
+                          </span>
+                          <span className="text-[10px] text-gray-400 ml-auto flex-shrink-0">
+                            {new Date(msg.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}
+                            {' '}
+                            {new Date(msg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-600 line-clamp-2 break-words">{snippet}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* Conversation list */}
                 <div className="flex-1 overflow-y-auto">
@@ -2597,7 +2685,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     const showDate = idx === 0 || new Date(msg.createdAt).toDateString() !== new Date(selectedConv.messages[idx - 1].createdAt).toDateString();
                     const incoming = msg.direction === 'incoming';
                     return (
-                      <div key={msg.id}>
+                      <div key={msg.id} id={`msg-${msg.id}`}
+                        className={highlightMsgId === msg.id ? 'rounded-lg ring-2 ring-amber-400 ring-offset-2 ring-offset-[#f0f2f5] transition-shadow' : ''}>
                         {showDate && (
                           <div className="flex justify-center my-3">
                             <span className="bg-white/80 backdrop-blur-sm text-[11px] text-gray-500 px-3 py-1 rounded-full shadow-sm">
