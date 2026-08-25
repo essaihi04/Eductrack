@@ -1146,15 +1146,28 @@ router.get('/conversations', async (req, res) => {
     // whatsapp_incoming_messages porte le message reçu ET, le cas échéant, la
     // réponse automatique du chatbot (ai_response_text) : les deux sont
     // réinjectés dans le fil pour que l'école voie la conversation complète.
-    let incomingQuery = supabaseAdmin
-      .from('whatsapp_incoming_messages')
-      .select('id, phone_e164, parent_id, message_text, ai_response_text, ai_response_sent, received_at, category, media_path, media_type, media_mimetype, media_filename')
-      .order('received_at', { ascending: false })
-      .limit(3000);
-    if (schoolId) incomingQuery = incomingQuery.eq('school_id', schoolId);
-    if (allowedCatsConv) incomingQuery = incomingQuery.in('category', allowedCatsConv);
+    // Les colonnes media_* n'existent qu'après ADD_WHATSAPP_INBOX.sql. Les
+    // demander sans repli faisait tomber TOUTE la boîte de réception en 500
+    // tant que la migration n'était pas jouée : on réessaie sans elles.
+    const INCOMING_BASE = 'id, phone_e164, parent_id, message_text, ai_response_text, ai_response_sent, received_at, category';
+    const INCOMING_MEDIA = ', media_path, media_type, media_mimetype, media_filename';
 
-    const { data: incomingRows, error: incError } = await incomingQuery;
+    const fetchIncoming = async (columns) => {
+      let q = supabaseAdmin
+        .from('whatsapp_incoming_messages')
+        .select(columns)
+        .order('received_at', { ascending: false })
+        .limit(3000);
+      if (schoolId) q = q.eq('school_id', schoolId);
+      if (allowedCatsConv) q = q.in('category', allowedCatsConv);
+      return q;
+    };
+
+    let { data: incomingRows, error: incError } = await fetchIncoming(INCOMING_BASE + INCOMING_MEDIA);
+    if (incError && /media_(path|type|mimetype|filename)|column/i.test(incError.message || '')) {
+      console.warn('[conversations] colonnes média absentes — exécutez ADD_WHATSAPP_INBOX.sql');
+      ({ data: incomingRows, error: incError } = await fetchIncoming(INCOMING_BASE));
+    }
     if (incError) throw incError;
 
     let incoming = incomingRows || [];
@@ -1753,6 +1766,12 @@ router.post('/inbox/media-urls', async (req, res) => {
       .in('id', ids);
     if (schoolId) q = q.eq('school_id', schoolId);   // scope école
     const { data: rows, error } = await q;
+    // Migration pas encore jouée : aucune pièce jointe n'existe, on renvoie
+    // une liste vide plutôt qu'une erreur qui casserait l'ouverture du fil.
+    if (error && /media_path|column/i.test(error.message || '')) {
+      console.warn('[inbox] colonnes média absentes — exécutez ADD_WHATSAPP_INBOX.sql');
+      return res.json({ urls: {} });
+    }
     if (error) throw error;
 
     const { signedUrl } = await import('../utils/storage.js');

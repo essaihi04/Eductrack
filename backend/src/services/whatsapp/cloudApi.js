@@ -286,7 +286,9 @@ export async function sendListMenu(schoolId, phone, menu, ctx = {}) {
       body: { text: body.slice(0, 1024) },
       footer: ctx.schoolName ? { text: String(ctx.schoolName).slice(0, 60) } : undefined,
       action: {
-        button: 'Voir les options',
+        // Libellé du bouton qui ouvre la liste — il fait partie de l'interface,
+        // pas du contenu : il doit suivre la langue du destinataire.
+        button: ctx.lang === 'ar' ? 'عرض الخيارات' : 'Voir les options',
         sections: [{ title: menu.title.slice(0, 24), rows }],
       },
     },
