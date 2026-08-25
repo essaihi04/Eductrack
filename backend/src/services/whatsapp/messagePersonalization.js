@@ -29,3 +29,25 @@ export function withGreeting(text, parentName) {
   const greeting = greetingFor(text, parentName);
   return greeting ? `${greeting}\n\n${text}` : text;
 }
+
+/**
+ * Mention de désabonnement, ajoutée aux messages PROACTIFS en texte libre
+ * (notifications, communications planifiées, envois du hub).
+ *
+ * Ce n'est pas une politesse : un parent qui ignore qu'il peut se désabonner
+ * BLOQUE le numéro, et c'est le blocage — pas le STOP — qui fait chuter la
+ * note de qualité du numéro chez Meta, donc le volume d'envoi autorisé.
+ *
+ * Volontairement absent : les réponses du chatbot (le parent vient d'écrire,
+ * lui rappeler qu'il peut partir n'a aucun sens) et les templates approuvés
+ * (leur texte est figé par Meta, on ne peut rien y ajouter).
+ */
+export const OPT_OUT_NOTICE = '_Répondez STOP pour ne plus recevoir ces messages._';
+
+/** Ajoute la mention, sauf si le texte la porte déjà. */
+export function withOptOutNotice(text) {
+  const body = String(text || '');
+  if (!body.trim()) return body;
+  if (/\bSTOP\b/i.test(body)) return body;
+  return `${body}\n\n${OPT_OUT_NOTICE}`;
+}

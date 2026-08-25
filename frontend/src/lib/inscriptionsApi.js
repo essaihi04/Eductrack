@@ -58,6 +58,9 @@ export const inscriptionsApi = {
   },
   // Rattache un ou plusieurs parents à un élève (academicYear → garantit l'inscription
   // de l'année active pour que le parent apparaisse aussitôt sur la page Parents).
-  addParents: (studentId, contacts, academicYear) =>
-    request(`/api/inscriptions/students/${studentId}/add-parents`, { method: 'POST', body: { contacts, academic_year: academicYear } }),
+  addParents: (studentId, contacts, academicYear, whatsappConsent = false) =>
+    request(`/api/inscriptions/students/${studentId}/add-parents`, {
+      method: 'POST',
+      body: { contacts, academic_year: academicYear, whatsapp_consent: whatsappConsent === true },
+    }),
 };

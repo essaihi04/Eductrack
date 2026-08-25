@@ -14,6 +14,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { sendPushToUser, isPushConfigured } from './webPush.js';
 import { userHasDeviceToken } from './fcmPush.js';
 import { sendUtility } from './whatsapp/utility.js';
+import { withOptOutNotice } from './whatsapp/messagePersonalization.js';
 
 /** Le parent a-t-il installé l'app ? (abonnement Web Push OU jeton d'appareil natif) */
 export async function parentHasApp(parentId) {
@@ -97,11 +98,29 @@ export async function whatsappOptedOut(parentId) {
  * @param {boolean} optedOut  true = ne plus recevoir de WhatsApp
  */
 export async function setWhatsappOptOut(parentId, optedOut) {
-  const { error } = await supabaseAdmin
+  // Date et origine tracées : Meta demande de pouvoir prouver le consentement,
+  // et un STOP daté est la meilleure défense en cas de contestation.
+  const patch = {
+    consent_status: optedOut ? 'opted_out' : 'opted_in',
+    consent_at: new Date().toISOString(),
+    consent_source: optedOut ? 'whatsapp_stop' : 'whatsapp_start',
+  };
+  let { error } = await supabaseAdmin
     .from('parent_contacts')
-    .update({ consent_status: optedOut ? 'opted_out' : 'opted_in' })
+    .update(patch)
     .eq('parent_id', parentId)
     .eq('channel', 'whatsapp');
+
+  // ADD_WHATSAPP_CONSENT.sql pas encore exécuté : on retombe sur le statut
+  // seul plutôt que de perdre le STOP d'un parent.
+  if (error && /consent_at|consent_source|column/i.test(error.message || '')) {
+    console.warn('[notificationRouter] colonnes de consentement absentes — exécutez ADD_WHATSAPP_CONSENT.sql');
+    ({ error } = await supabaseAdmin
+      .from('parent_contacts')
+      .update({ consent_status: patch.consent_status })
+      .eq('parent_id', parentId)
+      .eq('channel', 'whatsapp'));
+  }
   if (error) console.error('[notificationRouter] setWhatsappOptOut:', error.message);
   return !error;
 }
@@ -142,6 +161,8 @@ export async function routeNotification({
     // Il n'a de sens que sur le texte libre : un template ne peut pas le porter.
     let text = whatsappText || '';
     if (nudge && !hasApp) text += nudgeFooter();
+    // Mention de desabonnement : un parent qui ignore le STOP bloque le numero.
+    text = withOptOutNotice(text);
 
     // sendUtility tranche seul entre texte libre (fenêtre 24 h ouverte, gratuit)
     // et template approuvé (hors fenêtre, payant). La fenêtre y est mesurée sur

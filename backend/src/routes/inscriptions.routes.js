@@ -372,11 +372,50 @@ router.post('/students/:id/photo', profilePhotoUpload.single('photo'), async (re
 // réutilisation d'un parent existant par numéro, contacts WhatsApp, lien
 // parent↔élève, enrichissement CIN/profession/situation familiale).
 // body: { contacts: [{ name, phone, relationship?, cin?, profession?, maritalStatus?, email? }] }
+
+// Consentement WhatsApp saisi au formulaire : Meta exige de pouvoir prouver
+// qu'un parent a accepte de recevoir des messages. Sans case cochee, le
+// contact reste 'pending' (l'ecole peut ecrire, mais rien ne l'atteste).
+const upsertContactGuarded = async (supabase, row, accepted, logTag) => {
+  const opts = { onConflict: 'parent_id,phone_e164,channel' };
+
+  // Le consentement ne se DEGRADE jamais depuis un formulaire. Sans ce garde-fou,
+  // reenregistrer une fiche eleve remettrait a 'pending' le parent qui a repondu
+  // STOP par WhatsApp — et l'ecole recommencerait a lui ecrire.
+  const { data: existing } = await supabase
+    .from('parent_contacts')
+    .select('consent_status')
+    .eq('parent_id', row.parent_id)
+    .eq('phone_e164', row.phone_e164)
+    .eq('channel', row.channel)
+    .maybeSingle();
+
+  let consent = {};
+  if (existing?.consent_status === 'opted_out') {
+    // Un refus donne par le parent lui-meme prime sur une case cochee au bureau.
+    if (accepted) console.warn(`[${logTag}] consentement ignore : ${row.phone_e164} s'est desabonne par WhatsApp`);
+  } else if (accepted) {
+    consent = { consent_status: 'opted_in', consent_at: new Date().toISOString(), consent_source: 'inscription' };
+  } else if (!existing) {
+    consent = { consent_status: 'pending' };
+  }
+
+  let { error } = await supabase.from('parent_contacts').upsert({ ...row, ...consent }, opts);
+  // ADD_WHATSAPP_CONSENT.sql pas encore execute : les colonnes de tracabilite
+  // n'existent pas, on retombe sur le seul statut.
+  if (error && /consent_at|consent_source|column/i.test(error.message || '')) {
+    console.warn(`[${logTag}] colonnes de consentement absentes - executez ADD_WHATSAPP_CONSENT.sql`);
+    const fallback = consent.consent_status ? { consent_status: consent.consent_status } : {};
+    ({ error } = await supabase.from('parent_contacts').upsert({ ...row, ...fallback }, opts));
+  }
+  return error;
+};
+
 router.post('/students/:id/add-parents', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { id } = req.params;
-    const { contacts: raw } = req.body;
+    const { contacts: raw, whatsapp_consent: waConsent } = req.body;
     if (!Array.isArray(raw) || raw.length === 0) {
       return res.status(400).json({ error: 'Au moins un parent (nom + téléphone) est requis' });
     }
@@ -455,9 +494,11 @@ router.post('/students/:id/add-parents', async (req, res) => {
     for (let i = 0; i < contacts.length; i++) {
       const c = contacts[i];
       const label = [c.relationship ? c.relationship.charAt(0).toUpperCase() + c.relationship.slice(1) : null, c.name].filter(Boolean).join(' — ') || null;
-      const { error: cErr } = await supabaseAdmin.from('parent_contacts').upsert(
-        { parent_id: parentId, phone_e164: c.phone, channel: 'whatsapp', is_primary: i === 0, consent_status: 'pending', label },
-        { onConflict: 'parent_id,phone_e164,channel' },
+      const cErr = await upsertContactGuarded(
+        supabaseAdmin,
+        { parent_id: parentId, phone_e164: c.phone, channel: 'whatsapp', is_primary: i === 0, label },
+        waConsent === true,
+        'inscriptions',
       );
       if (cErr) throw cErr;
     }

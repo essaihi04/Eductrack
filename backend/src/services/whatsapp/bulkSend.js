@@ -14,7 +14,7 @@
 import { supabaseAdmin } from '../../config/supabase.js';
 import { sendPushToUser } from '../webPush.js';
 import { isSessionReady, sendUnified } from './sendHelpers.js';
-import { withGreeting } from './messagePersonalization.js';
+import { withGreeting, withOptOutNotice } from './messagePersonalization.js';
 
 export const WHATSAPP_BULK_SEND = 'whatsapp_bulk_send';
 
@@ -156,6 +156,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
         try {
           let body = message;
           if (personalize) body = withGreeting(body, nameByParent.get(recipient.parent_id));
+          body = withOptOutNotice(body);
           const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName });
           if (result.success) {
             waOk = true;

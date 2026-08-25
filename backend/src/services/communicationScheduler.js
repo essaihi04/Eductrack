@@ -16,6 +16,7 @@ import { whatsappOptedOut } from './notificationRouter.js';
 import { activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendText, sendImage, sendDocument } from './whatsapp/index.js';
+import { withOptOutNotice } from './whatsapp/messagePersonalization.js';
 import { sendUtility, serviceWindowOpen } from './whatsapp/utility.js';
 import { sendPushToUser } from './webPush.js';
 
@@ -250,7 +251,7 @@ export async function sendCommunication(comm) {
   // (sinon doublon image/PDF + lien) ; push : toujours avec le lien.
   // Si comm.personalize, le texte est reconstruit pour chaque parent avec sa
   // salutation nominative → autant de messages distincts que de destinataires.
-  const waTextFor = (parent) => buildMessage(comm, !hasRealAttachment, parent?.name);
+  const waTextFor = (parent) => withOptOutNotice(buildMessage(comm, !hasRealAttachment, parent?.name));
   const pushBody = comm.body
     ? comm.body.slice(0, 120)
     : (comm.type === 'deadline' && comm.deadline_date ? `Date limite : ${formatDateFr(comm.deadline_date)}` : 'Nouvelle communication');

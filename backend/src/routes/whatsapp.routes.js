@@ -1645,6 +1645,55 @@ router.post('/cloud/verify', async (req, res) => {
   }
 });
 
+// GET /consent-stats — répartition du consentement WhatsApp des parents de
+// l'école. Meta demande de pouvoir prouver l'accord de chaque destinataire :
+// ce taux dit où en est l'école, à côté de la qualité du numéro.
+router.get('/consent-stats', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    if (!schoolId) return res.status(400).json({ error: 'School ID requis' });
+
+    // Parents de l'école, puis leurs contacts WhatsApp (par lots : un .in()
+    // avec trop d'IDs dépasse la longueur d'URL de PostgREST).
+    const { data: parents } = await supabaseAdmin
+      .from('profiles').select('id').eq('role', 'parent').eq('school_id', schoolId);
+    const parentIds = (parents || []).map((p) => p.id);
+    if (!parentIds.length) {
+      return res.json({ success: true, stats: { total: 0, opted_in: 0, pending: 0, opted_out: 0, rate: 0 } });
+    }
+
+    const contacts = await selectInChunks(parentIds, (chunk) =>
+      supabaseAdmin.from('parent_contacts')
+        .select('parent_id, consent_status')
+        .in('parent_id', chunk)
+        .eq('channel', 'whatsapp'));
+
+    // Un parent compte une seule fois, au statut le plus fort qu'il porte :
+    // un refus l'emporte sur un accord, sinon il suffirait d'ajouter un
+    // second numéro pour effacer un STOP.
+    const byParent = new Map();
+    const rank = { opted_out: 3, opted_in: 2, pending: 1 };
+    for (const c of contacts || []) {
+      const status = c.consent_status || 'pending';
+      const current = byParent.get(c.parent_id);
+      if (!current || (rank[status] || 0) > (rank[current] || 0)) byParent.set(c.parent_id, status);
+    }
+
+    const stats = { total: byParent.size, opted_in: 0, pending: 0, opted_out: 0, rate: 0 };
+    for (const status of byParent.values()) {
+      if (status === 'opted_in') stats.opted_in++;
+      else if (status === 'opted_out') stats.opted_out++;
+      else stats.pending++;
+    }
+    stats.rate = stats.total ? Math.round((stats.opted_in / stats.total) * 100) : 0;
+
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error('Erreur consent-stats:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ==================== ÉTAT ET NOM AFFICHÉ DU NUMÉRO ====================
 
 // GET /cloud/number-status — ce que Meta sait du numéro : nom affiché et son

@@ -213,6 +213,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [waNameBusy, setWaNameBusy] = useState(false);
   const [waNameMsg, setWaNameMsg] = useState('');
   const [waNameError, setWaNameError] = useState('');
+  const [waConsent, setWaConsent] = useState(null); // taux de consentement des parents
 
   // ===================== TAB: PLANNING (communications) =====================
   const [comms, setComms] = useState([]);
@@ -1023,9 +1024,22 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     }
   }, [apiUrl]);
 
+  const fetchWaConsent = useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/consent-stats`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) setWaConsent(data.stats);
+    } catch (e) {
+      console.error('Erreur fetch consentement:', e);
+    }
+  }, [apiUrl]);
+
   useEffect(() => {
-    if (isCloudConnected) { fetchWaProfile(); fetchWaNumber(); }
-  }, [isCloudConnected, fetchWaProfile, fetchWaNumber]);
+    if (isCloudConnected) { fetchWaProfile(); fetchWaNumber(); fetchWaConsent(); }
+  }, [isCloudConnected, fetchWaProfile, fetchWaNumber, fetchWaConsent]);
 
   // Nouveau nom affiché : Meta ouvre un examen, l'ancien nom reste actif d'ici là.
   const requestWaDisplayName = async () => {
@@ -3644,11 +3658,20 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       Un nom générique, un slogan ou une adresse web se font refuser.
                     </p>
 
-                    {(waNumber?.quality_rating || waNumber?.messaging_limit_tier) && (
-                      <div className="flex items-center gap-4 text-[11px] text-gray-500 pt-1 border-t border-gray-100">
+                    {(waNumber?.quality_rating || waNumber?.messaging_limit_tier || waConsent) && (
+                      <div className="flex items-center gap-4 flex-wrap text-[11px] text-gray-500 pt-1 border-t border-gray-100">
                         {waNumber?.quality_rating && <span>Qualité du numéro : <strong>{waNumber.quality_rating}</strong></span>}
                         {waNumber?.messaging_limit_tier && (
                           <span>Volume autorisé : <strong>{WA_TIERS[waNumber.messaging_limit_tier] || waNumber.messaging_limit_tier}</strong></span>
+                        )}
+                        {waConsent?.total > 0 && (
+                          <span title={`${waConsent.opted_in} accord(s) · ${waConsent.pending} en attente · ${waConsent.opted_out} désabonné(s)`}>
+                            Consentement : <strong>{waConsent.rate} %</strong>
+                            <span className="text-gray-400"> ({waConsent.opted_in}/{waConsent.total} parents)</span>
+                            {waConsent.opted_out > 0 && (
+                              <span className="text-amber-600"> · {waConsent.opted_out} désabonné(s)</span>
+                            )}
+                          </span>
                         )}
                       </div>
                     )}
