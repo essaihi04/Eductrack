@@ -9,7 +9,7 @@
  */
 
 import 'dotenv/config';
-import { TEMPLATES } from '../src/services/whatsapp/templates.js';
+import { TEMPLATES, definitionFor, templateLanguages } from '../src/services/whatsapp/templates.js';
 
 const API = process.env.WA_API_VERSION || 'v21.0';
 const TOKEN = process.env.WA_TOKEN;
@@ -32,7 +32,8 @@ async function fetchExisting() {
   const res = await graph(`${WABA}/message_templates?limit=200&fields=name,status,category,language`);
   const json = await res.json();
   if (!res.ok) throw new Error(json?.error?.message || 'Lecture des templates impossible');
-  return new Map((json.data || []).map((t) => [t.name, t]));
+  // Un meme NOM porte plusieurs langues chez Meta : la cle doit inclure la langue.
+  return new Map((json.data || []).map((t) => [`${t.name}:${t.language}`, t]));
 }
 
 /** Traduit une définition du registre en payload attendu par l'API Meta. */
@@ -54,30 +55,38 @@ const run = async () => {
 
   const envLines = [];
   for (const [key, tpl] of Object.entries(TEMPLATES)) {
-    const def = tpl.definition;
-    const already = existing.get(def.name);
+    let toutesOk = true;
 
-    if (already) {
-      console.log(`• ${def.name.padEnd(28)} déjà présent — statut ${already.status}`);
-      envLines.push(`${tpl.env}=${def.name}`);
-      continue;
-    }
-    if (LIST_ONLY) {
-      console.log(`• ${def.name.padEnd(28)} ABSENT (clé « ${key} »)`);
-      continue;
+    // Une entree Meta par LANGUE, sous le meme nom de template.
+    for (const langue of templateLanguages(tpl)) {
+      const def = definitionFor(tpl, langue);
+      const etiquette = `${def.name} [${langue}]`.padEnd(34);
+      const already = existing.get(`${def.name}:${langue}`);
+
+      if (already) {
+        console.log(`• ${etiquette} deja present — statut ${already.status}`);
+        continue;
+      }
+      if (LIST_ONLY) {
+        console.log(`• ${etiquette} ABSENT (cle « ${key} »)`);
+        toutesOk = false;
+        continue;
+      }
+
+      const res = await graph(`${WABA}/message_templates`, {
+        method: 'POST',
+        body: JSON.stringify(toMetaPayload(def)),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        console.log(`✓ ${etiquette} cree — statut ${json.status || 'PENDING'}`);
+      } else {
+        console.error(`✗ ${etiquette} ECHEC — ${json?.error?.error_user_msg || json?.error?.message}`);
+        toutesOk = false;
+      }
     }
 
-    const res = await graph(`${WABA}/message_templates`, {
-      method: 'POST',
-      body: JSON.stringify(toMetaPayload(def)),
-    });
-    const json = await res.json();
-    if (res.ok) {
-      console.log(`✓ ${def.name.padEnd(28)} créé — statut ${json.status || 'PENDING'}`);
-      envLines.push(`${tpl.env}=${def.name}`);
-    } else {
-      console.error(`✗ ${def.name.padEnd(28)} ÉCHEC — ${json?.error?.error_user_msg || json?.error?.message}`);
-    }
+    if (toutesOk) envLines.push(`${tpl.env}=${tpl.definition.name}`);
   }
 
   if (envLines.length) {

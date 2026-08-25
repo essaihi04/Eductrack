@@ -21,6 +21,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import { runAsChatbot } from '../outboundGate.js';
 import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
+import { storeIncomingMedia, mediaPlaceholder, insertIncomingRow } from '../inboxMedia.js';
 import { markResponded } from '../../communicationTracking.js';
 import {
   saveProfilePhotoBuffer,
@@ -1126,7 +1127,7 @@ export async function handleIncomingWhatsAppMessage(args) {
   return runAsChatbot(() => handleIncomingImpl(args));
 }
 
-async function handleIncomingImpl({ from, text, id, schoolId, location = null, image = null }) {
+async function handleIncomingImpl({ from, text, id, schoolId, location = null, image = null, media = null }) {
   const phone = normalizePhone(from);
   console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"${location ? ` 📍(${location.lat},${location.lng})` : ''}${image ? ' 📷' : ''}`);
 
@@ -1158,7 +1159,7 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   if (!parentInfo) {
     // 1.bis Pas un parent → est-ce un « réceptionniste » déclaré par l'admin ?
     // Si oui, on bascule sur le chatbot IA « statistiques de l'école ».
-    if (location || image) {
+    if (location || image || media) {
       // Le chatbot réceptionniste ne gère que le texte (questions libres).
       console.log('[chatbot] Numéro non autorisé (média ignoré):', phone);
       return;
@@ -1211,21 +1212,24 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     return; // Silence total pour les inconnus (anti-bruit)
   }
 
-  // 2. Logger le message entrant
+  // 2. Logger le message entrant, pièce jointe archivée comprise.
+  //    Le média est rapatrié MAINTENANT : l'URL de Meta expire et exige le
+  //    token de l'app, elle serait inutilisable depuis la boîte de réception.
   const incomingCategory = categorizeIncoming?.(text) || 'pedagogical';
-  const { data: incomingMsg } = await supabaseAdmin
-    .from('whatsapp_incoming_messages')
-    .insert({
-      phone_e164: phone,
-      parent_id: parentInfo.parent_id,
-      school_id: parentInfo.school_id,
-      message_text: text || (location ? `📍 Localisation: ${location.lat},${location.lng}` : image ? '📷 Photo reçue' : ''),
-      provider_message_id: id,
-      processed: false,
-      category: incomingCategory,
-    })
-    .select()
-    .single();
+  const mediaCols = media ? await storeIncomingMedia(parentInfo.school_id || schoolId, media) : null;
+  const incomingMsg = await insertIncomingRow(supabaseAdmin, {
+    phone_e164: phone,
+    parent_id: parentInfo.parent_id,
+    school_id: parentInfo.school_id,
+    message_text: text
+      || (location ? `📍 Localisation: ${location.lat},${location.lng}` : '')
+      || mediaPlaceholder(media)
+      || (image ? '📷 Photo reçue' : ''),
+    provider_message_id: id,
+    processed: false,
+    category: incomingCategory,
+    ...(mediaCols || {}),
+  });
 
   // Tracking communications : ce message entrant vaut « réponse » (et lecture)
   // pour les envois récents adressés à ce parent.
@@ -1255,6 +1259,23 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // 2.ter Image partagée → photo de profil de l'enfant (avec confirmation)
   if (image) {
     await handlePhotoMessage({ image, caption: text, phone, parentInfo, incomingMsgId: incomingMsg?.id });
+    return;
+  }
+
+  // 2.quater Note vocale (ou autre pièce jointe) sans texte : le chatbot ne
+  // sait pas l'interpréter, mais le pire serait le silence — le parent croirait
+  // avoir parlé dans le vide. On accuse réception et on laisse la main à
+  // l'école : le message reste « en attente de réponse » dans sa boîte, avec
+  // l'audio réécoutable.
+  if (media && !String(text || '').trim()) {
+    const isVoice = media.kind === 'audio';
+    await sendText(
+      parentInfo.school_id, phone,
+      isVoice
+        ? `🎤 Votre message vocal a bien été reçu. L'équipe de *${parentInfo.school_name}* l'écoutera et vous répondra.\n\n_Pour une réponse immédiate, écrivez *menu*._`
+        : `📎 Votre pièce jointe a bien été reçue. L'équipe de *${parentInfo.school_name}* la consultera et vous répondra.\n\n_Pour une réponse immédiate, écrivez *menu*._`,
+    );
+    await markProcessed(incomingMsg?.id);
     return;
   }
 

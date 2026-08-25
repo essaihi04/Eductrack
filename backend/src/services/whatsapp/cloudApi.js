@@ -471,9 +471,32 @@ export async function parseIncoming(body) {
     };
   }
 
-  if (!text && !location && !image) return null;
+  // Tout média reçu (note vocale, photo, PDF, vidéo) est exposé sous une forme
+  // unique : la boîte de réception doit pouvoir l'archiver et le rejouer, quel
+  // que soit son type. `image` reste à part car il alimente aussi la photo de
+  // profil de l'élève.
+  let media = null;
+  const MEDIA_KINDS = [
+    ['audio', msg.audio], ['image', msg.image],
+    ['document', msg.document], ['video', msg.video], ['sticker', msg.sticker],
+  ];
+  for (const [kind, node] of MEDIA_KINDS) {
+    if (!node?.id) continue;
+    const mediaId = node.id;
+    media = {
+      kind,
+      mimetype: node.mime_type || null,
+      // Une note vocale n'a pas de nom de fichier : on en fabrique un lisible.
+      fileName: node.filename || `${kind}-${Date.now()}`,
+      voice: kind === 'audio' ? node.voice === true : false,
+      download: () => downloadCloudMedia(mediaId),
+    };
+    break;
+  }
 
-  return { from, text, id, schoolId, location, image };
+  if (!text && !location && !image && !media) return null;
+
+  return { from, text, id, schoolId, location, image, media };
 }
 
 // ─────────────────────────────────────────────────────────────────────────

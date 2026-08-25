@@ -22,7 +22,7 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import * as cloud from './cloudApi.js';
 import { sendText } from './index.js';
 import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
-import { getTemplate, buildComponents } from './templates.js';
+import { getTemplate, buildComponents, definitionFor } from './templates.js';
 
 /** Normalise un numéro pour la comparaison en base (E.164 sans espaces). */
 const norm = (phone) => String(phone || '').replace(/[^\d+]/g, '');
@@ -50,6 +50,29 @@ export async function serviceWindowOpen(phone) {
   return !!(data && data.length);
 }
 
+// Plages Unicode de l'alphabet arabe (arabe de base + supplements).
+const ARABE = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+/**
+ * Langue a employer pour un template proactif.
+ *
+ * Le chatbot detecte l'arabe sur le texte ENTRANT du parent ; ici il n'y a
+ * aucun texte a analyser puisque c'est l'ecole qui ecrit la premiere. On se
+ * fonde donc sur la langue du DERNIER message recu de ce numero. Repli : fr.
+ */
+export async function preferredLanguage(phone) {
+  const p = norm(phone);
+  if (!p) return 'fr';
+  const { data, error } = await supabaseAdmin
+    .from('whatsapp_incoming_messages')
+    .select('message_text')
+    .eq('phone_e164', p)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) return 'fr';
+  return ARABE.test(data?.[0]?.message_text || '') ? 'ar' : 'fr';
+}
+
 /**
  * Objet court tiré du corps d'un message, pour le template générique
  * « information » hors fenêtre 24 h. On prend la première ligne non vide,
@@ -74,7 +97,7 @@ export function subjectFromText(text) {
  * @param {Array}  opts.params      valeurs des {{1}}, {{2}}… dans l'ordre
  * @returns {Promise<{success:boolean, channel?:string, reason?:string, message?:string}>}
  */
-export async function sendUtility(schoolId, phone, { text, template, params = [] } = {}) {
+export async function sendUtility(schoolId, phone, { text, template, params = [], lang = null } = {}) {
   if (isOutboundBlocked()) {
     return { success: false, reason: 'outbound_disabled', message: OUTBOUND_DISABLED_MESSAGE };
   }
@@ -114,15 +137,16 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
   }
 
   // `tpl.name` = nom RÉELLEMENT approuvé chez Meta (variable d'environnement).
-  // `tpl.definition.name` n'est que le nom proposé au moment de la création.
+  // Chez Meta un même NOM porte plusieurs langues : seul `language` change.
+  const def = definitionFor(tpl, lang || (await preferredLanguage(phone)));
   const r = await cloud.sendTemplate(
     schoolId,
     phone,
     tpl.name,
-    tpl.definition.language || 'fr',
-    buildComponents(finalParams, tpl.definition.buttonPayloads || [])
+    def.language || 'fr',
+    buildComponents(finalParams, def.buttonPayloads || [])
   );
-  return { ...r, channel: 'template', paid: true };
+  return { ...r, channel: 'template', paid: true, lang: def.language };
 }
 
 /**
@@ -146,7 +170,7 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
  */
 export async function sendUtilityMedia(schoolId, phone, {
   buffer, fileName, mimetype = 'application/pdf', caption = '',
-  type = 'document', template = 'document', params = [],
+  type = 'document', template = 'document', params = [], lang = null,
 } = {}) {
   if (isOutboundBlocked()) {
     return { success: false, reason: 'outbound_disabled', message: OUTBOUND_DISABLED_MESSAGE };
@@ -176,9 +200,10 @@ export async function sendUtilityMedia(schoolId, phone, {
     };
   }
 
+  const def = definitionFor(tpl, lang || (await preferredLanguage(phone)));
   const r = await cloud.sendTemplate(
-    schoolId, phone, tpl.name, tpl.definition.language || 'fr', buildComponents(params, tpl.definition.buttonPayloads || [])
+    schoolId, phone, tpl.name, def.language || 'fr', buildComponents(params, def.buttonPayloads || [])
   );
   // Succès = l'ANNONCE est partie ; le PDF suivra quand le parent répondra.
-  return { ...r, channel: 'template_announce', paid: true, mediaDeferred: true };
+  return { ...r, channel: 'template_announce', paid: true, mediaDeferred: true, lang: def.language };
 }

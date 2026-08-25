@@ -48,6 +48,12 @@ export const TEMPLATES = {
       body: "Bonjour, l'établissement vous informe que {{1}} a été noté(e) absent(e) le {{2}}. Précision : {{3}}. Merci de justifier cette absence depuis votre espace parent.",
       example: ['Yassine Alaoui', 'lundi 25 août', 'matinée complète'],
     },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تُعلمكم المؤسسة أن {{1}} سُجّل(ت) غائبا(ة) يوم {{2}}. تفاصيل: {{3}}. يرجى تبرير هذا الغياب من فضاء ولي الأمر.',
+        example: ['ياسين العلوي', 'الاثنين 25 غشت', 'صباح كامل'],
+      },
+    },
   },
 
   note: {
@@ -60,6 +66,12 @@ export const TEMPLATES = {
       language: 'fr',
       body: 'Bonjour, une nouvelle note vient d\'être publiée pour {{1}} en {{2}}. Résultat : {{3}}. Le détail est disponible dans votre espace parent.',
       example: ['Yassine Alaoui', 'Mathématiques', '15,5/20'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تم نشر نقطة جديدة لـ {{1}} في مادة {{2}}. النتيجة: {{3}}. التفاصيل متوفرة في فضاء ولي الأمر.',
+        example: ['ياسين العلوي', 'الرياضيات', '15,5/20'],
+      },
     },
   },
 
@@ -74,6 +86,12 @@ export const TEMPLATES = {
       body: 'Bonjour, votre facture pour {{1}} ({{2}}) est disponible. Montant à régler : {{3}}. Retrouvez le document détaillé dans votre espace parent.',
       example: ['Yassine Alaoui', 'septembre 2026', '1 200,00 MAD'],
     },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، فاتورتكم الخاصة بـ {{1}} ({{2}}) متوفرة. المبلغ المطلوب: {{3}}. تجدون الوثيقة المفصلة في فضاء ولي الأمر.',
+        example: ['ياسين العلوي', 'شتنبر 2026', '1 200,00 درهم'],
+      },
+    },
   },
 
   devoir: {
@@ -86,6 +104,12 @@ export const TEMPLATES = {
       language: 'fr',
       body: 'Bonjour, un nouveau devoir a été donné à {{1}} en {{2}}, à rendre pour le {{3}}. L\'énoncé complet est consultable dans votre espace parent.',
       example: ['Yassine Alaoui', 'Français', 'vendredi 29 août'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تم إسناد واجب جديد لـ {{1}} في مادة {{2}}، يُسلَّم يوم {{3}}. نص الواجب كاملا في فضاء ولي الأمر.',
+        example: ['ياسين العلوي', 'اللغة الفرنسية', 'الجمعة 29 غشت'],
+      },
     },
   },
 
@@ -108,6 +132,18 @@ export const TEMPLATES = {
       // chatbot ne reconnaît pas (il attend transport_yes / transport_no).
       buttonPayloads: ['transport_yes', 'transport_no'],
     },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، انطلقت الحافلة المدرسية ({{1}}). ردّوا على هذه الرسالة لتتبّع الرحلة مباشرة اليوم، دون رسوم.',
+        example: ['نقل الصباح'],
+        // Les boutons sont traduits, mais les charges utiles restent
+        // identiques : c'est elles que le chatbot reconnaît, pas le libellé.
+        buttons: [
+          { type: 'QUICK_REPLY', text: 'تتبّع الرحلة' },
+          { type: 'QUICK_REPLY', text: 'ليس اليوم' },
+        ],
+      },
+    },
   },
 
   rendezVous: {
@@ -121,6 +157,12 @@ export const TEMPLATES = {
       body: 'Bonjour, votre rendez-vous « {{1}} » est confirmé pour le {{2}}, avec {{3}}. Répondez à ce message si vous souhaitez le modifier.',
       example: ['Réunion de suivi', 'mardi 26 août à 15h00', 'M. Bennani'],
     },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تم تأكيد موعدكم « {{1}} » يوم {{2}}، مع {{3}}. ردّوا على هذه الرسالة إذا رغبتم في تعديله.',
+        example: ['لقاء متابعة', 'الثلاثاء 26 غشت على الساعة 15:00', 'السيد بناني'],
+      },
+    },
   },
 
   document: {
@@ -133,6 +175,12 @@ export const TEMPLATES = {
       language: 'fr',
       body: 'Bonjour, un document concernant {{1}} est disponible : {{2}}. Répondez à ce message pour le recevoir directement ici, ou consultez votre espace parent.',
       example: ['Yassine Alaoui', 'bulletin du 1er semestre'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تتوفر وثيقة تخص {{1}}: {{2}}. ردّوا على هذه الرسالة لاستلامها هنا مباشرة، أو اطّلعوا على فضاء ولي الأمر.',
+        example: ['ياسين العلوي', 'نقطة الدورة الأولى'],
+      },
     },
   },
 
@@ -149,8 +197,33 @@ export const TEMPLATES = {
       body: 'Bonjour, votre établissement scolaire souhaite vous transmettre une information au sujet de : {{1}}. Répondez à ce message pour en recevoir le détail, ou consultez votre espace parent.',
       example: ['la sortie pédagogique du 12 septembre'],
     },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تودّ مؤسستكم التعليمية إبلاغكم بمعلومة بخصوص: {{1}}. ردّوا على هذه الرسالة لتلقّي التفاصيل، أو اطّلعوا على فضاء ولي الأمر.',
+        example: ['الخرجة التربوية ليوم 12 شتنبر'],
+      },
+    },
   },
 };
+
+/**
+ * Définition d'un template dans une langue donnée, avec repli sur la langue de
+ * base (français). Chez Meta, un même NOM porte plusieurs langues : seul le
+ * champ `language` change à l'envoi, jamais le nom.
+ */
+export function definitionFor(tpl, lang) {
+  const base = tpl.definition;
+  const tr = tpl.translations?.[lang];
+  if (!tr || lang === base.language) return base;
+  // `buttonPayloads` vient de la base : les libellés sont traduits, pas les
+  // charges utiles — c'est elles que le chatbot reconnaît.
+  return { ...base, ...tr, language: lang };
+}
+
+/** Toutes les langues déclarées pour un template (base + traductions). */
+export function templateLanguages(tpl) {
+  return [tpl.definition.language, ...Object.keys(tpl.translations || {})];
+}
 
 /** Template résolu par clé logique, ou null s'il n'est pas encore configuré. */
 export function getTemplate(key) {
