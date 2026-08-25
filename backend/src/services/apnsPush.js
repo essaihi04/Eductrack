@@ -80,7 +80,7 @@ function buildPayload(payload) {
   const body = {
     aps: {
       alert: {
-        title: String(payload.title || 'Eductrack'),
+        title: String(payload.title || 'Bousole'),
         body: String(payload.body || ''),
         ...(payload.schoolName ? { subtitle: String(payload.schoolName) } : {}),
       },

@@ -57,14 +57,14 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Eductrack utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
+	<string>Bousole utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Eductrack utilise l'appareil photo pour prendre la photo d'un élève ou photographier un document à joindre à son dossier.</string>
+	<string>Bousole utilise l'appareil photo pour prendre la photo d'un élève ou photographier un document à joindre à son dossier.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Eductrack accède à vos photos pour joindre une image à un dossier élève, un devoir ou un message envoyé aux parents.</string>
+	<string>Bousole accède à vos photos pour joindre une image à un dossier élève, un devoir ou un message envoyé aux parents.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Eductrack enregistre dans votre photothèque les images et documents que vous téléchargez depuis l'application.</string>
+	<string>Bousole enregistre dans votre photothèque les images et documents que vous téléchargez depuis l'application.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Eductrack utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
+	<string>Bousole utilise votre position GPS pour suivre les trajets de bus en temps réel et guider la navigation pendant les tournées.</string>
 </dict>
 </plist>

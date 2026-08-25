@@ -1,4 +1,4 @@
-# Publier Eductrack sur l'App Store
+# Publier Bousole sur l'App Store
 
 Tout le code nécessaire est en place. Ce qui reste est **côté Apple** : des comptes,
 des clés et des secrets GitHub. Cette page est la marche à suivre.
@@ -19,7 +19,7 @@ des clés et des secrets GitHub. Cette page est la marche à suivre.
    - Bundle ID (explicit) : `org.edtrack.app`
    - Capabilities : cocher **Push Notifications**
 2. **App Store Connect** → *Mes apps* → **+** → Nouvelle app
-   - Plateforme iOS, bundle ID `org.edtrack.app`, nom « Eductrack ».
+   - Plateforme iOS, bundle ID `org.edtrack.app`, nom « Bousole ».
 
 ## 3. Clé APNs (notifications)
 
@@ -47,7 +47,7 @@ Depuis un Mac (ou via le portail Developer si vous générez la CSR ailleurs) :
 1. Certificat **Apple Distribution** → l'exporter depuis Trousseau d'accès en `.p12`
    avec un mot de passe.
 2. *Profiles* → **+** → **App Store Connect** → App ID `org.edtrack.app` → certificat
-   ci-dessus. Donner un nom clair, par ex. `Eductrack App Store`, puis télécharger
+   ci-dessus. Donner un nom clair, par ex. `Bousole App Store`, puis télécharger
    le `.mobileprovision`.
 
 ## 5. Clé API App Store Connect (envoi automatique)
@@ -64,7 +64,7 @@ App Store Connect → *Utilisateurs et accès* → *Intégrations* → **Clés d
 | `IOS_CERT_P12_BASE64` | le `.p12` encodé en base64 |
 | `IOS_CERT_P12_PASSWORD` | mot de passe du `.p12` |
 | `IOS_PROVISION_BASE64` | le `.mobileprovision` encodé en base64 |
-| `IOS_PROVISION_NAME` | nom exact du profil (`Eductrack App Store`) |
+| `IOS_PROVISION_NAME` | nom exact du profil (`Bousole App Store`) |
 | `IOS_TEAM_ID` | Team ID Apple |
 | `ASC_KEY_ID` | Key ID de la clé App Store Connect |
 | `ASC_ISSUER_ID` | Issuer ID |

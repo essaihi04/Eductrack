@@ -97,7 +97,7 @@ export async function sendFcmToUser(userId, payload) {
   const message = {
     tokens,
     data: {
-      title: String(payload.title || 'Eductrack'),
+      title: String(payload.title || 'Bousole'),
       body: String(payload.body || ''),
       url: String(payload.url || '/'),
       ...(payload.tag ? { tag: String(payload.tag) } : {}),
