@@ -23,6 +23,15 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 // avec la barre d'onglets interne.
 const ADMIN_HUB_ROLES = ['admin', 'school_admin', 'pedagogical_director', 'pedagogical_manager'];
 
+// Catégories d'activité proposées pour la fiche WhatsApp de l'établissement
+// (sous-ensemble de l'énumération Meta, celles qui ont un sens pour une école).
+const WA_VERTICALS = [
+  { value: 'EDU', label: 'Éducation' },
+  { value: 'NONPROFIT', label: 'Association / à but non lucratif' },
+  { value: 'PROF_SERVICES', label: 'Services professionnels' },
+  { value: 'OTHER', label: 'Autre' },
+];
+
 const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null }) => {
   const { profile } = useAuth();
   const { year } = useYear(); // année active : scope les classes/destinataires
@@ -962,7 +971,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
         email: data.profile?.email || '',
         address: data.profile?.address || '',
         website: data.profile?.websites?.[0] || '',
-        vertical: data.profile?.vertical || 'EDU',
+        // Meta renvoie la chaîne « UNDEFINED » quand aucune catégorie n'est
+        // définie — la relui renvoyer telle quelle fait échouer la mise à jour
+        // (erreur #100). Toute valeur hors de nos options retombe sur EDU.
+        vertical: WA_VERTICALS.some((v) => v.value === data.profile?.vertical)
+          ? data.profile.vertical
+          : 'EDU',
       });
     } catch (e) {
       console.error('Erreur fetch profil WhatsApp:', e);
@@ -3663,10 +3677,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     <select value={waProfileForm.vertical}
                       onChange={(e) => setWaProfileForm({ ...waProfileForm, vertical: e.target.value })}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
-                      <option value="EDU">Éducation</option>
-                      <option value="NONPROFIT">Association / à but non lucratif</option>
-                      <option value="PROF_SERVICES">Services professionnels</option>
-                      <option value="OTHER">Autre</option>
+                      {WA_VERTICALS.map((v) => (
+                        <option key={v.value} value={v.value}>{v.label}</option>
+                      ))}
                     </select>
                   </div>
                   <div>

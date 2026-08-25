@@ -1651,6 +1651,14 @@ router.post('/cloud/verify', async (req, res) => {
 // WhatsApp : sa photo de profil et sa fiche entreprise ne peuvent plus être
 // changées depuis le téléphone. Ces deux routes rendent la main à l'école.
 
+// Catégories d'activité acceptées par Meta pour la fiche entreprise.
+const WA_VERTICALS = [
+  'OTHER', 'AUTO', 'BEAUTY', 'APPAREL', 'EDU', 'ENTERTAIN', 'EVENT_PLAN',
+  'FINANCE', 'GROCERY', 'GOVT', 'HOTEL', 'HEALTH', 'NONPROFIT',
+  'PROF_SERVICES', 'RETAIL', 'TRAVEL', 'RESTAURANT', 'ALCOHOL',
+  'ONLINE_GAMBLING', 'PHYSICAL_GAMBLING', 'OTC_DRUGS', 'MATRIMONY_SERVICE',
+];
+
 // Photo de profil WhatsApp : carrée, JPEG. Meta refuse en dessous de 192 px et
 // recadre tout ce qui ne l'est pas — on normalise donc avant l'envoi.
 const toWhatsAppAvatar = async (buffer) => {
@@ -1718,7 +1726,12 @@ router.post('/cloud/profile', async (req, res) => {
     }
 
     // 2. Champs texte (facultatifs, indépendants de la photo)
-    const fields = { about, description, email, address, vertical };
+    // Catégorie d'activité : Meta n'accepte que son énumération, et renvoie
+    // « UNDEFINED » quand rien n'est défini. Renvoyer ce placeholder fait
+    // échouer toute la mise à jour (erreur #100) — on l'écarte, comme toute
+    // valeur inconnue, plutôt que de perdre les autres champs au passage.
+    const safeVertical = WA_VERTICALS.includes(vertical) ? vertical : undefined;
+    const fields = { about, description, email, address, vertical: safeVertical };
     if (Array.isArray(websites) && websites.length) fields.websites = websites.filter(Boolean);
     const hasFields = Object.values(fields).some((v) => v !== undefined && v !== null && v !== '');
 
