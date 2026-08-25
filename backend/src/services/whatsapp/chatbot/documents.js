@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText, sendDocument } from '../index.js';
+import { sendUtility, serviceWindowOpen } from '../utility.js';
 import { normalizeText } from './knowledge.js';
 
 /** Catégories diffusables telles quelles (« fournitures » en est exclue). */
@@ -119,6 +120,18 @@ export async function sendOfficialDocument({ schoolId, phone, category, schoolNa
   if (!doc) return false;
 
   const { label } = DOCUMENT_LABELS[doc.category] || DOCUMENT_LABELS.autre;
+
+  // Hors fenêtre 24 h — diffusion proactive de rentrée — Meta refuse le PDF
+  // comme le texte libre. On annonce le document par template ; la réponse du
+  // parent rouvre la fenêtre et le fichier part alors normalement.
+  if (!(await serviceWindowOpen(phone))) {
+    const ann = await sendUtility(schoolId, phone, {
+      template: 'documentEcole',
+      params: [doc.title || label],
+    });
+    return !!ann?.success;
+  }
+
   await sendText(schoolId, phone, `📄 Je vous envoie *${doc.title || label}*…`);
 
   const res = await sendDocument(

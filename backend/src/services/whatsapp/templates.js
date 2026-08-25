@@ -206,6 +206,34 @@ export const TEMPLATES = {
   },
 
   /**
+   * DOCUMENT OFFICIEL DE L'ÉCOLE — règlement intérieur, calendrier scolaire,
+   * dossier d'inscription, menu de cantine, circuit de bus.
+   *
+   * Le chatbot sait déjà envoyer ces PDF (chatbot/documents.js), mais
+   * uniquement quand le parent les réclame. Ce template permet de les
+   * diffuser à la rentrée. UN SEUL template pour les six catégories : le
+   * type passe en paramètre, ce qui évite six examens Meta distincts.
+   */
+  documentEcole: {
+    env: 'WA_TPL_DOC_ECOLE',
+    name: process.env.WA_TPL_DOC_ECOLE || null,
+    params: ['typeDocument'],
+    definition: {
+      name: 'document_ecole',
+      category: 'UTILITY',
+      language: 'fr',
+      body: 'Bonjour, votre établissement met à votre disposition le document suivant : {{1}}. Répondez à ce message pour le recevoir en PDF, ou consultez votre espace parent.',
+      example: ['Règlement intérieur'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، تضع مؤسستكم رهن إشارتكم الوثيقة التالية: {{1}}. ردّوا على هذه الرسالة لاستلامها بصيغة PDF، أو اطّلعوا عليها في فضاء ولي الأمر.',
+        example: ['النظام الداخلي'],
+      },
+    },
+  },
+
+  /**
    * FOURNITURES SCOLAIRES.
    *
    * La réponse existe déjà dans le chatbot (chatbot/supplies.js) mais ne part
