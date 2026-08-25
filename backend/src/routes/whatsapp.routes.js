@@ -784,12 +784,16 @@ router.get('/messages/:messageId/details', async (req, res) => {
   try {
     const { messageId } = req.params;
 
+    const schoolId = getSchoolId(req);
+
+    let msgQ = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('*, sender:profiles!whatsapp_messages_sent_by_fkey(first_name, last_name)')
+      .eq('id', messageId);
+    if (schoolId) msgQ = msgQ.eq('school_id', schoolId);   // pas d'accès inter-écoles
+
     const [msgRes, recipientsRes] = await Promise.all([
-      supabaseAdmin
-        .from('whatsapp_messages')
-        .select('*, sender:profiles!whatsapp_messages_sent_by_fkey(first_name, last_name)')
-        .eq('id', messageId)
-        .single(),
+      msgQ.single(),
       supabaseAdmin
         .from('whatsapp_message_recipients')
         .select('*, parent:profiles(first_name, last_name)')
@@ -798,10 +802,51 @@ router.get('/messages/:messageId/details', async (req, res) => {
     ]);
 
     if (msgRes.error) throw msgRes.error;
+    const recipients = recipientsRes.data || [];
+
+    // Classe de chaque destinataire : un nom de parent seul ne dit pas à qui on
+    // a écrit. « Mme Alaoui (6ème A) » se relit d'un coup d'œil, et permet de
+    // vérifier qu'une campagne a bien visé les bonnes classes.
+    const parentIds = [...new Set(recipients.map(r => r.parent_id).filter(Boolean))];
+    if (parentIds.length) {
+      const links = await selectInChunks(parentIds, (chunk) =>
+        supabaseAdmin.from('parent_students').select('parent_id, student_id').in('parent_id', chunk));
+
+      const studentIds = [...new Set((links || []).map(l => l.student_id).filter(Boolean))];
+      const students = studentIds.length
+        ? await selectInChunks(studentIds, (chunk) =>
+            supabaseAdmin
+              .from('profiles')
+              .select('id, first_name, last_name, class_id, classes!fk_profiles_class(name)')
+              .in('id', chunk))
+        : [];
+
+      const studentById = new Map((students || []).map(st => [st.id, st]));
+      const childrenByParent = new Map();
+      for (const l of links || []) {
+        const st = studentById.get(l.student_id);
+        if (!st) continue;
+        const list = childrenByParent.get(l.parent_id) || [];
+        list.push({
+          id: st.id,
+          name: `${st.first_name || ''} ${st.last_name || ''}`.trim(),
+          className: st.classes?.name || null,
+        });
+        childrenByParent.set(l.parent_id, list);
+      }
+
+      recipients.forEach(r => {
+        const children = childrenByParent.get(r.parent_id) || [];
+        r.children = children;
+        // Une famille peut avoir plusieurs enfants dans l'école : on liste les
+        // classes distinctes, sans répétition.
+        r.classNames = [...new Set(children.map(c => c.className).filter(Boolean))];
+      });
+    }
 
     res.json({
       message: msgRes.data,
-      recipients: recipientsRes.data || []
+      recipients,
     });
   } catch (error) {
     console.error('Erreur détails message:', error);

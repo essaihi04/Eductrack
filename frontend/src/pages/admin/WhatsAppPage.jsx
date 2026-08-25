@@ -4419,6 +4419,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                                 <span className="flex-1 min-w-0 truncate text-gray-700">
                                   {r.parent ? `${r.parent.first_name || ''} ${r.parent.last_name || ''}`.trim() : (r.phone_e164 || '📲 App')}
                                   {r.parent && r.phone_e164 && <span className="text-gray-400 text-xs ml-1">· {r.phone_e164}</span>}
+                                  {r.classNames?.length > 0 && (
+                                    <span className="text-indigo-600 text-[11px] ml-1">· 🎓 {r.classNames.join(' · ')}</span>
+                                  )}
                                 </span>
                                 <span className="flex-shrink-0 flex gap-1">
                                   {!r.read_at && <span className="text-[9px] px-1 rounded bg-amber-50 text-amber-600">non vu</span>}
@@ -4471,6 +4474,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                         <div className="min-w-0">
                           <span className="text-gray-700">{r.phone_e164 || '📲 App uniquement'}</span>
                           {r.parent && <span className="text-gray-500 ml-2 text-xs">({r.parent.first_name} {r.parent.last_name})</span>}
+                          {r.classNames?.length > 0 && (
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium"
+                              title={(r.children || []).map(c => `${c.name}${c.className ? ` — ${c.className}` : ''}`).join(' | ')}>
+                              🎓 {r.classNames.join(' · ')}
+                            </span>
+                          )}
                         </div>
                         <span className={`text-xs font-medium flex-shrink-0 ${r.status === 'sent' ? 'text-green-600' : r.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>
                           {r.status === 'sent' ? '✓ Envoyé' : r.status === 'failed' ? '✗ Échec' : '...'}
