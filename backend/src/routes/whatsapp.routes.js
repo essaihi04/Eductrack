@@ -50,6 +50,20 @@ const selectPaged = async (queryFn, max = 3000, label = '') => {
   return out;
 };
 
+// whatsapp_incoming_messages.received_at est un TIMESTAMP *sans* fuseau
+// (table d'origine du chatbot). PostgREST le renvoie donc « 2026-08-25T10:14:02 »,
+// que le navigateur interprète comme une heure LOCALE alors que la valeur est en
+// UTC : une heure d'écart au Maroc. Conséquences visibles : réponse d'un parent
+// affichée AVANT le message auquel elle répond, et conversation qui ne remonte
+// pas en tête. On marque explicitement l'UTC.
+// (ADD_WHATSAPP_TIMESTAMPTZ.sql corrige la colonne ; ceci reste sans effet une
+// fois la migration passée, la date portant alors déjà son fuseau.)
+const asUtc = (value) => {
+  if (!value) return value;
+  const s = String(value);
+  return /(Z|[+-]\d{2}:?\d{2})$/.test(s) ? s : `${s.replace(' ', 'T')}Z`;
+};
+
 const selectInChunks = async (ids, queryFn, chunkSize = 200) => {
   const out = [];
   for (let i = 0; i < ids.length; i += chunkSize) {
@@ -1134,7 +1148,11 @@ router.get('/conversations', async (req, res) => {
           lastIncomingAt: null,
           totalSent: 0,
           totalFailed: 0,
-          totalReceived: 0
+          totalReceived: 0,
+          // Dates du dernier succès et du dernier échec vers ce numéro :
+          // elles disent si un échec a depuis été rattrapé par un renvoi.
+          lastSentOkAt: null,
+          lastFailedAt: null
         };
       } else if (!conversationMap[phone].parentId && parentId) {
         const parent = parentMap[parentId];
@@ -1177,8 +1195,16 @@ router.get('/conversations', async (req, res) => {
         });
       }
 
-      if (r.status === 'sent') conversationMap[phone].totalSent++;
-      if (r.status === 'failed') conversationMap[phone].totalFailed++;
+      const conv = conversationMap[phone];
+      const at = r.sent_at || msg?.created_at || null;
+      if (r.status === 'sent') {
+        conv.totalSent++;
+        if (at && (!conv.lastSentOkAt || new Date(at) > new Date(conv.lastSentOkAt))) conv.lastSentOkAt = at;
+      }
+      if (r.status === 'failed') {
+        conv.totalFailed++;
+        if (at && (!conv.lastFailedAt || new Date(at) > new Date(conv.lastFailedAt))) conv.lastFailedAt = at;
+      }
     });
 
     // ── Messages ENTRANTS (réponses des parents, des professeurs, visiteurs) ──
@@ -1243,12 +1269,13 @@ router.get('/conversations', async (req, res) => {
         mediaMimetype: r.media_mimetype || null,
         fileName: r.media_filename || null,
         status: 'received',
-        createdAt: r.received_at,
+        createdAt: asUtc(r.received_at),
         direction: 'incoming'
       });
       conv.totalReceived++;
-      if (!conv.lastIncomingAt || new Date(r.received_at) > new Date(conv.lastIncomingAt)) {
-        conv.lastIncomingAt = r.received_at;
+      const receivedAt = asUtc(r.received_at);
+      if (!conv.lastIncomingAt || new Date(receivedAt) > new Date(conv.lastIncomingAt)) {
+        conv.lastIncomingAt = receivedAt;
       }
       if (r.ai_response_text) {
         conv.messages.push({
@@ -1257,7 +1284,7 @@ router.get('/conversations', async (req, res) => {
           messageType: 'text',
           status: r.ai_response_sent ? 'sent' : 'pending',
           // +1 s pour que la réponse du bot se place après la question
-          createdAt: new Date(new Date(r.received_at).getTime() + 1000).toISOString(),
+          createdAt: new Date(new Date(asUtc(r.received_at)).getTime() + 1000).toISOString(),
           senderName: '🤖 Chatbot',
           direction: 'outgoing',
           isBot: true
@@ -1354,6 +1381,13 @@ router.get('/conversations', async (req, res) => {
             Math.abs(new Date(l.createdAt).getTime() - t) < 120000);
         });
       }
+      // Un échec suivi d'un envoi réussi vers le MÊME numéro n'est plus un
+      // problème : c'est le cas de tous les échecs hérités de l'ancien
+      // fournisseur, renvoyés depuis avec l'API Cloud. Les garder dans le
+      // filtre « Échoués » noierait les vrais échecs à traiter.
+      conv.hasUnresolvedFailure = !!conv.lastFailedAt &&
+        (!conv.lastSentOkAt || new Date(conv.lastFailedAt) > new Date(conv.lastSentOkAt));
+
       conv.messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       const last = conv.messages[conv.messages.length - 1];
       conv.lastMessageAt = last ? last.createdAt : null;

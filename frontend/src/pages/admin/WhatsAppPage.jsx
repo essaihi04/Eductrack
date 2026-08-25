@@ -817,7 +817,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       (inboxFilter === 'awaiting' && conv.awaitingReply) ||
       (inboxFilter === 'received' && conv.totalReceived > 0) ||
       (inboxFilter === 'sent' && conv.totalSent > 0) ||
-      (inboxFilter === 'failed' && conv.totalFailed > 0);
+      // Un échec déjà rattrapé par un renvoi réussi vers le même numéro n'a
+      // plus à figurer ici (cas des échecs hérités de l'ancien fournisseur).
+      (inboxFilter === 'failed' && (conv.hasUnresolvedFailure ?? conv.totalFailed > 0));
     return matchesSearch && matchesFilter;
   });
 
@@ -1600,7 +1602,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   };
 
   const inboxTotalSent = conversations.reduce((s, c) => s + c.totalSent, 0);
-  const inboxTotalFailed = conversations.reduce((s, c) => s + c.totalFailed, 0);
+  const inboxTotalFailed = conversations.filter(c => c.hasUnresolvedFailure ?? c.totalFailed > 0).length;
   const inboxTotalReceived = conversations.reduce((s, c) => s + (c.totalReceived || 0), 0);
   const inboxTotalMessages = conversations.reduce((s, c) => s + c.messageCount, 0);
 
@@ -2566,7 +2568,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
               <span className="text-[11px] text-gray-600"><strong className="text-gray-900">{conversations.length}</strong> conv.</span>
               <span className="text-[11px] text-green-600"><strong>{inboxTotalSent}</strong> envoyés</span>
               <span className="text-[11px] text-blue-600"><strong>{inboxTotalReceived}</strong> reçus</span>
-              {inboxTotalFailed > 0 && <span className="text-[11px] text-red-500"><strong>{inboxTotalFailed}</strong> échoués</span>}
+              {inboxTotalFailed > 0 && <span className="text-[11px] text-red-500" title="Conversations dont le dernier envoi a échoué (les échecs déjà rattrapés par un renvoi ne comptent pas)"><strong>{inboxTotalFailed}</strong> à renvoyer</span>}
               {awaitingCount > 0 && <span className="text-[11px] text-amber-600"><strong>{awaitingCount}</strong> à répondre</span>}
               <div className="ml-auto flex bg-gray-100 rounded p-0.5">
                 <button onClick={() => setInboxView('conversations')}
