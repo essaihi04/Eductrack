@@ -830,11 +830,22 @@ router.post('/messages/:messageId/resend', async (req, res) => {
     // Salutation nominative : une relance nommait jusqu'ici personne, alors que
     // les communications planifiées savaient déjà s'adresser au parent.
     const personalize = req.body?.personalize === true;
-    // Planification : ISO ou null. Une date passée = envoi immédiat.
+    // Planification : ISO, ou null pour un envoi immédiat.
     const scheduledAt = req.body?.scheduled_at && !Number.isNaN(Date.parse(req.body.scheduled_at))
       ? new Date(req.body.scheduled_at)
       : null;
-    const runAfter = scheduledAt && scheduledAt.getTime() > Date.now() ? scheduledAt.toISOString() : null;
+    // Une date déjà passée partait AUSSITÔT, sans rien dire : l'utilisateur
+    // croyait avoir programmé un envoi et le voyait partir sous ses yeux. On
+    // refuse plutôt, en indiquant l'heure du serveur (un poste mal réglé est
+    // la cause la plus fréquente d'un décalage).
+    if (scheduledAt && scheduledAt.getTime() <= Date.now()) {
+      return res.status(400).json({
+        error: `Date de planification déjà passée (${scheduledAt.toLocaleString('fr-FR', { timeZone: 'Africa/Casablanca' })}). `
+          + `Il est ${new Date().toLocaleString('fr-FR', { timeZone: 'Africa/Casablanca' })} au Maroc. `
+          + `Choisissez une date future, ou laissez le champ vide pour envoyer maintenant.`,
+      });
+    }
+    const runAfter = scheduledAt ? scheduledAt.toISOString() : null;
     const wantWa = channel !== 'app';
     const wantPush = channel !== 'whatsapp';
 

@@ -3468,7 +3468,15 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                 <div>
                   <label className="text-xs font-semibold text-gray-700 block mb-1">Type</label>
                   <select value={commForm.type}
-                    onChange={(e) => setCommForm({ ...commForm, type: e.target.value })}
+                    onChange={(e) => setCommForm({
+                      ...commForm,
+                      type: e.target.value,
+                      // Un urgent part tout de suite : garder une date saisie
+                      // avant le changement de type la rendrait invisible ET
+                      // sans effet — l'envoi partirait « maintenant » sans
+                      // que personne ne comprenne pourquoi.
+                      ...(e.target.value === 'urgent' ? { scheduled_at: '', send_now: false } : {}),
+                    })}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500">
                     <option value="normal">🟢 Normal</option>
                     <option value="deadline">🟠 Avec date limite</option>
@@ -3676,6 +3684,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                 )}
               </div>
 
+              {commForm.type === 'urgent' && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  🔴 Un message <strong>urgent part immédiatement</strong> : la planification ne s'applique pas.
+                  Choisissez « Normal » pour programmer une date d'envoi.
+                </p>
+              )}
               {commForm.type !== 'urgent' && (
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="flex items-center gap-2 text-sm text-gray-700">
