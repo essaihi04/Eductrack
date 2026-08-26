@@ -22,8 +22,18 @@ export const isSessionReady = async (schoolId) => {
  * sur le template « information », qui annonce l'objet et invite le parent à
  * répondre. Sa réponse rouvre la fenêtre et le contenu complet peut suivre.
  */
-export async function sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName }) {
+export async function sendUnified(schoolId, phone, {
+  messageType, message, mediaUrl, fileName, templateKey = null, templateParams = [],
+}) {
   if (!(await serviceWindowOpen(phone))) {
+    // Campagne adossée à un template APPROUVÉ dont le corps porte le message
+    // entier : pas d'annonce, pas d'attente — le destinataire le lit du
+    // premier coup, même fenêtre fermée.
+    if (templateKey) {
+      return sendUtility(schoolId, phone, {
+        text: message || '', template: templateKey, params: templateParams,
+      });
+    }
     // Le texte est mis en attente par sendUtility (template d'annonce) ; le
     // MÉDIA, lui, ne voyage pas dans un template : on le met en attente ici
     // pour qu'il parte dès la première réponse du destinataire.

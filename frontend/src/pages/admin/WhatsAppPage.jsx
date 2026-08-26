@@ -87,6 +87,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [recipientCount, setRecipientCount] = useState(0);
   const [loadingRecipients, setLoadingRecipients] = useState(false);
   const [messageText, setMessageText] = useState('');
+  // Modèles Meta approuvés : un message dont le corps est déjà validé part EN
+  // ENTIER même hors fenêtre de 24 h, là où un texte libre serait seulement
+  // annoncé au parent (qui doit répondre pour le recevoir).
+  const [templates, setTemplates] = useState([]);
+  const [templateKey, setTemplateKey] = useState('');
+  const [templateParams, setTemplateParams] = useState([]);
   const [messageType, setMessageType] = useState('text');
   // Canal d'envoi : 'push' (app), 'whatsapp', 'both' (portée maximale)
   const [sendChannels, setSendChannels] = useState('both');
@@ -465,6 +471,52 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     if (activeTab === 'send') fetchHistory();
   }, [fetchHistory, activeTab]);
 
+  // Modèles approuvés, chargés une fois : la liste ne change qu'au rythme des
+  // validations de Meta, pas à chaque ouverture de l'onglet.
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const res = await fetch(`${apiUrl}/api/admin/whatsapp/templates`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setTemplates(await res.json());
+      } catch (error) {
+        console.error('Erreur modèles:', error);
+      }
+    })();
+  }, [apiUrl]);
+
+  const selectedTemplate = templates.find((t) => t.key === templateKey) || null;
+
+  /** Corps du modèle, variables remplacées par les valeurs saisies. */
+  const renderTemplate = useCallback((tpl, valeurs) => {
+    const corps = tpl.bodies?.fr || tpl.bodies?.[tpl.languages?.[0]] || '';
+    return (tpl.params || []).reduce(
+      (texte, _, i) => texte.replaceAll(`{{${i + 1}}}`, valeurs[i] || `{{${i + 1}}}`),
+      corps,
+    );
+  }, []);
+
+  /** Choix d'un modèle : le message devient son corps, non modifiable. */
+  const chooseTemplate = (key) => {
+    setTemplateKey(key);
+    if (!key) { setTemplateParams([]); return; }
+    const tpl = templates.find((t) => t.key === key);
+    if (!tpl) return;
+    const valeurs = (tpl.params || []).map((_, i) => tpl.example?.[i] || '');
+    setTemplateParams(valeurs);
+    setMessageType('text');
+    setMessageText(renderTemplate(tpl, valeurs));
+  };
+
+  const setTemplateParam = (index, valeur) => {
+    const valeurs = [...templateParams];
+    valeurs[index] = valeur;
+    setTemplateParams(valeurs);
+    if (selectedTemplate) setMessageText(renderTemplate(selectedTemplate, valeurs));
+  };
+
   const toggleClass = (classId) => {
     setSelectedClasses(prev => prev.includes(classId) ? prev.filter(id => id !== classId) : [...prev, classId]);
   };
@@ -571,7 +623,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory, channels: sendChannels })
+        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory, channels: sendChannels, templateKey: templateKey || null, templateParams })
       });
       const data = await res.json();
       if (data.success && data.messageId) {
@@ -2119,9 +2171,62 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                   )}
                 </div>
 
+                {/* Modèle approuvé — la seule façon de joindre un parent hors
+                    fenêtre de 24 h avec le message ENTIER. Un texte libre, lui,
+                    n'est alors qu'annoncé, et attend la réponse du parent. */}
+                {templates.length > 0 && sendChannels !== 'push' && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                        <FileText className="w-3 h-3" /> Modèle approuvé :
+                      </label>
+                      <select
+                        value={templateKey}
+                        onChange={(e) => chooseTemplate(e.target.value)}
+                        className="text-xs border border-gray-300 rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-green-500">
+                        <option value="">Message libre (annoncé hors 24 h)</option>
+                        {templates.map((t) => (
+                          <option key={t.key} value={t.key}>
+                            {t.name}{t.category === 'MARKETING' ? ' — marketing' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {selectedTemplate && (
+                      <>
+                        {(selectedTemplate.params || []).map((nom, i) => (
+                          <div key={nom} className="flex items-center gap-2">
+                            <label className="text-[11px] text-gray-500 w-40 flex-shrink-0">
+                              {`{{${i + 1}}}`} {nom}
+                            </label>
+                            <input
+                              type="text"
+                              value={templateParams[i] || ''}
+                              onChange={(e) => setTemplateParam(i, e.target.value)}
+                              placeholder={selectedTemplate.example?.[i] || ''}
+                              className="text-xs border border-gray-300 rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-green-500" />
+                          </div>
+                        ))}
+                        <p className="text-[11px] text-gray-500 leading-snug">
+                          Le corps du message est fixé par Meta : seules les valeurs ci-dessus changent.
+                          Envoyé en {selectedTemplate.languages?.join(' et ')} selon la langue de chaque parent.
+                        </p>
+                        {selectedTemplate.category === 'MARKETING' && (
+                          <p className="text-[11px] text-amber-600 flex items-start gap-1">
+                            <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                            Modèle marketing : jamais envoyé aux parents désabonnés, plafonné par Meta et facturé plus cher que l'utilitaire.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)}
+                  readOnly={!!selectedTemplate}
                   placeholder="Tapez votre message ici..." rows="5"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+                  className={`w-full rounded-lg border border-gray-300 px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-green-500 focus:border-green-500 ${selectedTemplate ? 'bg-gray-50 text-gray-600' : ''}`} />
 
                 {/* Sélecteur de catégorie — visible uniquement aux admins ; les responsables ont leur catégorie imposée */}
                 {(profile?.role === 'admin' || profile?.role === 'school_admin') ? (

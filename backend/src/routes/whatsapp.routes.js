@@ -5,6 +5,7 @@ import { generatePreview, generateComprehensivePreview } from '../services/daily
 import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
 import { sendText, getStatus } from '../services/whatsapp/index.js';
 import { sendUtility, sendUtilityMedia, serviceWindowOpen } from '../services/whatsapp/utility.js';
+import { TEMPLATES, getTemplate, templateLanguages, definitionFor } from '../services/whatsapp/templates.js';
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
 import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeEnrollmentMap, activeStudentIdSet } from '../utils/enrollmentScope.js';
@@ -148,6 +149,55 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
 // Cloud officielle (phone_number_id renseigné).
 // isSessionReady / sendUnified vivent désormais dans services/whatsapp/sendHelpers.js :
 // le job d'envoi de masse en a besoin aussi (voir import en tête de fichier).
+
+// ==================== MODÈLES META ====================
+
+/**
+ * Colonnes de template à joindre à une campagne, ou rien du tout.
+ *
+ * Une clé inconnue du registre, ou un template pas encore approuvé, ne doit
+ * PAS bloquer l'envoi : on l'ignore et la campagne repart sur le
+ * comportement habituel (texte libre dans la fenêtre, annonce en dehors).
+ */
+function templateColumns(templateKey, templateParams) {
+  if (!templateKey || !getTemplate(templateKey)) return {};
+  return {
+    template_key: templateKey,
+    template_params: Array.isArray(templateParams) ? templateParams : [],
+  };
+}
+
+/**
+ * GET /templates — modèles approuvés utilisables pour un envoi.
+ *
+ * L'école y choisit un message dont le corps est déjà validé par Meta : il
+ * part EN ENTIER même hors fenêtre de 24 h, là où un texte libre serait
+ * seulement annoncé. Les templates d'annonce sont exclus de la liste — les
+ * proposer n'aurait aucun intérêt, c'est déjà le repli automatique.
+ */
+router.get('/templates', async (req, res) => {
+  try {
+    const dispo = Object.entries(TEMPLATES)
+      .filter(([, tpl]) => tpl.name && !tpl.announce)
+      .map(([key, tpl]) => ({
+        key,
+        name: tpl.name,
+        params: tpl.params || [],
+        category: tpl.definition.category,
+        languages: templateLanguages(tpl),
+        // Corps de chaque langue : l'interface montre à l'école le message
+        // exact que le parent recevra, variables comprises.
+        bodies: Object.fromEntries(
+          templateLanguages(tpl).map((lang) => [lang, definitionFor(tpl, lang).body]),
+        ),
+        example: tpl.definition.example || [],
+      }));
+    res.json(dispo);
+  } catch (error) {
+    console.error('Erreur GET /templates:', error);
+    res.status(500).json({ error: error.message || 'Erreur serveur' });
+  }
+});
 
 // ==================== RECIPIENTS ====================
 
@@ -396,7 +446,7 @@ router.get('/recipients-list', async (req, res) => {
 // POST /send — send WhatsApp message to filtered parents
 router.post('/send', async (req, res) => {
   try {
-    const { message, type, mediaUrl, fileName, filter, category: requestedCategory } = req.body;
+    const { message, type, mediaUrl, fileName, filter, category: requestedCategory, templateKey, templateParams } = req.body;
     const schoolId = getSchoolId(req);
     const category = resolveCategoryForSending(requestedCategory, req.user?.role);
     // Canal(aux) d'envoi : 'whatsapp' (défaut, historique), 'push' (app), 'both'
@@ -523,7 +573,8 @@ router.post('/send', async (req, res) => {
         total_recipients: recipients.length,
         status: 'sending',
         category,
-        channels
+        channels,
+        ...templateColumns(templateKey, templateParams),
       })
       .select()
       .single();
@@ -604,7 +655,7 @@ router.post('/send', async (req, res) => {
 router.post('/send-direct', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { phone, message, type, mediaUrl, fileName, parentId, category: requestedCategory } = req.body;
+    const { phone, message, type, mediaUrl, fileName, parentId, category: requestedCategory, templateKey, templateParams } = req.body;
     const category = resolveCategoryForSending(requestedCategory, req.user?.role);
 
     if (!phone) {
@@ -659,7 +710,11 @@ router.post('/send-direct', async (req, res) => {
     });
 
     // Envoi via l'API Cloud
-    const result = await sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName });
+    const result = await sendUnified(schoolId, phone, {
+      messageType, message, mediaUrl, fileName,
+      templateKey: templateKey || null,
+      templateParams: Array.isArray(templateParams) ? templateParams : [],
+    });
 
     if (result.success) {
       await supabaseAdmin.from('whatsapp_message_recipients').update({

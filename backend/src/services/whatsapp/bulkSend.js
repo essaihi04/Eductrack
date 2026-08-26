@@ -28,11 +28,21 @@ class SendSuspended extends Error {}
 export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   const touch = ctx.touch || (async () => {});
 
-  const { data: msg, error: msgError } = await supabaseAdmin
+  const CHAMPS = 'id, school_id, message_type, content, media_url, file_name, channels, total_recipients, personalize, resend_of';
+  const lireMessage = (champs) => supabaseAdmin
     .from('whatsapp_messages')
-    .select('id, school_id, message_type, content, media_url, file_name, channels, total_recipients, personalize, resend_of')
+    .select(champs)
     .eq('id', messageId)
     .single();
+
+  // Les colonnes de template sont récentes : demander une colonne absente fait
+  // ÉCHOUER toute la requête, donc tout l'envoi. Tant que
+  // ADD_WHATSAPP_MESSAGE_TEMPLATE.sql n'est pas exécuté, on relit sans elles.
+  let { data: msg, error: msgError } = await lireMessage(`${CHAMPS}, template_key, template_params`);
+  if (msgError && /template_key|template_params|column|schema cache/i.test(msgError.message || '')) {
+    console.warn('[bulkSend] colonnes de template absentes — exécutez ADD_WHATSAPP_MESSAGE_TEMPLATE.sql');
+    ({ data: msg, error: msgError } = await lireMessage(CHAMPS));
+  }
 
   if (msgError || !msg) throw new Error(`Message ${messageId} introuvable`);
 
@@ -46,6 +56,11 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   const wantPush = channels !== 'whatsapp';
 
   const personalize = msg.personalize === true;
+
+  // Campagne adossée à un template Meta approuvé : hors fenêtre de 24 h, le
+  // message part EN ENTIER au lieu d'être seulement annoncé.
+  const templateKey = msg.template_key || null;
+  const templateParams = Array.isArray(msg.template_params) ? msg.template_params : [];
 
   const { data: allRecipients, error: recError } = await supabaseAdmin
     .from('whatsapp_message_recipients')
@@ -183,7 +198,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
           let body = message;
           if (personalize) body = withGreeting(body, nameByParent.get(recipient.parent_id));
           body = withOptOutNotice(body);
-          const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName });
+          const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName, templateKey, templateParams });
           if (result.success) {
             waOk = true;
             // Hors fenêtre 24 h, seule l'ANNONCE est partie : le message

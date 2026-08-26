@@ -243,6 +243,65 @@ export const TEMPLATES = {
   },
 
   /**
+   * MANUELS SCOLAIRES — offre de la maison d'édition partenaire.
+   *
+   * ⚠️ Seul template MARKETING du registre : il vante une offre commerciale
+   * (remises, éditeur partenaire) et Meta refuse ce contenu en UTILITY.
+   * Trois conséquences à connaître avant de l'employer :
+   *   • il ne part JAMAIS vers un parent désabonné (STOP) ;
+   *   • Meta plafonne les messages marketing reçus par utilisateur ;
+   *   • il est facturé au tarif marketing, plus élevé que l'utilitaire.
+   *
+   * Le corps porte le message ENTIER : rien à annoncer, rien à attendre — le
+   * parent le lit du premier coup, fenêtre de 24 h ouverte ou non. Le nom de
+   * l'école et le numéro du partenaire sont des paramètres : le registre est
+   * partagé par toutes les écoles du WABA, les inscrire en dur enverrait le
+   * message d'une école aux parents des autres.
+   */
+  manuels: {
+    env: 'WA_TPL_MANUELS',
+    name: process.env.WA_TPL_MANUELS || null,
+    params: ['ecole', 'telephonePartenaire'],
+    definition: {
+      name: 'manuels_scolaires',
+      category: 'MARKETING',
+      language: 'ar',
+      body: `تحية طيبة من {{1}} 📚
+
+حرصًا على توفير أفضل الظروف للتلاميذ وللاستفادة من أفضل خدمة في اقتناء الكتب المدرسية، يمكن للأسر اقتناء المقررات الدراسية مباشرة عبر دار النشر الشريكة، والاستفادة من:
+
+✅ الطبعات الجديدة والمنقحة والمعتمدة للسنة الدراسية.
+✅ تعويض المقرر مجانًا في حال ضياعه خلال السنة الدراسية، وفق شروط دار النشر.
+✅ تخفيضات خاصة على أثمنة الكتب.
+
+اختياركم يضمن الحصول على الكتب المعتمدة، بأحدث طبعاتها، مع خدمة مرافقة ومزايا إضافية.
+
+📞 للطلب والاستفسار — دار النشر الشريكة: {{2}}
+
+شكرًا لثقتكم وحرصكم على مصلحة أبنائكم 📖`,
+      example: ['Groupe Scolaire Marcel Arnaud', '+212 630-225807'],
+    },
+    translations: {
+      fr: {
+        body: `Bonjour, un message de {{1}} 📚
+
+Afin d'offrir les meilleures conditions aux élèves, les familles peuvent se procurer les manuels scolaires directement auprès de la maison d'édition partenaire, et bénéficier de :
+
+✅ Les éditions neuves, révisées et agréées pour l'année scolaire.
+✅ Le remplacement gratuit du manuel en cas de perte durant l'année, selon les conditions de l'éditeur.
+✅ Des remises spéciales sur le prix des livres.
+
+Votre choix garantit des ouvrages agréés, dans leur dernière édition, avec un accompagnement et des avantages supplémentaires.
+
+📞 Commandes et renseignements — maison d'édition partenaire : {{2}}
+
+Merci de votre confiance et de votre attention portée à vos enfants 📖`,
+        example: ['Groupe Scolaire Marcel Arnaud', '+212 630-225807'],
+      },
+    },
+  },
+
+  /**
    * DOCUMENT OFFICIEL DE L'ÉCOLE — règlement intérieur, calendrier scolaire,
    * dossier d'inscription, menu de cantine, circuit de bus.
    *
