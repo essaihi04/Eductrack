@@ -1443,6 +1443,56 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
 
   useEffect(() => { if (activeTab === 'planning') fetchComms(); }, [activeTab, fetchComms]);
 
+  // ── Période du tableau de bord des envois ────────────────────────────────
+  // 'all' | 'today' | 'week' | 'month' | 'custom'. Elle filtre la liste ET
+  // les indicateurs : un taux de lecture calculé sur toute l'année ne dit
+  // rien de l'envoi de ce matin.
+  const [commPeriod, setCommPeriod] = useState('all');
+  const [commFrom, setCommFrom] = useState('');
+  const [commTo, setCommTo] = useState('');
+
+  /** Une date tombe-t-elle dans la période choisie ? */
+  const dansPeriode = useCallback((iso) => {
+    if (commPeriod === 'all') return true;
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return false;
+    if (commPeriod === 'custom') {
+      if (commFrom && t < new Date(`${commFrom}T00:00:00`).getTime()) return false;
+      // Borne haute inclusive : « jusqu'au 26 » couvre toute la journée du 26.
+      if (commTo && t > new Date(`${commTo}T23:59:59`).getTime()) return false;
+      return true;
+    }
+    const jours = { today: 1, week: 7, month: 30 }[commPeriod] || 0;
+    return t >= Date.now() - jours * 24 * 3600 * 1000;
+  }, [commPeriod, commFrom, commTo]);
+
+  const commsFiltres = useMemo(
+    () => comms.filter((c) => dansPeriode(c.scheduled_at)),
+    [comms, dansPeriode],
+  );
+
+  // Contenus encore en attente de livraison, sur la même période.
+  const [pendingSummary, setPendingSummary] = useState({ messages: 0, parents: 0 });
+  useEffect(() => {
+    if (activeTab !== 'planning') return;
+    (async () => {
+      try {
+        const token = await getAuthToken();
+        const params = new URLSearchParams({ period: commPeriod });
+        if (commPeriod === 'custom') {
+          if (commFrom) params.append('from', commFrom);
+          if (commTo) params.append('to', commTo);
+        }
+        const res = await fetch(`${apiUrl}/api/admin/communications/pending-delivery?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setPendingSummary(await res.json());
+      } catch (e) {
+        console.error('Erreur en attente de livraison:', e);
+      }
+    })();
+  }, [activeTab, apiUrl, commPeriod, commFrom, commTo, comms]);
+
   // Agrégats « vue d'ensemble » des communications (bandeau KPI du planificateur).
   const commStats = useMemo(() => {
     const now = Date.now();
@@ -1450,7 +1500,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
     let targeted = 0, delivered = 0, read = 0, readApp = 0, readWa = 0, responded = 0, failed = 0;
     let upcoming = 0, sending = 0, sentThisMonth = 0, sentTotal = 0;
-    comms.forEach((c) => {
+    commsFiltres.forEach((c) => {
       const at = new Date(c.scheduled_at).getTime();
       if (c.status === 'scheduled' && at > now) upcoming++;
       if (c.status === 'sending') sending++;
@@ -1477,7 +1527,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       readRate: pct(read, delivered),
       responseRate: pct(responded, delivered),
     };
-  }, [comms]);
+  }, [commsFiltres]);
 
   // Sélection d'un fichier à joindre (image ou document) pour le planificateur
   const handleCommFileSelect = (e) => {
@@ -4034,13 +4084,43 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
             )}
 
             {/* Bandeau KPI — vue d'ensemble des communications */}
-            {comms.length > 0 && (
+            {commsFiltres.length > 0 && (
               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <BarChart3 className="w-4 h-4 text-indigo-600" />
                   <h3 className="text-sm font-semibold text-gray-800">Vue d'ensemble</h3>
+
+                  {/* Période — un taux de lecture calculé sur toute l'année ne
+                      dit rien de l'envoi de ce matin. */}
+                  <div className="flex items-center gap-1 flex-wrap ml-auto">
+                    {[
+                      { key: 'today', label: "Aujourd'hui" },
+                      { key: 'week', label: '7 jours' },
+                      { key: 'month', label: '30 jours' },
+                      { key: 'all', label: 'Tout' },
+                      { key: 'custom', label: 'Personnalisée' },
+                    ].map((p) => (
+                      <button key={p.key} type="button"
+                        onClick={() => setCommPeriod(p.key)}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${commPeriod === p.key ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+
+                {commPeriod === 'custom' && (
+                  <div className="flex items-center gap-2 flex-wrap mb-3">
+                    <label className="text-[11px] text-gray-500">Du</label>
+                    <input type="date" value={commFrom} onChange={(e) => setCommFrom(e.target.value)}
+                      className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500" />
+                    <label className="text-[11px] text-gray-500">au</label>
+                    <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)}
+                      className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
                   {/* Portée & remise */}
                   <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500"><Users className="w-3.5 h-3.5" /> Portée</div>
@@ -4069,6 +4149,15 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     <p className="text-base font-bold text-gray-800 mt-1">📲 {commStats.readApp} · 💬 {commStats.readWa}</p>
                     <p className="text-[11px] text-gray-500">{commStats.failed > 0 ? `${commStats.failed} échec(s)` : 'aucun échec'}</p>
                   </div>
+                  {/* En attente de livraison — le reliquat que le taux de
+                      remise masque : l'annonce est partie, le contenu non. */}
+                  <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-orange-700"><Clock className="w-3.5 h-3.5" /> À livrer</div>
+                    <p className="text-xl font-bold text-orange-700 mt-1">{pendingSummary.messages}</p>
+                    <p className="text-[11px] text-orange-600/80">
+                      {pendingSummary.parents} parent(s) · en attente de réponse
+                    </p>
+                  </div>
                   {/* Planning */}
                   <div className="rounded-lg border border-amber-100 bg-amber-50 p-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-700"><Calendar className="w-3.5 h-3.5" /> Planning</div>
@@ -4087,11 +4176,13 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                   <RefreshCw className={`w-4 h-4 ${commsLoading ? 'animate-spin' : ''}`} /> Actualiser
                 </button>
               </div>
-              {comms.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-6">Aucune communication.</p>
+              {commsFiltres.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-6">
+                  {comms.length === 0 ? 'Aucune communication.' : 'Aucune communication sur cette période.'}
+                </p>
               ) : (
                 <div className="space-y-2">
-                  {comms.map((c) => {
+                  {commsFiltres.map((c) => {
                     const badge = c.type === 'urgent' ? '🔴' : c.type === 'deadline' ? '🟠' : '🟢';
                     const statusColor = c.status === 'sent' ? 'text-green-600' : c.status === 'failed' ? 'text-red-600' : c.status === 'sending' ? 'text-amber-600' : 'text-gray-500';
                     const clickable = !!c.message_id; // envoi tracké → détail « qui a vu / répondu »
@@ -4112,6 +4203,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium" title="Parents ciblés / atteints">
                                 🎯 {c.metrics.targeted} ciblé(s) · ✓ {c.metrics.sent} atteint(s)
                               </span>
+                              {c.metrics.announced > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium"
+                                  title="Annoncés hors fenêtre 24 h — le contenu part dès que le parent répond">
+                                  ⏳ {c.metrics.announced} à livrer
+                                </span>
+                              )}
                               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${c.metrics.read > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}
                                 title={`${c.metrics.readApp} via l'app · ${c.metrics.readWa} via WhatsApp`}>
                                 👁 {c.metrics.read} vu(s){c.metrics.read > 0 && ` — 📲${c.metrics.readApp} 💬${c.metrics.readWa}`}

@@ -15,6 +15,51 @@ router.use(authorize('admin', 'school_admin', 'pedagogical_manager', 'pedagogica
 
 const getSchoolId = (req) => (req.user.role === 'super_admin' ? null : req.user.school_id || null);
 
+/**
+ * GET /pending-delivery — combien de contenus attendent encore leur livraison.
+ *
+ * Hors fenêtre de 24 h, seule l'annonce part : le message reste au statut
+ * « annoncé » jusqu'à ce que le parent écrive. Le tableau de bord des envois
+ * doit montrer ce reliquat, sinon un taux de remise de 100 % laisse croire
+ * que tout le monde a lu, alors que le contenu n'est jamais arrivé.
+ *
+ * Paramètres : period = today | week | month | all | custom (+ from / to).
+ */
+router.get('/pending-delivery', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { period, from: fromDate, to: toDate } = req.query;
+    const jours = { today: 1, week: 7, month: 30 }[period];
+    const from = jours ? new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString()
+      : (period === 'custom' && fromDate ? new Date(`${fromDate}T00:00:00`).toISOString() : null);
+    // Borne haute INCLUSIVE : « jusqu'au 26 » couvre toute la journée du 26.
+    const to = period === 'custom' && toDate
+      ? new Date(`${toDate}T23:59:59`).toISOString() : null;
+
+    let q = supabaseAdmin
+      .from('whatsapp_message_recipients')
+      .select('phone_e164, whatsapp_messages!inner(school_id)')
+      .eq('status', 'announced');
+    if (schoolId) q = q.eq('whatsapp_messages.school_id', schoolId);
+    if (from) q = q.gte('created_at', from);
+    if (to) q = q.lte('created_at', to);
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const lignes = data || [];
+    res.json({
+      messages: lignes.length,
+      parents: new Set(lignes.map((r) => r.phone_e164).filter(Boolean)).size,
+    });
+  } catch (e) {
+    // Colonne de statut absente ou table vide : un zéro vaut mieux qu'une
+    // page d'erreur pour une simple tuile de tableau de bord.
+    console.warn('Erreur en attente de livraison:', e.message);
+    res.json({ messages: 0, parents: 0 });
+  }
+});
+
 // GET / — liste des communications de l'école, avec métriques de lecture
 // (ciblés / vus par canal / réponses) pour les envois trackés (message_id).
 router.get('/', async (req, res) => {
@@ -42,11 +87,16 @@ router.get('/', async (req, res) => {
           .in('message_id', chunk);
         (recs || []).forEach((r) => {
           if (!metricsByMsg.has(r.message_id)) {
-            metricsByMsg.set(r.message_id, { targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0 });
+            metricsByMsg.set(r.message_id, {
+              targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0, announced: 0,
+            });
           }
           const m = metricsByMsg.get(r.message_id);
           m.targeted++;
           if (r.status === 'sent') m.sent++;
+          // « annoncé » : hors fenêtre de 24 h, seule l'annonce est partie et
+          // le contenu attend encore la réponse du parent.
+          if (r.status === 'announced') m.announced++;
           if (r.read_at) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
           if (r.responded_at) m.responded++;
         });
