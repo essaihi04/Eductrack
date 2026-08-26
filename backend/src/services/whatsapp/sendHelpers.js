@@ -23,15 +23,19 @@ export const isSessionReady = async (schoolId) => {
  * répondre. Sa réponse rouvre la fenêtre et le contenu complet peut suivre.
  */
 export async function sendUnified(schoolId, phone, {
-  messageType, message, mediaUrl, fileName, templateKey = null, templateParams = [],
+  messageType, message, mediaUrl, fileName,
+  templateKey = null, templateParams = [], templateLang = null,
 }) {
   if (!(await serviceWindowOpen(phone))) {
     // Campagne adossée à un template APPROUVÉ dont le corps porte le message
     // entier : pas d'annonce, pas d'attente — le destinataire le lit du
     // premier coup, même fenêtre fermée.
     if (templateKey) {
+      // `lang` null = langue de chaque destinataire (son choix explicite, à
+      // défaut celle de son dernier message). Une valeur force toute la
+      // campagne dans cette langue.
       return sendUtility(schoolId, phone, {
-        text: message || '', template: templateKey, params: templateParams,
+        text: message || '', template: templateKey, params: templateParams, lang: templateLang,
       });
     }
     // Le texte est mis en attente par sendUtility (template d'annonce) ; le

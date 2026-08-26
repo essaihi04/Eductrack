@@ -159,11 +159,16 @@ router.get('/teachers/:teacherId/subjects', async (req, res) => {
  * PAS bloquer l'envoi : on l'ignore et la campagne repart sur le
  * comportement habituel (texte libre dans la fenêtre, annonce en dehors).
  */
-function templateColumns(templateKey, templateParams) {
-  if (!templateKey || !getTemplate(templateKey)) return {};
+function templateColumns(templateKey, templateParams, templateLang) {
+  const tpl = templateKey ? getTemplate(templateKey) : null;
+  if (!tpl) return {};
+  // Une langue non déclarée pour ce template ferait échouer l'envoi chez Meta :
+  // on l'ignore et la campagne repart sur la langue de chaque destinataire.
+  const langue = templateLanguages(tpl).includes(templateLang) ? templateLang : null;
   return {
     template_key: templateKey,
     template_params: Array.isArray(templateParams) ? templateParams : [],
+    template_lang: langue,
   };
 }
 
@@ -446,7 +451,7 @@ router.get('/recipients-list', async (req, res) => {
 // POST /send — send WhatsApp message to filtered parents
 router.post('/send', async (req, res) => {
   try {
-    const { message, type, mediaUrl, fileName, filter, category: requestedCategory, templateKey, templateParams } = req.body;
+    const { message, type, mediaUrl, fileName, filter, category: requestedCategory, templateKey, templateParams, templateLang } = req.body;
     const schoolId = getSchoolId(req);
     const category = resolveCategoryForSending(requestedCategory, req.user?.role);
     // Canal(aux) d'envoi : 'whatsapp' (défaut, historique), 'push' (app), 'both'
@@ -574,7 +579,7 @@ router.post('/send', async (req, res) => {
         status: 'sending',
         category,
         channels,
-        ...templateColumns(templateKey, templateParams),
+        ...templateColumns(templateKey, templateParams, templateLang),
       })
       .select()
       .single();
@@ -655,7 +660,7 @@ router.post('/send', async (req, res) => {
 router.post('/send-direct', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { phone, message, type, mediaUrl, fileName, parentId, category: requestedCategory, templateKey, templateParams } = req.body;
+    const { phone, message, type, mediaUrl, fileName, parentId, category: requestedCategory, templateKey, templateParams, templateLang } = req.body;
     const category = resolveCategoryForSending(requestedCategory, req.user?.role);
 
     if (!phone) {
@@ -714,6 +719,7 @@ router.post('/send-direct', async (req, res) => {
       messageType, message, mediaUrl, fileName,
       templateKey: templateKey || null,
       templateParams: Array.isArray(templateParams) ? templateParams : [],
+      templateLang: templateLang || null,
     });
 
     if (result.success) {

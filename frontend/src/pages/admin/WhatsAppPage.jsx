@@ -93,6 +93,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [templates, setTemplates] = useState([]);
   const [templateKey, setTemplateKey] = useState('');
   const [templateParams, setTemplateParams] = useState([]);
+  // Langue imposée à la campagne. Vide = chaque parent reçoit la sienne.
+  const [templateLang, setTemplateLang] = useState('');
   const [messageType, setMessageType] = useState('text');
   // Canal d'envoi : 'push' (app), 'whatsapp', 'both' (portée maximale)
   const [sendChannels, setSendChannels] = useState('both');
@@ -490,8 +492,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const selectedTemplate = templates.find((t) => t.key === templateKey) || null;
 
   /** Corps du modèle, variables remplacées par les valeurs saisies. */
-  const renderTemplate = useCallback((tpl, valeurs) => {
-    const corps = tpl.bodies?.fr || tpl.bodies?.[tpl.languages?.[0]] || '';
+  const renderTemplate = useCallback((tpl, valeurs, langue) => {
+    const corps = tpl.bodies?.[langue] || tpl.bodies?.fr || tpl.bodies?.[tpl.languages?.[0]] || '';
     return (tpl.params || []).reduce(
       (texte, _, i) => texte.replaceAll(`{{${i + 1}}}`, valeurs[i] || `{{${i + 1}}}`),
       corps,
@@ -501,20 +503,27 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   /** Choix d'un modèle : le message devient son corps, non modifiable. */
   const chooseTemplate = (key) => {
     setTemplateKey(key);
+    setTemplateLang('');
     if (!key) { setTemplateParams([]); return; }
     const tpl = templates.find((t) => t.key === key);
     if (!tpl) return;
     const valeurs = (tpl.params || []).map((_, i) => tpl.example?.[i] || '');
     setTemplateParams(valeurs);
     setMessageType('text');
-    setMessageText(renderTemplate(tpl, valeurs));
+    setMessageText(renderTemplate(tpl, valeurs, ''));
   };
 
   const setTemplateParam = (index, valeur) => {
     const valeurs = [...templateParams];
     valeurs[index] = valeur;
     setTemplateParams(valeurs);
-    if (selectedTemplate) setMessageText(renderTemplate(selectedTemplate, valeurs));
+    if (selectedTemplate) setMessageText(renderTemplate(selectedTemplate, valeurs, templateLang));
+  };
+
+  /** Langue imposée, ou '' pour suivre celle de chaque parent. */
+  const chooseTemplateLang = (langue) => {
+    setTemplateLang(langue);
+    if (selectedTemplate) setMessageText(renderTemplate(selectedTemplate, templateParams, langue));
   };
 
   const toggleClass = (classId) => {
@@ -623,7 +632,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory, channels: sendChannels, templateKey: templateKey || null, templateParams })
+        body: JSON.stringify({ message: messageText, type: messageType, mediaUrl: uploadedUrl || null, fileName: fileName || null, filter, category: messageCategory, channels: sendChannels, templateKey: templateKey || null, templateParams, templateLang: templateLang || null })
       });
       const data = await res.json();
       if (data.success && data.messageId) {
@@ -2208,9 +2217,29 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                               className="text-xs border border-gray-300 rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-green-500" />
                           </div>
                         ))}
+                        {(selectedTemplate.languages || []).length > 1 && (
+                          <div className="flex items-center gap-2">
+                            <label className="text-[11px] text-gray-500 w-40 flex-shrink-0">
+                              Langue d'envoi
+                            </label>
+                            <select
+                              value={templateLang}
+                              onChange={(e) => chooseTemplateLang(e.target.value)}
+                              className="text-xs border border-gray-300 rounded-md px-2 py-1 flex-1 focus:ring-2 focus:ring-green-500">
+                              <option value="">Automatique — la langue de chaque parent</option>
+                              {selectedTemplate.languages.map((l) => (
+                                <option key={l} value={l}>
+                                  {l === 'ar' ? 'Arabe pour tous — العربية' : l === 'fr' ? 'Français pour tous' : l}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         <p className="text-[11px] text-gray-500 leading-snug">
                           Le corps du message est fixé par Meta : seules les valeurs ci-dessus changent.
-                          Envoyé en {selectedTemplate.languages?.join(' et ')} selon la langue de chaque parent.
+                          {templateLang
+                            ? ` Tous les parents le recevront en ${templateLang === 'ar' ? 'arabe' : 'français'}.`
+                            : ` Chaque parent le recevra dans sa langue (${selectedTemplate.languages?.join(' ou ')}) : celle qu'il a choisie dans l'application, sinon celle de son dernier message.`}
                         </p>
                         {selectedTemplate.category === 'MARKETING' && (
                           <p className="text-[11px] text-amber-600 flex items-start gap-1">

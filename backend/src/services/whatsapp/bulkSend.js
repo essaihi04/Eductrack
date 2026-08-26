@@ -38,8 +38,8 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   // Les colonnes de template sont récentes : demander une colonne absente fait
   // ÉCHOUER toute la requête, donc tout l'envoi. Tant que
   // ADD_WHATSAPP_MESSAGE_TEMPLATE.sql n'est pas exécuté, on relit sans elles.
-  let { data: msg, error: msgError } = await lireMessage(`${CHAMPS}, template_key, template_params`);
-  if (msgError && /template_key|template_params|column|schema cache/i.test(msgError.message || '')) {
+  let { data: msg, error: msgError } = await lireMessage(`${CHAMPS}, template_key, template_params, template_lang`);
+  if (msgError && /template_key|template_params|template_lang|column|schema cache/i.test(msgError.message || '')) {
     console.warn('[bulkSend] colonnes de template absentes — exécutez ADD_WHATSAPP_MESSAGE_TEMPLATE.sql');
     ({ data: msg, error: msgError } = await lireMessage(CHAMPS));
   }
@@ -61,6 +61,8 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   // message part EN ENTIER au lieu d'être seulement annoncé.
   const templateKey = msg.template_key || null;
   const templateParams = Array.isArray(msg.template_params) ? msg.template_params : [];
+  // Langue imposée à la campagne, ou null pour suivre celle de chaque parent.
+  const templateLang = msg.template_lang || null;
 
   const { data: allRecipients, error: recError } = await supabaseAdmin
     .from('whatsapp_message_recipients')
@@ -198,7 +200,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
           let body = message;
           if (personalize) body = withGreeting(body, nameByParent.get(recipient.parent_id));
           body = withOptOutNotice(body);
-          const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName, templateKey, templateParams });
+          const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName, templateKey, templateParams, templateLang });
           if (result.success) {
             waOk = true;
             // Hors fenêtre 24 h, seule l'ANNONCE est partie : le message

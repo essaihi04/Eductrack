@@ -12,9 +12,12 @@
 
 ALTER TABLE public.whatsapp_messages
   ADD COLUMN IF NOT EXISTS template_key    TEXT,
-  ADD COLUMN IF NOT EXISTS template_params JSONB;
+  ADD COLUMN IF NOT EXISTS template_params JSONB,
+  ADD COLUMN IF NOT EXISTS template_lang   TEXT;
 
 COMMENT ON COLUMN public.whatsapp_messages.template_key IS
   'Clé du registre backend/src/services/whatsapp/templates.js (ex. « manuels »). NULL = message libre, annoncé hors fenêtre 24 h.';
 COMMENT ON COLUMN public.whatsapp_messages.template_params IS
   'Valeurs des {{1}}, {{2}}… du template, dans l''ordre.';
+COMMENT ON COLUMN public.whatsapp_messages.template_lang IS
+  'Langue imposée à toute la campagne (« fr », « ar »). NULL = langue de chaque parent (choix explicite, sinon langue de son dernier message).';
