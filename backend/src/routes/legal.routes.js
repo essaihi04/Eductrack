@@ -17,7 +17,7 @@ import express from 'express';
 const router = express.Router();
 
 const CONTACT_EMAIL = process.env.LEGAL_CONTACT_EMAIL || 'contact@etrack.ma';
-const APP_NAME = 'Eductrack';
+const APP_NAME = 'Bousole';
 const UPDATED = '22 août 2026';
 
 // Éditeur du service. La raison sociale EXACTE du Registre du Commerce doit

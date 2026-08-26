@@ -260,45 +260,6 @@ export const TEMPLATES = {
       },
     },
   },
-
-  /**
-   * PREMIER CONTACT — pour un numéro qui n'a JAMAIS écrit à l'école.
-   *
-   * Sans lui, un tel parent est injoignable autrement que par template, et
-   * comme il ne répond jamais, la fenêtre 24 h ne s'ouvre pas : c'est le
-   * blocage d'amorçage du canal. Ce message l'invite explicitement à
-   * répondre, ce qui ouvre la fenêtre et rend tout le reste gratuit.
-   *
-   * ⚠️ POLITIQUE META : écrire à un numéro sans consentement préalable est
-   * contraire aux règles WhatsApp Business. À réserver aux parents réellement
-   * inscrits, jamais à de la prospection. Des signalements « indésirable »
-   * font chuter la qualité du numéro et peuvent le faire restreindre.
-   * La mention STOP fait partie du corps : elle protège le numéro.
-   *
-   * ⚠️ CONTRAINTE TECHNIQUE — n'envoyer qu'à un numéro DÉJÀ RATTACHÉ à un
-   * parent (parent_contacts ou profiles.phone). Le traitement de « STOP »
-   * exige `parentInfo.parent_id` (chatbot/index.js) ; un numéro absent de la
-   * base sort du flux avant, et son STOP serait ignoré — on promettrait un
-   * désabonnement qui ne fonctionne pas, ce que Meta sanctionne précisément.
-   */
-  bienvenue: {
-    env: 'WA_TPL_BIENVENUE',
-    name: process.env.WA_TPL_BIENVENUE || null,
-    params: ['etablissement'],
-    definition: {
-      name: 'bienvenue_parent',
-      category: 'UTILITY',
-      language: 'fr',
-      body: 'Bonjour, {{1}} vous propose de suivre la scolarité de votre enfant sur WhatsApp : absences, notes, factures et documents. Répondez à ce message pour activer ce service. Répondez STOP pour ne plus rien recevoir.',
-      example: ['Groupe Scolaire Pythagore'],
-    },
-    translations: {
-      ar: {
-        body: 'تحية طيبة، تقترح عليكم {{1}} متابعة الحياة الدراسية لابنكم عبر واتساب: الغيابات والنقط والفواتير والوثائق. ردّوا على هذه الرسالة لتفعيل هذه الخدمة. أرسلوا STOP لإيقاف الرسائل.',
-        example: ['مجموعة مدارس فيتاغور'],
-      },
-    },
-  },
 };
 
 /**
