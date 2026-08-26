@@ -216,12 +216,16 @@ router.get('/templates', async (req, res) => {
  *
  * @returns {Promise<Set<string>>} numéros E.164
  */
-async function phonesAwaitingDelivery(schoolId) {
+async function phonesAwaitingDelivery(schoolId, { from = null, to = null } = {}) {
   let q = supabaseAdmin
     .from('whatsapp_message_recipients')
     .select('phone_e164, whatsapp_messages!inner(school_id)')
     .eq('status', 'announced');
   if (schoolId) q = q.eq('whatsapp_messages.school_id', schoolId);
+  // La date de référence est celle de la LIGNE destinataire : un message
+  // annoncé n'a pas de sent_at (rien n'est encore parti au destinataire).
+  if (from) q = q.gte('created_at', from);
+  if (to) q = q.lte('created_at', to);
   const { data, error } = await q;
   if (error) {
     console.warn('[whatsapp] segment en attente de livraison:', error.message);
@@ -230,12 +234,38 @@ async function phonesAwaitingDelivery(schoolId) {
   return new Set((data || []).map((r) => r.phone_e164).filter(Boolean));
 }
 
+/**
+ * Bornes d'une période nommée, en ISO.
+ *
+ * « today » / « week » / « month » couvrent les 1, 7 et 30 derniers jours ;
+ * « custom » attend les dates fournies par l'appelant ; toute autre valeur
+ * (ou l'absence de valeur) signifie « depuis toujours ».
+ */
+function periodBounds(period, fromDate, toDate) {
+  const jours = { today: 1, week: 7, month: 30 }[period];
+  if (jours) {
+    return { from: new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString(), to: null };
+  }
+  if (period === 'custom') {
+    return {
+      from: fromDate ? new Date(`${fromDate}T00:00:00`).toISOString() : null,
+      // Borne haute INCLUSIVE : « jusqu'au 26 » doit contenir toute la journée
+      // du 26, pas s'arrêter à minuit pile.
+      to: toDate ? new Date(`${toDate}T23:59:59`).toISOString() : null,
+    };
+  }
+  return { from: null, to: null };
+}
+
 // ==================== RECIPIENTS ====================
 
 // GET /recipients — get parent phone numbers filtered by class, level, school_type
 router.get('/recipients', async (req, res) => {
   try {
-    const { class_ids, school_type, level, pending_delivery } = req.query;
+    const {
+      class_ids, school_type, level,
+      pending_delivery, pending_period, pending_from, pending_to,
+    } = req.query;
     const schoolId = getSchoolId(req);
     const attenteSeule = pending_delivery === '1' || pending_delivery === 'true';
 
@@ -337,7 +367,9 @@ router.get('/recipients', async (req, res) => {
 
     // Segment de relance : uniquement ceux dont un message attend sa livraison.
     if (attenteSeule) {
-      const enAttente = await phonesAwaitingDelivery(schoolId);
+      const enAttente = await phonesAwaitingDelivery(
+        schoolId, periodBounds(pending_period, pending_from, pending_to),
+      );
       uniqueRecipients = uniqueRecipients.filter((r) => enAttente.has(r.phone_e164));
       return res.json({
         count: uniqueRecipients.length,
@@ -590,7 +622,10 @@ router.post('/send', async (req, res) => {
     // dont un contenu n'est jamais parti. Appliqué APRÈS les filtres de classe
     // pour qu'on puisse relancer une seule classe si besoin.
     if (filter?.pending_delivery) {
-      const enAttente = await phonesAwaitingDelivery(schoolId);
+      const enAttente = await phonesAwaitingDelivery(
+        schoolId,
+        periodBounds(filter.pending_period, filter.pending_from, filter.pending_to),
+      );
       recipients = recipients.filter((r) => r.phone_e164 && enAttente.has(r.phone_e164));
     }
 

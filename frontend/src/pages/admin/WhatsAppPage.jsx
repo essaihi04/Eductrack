@@ -98,6 +98,10 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   // Segment de relance : uniquement les numéros dont un message reste au statut
   // « annoncé », c'est-à-dire ceux qui n'ont jamais reçu le contenu.
   const [pendingOnly, setPendingOnly] = useState(false);
+  // Période du segment : 'all' | 'today' | 'week' | 'month' | 'custom'.
+  const [pendingPeriod, setPendingPeriod] = useState('all');
+  const [pendingFrom, setPendingFrom] = useState('');
+  const [pendingTo, setPendingTo] = useState('');
   const [messageType, setMessageType] = useState('text');
   // Canal d'envoi : 'push' (app), 'whatsapp', 'both' (portée maximale)
   const [sendChannels, setSendChannels] = useState('both');
@@ -437,7 +441,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       if (schoolTypeFilter) params.append('school_type', schoolTypeFilter);
       if (levelFilter) params.append('level', levelFilter);
       if (year) params.append('academic_year', year);
-      if (pendingOnly) params.append('pending_delivery', '1');
+      if (pendingOnly) {
+        params.append('pending_delivery', '1');
+        params.append('pending_period', pendingPeriod);
+        if (pendingPeriod === 'custom') {
+          if (pendingFrom) params.append('pending_from', pendingFrom);
+          if (pendingTo) params.append('pending_to', pendingTo);
+        }
+      }
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients?${params}`, {
         headers: { Authorization: `Bearer ${await getAuthToken()}` }
       });
@@ -449,7 +460,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     } finally {
       setLoadingRecipients(false);
     }
-  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year, pendingOnly]);
+  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year, pendingOnly, pendingPeriod, pendingFrom, pendingTo]);
 
   useEffect(() => {
     fetchRecipientCount();
@@ -638,7 +649,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       if (parentSelectionMode === 'select' && selectedParents.length > 0) {
         filter.parent_ids = selectedParents;
       }
-      if (pendingOnly) filter.pending_delivery = true;
+      if (pendingOnly) {
+        filter.pending_delivery = true;
+        filter.pending_period = pendingPeriod;
+        if (pendingPeriod === 'custom') {
+          if (pendingFrom) filter.pending_from = pendingFrom;
+          if (pendingTo) filter.pending_to = pendingTo;
+        }
+      }
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -2068,6 +2086,39 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       </span>
                     </span>
                   </label>
+
+                  {/* Période : une relance porte rarement sur tout l'historique.
+                      On vise l'envoi de ce matin, ou celui de la semaine. */}
+                  {pendingOnly && (
+                    <div className="mt-2 pl-6 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <label className="text-[11px] text-gray-500">Période :</label>
+                        {[
+                          { key: 'today', label: "Aujourd'hui" },
+                          { key: 'week', label: '7 jours' },
+                          { key: 'month', label: '30 jours' },
+                          { key: 'all', label: 'Tout' },
+                          { key: 'custom', label: 'Personnalisée' },
+                        ].map((p) => (
+                          <button key={p.key} type="button"
+                            onClick={() => setPendingPeriod(p.key)}
+                            className={`px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${pendingPeriod === p.key ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                      {pendingPeriod === 'custom' && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <label className="text-[11px] text-gray-500">Du</label>
+                          <input type="date" value={pendingFrom} onChange={(e) => setPendingFrom(e.target.value)}
+                            className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-amber-500" />
+                          <label className="text-[11px] text-gray-500">au</label>
+                          <input type="date" value={pendingTo} onChange={(e) => setPendingTo(e.target.value)}
+                            className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-amber-500" />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Mode de sélection parents */}
