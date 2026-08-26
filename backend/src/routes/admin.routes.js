@@ -5483,10 +5483,6 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
 
         // Utiliser le message personnalisé ou générer les identifiants par défaut
         let messageText, message_type, content, media_url, file_name;
-        // Renseigné uniquement pour l'envoi d'identifiants : permet de faire
-        // voyager le login et le mot de passe DANS le template Meta, donc de
-        // les livrer du premier coup, sans message d'annonce ni réponse du prof.
-        let credentialParams = null;
         
         // Si un message personnalisé est fourni (texte, image ou document), l'utiliser tel quel
         if (message && message.trim()) {
@@ -5531,11 +5527,6 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
           content = messageText;
           media_url = null;
           file_name = null;
-          credentialParams = [
-            `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim() || 'cher professeur',
-            teacher.email,
-            newPassword,
-          ];
         }
 
         // Créer le log du message
@@ -5574,32 +5565,22 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             // Fermée : on annonce par template, le parent répond, puis le
             // contenu complet (fichier compris) peut partir normalement.
             if (!(await serviceWindowOpen(phoneNumber))) {
-              // Identifiants : template dédié, le contenu utile est DANS le
-              // message. Le professeur reçoit son accès directement, sans
-              // « bienvenue, répondez pour recevoir le détail ».
-              if (credentialParams) {
-                waResult = await sendUtility(schoolId, phoneNumber, {
-                  text: messageText, template: 'identifiants', params: credentialParams,
-                });
-              } else {
-                waResult = { success: false, reason: 'no_template' };
-              }
-              // Repli (template pas encore approuvé, ou message personnalisé) :
-              // le template d'annonce, dont sendUtility met le TEXTE en attente
-              // tout seul. Une pièce jointe, elle, ne voyage dans aucun
-              // template : on la met en attente explicitement.
-              if (!waResult.success) {
-                if (media_url) {
-                  await queuePending({
-                    schoolId, phone: phoneNumber, text: messageText,
-                    mediaUrl: media_url, fileName: file_name,
-                    messageType: message_type, kind: 'teacher_message',
-                  });
-                }
-                waResult = await sendUtility(schoolId, phoneNumber, {
-                  text: messageText, template: 'information', queueText: !media_url,
+              // Aucun template ne peut transporter un mot de passe : Meta
+              // l'interdit et a rejeté le nôtre (voir le bandeau dans
+              // templates.js). Hors fenêtre, la seule voie est donc l'annonce
+              // suivie de la livraison automatique à la réponse — sendUtility
+              // met le TEXTE en attente tout seul. Une pièce jointe, elle, ne
+              // voyage dans aucun template : on la met en attente ici.
+              if (media_url) {
+                await queuePending({
+                  schoolId, phone: phoneNumber, text: messageText,
+                  mediaUrl: media_url, fileName: file_name,
+                  messageType: message_type, kind: 'teacher_message',
                 });
               }
+              waResult = await sendUtility(schoolId, phoneNumber, {
+                text: messageText, template: 'information', queueText: !media_url,
+              });
             } else if (messageType === 'image' && mediaUrl) {
               waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '');
             } else if (messageType === 'document' && mediaUrl) {

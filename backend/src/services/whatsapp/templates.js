@@ -213,34 +213,21 @@ export const TEMPLATES = {
     },
   },
 
-  /**
-   * IDENTIFIANTS DE CONNEXION (professeur, personnel).
-   *
-   * Le template générique « information » ne fait qu'ANNONCER : il demande au
-   * destinataire de répondre pour recevoir le détail, ce qui donnait un
-   * message de bienvenue absurde pour un professeur à qui l'école envoie
-   * simplement son accès. Ici le contenu utile voyage DANS le template :
-   * l'identifiant et le mot de passe arrivent du premier coup, sans échange
-   * préalable et sans dépendre de la fenêtre de 24 h.
-   */
-  identifiants: {
-    env: 'WA_TPL_IDENTIFIANTS',
-    name: process.env.WA_TPL_IDENTIFIANTS || null,
-    params: ['nom', 'login', 'motDePasse'],
-    definition: {
-      name: 'identifiants_connexion',
-      category: 'UTILITY',
-      language: 'fr',
-      body: "Bonjour {{1}}, votre accès à la plateforme de l'établissement est activé. Identifiant : {{2}} - Mot de passe : {{3}}. Connectez-vous sur etrack.ma/login puis modifiez votre mot de passe.",
-      example: ['Karim Bennani', 'karim.bennani@ecole.ma', 'Karim2026'],
-    },
-    translations: {
-      ar: {
-        body: 'تحية طيبة {{1}}، تم تفعيل حسابكم في منصة المؤسسة. المعرّف: {{2}} - كلمة السر: {{3}}. سجّلوا الدخول عبر etrack.ma/login ثم غيّروا كلمة السر.',
-        example: ['كريم بناني', 'karim.bennani@ecole.ma', 'Karim2026'],
-      },
-    },
-  },
+  // ╔══════════════════════════════════════════════════════════════════════╗
+  // ║  PAS DE TEMPLATE D'IDENTIFIANTS — N'EN RECRÉEZ PAS                    ║
+  // ╠══════════════════════════════════════════════════════════════════════╣
+  // ║  Un template « identifiants_connexion » portant login + mot de passe  ║
+  // ║  a été soumis le 2026-08-26 : REJETÉ par Meta en quelques secondes,   ║
+  // ║  en français comme en arabe. Ce n'est pas un défaut de rédaction —    ║
+  // ║  la politique interdit de transporter un secret dans un template.     ║
+  // ║  Seule la catégorie AUTHENTICATION le peut, et elle est réservée aux  ║
+  // ║  codes à usage unique, dans un format imposé.                         ║
+  // ║                                                                       ║
+  // ║  Les identifiants suivent donc le seul chemin autorisé :              ║
+  // ║    • fenêtre de 24 h ouverte → texte libre, envoi direct et complet ; ║
+  // ║    • fenêtre fermée → annonce « information », puis livraison         ║
+  // ║      automatique dès la réponse (services/whatsapp/pendingDelivery).  ║
+  // ╚══════════════════════════════════════════════════════════════════════╝
 
   /**
    * MANUELS SCOLAIRES — offre de la maison d'édition partenaire.

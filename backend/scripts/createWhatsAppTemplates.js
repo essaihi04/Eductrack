@@ -54,6 +54,7 @@ const run = async () => {
   console.log(`WABA ${WABA} — ${existing.size} template(s) déjà présent(s).\n`);
 
   const envLines = [];
+  const refuses = [];
   for (const [key, tpl] of Object.entries(TEMPLATES)) {
     let toutesOk = true;
 
@@ -65,6 +66,13 @@ const run = async () => {
 
       if (already) {
         console.log(`• ${etiquette} deja present — statut ${already.status}`);
+        // Un template REJECTED ou PENDING ne doit JAMAIS finir dans le .env :
+        // l'envoi echouerait chez Meta (erreur 132001) au lieu de retomber sur
+        // le repli prevu par le code. La ligne suggeree serait un piege.
+        if (already.status !== 'APPROVED') {
+          toutesOk = false;
+          if (already.status === 'REJECTED') refuses.push(`${def.name} [${langue}]`);
+        }
         continue;
       }
       if (LIST_ONLY) {
@@ -90,10 +98,18 @@ const run = async () => {
   }
 
   if (envLines.length) {
-    console.log('\n─── À ajouter dans le .env une fois les templates APPROUVÉS ───');
+    console.log('\n─── À mettre dans le .env — ces templates sont APPROVED ───');
     console.log(envLines.join('\n'));
-    console.log('\n⚠️ N\'ajoutez une ligne que lorsque le template est APPROVED :');
-    console.log('   tant qu\'il est PENDING, l\'envoi échoue chez Meta (erreur 132001).');
+    console.log('\nLes templates encore PENDING sont volontairement absents de cette');
+    console.log('liste : tant qu\'ils ne sont pas approuvés, l\'envoi échoue chez Meta');
+    console.log('(erreur 132001). Relancez ce script après approbation.');
+  }
+
+  if (refuses.length) {
+    console.log('\n─── REFUSÉS par Meta — ne les déclarez PAS dans le .env ───');
+    refuses.forEach((r) => console.log(`  ✗ ${r}`));
+    console.log('\nUn nom refusé déclaré dans le .env fait échouer chaque envoi AVANT');
+    console.log('le repli du code. Retirez la variable correspondante.');
   }
 };
 
