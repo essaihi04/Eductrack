@@ -7,7 +7,8 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { sendCommunication } from '../services/communicationScheduler.js';
-import { resolveCategoryForSending } from '../utils/whatsappCategory.js';
+import { allowedCategoriesForRole, resolveCategoryForSending } from '../utils/whatsappCategory.js';
+import { selectInChunksPaged } from '../utils/chunkedQueries.js';
 
 const router = express.Router();
 router.use(authenticate);
@@ -71,8 +72,25 @@ router.get('/pending-delivery', async (req, res) => {
   }
 });
 
-// GET / — liste des communications de l'école, avec métriques de lecture
-// (ciblés / vus par canal / réponses) pour les envois trackés (message_id).
+const historyStatus = (message) => {
+  if (message.status === 'completed') return 'sent';
+  if (message.status === 'pending' && message.scheduled_at && new Date(message.scheduled_at) > new Date()) return 'scheduled';
+  return message.status || 'sent';
+};
+
+const historyTitle = (message) => {
+  const text = String(message.content || '').replace(/\s+/g, ' ').trim();
+  if (text) return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+  return message.file_name || 'Communication WhatsApp';
+};
+
+// GET / — liste UNIFIÉE des communications de l'école.
+//
+// Le planificateur écrit dans scheduled_communications, tandis que les envois
+// directs écrivent seulement dans whatsapp_messages. Ne lire que la première
+// table affichait donc « Aucune communication » alors que le dashboard
+// comptait correctement les campagnes WhatsApp. On fusionne les deux sources,
+// en dédupliquant les messages déjà liés à une communication planifiée.
 router.get('/', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
@@ -84,34 +102,72 @@ router.get('/', async (req, res) => {
     if (schoolId) q = q.eq('school_id', schoolId);
     const { data, error } = await q;
     if (error) throw error;
-    const comms = data || [];
+    const scheduled = data || [];
+
+    let historyQuery = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id, school_id, sent_by, message_type, content, file_name, total_recipients, sent_count, failed_count, status, scheduled_at, created_at, category')
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (schoolId) historyQuery = historyQuery.eq('school_id', schoolId);
+    const allowedCats = allowedCategoriesForRole(req.user?.role);
+    if (allowedCats) historyQuery = historyQuery.in('category', allowedCats);
+    const { data: history, error: historyError } = await historyQuery;
+    if (historyError) throw historyError;
+
+    const linkedMessageIds = new Set(scheduled.map((c) => c.message_id).filter(Boolean));
+    const direct = (history || [])
+      .filter((message) => !linkedMessageIds.has(message.id))
+      .map((message) => ({
+        id: `whatsapp-${message.id}`,
+        school_id: message.school_id,
+        created_by: message.sent_by,
+        title: historyTitle(message),
+        body: message.content || null,
+        type: 'normal',
+        attachment_name: message.file_name || null,
+        scheduled_at: message.scheduled_at || message.created_at,
+        status: historyStatus(message),
+        sent_count: message.sent_count || 0,
+        failed_count: message.failed_count || 0,
+        total_recipients: message.total_recipients || 0,
+        created_at: message.created_at,
+        message_id: message.id,
+        source: 'whatsapp',
+      }));
+
+    const comms = [...scheduled, ...direct]
+      .sort((a, b) => new Date(b.scheduled_at || b.created_at) - new Date(a.scheduled_at || a.created_at))
+      .slice(0, 100);
 
     // Agrégats de tracking par message lié
     const msgIds = comms.map((c) => c.message_id).filter(Boolean);
     if (msgIds.length) {
       const metricsByMsg = new Map();
-      for (let i = 0; i < msgIds.length; i += 100) {
-        const chunk = msgIds.slice(i, i + 100);
-        const { data: recs } = await supabaseAdmin
+      const recs = await selectInChunksPaged(
+        msgIds,
+        (chunk) => supabaseAdmin
           .from('whatsapp_message_recipients')
-          .select('message_id, status, read_at, read_channel, responded_at')
-          .in('message_id', chunk);
-        (recs || []).forEach((r) => {
-          if (!metricsByMsg.has(r.message_id)) {
-            metricsByMsg.set(r.message_id, {
-              targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0, announced: 0,
-            });
-          }
-          const m = metricsByMsg.get(r.message_id);
-          m.targeted++;
-          if (r.status === 'sent') m.sent++;
-          // « annoncé » : hors fenêtre de 24 h, seule l'annonce est partie et
-          // le contenu attend encore la réponse du parent.
-          if (r.status === 'announced') m.announced++;
-          if (r.read_at) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
-          if (r.responded_at) m.responded++;
-        });
-      }
+          .select('id, message_id, status, read_at, read_channel, responded_at')
+          .in('message_id', chunk)
+          .order('id', { ascending: true }),
+      );
+      recs.forEach((r) => {
+        if (!metricsByMsg.has(r.message_id)) {
+          metricsByMsg.set(r.message_id, {
+            targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0, announced: 0,
+          });
+        }
+        const m = metricsByMsg.get(r.message_id);
+        m.targeted++;
+        if (r.status === 'sent') m.sent++;
+        // « annoncé » : hors fenêtre de 24 h, seule l'annonce est partie et
+        // le contenu attend encore la réponse du parent.
+        if (r.status === 'announced') m.announced++;
+        // Une lecture/réponse ne vaut que sur un envoi réellement remis.
+        if (r.read_at && r.status === 'sent') { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
+        if (r.responded_at && r.status === 'sent') m.responded++;
+      });
       comms.forEach((c) => { if (c.message_id) c.metrics = metricsByMsg.get(c.message_id) || null; });
     }
 

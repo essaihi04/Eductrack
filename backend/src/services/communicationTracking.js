@@ -50,8 +50,18 @@ export async function markWaAck(providerMsgId, kind) {
 }
 
 /**
- * Le parent a envoyé un message WhatsApp → marque « répondu » (et « lu »)
- * ses envois récents encore sans réponse.
+ * Le parent a envoyé un message WhatsApp → attribue cette réponse au DERNIER
+ * envoi du hub qui lui a été réellement remis et qui attend encore une
+ * réponse.
+ *
+ * Un seul envoi est marqué, et non tous ceux de la semaine : le parent écrit
+ * le plus souvent au chatbot pour une question sans rapport, et marquer 50
+ * lignes d'un coup faisait grimper artificiellement les taux de lecture et de
+ * réponse du tableau de bord (on lisait « 267 parents ont répondu » pour une
+ * poignée de messages entrants).
+ *
+ * La lecture déduite est tracée à part (read_channel = 'whatsapp_reply') pour
+ * ne jamais être confondue avec un vrai ✓✓ bleu de Meta.
  * @param {{ parentId?: string, phone?: string }} p
  */
 export async function markResponded({ parentId, phone }) {
@@ -60,28 +70,25 @@ export async function markResponded({ parentId, phone }) {
     const since = new Date(Date.now() - RESPONSE_WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
     let q = supabaseAdmin
       .from('whatsapp_message_recipients')
-      .select('id, read_at')
+      .select('id, read_at, delivered_at')
       .is('responded_at', null)
+      // Un envoi en échec (ou une annonce dont le contenu n'est jamais parti)
+      // ne peut pas avoir suscité de réponse.
+      .eq('status', 'sent')
       .gte('created_at', since)
-      .limit(50);
+      .order('sent_at', { ascending: false, nullsFirst: false })
+      .limit(1);
     q = parentId ? q.eq('parent_id', parentId) : q.eq('phone_e164', phone);
     const { data: rows } = await q;
-    if (!rows?.length) return;
+    const row = rows?.[0];
+    if (!row) return;
 
     const now = new Date().toISOString();
-    const ids = rows.map((r) => r.id);
-    await supabaseAdmin
-      .from('whatsapp_message_recipients')
-      .update({ responded_at: now, response_channel: 'whatsapp' })
-      .in('id', ids);
-    // Répondre implique avoir vu le message
-    const unreadIds = rows.filter((r) => !r.read_at).map((r) => r.id);
-    if (unreadIds.length) {
-      await supabaseAdmin
-        .from('whatsapp_message_recipients')
-        .update({ read_at: now, read_channel: 'whatsapp' })
-        .in('id', unreadIds);
-    }
+    const patch = { responded_at: now, response_channel: 'whatsapp' };
+    // Répondre prouve la remise, et vaut lecture de CE message-là.
+    if (!row.delivered_at) patch.delivered_at = now;
+    if (!row.read_at) { patch.read_at = now; patch.read_channel = 'whatsapp_reply'; }
+    await supabaseAdmin.from('whatsapp_message_recipients').update(patch).eq('id', row.id);
   } catch (e) {
     console.error('[commTracking] markResponded:', e.message);
   }

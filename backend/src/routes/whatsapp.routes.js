@@ -17,6 +17,7 @@ import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.j
 import { enqueueJob } from '../services/jobs/index.js';
 import { whatsappOptedOut } from '../services/notificationRouter.js';
 import { prepareVoiceNote } from '../services/whatsapp/voiceNote.js';
+import { selectAllPages, selectInChunksPaged } from '../utils/chunkedQueries.js';
 
 const router = express.Router();
 
@@ -908,8 +909,9 @@ router.get('/history', async (req, res) => {
         const m = metricsByMsg.get(r.message_id);
         m.targeted++;
         if (r.status === 'sent') m.sent++;
-        if (r.read_at) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
-        if (r.responded_at) m.responded++;
+        // Une lecture/reponse ne vaut que sur un envoi reellement remis.
+        if (r.read_at && r.status === 'sent') { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
+        if (r.responded_at && r.status === 'sent') m.responded++;
       });
       messages.forEach(m => { m.metrics = metricsByMsg.get(m.id) || null; });
     }
@@ -1637,27 +1639,31 @@ async function fetchEngagementRows(req, days) {
   const schoolId = getSchoolId(req);
   const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
-  let msgQuery = supabaseAdmin
-    .from('whatsapp_messages')
-    .select('id, channels, category, message_type, created_at, total_recipients')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(500);
-  if (schoolId) msgQuery = msgQuery.eq('school_id', schoolId);
-  const allowedCats = allowedCategoriesForRole(req.user?.role);
-  if (allowedCats) msgQuery = msgQuery.in('category', allowedCats);
-  const { data: messages, error } = await msgQuery;
-  if (error) throw error;
+  // Pagination obligatoire : PostgREST plafonne chaque reponse a 1000 lignes,
+  // et l'ancien .limit(500) tronquait les stats des periodes chargees sans que
+  // rien ne le signale.
+  const messages = await selectAllPages(() => {
+    let q = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id, channels, category, message_type, created_at, total_recipients')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false });
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const allowedCats = allowedCategoriesForRole(req.user?.role);
+    if (allowedCats) q = q.in('category', allowedCats);
+    return q;
+  });
 
   const msgIds = (messages || []).map(m => m.id);
   let recipients = [];
   if (msgIds.length) {
-    recipients = await selectInChunks(
+    recipients = await selectInChunksPaged(
       msgIds,
       (chunk) => supabaseAdmin
         .from('whatsapp_message_recipients')
-        .select('message_id, parent_id, phone_e164, status, wa_status, push_status, notification_id, provider_msg_id, delivered_at, read_at, read_channel, responded_at, sent_at, created_at')
+        .select('id, message_id, parent_id, phone_e164, status, wa_status, push_status, notification_id, provider_msg_id, delivered_at, read_at, read_channel, responded_at, sent_at, created_at')
         .in('message_id', chunk)
+        .order('id', { ascending: true })
     );
   }
   return { schoolId, messages: messages || [], recipients };
@@ -1670,8 +1676,13 @@ router.get('/engagement/summary', async (req, res) => {
     const { schoolId, messages, recipients } = await fetchEngagementRows(req, days);
 
     // Totaux par canal
-    let reached = 0, failed = 0, waSent = 0, waDelivered = 0, pushSent = 0, appInbox = 0;
-    let readTotal = 0, readApp = 0, readWa = 0, responded = 0;
+    let reached = 0, announced = 0, failed = 0, pending = 0;
+    let waSent = 0, waAnnounced = 0, waDelivered = 0, pushSent = 0, appInbox = 0;
+    let readTotal = 0, readApp = 0, readWa = 0, readInferred = 0, responded = 0;
+    // Un parent ne doit peser qu'une fois : les taux « parents » se lisent sur
+    // des personnes, pas sur des lignes d'envoi.
+    const reachedParents = new Set(), readParents = new Set(), respondedParents = new Set();
+    const key = (r) => r.parent_id || r.phone_e164 || `row-${r.id}`;
     const byDayMap = new Map(); // 'YYYY-MM-DD' -> { sent, read, responded }
     const dayKey = (iso) => String(iso).slice(0, 10);
     const bump = (iso, field) => {
@@ -1682,39 +1693,64 @@ router.get('/engagement/summary', async (req, res) => {
     };
 
     for (const r of recipients) {
-      if (r.status === 'sent') { reached++; bump(r.sent_at || r.created_at, 'sent'); }
+      // « Annonce » = hors fenetre 24 h, seule l'annonce est partie et le
+      // contenu attend la reponse du parent : ni atteint, ni en echec.
+      const isReached = r.status === 'sent';
+      if (isReached) { reached++; reachedParents.add(key(r)); bump(r.sent_at || r.created_at, 'sent'); }
+      else if (r.status === 'announced') announced++;
       else if (r.status === 'failed') failed++;
-      if (r.provider_msg_id) waSent++;
+      else pending++;
+      if (r.provider_msg_id) { if (r.status === 'announced') waAnnounced++; else waSent++; }
       if (r.delivered_at) waDelivered++;
       if (r.push_status === 'sent') pushSent++;
       if (r.notification_id) appInbox++;
-      if (r.read_at) {
+      // Une lecture ne compte que sur un envoi reellement remis : sinon le taux
+      // pouvait depasser 100 % (numerateur plus large que le denominateur).
+      if (r.read_at && isReached) {
         readTotal++;
+        readParents.add(key(r));
         bump(r.read_at, 'read');
-        if (r.read_channel === 'app') readApp++; else readWa++;
+        if (r.read_channel === 'app') readApp++;
+        else if (r.read_channel === 'whatsapp_reply') readInferred++; // deduit d'une reponse, pas un accuse de lecture
+        else readWa++;
       }
-      if (r.responded_at) { responded++; bump(r.responded_at, 'responded'); }
+      if (r.responded_at && isReached) {
+        responded++;
+        respondedParents.add(key(r));
+        bump(r.responded_at, 'responded');
+      }
     }
 
-    // Couverture école : parents, app installée, opt-out, numéro WhatsApp
+    // Couverture ecole : parents, app installee, opt-out, numero WhatsApp
     let parentsTotal = 0, parentsWithApp = 0, parentsOptedOut = 0, parentsWithWhatsapp = 0, parentsOptedIn = 0;
     if (schoolId) {
-      const { data: parentProfiles } = await supabaseAdmin
+      const parentProfiles = await selectAllPages(() => supabaseAdmin
         .from('profiles')
         .select('id')
         .eq('role', 'parent')
-        .eq('school_id', schoolId);
+        .eq('school_id', schoolId)
+        .order('id', { ascending: true }));
       const pIds = (parentProfiles || []).map(p => p.id);
       parentsTotal = pIds.length;
       if (pIds.length) {
-        const subs = await selectInChunks(pIds, (chunk) =>
-          supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk));
-        parentsWithApp = new Set((subs || []).map(s => s.user_id)).size;
-        const waContacts = await selectInChunks(pIds, (chunk) =>
-          supabaseAdmin.from('parent_contacts').select('parent_id, consent_status').eq('channel', 'whatsapp').in('parent_id', chunk));
+        // Deux parcs d'appareils cohabitent : Web Push (push_subscriptions) et
+        // l'app native Android/iOS (device_tokens). N'en compter qu'un seul
+        // affichait 0 % de parents equipes alors que l'app native est le canal
+        // principal.
+        const subs = await selectInChunksPaged(pIds, (chunk) =>
+          supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk).order('user_id', { ascending: true }));
+        // device_tokens peut manquer si ADD_DEVICE_TOKENS.sql n'a pas encore
+        // ete joue : le tableau de bord ne doit pas tomber pour autant.
+        const devices = await selectInChunksPaged(pIds, (chunk) =>
+          supabaseAdmin.from('device_tokens').select('user_id').in('user_id', chunk).order('user_id', { ascending: true }))
+          .catch(() => []);
+        const appUsers = new Set([...(subs || []), ...(devices || [])].map(s => s.user_id));
+        parentsWithApp = appUsers.size;
+        const waContacts = await selectInChunksPaged(pIds, (chunk) =>
+          supabaseAdmin.from('parent_contacts').select('parent_id, consent_status').eq('channel', 'whatsapp').in('parent_id', chunk).order('parent_id', { ascending: true }));
         // Un parent compte une fois, au statut le plus fort qu'il porte : un
-        // refus l'emporte sur un accord, sinon ajouter un second numéro
-        // suffirait à effacer un STOP.
+        // refus l'emporte sur un accord, sinon ajouter un second numero
+        // suffirait a effacer un STOP.
         const withWa = new Set();
         const rank = { opted_out: 3, opted_in: 2, pending: 1 };
         const statusByParent = new Map();
@@ -1732,7 +1768,7 @@ router.get('/engagement/summary', async (req, res) => {
       }
     }
 
-    // Timeline complète (jours sans activité inclus) — bornée à 90 points
+    // Timeline complete (jours sans activite inclus) - bornee a 90 points
     const byDay = [];
     const nDays = Math.min(days, 90);
     for (let i = nDays - 1; i >= 0; i--) {
@@ -1746,15 +1782,22 @@ router.get('/engagement/summary', async (req, res) => {
       totals: {
         messages: messages.length,
         recipients: recipients.length,
-        reached, failed,
-        readTotal, readApp, readWa, responded,
-        readRate: reached ? Math.round((readTotal / reached) * 100) : 0,
-        responseRate: reached ? Math.round((responded / reached) * 100) : 0,
+        reached, announced, failed, pending,
+        readTotal, readApp, readWa, readInferred, responded,
+        // Effectifs de PERSONNES derriere les lignes d'envoi
+        reachedParents: reachedParents.size,
+        readParents: readParents.size,
+        respondedParents: respondedParents.size,
+        readRate: reached ? Math.min(100, Math.round((readTotal / reached) * 100)) : 0,
+        // Taux de reponse = part des parents joints qui ont repondu, et non des
+        // lignes d'envoi : un parent servi 10 fois ne pese pas 10.
+        responseRate: reachedParents.size ? Math.min(100, Math.round((respondedParents.size / reachedParents.size) * 100)) : 0,
       },
-      channels: { waSent, waDelivered, pushSent, appInbox },
+      channels: { waSent, waAnnounced, waDelivered, pushSent, appInbox },
       coverage: {
         parentsTotal, parentsWithApp, parentsOptedOut, parentsWithWhatsapp, parentsOptedIn,
-        // Taux de consentement tracé, sur les parents joignables par WhatsApp.
+        parentsPending: Math.max(0, parentsWithWhatsapp - parentsOptedIn - parentsOptedOut),
+        // Taux de consentement trace, sur les parents joignables par WhatsApp.
         consentRate: parentsWithWhatsapp ? Math.round((parentsOptedIn / parentsWithWhatsapp) * 100) : 0,
       },
       byDay,
@@ -1779,25 +1822,31 @@ router.get('/engagement/parents', async (req, res) => {
         byParent.set(r.parent_id, {
           parent_id: r.parent_id,
           phone: r.phone_e164 || null,
-          sent: 0, reached: 0, failed: 0,
+          sent: 0, reached: 0, announced: 0, failed: 0,
           waSent: 0, pushSent: 0,
-          read: 0, readApp: 0, readWa: 0,
+          read: 0, readApp: 0, readWa: 0, readInferred: 0,
           responded: 0,
           lastReadAt: null, lastRespondedAt: null, lastSentAt: null,
         });
       }
       const p = byParent.get(r.parent_id);
       p.sent++;
-      if (r.status === 'sent') p.reached++;
+      // Meme regle que le resume : seuls les envois reellement remis peuvent
+      // porter une lecture ou une reponse.
+      const isReached = r.status === 'sent';
+      if (isReached) p.reached++;
+      if (r.status === 'announced') p.announced++;
       if (r.status === 'failed') p.failed++;
-      if (r.provider_msg_id) p.waSent++;
+      if (r.provider_msg_id && r.status !== 'announced') p.waSent++;
       if (r.push_status === 'sent') p.pushSent++;
-      if (r.read_at) {
+      if (r.read_at && isReached) {
         p.read++;
-        if (r.read_channel === 'app') p.readApp++; else p.readWa++;
+        if (r.read_channel === 'app') p.readApp++;
+        else if (r.read_channel === 'whatsapp_reply') p.readInferred++;
+        else p.readWa++;
         if (!p.lastReadAt || r.read_at > p.lastReadAt) p.lastReadAt = r.read_at;
       }
-      if (r.responded_at) {
+      if (r.responded_at && isReached) {
         p.responded++;
         if (!p.lastRespondedAt || r.responded_at > p.lastRespondedAt) p.lastRespondedAt = r.responded_at;
       }
@@ -1813,10 +1862,13 @@ router.get('/engagement/parents', async (req, res) => {
         const p = byParent.get(pr.id);
         if (p) p.name = `${pr.first_name || ''} ${pr.last_name || ''}`.trim() || 'Parent';
       });
-      // App installée
-      const subs = await selectInChunks(parentIds, (chunk) =>
-        supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk));
-      const appIds = new Set((subs || []).map(s => s.user_id));
+      // App installee : Web Push ET app native (deux tables distinctes)
+      const subs = await selectInChunksPaged(parentIds, (chunk) =>
+        supabaseAdmin.from('push_subscriptions').select('user_id').in('user_id', chunk).order('user_id', { ascending: true }));
+      const devices = await selectInChunksPaged(parentIds, (chunk) =>
+        supabaseAdmin.from('device_tokens').select('user_id').in('user_id', chunk).order('user_id', { ascending: true }))
+        .catch(() => []);
+      const appIds = new Set([...(subs || []), ...(devices || [])].map(s => s.user_id));
       // Opt-out WhatsApp
       const optContacts = await selectInChunks(parentIds, (chunk) =>
         supabaseAdmin.from('parent_contacts').select('parent_id, consent_status').eq('channel', 'whatsapp').in('parent_id', chunk));
@@ -1826,9 +1878,13 @@ router.get('/engagement/parents', async (req, res) => {
         p.hasApp = appIds.has(p.parent_id);
         p.optedOut = optedIds.has(p.parent_id);
         // Canal dominant de lecture
-        p.preferredChannel = p.readApp > p.readWa ? 'app' : (p.readWa > 0 ? 'whatsapp' : (p.hasApp ? 'app' : 'whatsapp'));
-        // Segment d'engagement
-        if (p.reached === 0) p.segment = 'injoignable';
+        const readWaTotal = p.readWa + p.readInferred;
+        p.preferredChannel = p.readApp > readWaTotal ? 'app' : (readWaTotal > 0 ? 'whatsapp' : (p.hasApp ? 'app' : 'whatsapp'));
+        // Segment d'engagement. Un parent dont les envois sont seulement
+        // « annonces » (hors fenetre 24 h) a bien ete touche par WhatsApp :
+        // il est silencieux, pas injoignable.
+        if (p.reached === 0 && p.announced === 0) p.segment = 'injoignable';
+        else if (p.reached === 0) p.segment = 'silencieux';
         else if (p.responded > 0) p.segment = 'reactif';
         else if (p.read > 0) p.segment = 'lecteur';
         else p.segment = 'silencieux';

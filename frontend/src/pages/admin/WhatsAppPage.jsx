@@ -1526,7 +1526,10 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
         delivered += c.sent_count || 0;
       }
     });
-    const pct = (n, den) => (den > 0 ? Math.round((n / den) * 100) : 0);
+    // Les anciennes lignes peuvent encore contenir plusieurs accusés pour un
+    // même envoi. Le backend les répare progressivement, mais l'interface ne
+    // doit jamais présenter un pourcentage impossible entre-temps.
+    const pct = (n, den) => (den > 0 ? Math.min(100, Math.round((n / den) * 100)) : 0);
     return {
       targeted, delivered, read, readApp, readWa, responded, failed,
       upcoming, sending, sentThisMonth, sentTotal,

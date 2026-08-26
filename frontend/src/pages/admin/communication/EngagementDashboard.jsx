@@ -134,21 +134,26 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
           <>
             {/* Cartes principales */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Lecture : « vu » ne compte que sur un envoi réellement remis, et
+                  la lecture déduite d'une réponse est affichée à part — ce n'est pas
+                  un accusé de lecture de Meta. */}
               <StatCard icon={Eye} iconCls="text-blue-600" title="Taux de lecture"
                 value={`${t.readRate}%`}
-                sub={`${t.readTotal} vus / ${t.reached} atteints — 📲 ${t.readApp} app · 💬 ${t.readWa} WhatsApp`} />
+                sub={`${t.readTotal} vus / ${t.reached} remis — 📲 ${t.readApp} app · ✓✓ ${t.readWa} WhatsApp${t.readInferred ? ` · ↩ ${t.readInferred} déduits d'une réponse` : ''}`} />
+              {/* Taux de réponse compté en PARENTS distincts : un parent servi
+                  dix fois ne doit pas peser dix. */}
               <StatCard icon={MessageCircle} iconCls="text-emerald-600" title="Taux de réponse"
                 value={`${t.responseRate}%`}
-                sub={`${t.responded} parent(s) ont répondu (WhatsApp)`} />
+                sub={`${t.respondedParents} parent(s) sur ${t.reachedParents} joints — ${t.responded} envoi(s) répondu(s)`} />
               <StatCard icon={Smartphone} iconCls="text-indigo-600" title="Parents avec l'app"
                 value={cov?.parentsTotal ? `${Math.round((cov.parentsWithApp / cov.parentsTotal) * 100)}%` : '—'}
-                sub={`${cov?.parentsWithApp || 0} / ${cov?.parentsTotal || 0} parents — canal gratuit`} />
+                sub={`${cov?.parentsWithApp || 0} / ${cov?.parentsTotal || 0} parents — canal gratuit (app mobile + web)`} />
               {/* Consentement : Meta exige de pouvoir prouver l'accord de chaque
                   destinataire, et les désabonnements pèsent sur la qualité du numéro. */}
               <StatCard icon={BellOff} iconCls={cov?.parentsOptedOut ? 'text-red-500' : 'text-emerald-600'}
                 title="Consentement WhatsApp"
                 value={cov?.parentsWithWhatsapp ? `${cov.consentRate ?? 0}%` : '—'}
-                sub={`${cov?.parentsOptedIn || 0} accord(s) / ${cov?.parentsWithWhatsapp || 0} joignables · ${cov?.parentsOptedOut || 0} désabonné(s)`} />
+                sub={`${cov?.parentsOptedIn || 0} accord(s) / ${cov?.parentsWithWhatsapp || 0} joignables · ${cov?.parentsPending || 0} sans accord tracé · ${cov?.parentsOptedOut || 0} désabonné(s)`} />
             </div>
 
             {/* Canaux utilisés + timeline */}
@@ -158,11 +163,14 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
                 <div className="space-y-2.5 text-sm">
                   {[
                     { label: '💬 WhatsApp envoyés', value: ch?.waSent || 0, cls: 'bg-green-500' },
+                    // Hors fenêtre 24 h : seule l'annonce est partie, le contenu
+                    // attend la réponse du parent — à ne pas compter comme envoyé.
+                    { label: '⏳ Annonces en attente', value: ch?.waAnnounced || 0, cls: 'bg-amber-400' },
                     { label: '✓✓ WhatsApp remis', value: ch?.waDelivered || 0, cls: 'bg-green-300' },
                     { label: '📲 Push envoyés', value: ch?.pushSent || 0, cls: 'bg-indigo-500' },
                     { label: '📥 Boîte in-app', value: ch?.appInbox || 0, cls: 'bg-indigo-300' },
                   ].map(row => {
-                    const max = Math.max(ch?.waSent || 0, ch?.waDelivered || 0, ch?.pushSent || 0, ch?.appInbox || 0, 1);
+                    const max = Math.max(ch?.waSent || 0, ch?.waAnnounced || 0, ch?.waDelivered || 0, ch?.pushSent || 0, ch?.appInbox || 0, 1);
                     return (
                       <div key={row.label}>
                         <div className="flex items-center justify-between text-xs text-gray-600 mb-0.5">
@@ -176,7 +184,8 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
                   })}
                 </div>
                 <p className="text-[11px] text-gray-400 mt-3">
-                  {t.recipients} destinataire(s) sur {t.messages} envoi(s) — {t.failed} échec(s)
+                  {t.recipients} destinataire(s) sur {t.messages} envoi(s) — {t.reached} atteint(s)
+                  {t.announced ? ` · ${t.announced} annoncé(s)` : ''} · {t.failed} échec(s)
                 </p>
               </div>
 
@@ -249,7 +258,9 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
                       <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">Aucun parent sur cette période.</td></tr>
                     ) : filteredParents.map(p => {
                       const seg = SEGMENTS[p.segment] || SEGMENTS.silencieux;
-                      const readPct = p.reached ? Math.round((p.read / p.reached) * 100) : 0;
+                      // Protection d'affichage pour les anciennes données déjà
+                      // corrompues : un taux de lecture ne dépasse jamais 100 %.
+                      const readPct = p.reached ? Math.min(100, Math.round((p.read / p.reached) * 100)) : 0;
                       const openInbox = () => onOpenConversation?.({
                         phone: p.phone, parentId: p.parent_id, name: p.name,
                       });
@@ -278,8 +289,11 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
                             {p.read > 0
                               ? (p.preferredChannel === 'app' ? '📲 Application' : '💬 WhatsApp')
                               : '—'}
-                            {p.read > 0 && (p.readApp > 0 && p.readWa > 0) && (
-                              <span className="text-[10px] text-gray-400 ml-1">({p.readApp} app / {p.readWa} WA)</span>
+                            {p.read > 0 && (p.readApp > 0 && (p.readWa + (p.readInferred || 0)) > 0) && (
+                              <span className="text-[10px] text-gray-400 ml-1">({p.readApp} app / {p.readWa + (p.readInferred || 0)} WA)</span>
+                            )}
+                            {p.readInferred > 0 && (
+                              <span className="text-[10px] text-gray-400 ml-1" title="Lecture déduite d'une réponse, pas d'un accusé de lecture">↩</span>
                             )}
                           </td>
                           <td className="px-2 py-2 text-xs text-gray-500">{fmtDate(p.lastReadAt)}</td>
@@ -307,8 +321,10 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
               <div className="px-4 py-2.5 border-t border-gray-100 flex items-start gap-2 text-[11px] text-gray-400">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                 <p>
-                  « Vu » = notification lue dans l'app ou ✓✓ bleu WhatsApp (si les accusés de lecture du parent sont activés).
-                  « Réponse » = message WhatsApp reçu après un envoi. Les parents ⚠️ injoignables n'ont ni app ni WhatsApp fonctionnel :
+                  « Vu » = notification lue dans l'app, ✓✓ bleu WhatsApp (si les accusés de lecture du parent sont activés),
+                  ou lecture déduite (↩) quand le parent répond à un envoi. « Réponse » = message WhatsApp reçu après un envoi,
+                  attribué au dernier envoi remis resté sans réponse. Lectures et réponses ne sont comptées que sur les envois
+                  réellement remis. Les parents ⚠️ injoignables n'ont ni app ni WhatsApp fonctionnel :
                   pensez à mettre à jour leur numéro ou à les inviter à installer l'application.{' '}
                   Cliquez sur une ligne pour ouvrir la conversation du parent dans la boîte de réception.
                 </p>
