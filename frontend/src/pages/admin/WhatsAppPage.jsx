@@ -1478,8 +1478,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     [comms, dansPeriode],
   );
 
-  // Contenus encore en attente de livraison, sur la même période.
-  const [pendingSummary, setPendingSummary] = useState({ messages: 0, parents: 0 });
+  // Vue d'ensemble calculée SERVEUR sur toute la période.
+  //
+  // Les tuiles étaient auparavant agrégées dans le navigateur à partir de la
+  // liste — plafonnée à 100 communications — alors que « À livrer » était,
+  // lui, compté côté serveur sur l'ensemble des envois : deux tuiles voisines
+  // ne parlaient donc pas du même périmètre (« Portée 305 » contre
+  // « À livrer 158 »). Une seule requête, un seul périmètre.
+  const [serverStats, setServerStats] = useState(null);
   useEffect(() => {
     if (activeTab !== 'planning') return;
     (async () => {
@@ -1490,12 +1496,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
           if (commFrom) params.append('from', commFrom);
           if (commTo) params.append('to', commTo);
         }
-        const res = await fetch(`${apiUrl}/api/admin/communications/pending-delivery?${params}`, {
+        const res = await fetch(`${apiUrl}/api/admin/communications/stats?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) setPendingSummary(await res.json());
+        if (res.ok) setServerStats(await res.json());
       } catch (e) {
-        console.error('Erreur en attente de livraison:', e);
+        console.error('Erreur vue d\'ensemble:', e);
       }
     })();
   }, [activeTab, apiUrl, commPeriod, commFrom, commTo, comms]);
@@ -1530,14 +1536,34 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     // même envoi. Le backend les répare progressivement, mais l'interface ne
     // doit jamais présenter un pourcentage impossible entre-temps.
     const pct = (n, den) => (den > 0 ? Math.min(100, Math.round((n / den) * 100)) : 0);
+    // Repli sur la liste tant que les stats serveur ne sont pas revenues (ou
+    // si l'instance backend n'expose pas encore /stats).
+    if (serverStats) {
+      const st = serverStats;
+      return {
+        targeted: st.targeted, sent: st.sent, announced: st.announced, queued: st.queued || 0,
+        delivered: st.delivered, read: st.read, readApp: st.readApp, readWa: st.readWa,
+        readInferred: st.readInferred, responded: st.responded,
+        respondedParents: st.respondedParents, servedParents: st.servedParents,
+        failed: st.failed,
+        pending: st.pending || { messages: 0, parents: 0 },
+        upcoming: st.upcoming, sending, sentThisMonth: st.sentThisMonth, sentTotal,
+        deliveryRate: st.deliveryRate, dispatchRate: st.dispatchRate,
+        readRate: st.readRate, responseRate: st.responseRate,
+      };
+    }
     return {
-      targeted, delivered, read, readApp, readWa, responded, failed,
+      targeted, sent: delivered, announced: 0, queued: 0,
+      delivered, read, readApp, readWa, readInferred: 0, responded,
+      respondedParents: responded, servedParents: delivered, failed,
+      pending: { messages: 0, parents: 0 },
       upcoming, sending, sentThisMonth, sentTotal,
       deliveryRate: pct(delivered, targeted),
+      dispatchRate: pct(delivered, targeted),
       readRate: pct(read, delivered),
       responseRate: pct(responded, delivered),
     };
-  }, [commsFiltres]);
+  }, [commsFiltres, serverStats]);
 
   // Sélection d'un fichier à joindre (image ou document) pour le planificateur
   const handleCommFileSelect = (e) => {
@@ -2914,7 +2940,12 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
           {/* Sub-tabs */}
           <div className={`w-full lg:w-96 lg:flex-shrink-0 border-r border-gray-200 bg-white flex flex-col ${selectedConv ? 'hidden lg:flex' : 'flex'}`}>
             {/* Stats bar */}
-            <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center gap-4 flex-shrink-0">
+            {/* Ces compteurs portent sur TOUT le trafic WhatsApp du numéro,
+                chatbot compris, et sans limite de période : ils ne se comparent
+                pas aux tuiles de l'onglet Envois, qui ne mesurent que les
+                campagnes du hub sur la période choisie. */}
+            <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 flex items-center gap-4 flex-shrink-0"
+              title="Tout le trafic WhatsApp du numéro (chatbot compris), sans filtre de période">
               <span className="text-[11px] text-gray-600"><strong className="text-gray-900">{conversations.length}</strong> conv.</span>
               <span className="text-[11px] text-green-600"><strong>{inboxTotalSent}</strong> envoyés</span>
               <span className="text-[11px] text-blue-600"><strong>{inboxTotalReceived}</strong> reçus</span>
@@ -4138,23 +4169,33 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                   <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-500"><Users className="w-3.5 h-3.5" /> Portée</div>
                     <p className="text-xl font-bold text-gray-800 mt-1">{commStats.targeted}</p>
-                    <p className="text-[11px] text-gray-500">{commStats.delivered} atteint(s)</p>
+                    <p className="text-[11px] text-gray-500">
+                      {commStats.sent} parti(s){commStats.announced ? ` · ${commStats.announced} annoncé(s)` : ''}
+                      {commStats.queued ? ` · ${commStats.queued} en file` : ''}
+                    </p>
                   </div>
+                  {/* « Remise » = accusé ✓✓ de Meta, pas le simple fait d'avoir
+                      expédié : afficher 100 % parce que tout est parti laissait
+                      croire que tout était arrivé. */}
                   <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700"><Send className="w-3.5 h-3.5" /> Remise</div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700"><Send className="w-3.5 h-3.5" /> Remise ✓✓</div>
                     <p className="text-xl font-bold text-emerald-700 mt-1">{commStats.deliveryRate}%</p>
-                    <p className="text-[11px] text-emerald-600/80">{commStats.delivered}/{commStats.targeted}</p>
+                    <p className="text-[11px] text-emerald-600/80">{commStats.delivered}/{commStats.sent} parti(s)</p>
                   </div>
                   {/* Lecture & réponse */}
                   <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-blue-700"><Eye className="w-3.5 h-3.5" /> Lecture</div>
                     <p className="text-xl font-bold text-blue-700 mt-1">{commStats.readRate}%</p>
-                    <p className="text-[11px] text-blue-600/80">{commStats.read} vu(s)</p>
+                    <p className="text-[11px] text-blue-600/80">
+                      {commStats.read} vu(s){commStats.readInferred ? ` · ↩ ${commStats.readInferred} déduits` : ''}
+                    </p>
                   </div>
                   <div className="rounded-lg border border-violet-100 bg-violet-50 p-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-violet-700"><MessageSquare className="w-3.5 h-3.5" /> Réponse</div>
                     <p className="text-xl font-bold text-violet-700 mt-1">{commStats.responseRate}%</p>
-                    <p className="text-[11px] text-violet-600/80">{commStats.responded} réponse(s)</p>
+                    <p className="text-[11px] text-violet-600/80">
+                      {commStats.respondedParents} parent(s) / {commStats.servedParents} servi(s)
+                    </p>
                   </div>
                   {/* Canal & échecs */}
                   <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
@@ -4166,9 +4207,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       remise masque : l'annonce est partie, le contenu non. */}
                   <div className="rounded-lg border border-orange-100 bg-orange-50 p-3">
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-orange-700"><Clock className="w-3.5 h-3.5" /> À livrer</div>
-                    <p className="text-xl font-bold text-orange-700 mt-1">{pendingSummary.messages}</p>
+                    <p className="text-xl font-bold text-orange-700 mt-1">{commStats.pending.messages}</p>
                     <p className="text-[11px] text-orange-600/80">
-                      {pendingSummary.parents} parent(s) · en attente de réponse
+                      {commStats.pending.parents} parent(s) · en attente de réponse
                     </p>
                   </div>
                   {/* Planning */}

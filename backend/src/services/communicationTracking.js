@@ -72,9 +72,10 @@ export async function markResponded({ parentId, phone }) {
       .from('whatsapp_message_recipients')
       .select('id, read_at, delivered_at')
       .is('responded_at', null)
-      // Un envoi en échec (ou une annonce dont le contenu n'est jamais parti)
-      // ne peut pas avoir suscité de réponse.
-      .eq('status', 'sent')
+      // Un envoi en échec n'a pas pu susciter de réponse. Une ANNONCE, si :
+      // hors fenêtre de 24 h c'est justement la réponse du parent qui
+      // déclenche la livraison du contenu.
+      .in('status', ['sent', 'announced'])
       .gte('created_at', since)
       .order('sent_at', { ascending: false, nullsFirst: false })
       .limit(1);

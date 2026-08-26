@@ -101,6 +101,10 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
   // On affiche alors les compteurs historiques au lieu de « undefined ».
   const respondedParentCount = Number.isFinite(t?.respondedParents) ? t.respondedParents : (t?.responded || 0);
   const reachedParentCount = Number.isFinite(t?.reachedParents) ? t.reachedParents : (t?.reached || 0);
+  // « Servi » = contenu parti OU annonce reçue (hors fenêtre 24 h) : c'est
+  // l'ensemble qui peut porter une lecture ou une réponse.
+  const servedCount = Number.isFinite(t?.served) ? t.served : (t?.reached || 0);
+  const servedParentCount = Number.isFinite(t?.servedParents) ? t.servedParents : reachedParentCount;
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
@@ -144,12 +148,12 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
                   un accusé de lecture de Meta. */}
               <StatCard icon={Eye} iconCls="text-blue-600" title="Taux de lecture"
                 value={`${t.readRate}%`}
-                sub={`${t.readTotal} vus / ${t.reached} remis — 📲 ${t.readApp} app · ✓✓ ${t.readWa} WhatsApp${t.readInferred ? ` · ↩ ${t.readInferred} déduits d'une réponse` : ''}`} />
+                sub={`${t.readTotal} vus / ${servedCount} servis — 📲 ${t.readApp} app · ✓✓ ${t.readWa} WhatsApp${t.readInferred ? ` · ↩ ${t.readInferred} déduits d'une réponse` : ''}`} />
               {/* Taux de réponse compté en PARENTS distincts : un parent servi
                   dix fois ne doit pas peser dix. */}
               <StatCard icon={MessageCircle} iconCls="text-emerald-600" title="Taux de réponse"
                 value={`${t.responseRate}%`}
-                sub={`${respondedParentCount} parent(s) sur ${reachedParentCount} joints — ${t.responded} envoi(s) répondu(s)`} />
+                sub={`${respondedParentCount} parent(s) sur ${servedParentCount} joints — ${t.responded} envoi(s) répondu(s)`} />
               <StatCard icon={Smartphone} iconCls="text-indigo-600" title="Parents avec l'app"
                 value={cov?.parentsTotal ? `${Math.round((cov.parentsWithApp / cov.parentsTotal) * 100)}%` : '—'}
                 sub={`${cov?.parentsWithApp || 0} / ${cov?.parentsTotal || 0} parents — canal gratuit (app mobile + web)`} />

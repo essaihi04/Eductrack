@@ -19,6 +19,11 @@ import { whatsappOptedOut } from '../services/notificationRouter.js';
 import { prepareVoiceNote } from '../services/whatsapp/voiceNote.js';
 import { selectAllPages, selectInChunksPaged } from '../utils/chunkedQueries.js';
 
+// Destinataire « servi » : le contenu est parti ('sent'), ou l'annonce a
+// été reçue ('announced') — hors fenêtre de 24 h, c'est la réponse du
+// parent à cette annonce qui déclenche la livraison du contenu.
+const servi = (r) => r.status === 'sent' || r.status === 'announced';
+
 const router = express.Router();
 
 router.use(authenticate);
@@ -909,9 +914,9 @@ router.get('/history', async (req, res) => {
         const m = metricsByMsg.get(r.message_id);
         m.targeted++;
         if (r.status === 'sent') m.sent++;
-        // Une lecture/reponse ne vaut que sur un envoi reellement remis.
-        if (r.read_at && r.status === 'sent') { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
-        if (r.responded_at && r.status === 'sent') m.responded++;
+        // Une lecture/réponse ne vaut que sur un envoi effectivement servi.
+        if (r.read_at && servi(r)) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
+        if (r.responded_at && servi(r)) m.responded++;
       });
       messages.forEach(m => { m.metrics = metricsByMsg.get(m.id) || null; });
     }
@@ -1682,6 +1687,12 @@ router.get('/engagement/summary', async (req, res) => {
     // Un parent ne doit peser qu'une fois : les taux « parents » se lisent sur
     // des personnes, pas sur des lignes d'envoi.
     const reachedParents = new Set(), readParents = new Set(), respondedParents = new Set();
+    // « Servi » = le destinataire a reçu quelque chose sur WhatsApp, contenu
+    // complet ('sent') ou simple annonce ('announced'). Hors fenêtre 24 h,
+    // c'est la réponse du parent à l'annonce qui déclenche la livraison : ces
+    // lignes doivent pouvoir porter une lecture et une réponse.
+    let served = 0;
+    const servedParents = new Set();
     const key = (r) => r.parent_id || r.phone_e164 || `row-${r.id}`;
     const byDayMap = new Map(); // 'YYYY-MM-DD' -> { sent, read, responded }
     const dayKey = (iso) => String(iso).slice(0, 10);
@@ -1696,6 +1707,8 @@ router.get('/engagement/summary', async (req, res) => {
       // « Annonce » = hors fenetre 24 h, seule l'annonce est partie et le
       // contenu attend la reponse du parent : ni atteint, ni en echec.
       const isReached = r.status === 'sent';
+      const isServed = isReached || r.status === 'announced';
+      if (isServed) { served++; servedParents.add(key(r)); }
       if (isReached) { reached++; reachedParents.add(key(r)); bump(r.sent_at || r.created_at, 'sent'); }
       else if (r.status === 'announced') announced++;
       else if (r.status === 'failed') failed++;
@@ -1704,9 +1717,9 @@ router.get('/engagement/summary', async (req, res) => {
       if (r.delivered_at) waDelivered++;
       if (r.push_status === 'sent') pushSent++;
       if (r.notification_id) appInbox++;
-      // Une lecture ne compte que sur un envoi reellement remis : sinon le taux
-      // pouvait depasser 100 % (numerateur plus large que le denominateur).
-      if (r.read_at && isReached) {
+      // Une lecture ne compte que sur un envoi effectivement servi : sinon le
+      // taux pouvait dépasser 100 % (numérateur plus large que dénominateur).
+      if (r.read_at && isServed) {
         readTotal++;
         readParents.add(key(r));
         bump(r.read_at, 'read');
@@ -1714,7 +1727,7 @@ router.get('/engagement/summary', async (req, res) => {
         else if (r.read_channel === 'whatsapp_reply') readInferred++; // deduit d'une reponse, pas un accuse de lecture
         else readWa++;
       }
-      if (r.responded_at && isReached) {
+      if (r.responded_at && isServed) {
         responded++;
         respondedParents.add(key(r));
         bump(r.responded_at, 'responded');
@@ -1782,16 +1795,19 @@ router.get('/engagement/summary', async (req, res) => {
       totals: {
         messages: messages.length,
         recipients: recipients.length,
-        reached, announced, failed, pending,
+        reached, served, announced, failed, pending,
         readTotal, readApp, readWa, readInferred, responded,
         // Effectifs de PERSONNES derriere les lignes d'envoi
         reachedParents: reachedParents.size,
+        servedParents: servedParents.size,
         readParents: readParents.size,
         respondedParents: respondedParents.size,
-        readRate: reached ? Math.min(100, Math.round((readTotal / reached) * 100)) : 0,
+        // Dénominateur = destinataires servis, le même ensemble que celui qui
+        // peut porter une lecture.
+        readRate: served ? Math.min(100, Math.round((readTotal / served) * 100)) : 0,
         // Taux de reponse = part des parents joints qui ont repondu, et non des
         // lignes d'envoi : un parent servi 10 fois ne pese pas 10.
-        responseRate: reachedParents.size ? Math.min(100, Math.round((respondedParents.size / reachedParents.size) * 100)) : 0,
+        responseRate: servedParents.size ? Math.min(100, Math.round((respondedParents.size / servedParents.size) * 100)) : 0,
       },
       channels: { waSent, waAnnounced, waDelivered, pushSent, appInbox },
       coverage: {
@@ -1834,19 +1850,20 @@ router.get('/engagement/parents', async (req, res) => {
       // Meme regle que le resume : seuls les envois reellement remis peuvent
       // porter une lecture ou une reponse.
       const isReached = r.status === 'sent';
+      const isServed = isReached || r.status === 'announced';
       if (isReached) p.reached++;
       if (r.status === 'announced') p.announced++;
       if (r.status === 'failed') p.failed++;
       if (r.provider_msg_id && r.status !== 'announced') p.waSent++;
       if (r.push_status === 'sent') p.pushSent++;
-      if (r.read_at && isReached) {
+      if (r.read_at && isServed) {
         p.read++;
         if (r.read_channel === 'app') p.readApp++;
         else if (r.read_channel === 'whatsapp_reply') p.readInferred++;
         else p.readWa++;
         if (!p.lastReadAt || r.read_at > p.lastReadAt) p.lastReadAt = r.read_at;
       }
-      if (r.responded_at && isReached) {
+      if (r.responded_at && isServed) {
         p.responded++;
         if (!p.lastRespondedAt || r.responded_at > p.lastRespondedAt) p.lastRespondedAt = r.responded_at;
       }

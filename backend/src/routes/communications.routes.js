@@ -8,13 +8,40 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { sendCommunication } from '../services/communicationScheduler.js';
 import { allowedCategoriesForRole, resolveCategoryForSending } from '../utils/whatsappCategory.js';
-import { selectInChunksPaged } from '../utils/chunkedQueries.js';
+import { selectAllPages, selectInChunksPaged } from '../utils/chunkedQueries.js';
+
+// Destinataire « servi » : le contenu est parti ('sent'), ou l'annonce a
+// été reçue ('announced') — hors fenêtre de 24 h, c'est la réponse du
+// parent à cette annonce qui déclenche la livraison du contenu.
+const servi = (r) => r.status === 'sent' || r.status === 'announced';
 
 const router = express.Router();
 router.use(authenticate);
 router.use(authorize('admin', 'school_admin', 'pedagogical_manager', 'pedagogical_director'));
 
 const getSchoolId = (req) => (req.user.role === 'super_admin' ? null : req.user.school_id || null);
+
+// Bornes d'une période, communes à TOUTES les tuiles du bandeau : « aujourd'hui »
+// se lit comme une date (depuis minuit), les autres comme des fenêtres
+// glissantes. Une seule définition, sinon deux tuiles côte à côte racontent
+// deux histoires différentes.
+const periodBounds = ({ period, from: fromDate, to: toDate } = {}) => {
+  const jours = { week: 7, month: 30 }[period];
+  let from = null;
+  if (period === 'today') {
+    const minuit = new Date();
+    minuit.setHours(0, 0, 0, 0);
+    from = minuit.toISOString();
+  } else if (jours) {
+    from = new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString();
+  } else if (period === 'custom' && fromDate) {
+    from = new Date(`${fromDate}T00:00:00`).toISOString();
+  }
+  // Borne haute INCLUSIVE : « jusqu'au 26 » couvre toute la journée du 26.
+  const to = period === 'custom' && toDate
+    ? new Date(`${toDate}T23:59:59`).toISOString() : null;
+  return { from, to };
+};
 
 /**
  * GET /pending-delivery — combien de contenus attendent encore leur livraison.
@@ -29,24 +56,7 @@ const getSchoolId = (req) => (req.user.role === 'super_admin' ? null : req.user.
 router.get('/pending-delivery', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
-    const { period, from: fromDate, to: toDate } = req.query;
-    // « Aujourd'hui » se lit comme une date (depuis minuit), les autres
-    // périodes comme des fenêtres glissantes. Même règle que l'interface,
-    // sinon la tuile et la liste ne racontent pas la même histoire.
-    const jours = { week: 7, month: 30 }[period];
-    let from = null;
-    if (period === 'today') {
-      const minuit = new Date();
-      minuit.setHours(0, 0, 0, 0);
-      from = minuit.toISOString();
-    } else if (jours) {
-      from = new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString();
-    } else if (period === 'custom' && fromDate) {
-      from = new Date(`${fromDate}T00:00:00`).toISOString();
-    }
-    // Borne haute INCLUSIVE : « jusqu'au 26 » couvre toute la journée du 26.
-    const to = period === 'custom' && toDate
-      ? new Date(`${toDate}T23:59:59`).toISOString() : null;
+    const { from, to } = periodBounds(req.query);
 
     let q = supabaseAdmin
       .from('whatsapp_message_recipients')
@@ -69,6 +79,121 @@ router.get('/pending-delivery', async (req, res) => {
     // page d'erreur pour une simple tuile de tableau de bord.
     console.warn('Erreur en attente de livraison:', e.message);
     res.json({ messages: 0, parents: 0 });
+  }
+});
+
+// GET /stats — bandeau « Vue d'ensemble » des communications.
+//
+// Calculé SERVEUR sur toute la période, et non côté navigateur sur la liste :
+// celle-ci est plafonnée à 100 lignes, si bien que « Portée 305 » et
+// « À livrer 158 » ne portaient pas sur le même ensemble d'envois. Une seule
+// requête, un seul périmètre, des tuiles qui se répondent.
+router.get('/stats', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const { from, to } = periodBounds(req.query);
+
+    const messages = await selectAllPages(() => {
+      let q = supabaseAdmin
+        .from('whatsapp_messages')
+        .select('id, status, created_at, scheduled_at')
+        .order('created_at', { ascending: false });
+      if (schoolId) q = q.eq('school_id', schoolId);
+      if (from) q = q.gte('created_at', from);
+      if (to) q = q.lte('created_at', to);
+      const allowedCats = allowedCategoriesForRole(req.user?.role);
+      if (allowedCats) q = q.in('category', allowedCats);
+      return q;
+    });
+
+    const msgIds = messages.map((m) => m.id);
+    const recipients = msgIds.length
+      ? await selectInChunksPaged(msgIds, (chunk) => supabaseAdmin
+        .from('whatsapp_message_recipients')
+        .select('id, parent_id, phone_e164, status, delivered_at, read_at, read_channel, responded_at')
+        .in('message_id', chunk)
+        .order('id', { ascending: true }))
+      : [];
+
+    // `queued` : lignes jamais traitées (job interrompu, envoi encore en file).
+    // Sans elles, la somme des tuiles ne retombe pas sur la portée affichée.
+    let targeted = 0, sent = 0, announced = 0, failed = 0, queued = 0, deliveredAck = 0;
+    let read = 0, readApp = 0, readWa = 0, readInferred = 0, responded = 0;
+    let pendingMessages = 0;
+    const pendingParents = new Set();
+    const servedParents = new Set(), respondedParents = new Set();
+    const key = (r) => r.parent_id || r.phone_e164 || `row-${r.id}`;
+
+    for (const r of recipients) {
+      targeted++;
+      // « annoncé » : l'annonce est partie, le contenu attend la réponse du
+      // parent. Le destinataire est touché, mais n'a pas reçu le contenu.
+      const served = r.status === 'sent' || r.status === 'announced';
+      if (r.status === 'sent') sent++;
+      else if (r.status === 'announced') {
+        announced++;
+        pendingMessages++;
+        if (r.phone_e164) pendingParents.add(r.phone_e164);
+      } else if (r.status === 'failed') failed++;
+      else queued++;
+      if (served) servedParents.add(key(r));
+      if (r.delivered_at) deliveredAck++;
+      if (r.read_at && served) {
+        read++;
+        if (r.read_channel === 'app') readApp++;
+        else if (r.read_channel === 'whatsapp_reply') readInferred++;
+        else readWa++;
+      }
+      if (r.responded_at && served) {
+        responded++;
+        respondedParents.add(key(r));
+      }
+    }
+
+    // Planning : ce qui reste à partir, et le volume du mois en cours.
+    const now = Date.now();
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    let upcoming = 0;
+    let scheduledQuery = supabaseAdmin
+      .from('scheduled_communications')
+      .select('id, status, scheduled_at')
+      .in('status', ['scheduled', 'pending'])
+      .gte('scheduled_at', new Date(now).toISOString());
+    if (schoolId) scheduledQuery = scheduledQuery.eq('school_id', schoolId);
+    const { data: aVenir } = await scheduledQuery;
+    upcoming = (aVenir || []).length;
+    // « Ce mois » se compte sur le mois calendaire ENTIER, indépendamment de
+    // la période choisie : une fenêtre du 12 au 26 août ne dit rien du mois.
+    let moisQuery = supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', monthStart);
+    if (schoolId) moisQuery = moisQuery.eq('school_id', schoolId);
+    const allowedCatsMois = allowedCategoriesForRole(req.user?.role);
+    if (allowedCatsMois) moisQuery = moisQuery.in('category', allowedCatsMois);
+    const { count: sentThisMonth } = await moisQuery;
+
+    const pct = (n, den) => (den > 0 ? Math.min(100, Math.round((n / den) * 100)) : 0);
+
+    res.json({
+      messages: messages.length,
+      targeted, sent, announced, failed, queued,
+      delivered: deliveredAck,
+      read, readApp, readWa, readInferred, responded,
+      servedParents: servedParents.size,
+      respondedParents: respondedParents.size,
+      pending: { messages: pendingMessages, parents: pendingParents.size },
+      upcoming, sentThisMonth: sentThisMonth || 0,
+      // « Remise » = accusé ✓✓ de Meta sur un contenu réellement parti, et non
+      // le simple fait d'avoir expédié le message.
+      deliveryRate: pct(deliveredAck, sent),
+      dispatchRate: pct(sent, targeted),
+      readRate: pct(read, sent),
+      responseRate: pct(respondedParents.size, servedParents.size),
+    });
+  } catch (e) {
+    console.error('Erreur stats communications:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
@@ -164,9 +289,9 @@ router.get('/', async (req, res) => {
         // « annoncé » : hors fenêtre de 24 h, seule l'annonce est partie et
         // le contenu attend encore la réponse du parent.
         if (r.status === 'announced') m.announced++;
-        // Une lecture/réponse ne vaut que sur un envoi réellement remis.
-        if (r.read_at && r.status === 'sent') { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
-        if (r.responded_at && r.status === 'sent') m.responded++;
+        // Une lecture/réponse ne vaut que sur un envoi effectivement servi.
+        if (r.read_at && servi(r)) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
+        if (r.responded_at && servi(r)) m.responded++;
       });
       comms.forEach((c) => { if (c.message_id) c.metrics = metricsByMsg.get(c.message_id) || null; });
     }
