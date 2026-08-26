@@ -204,13 +204,40 @@ router.get('/templates', async (req, res) => {
   }
 });
 
+// ==================== SEGMENT « EN ATTENTE DE LIVRAISON » ====================
+
+/**
+ * Numéros dont au moins un message reste au statut « annoncé ».
+ *
+ * Hors fenêtre de 24 h, seule l'annonce part : le contenu attend la réponse du
+ * destinataire. Ces numéros forment donc le segment de relance le plus utile —
+ * ce sont eux, et eux seuls, qui n'ont rien reçu. La ligne repasse à « envoyé »
+ * dès la livraison, le segment se vide donc tout seul.
+ *
+ * @returns {Promise<Set<string>>} numéros E.164
+ */
+async function phonesAwaitingDelivery(schoolId) {
+  let q = supabaseAdmin
+    .from('whatsapp_message_recipients')
+    .select('phone_e164, whatsapp_messages!inner(school_id)')
+    .eq('status', 'announced');
+  if (schoolId) q = q.eq('whatsapp_messages.school_id', schoolId);
+  const { data, error } = await q;
+  if (error) {
+    console.warn('[whatsapp] segment en attente de livraison:', error.message);
+    return new Set();
+  }
+  return new Set((data || []).map((r) => r.phone_e164).filter(Boolean));
+}
+
 // ==================== RECIPIENTS ====================
 
 // GET /recipients — get parent phone numbers filtered by class, level, school_type
 router.get('/recipients', async (req, res) => {
   try {
-    const { class_ids, school_type, level } = req.query;
+    const { class_ids, school_type, level, pending_delivery } = req.query;
     const schoolId = getSchoolId(req);
+    const attenteSeule = pending_delivery === '1' || pending_delivery === 'true';
 
     // Build student query to get class-filtered student IDs
     let studentQuery = supabaseAdmin
@@ -306,7 +333,18 @@ router.get('/recipients', async (req, res) => {
       }
     });
 
-    const uniqueRecipients = Object.values(uniquePhones);
+    let uniqueRecipients = Object.values(uniquePhones);
+
+    // Segment de relance : uniquement ceux dont un message attend sa livraison.
+    if (attenteSeule) {
+      const enAttente = await phonesAwaitingDelivery(schoolId);
+      uniqueRecipients = uniqueRecipients.filter((r) => enAttente.has(r.phone_e164));
+      return res.json({
+        count: uniqueRecipients.length,
+        parentCount: uniqueRecipients.length,
+        recipients: uniqueRecipients,
+      });
+    }
 
     // count = numéros WhatsApp uniques ; parentCount = parents ciblés (canal app,
     // joignables même sans numéro WhatsApp via la notification in-app).
@@ -546,6 +584,14 @@ router.post('/send', async (req, res) => {
       // Rétro-compatibilité : sélection par numéro
       const targetPhones = new Set(filter.parent_phones);
       recipients = recipients.filter(r => r.phone_e164 && targetPhones.has(r.phone_e164));
+    }
+
+    // Segment « en attente de livraison » : la relance ne vise que les numéros
+    // dont un contenu n'est jamais parti. Appliqué APRÈS les filtres de classe
+    // pour qu'on puisse relancer une seule classe si besoin.
+    if (filter?.pending_delivery) {
+      const enAttente = await phonesAwaitingDelivery(schoolId);
+      recipients = recipients.filter((r) => r.phone_e164 && enAttente.has(r.phone_e164));
     }
 
     if (!wantPush) {

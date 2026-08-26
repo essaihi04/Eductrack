@@ -95,6 +95,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const [templateParams, setTemplateParams] = useState([]);
   // Langue imposée à la campagne. Vide = chaque parent reçoit la sienne.
   const [templateLang, setTemplateLang] = useState('');
+  // Segment de relance : uniquement les numéros dont un message reste au statut
+  // « annoncé », c'est-à-dire ceux qui n'ont jamais reçu le contenu.
+  const [pendingOnly, setPendingOnly] = useState(false);
   const [messageType, setMessageType] = useState('text');
   // Canal d'envoi : 'push' (app), 'whatsapp', 'both' (portée maximale)
   const [sendChannels, setSendChannels] = useState('both');
@@ -434,6 +437,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       if (schoolTypeFilter) params.append('school_type', schoolTypeFilter);
       if (levelFilter) params.append('level', levelFilter);
       if (year) params.append('academic_year', year);
+      if (pendingOnly) params.append('pending_delivery', '1');
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/recipients?${params}`, {
         headers: { Authorization: `Bearer ${await getAuthToken()}` }
       });
@@ -445,7 +449,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
     } finally {
       setLoadingRecipients(false);
     }
-  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year]);
+  }, [apiUrl, selectedClasses, classes.length, schoolTypeFilter, levelFilter, year, pendingOnly]);
 
   useEffect(() => {
     fetchRecipientCount();
@@ -607,9 +611,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
 
   // Nombre affiché : en mode sélection = parents cochés ; sinon selon canal
   // (WhatsApp seul → numéros uniques ; app/both → tous les parents ciblés).
-  const effectiveRecipientCount = parentSelectionMode === 'select'
-    ? selectedParents.length
-    : (sendChannels === 'whatsapp' ? recipientCount : Math.max(parentCount, recipientCount));
+  // Le segment « en attente de livraison » est résolu par le serveur : son
+  // décompte fait autorité, y compris en mode sélection où les parents cochés
+  // sont ensuite restreints à ceux qui attendent vraiment leur contenu.
+  const effectiveRecipientCount = pendingOnly
+    ? recipientCount
+    : parentSelectionMode === 'select'
+      ? selectedParents.length
+      : (sendChannels === 'whatsapp' ? recipientCount : Math.max(parentCount, recipientCount));
 
   const handleSend = async () => {
     if (!messageText && !mediaFile) return;
@@ -629,6 +638,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       if (parentSelectionMode === 'select' && selectedParents.length > 0) {
         filter.parent_ids = selectedParents;
       }
+      if (pendingOnly) filter.pending_delivery = true;
       const res = await fetch(`${apiUrl}/api/admin/whatsapp/send`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -2041,6 +2051,25 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     )}
                   </div>
                 </div>
+                {/* Relance ciblée : les numéros dont un message n'est jamais
+                    arrivé. Hors fenêtre de 24 h seule l'annonce part, et ces
+                    parents restent sans le contenu tant qu'ils n'écrivent pas. */}
+                <div className="pt-3 border-t border-gray-100">
+                  <label className={`flex items-start gap-2 cursor-pointer rounded-lg border-2 p-2.5 transition-all ${pendingOnly ? 'border-amber-400 bg-amber-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                    <input type="checkbox" checked={pendingOnly}
+                      onChange={(e) => setPendingOnly(e.target.checked)}
+                      className="w-3.5 h-3.5 mt-0.5 text-amber-600" />
+                    <span>
+                      <span className={`text-sm font-semibold ${pendingOnly ? 'text-amber-700' : 'text-gray-700'}`}>
+                        Relancer uniquement les messages en attente de livraison
+                      </span>
+                      <span className="block text-[11px] text-gray-500 leading-snug mt-0.5">
+                        Ces parents n'ont reçu qu'une annonce, jamais le contenu. La sélection se combine avec les classes choisies ci-dessus.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
                 {/* Mode de sélection parents */}
                 <div className="pt-3 border-t border-gray-100 space-y-3">
                   <div className="flex items-center gap-4">
