@@ -24,6 +24,7 @@ import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from
 import { tryOfficialDocument } from './documents.js';
 import {
   handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu, buildShowcaseContext,
+  schoolContactBlock,
 } from './showcase.js';
 
 const deepseek = new OpenAI({
@@ -103,11 +104,19 @@ RÈGLES ABSOLUES :
 5. Réponse COURTE (8 lignes maximum), claire, avec des emojis pertinents.
 6. Ne termine pas par « Tapez menu » : le système ajoute lui-même ce rappel.`;
 
-function noAnswerMessage(text, schoolName) {
-  if (isArabicText(text)) {
-    return `🤔 لا أتوفر على هذه المعلومة في وثائق *${schoolName}*.\n\nيرجى الاتصال بإدارة المدرسة للحصول على إجابة دقيقة.`;
+/**
+ * Réponse d'impuissance, complétée par les COORDONNÉES de l'école.
+ *
+ * « Contactez l'administration » sans numéro laissait le visiteur devant une
+ * impasse : la vitrine porte le fixe et le mobile, autant les lui donner.
+ */
+async function noAnswerMessage(text, schoolName, schoolId) {
+  const ar = isArabicText(text);
+  const contacts = await schoolContactBlock(schoolId, { lang: ar ? 'ar' : 'fr' }).catch(() => '');
+  if (ar) {
+    return `🤔 لا أتوفر على هذه المعلومة في وثائق *${schoolName}*.${contacts}`;
   }
-  return `🤔 Je n'ai pas cette information dans les documents de *${schoolName}*.\n\nContactez l'administration de l'école pour une réponse précise.`;
+  return `🤔 Je n'ai pas cette information dans les documents de *${schoolName}*.${contacts}`;
 }
 
 /**
@@ -122,7 +131,7 @@ export async function answerFromKnowledge({ schoolId, schoolName, question }) {
     buildShowcaseContext(schoolId, { publicOnly: true }).catch(() => null),
   ]);
   if ((snippets.length === 0 && !showcase) || !process.env.DEEPSEEK_API_KEY) {
-    return noAnswerMessage(question, schoolName);
+    return noAnswerMessage(question, schoolName, schoolId);
   }
 
   try {
@@ -145,10 +154,10 @@ export async function answerFromKnowledge({ schoolId, schoolName, question }) {
         { role: 'user', content: question },
       ],
     });
-    return completion.choices[0]?.message?.content?.trim() || noAnswerMessage(question, schoolName);
+    return completion.choices[0]?.message?.content?.trim() || (await noAnswerMessage(question, schoolName, schoolId));
   } catch (e) {
     console.error('[chatbot/public] DeepSeek:', e.message);
-    return noAnswerMessage(question, schoolName);
+    return noAnswerMessage(question, schoolName, schoolId);
   }
 }
 

@@ -125,6 +125,54 @@ export async function getSchoolProfile(schoolId) {
   return data || null;
 }
 
+// Le bloc de contacts s'ajoute à CHAQUE réponse impuissante du chatbot : sans
+// cache, la même fiche serait relue en base des dizaines de fois par heure.
+const PROFILE_TTL_MS = 10 * 60 * 1000;
+const profileCache = new Map(); // schoolId -> { profile, expiresAt }
+
+async function getSchoolProfileCached(schoolId) {
+  const hit = profileCache.get(schoolId);
+  if (hit && hit.expiresAt > Date.now()) return hit.profile;
+  const profile = await getSchoolProfile(schoolId).catch(() => null);
+  profileCache.set(schoolId, { profile, expiresAt: Date.now() + PROFILE_TTL_MS });
+  return profile;
+}
+
+/**
+ * Coordonnées de l'école, à coller sous une réponse que le chatbot ne sait pas
+ * donner. Sans elles, le parent lisait « contactez l'administration » sans
+ * savoir COMMENT : le numéro est dans la vitrine, autant le lui donner.
+ *
+ * Renvoie une chaîne vide si l'école n'a renseigné aucun numéro — mieux vaut
+ * ne rien promettre que renvoyer vers un contact inexistant.
+ *
+ * @param {string} schoolId
+ * @param {'fr'|'ar'} [lang]
+ * @returns {Promise<string>} bloc prêt à concaténer (commence par deux sauts
+ *                            de ligne), ou ''
+ */
+export async function schoolContactBlock(schoolId, { lang = 'fr' } = {}) {
+  if (!schoolId) return '';
+  const profile = await getSchoolProfileCached(schoolId);
+  const fixe = profile?.contact_phone?.trim();
+  const mobile = profile?.contact_whatsapp?.trim();
+  if (!fixe && !mobile) return '';
+
+  const lignes = [];
+  if (lang === 'ar') {
+    lignes.push('📞 *للاستفسار، اتصلوا بالإدارة:*');
+    if (fixe) lignes.push(`☎️ الهاتف الثابت: ${fixe}`);
+    // Même numéro des deux côtés : le répéter donnerait l'illusion de deux
+    // contacts différents.
+    if (mobile && mobile !== fixe) lignes.push(`📱 الهاتف المحمول: ${mobile}`);
+  } else {
+    lignes.push(`📞 *Pour toute précision, appelez l'administration :*`);
+    if (fixe) lignes.push(`☎️ Fixe : ${fixe}`);
+    if (mobile && mobile !== fixe) lignes.push(`📱 Mobile : ${mobile}`);
+  }
+  return `\n\n${lignes.join('\n')}`;
+}
+
 /**
  * Rubriques illustrées publiées.
  * @param {boolean} publicOnly  true pour un numéro inconnu (chatbot visiteur)
@@ -289,7 +337,8 @@ export async function sendShowcaseMenu({ schoolId, phone, schoolName, publicOnly
     else if (!card || card.split('\n').length <= 2) {
       await sendText(
         schoolId, phone,
-        `🏫 Les informations de *${schoolName}* ne sont pas encore publiées ici.\n\n_Contactez l'administration de l'école._`,
+        `🏫 Les informations de *${schoolName}* ne sont pas encore publiées ici.`
+          + (await schoolContactBlock(schoolId).catch(() => '')),
       );
     }
     return;

@@ -11,7 +11,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import * as A from './answers.js';
 import { getDefaultYearBounds, getCurrentAcademicYear } from '../../bulletins/schoolCalendar.js';
 import { getKnowledgeSnippets } from './knowledge.js';
-import { buildShowcaseContext } from './showcase.js';
+import { buildShowcaseContext, schoolContactBlock } from './showcase.js';
 import { allowedAiScopes } from './capabilities.js';
 import { customKnowledgeForAi } from './customEntries.js';
 
@@ -39,7 +39,7 @@ const SYSTEM_PROMPT = `Tu es l'assistant pédagogique officiel d'une école maro
 
 RÈGLES STRICTES :
 1. Tu réponds UNIQUEMENT sur le suivi scolaire de l'élève dont les données te sont fournies.
-2. Tu n'inventes JAMAIS de notes, devoirs, présences ou montants. Si une donnée n'est pas dans le contexte fourni, dis-le simplement.
+2. Tu n'inventes JAMAIS de notes, devoirs, présences ou montants. Si une donnée n'est pas dans le contexte fourni, dis-le simplement, puis invite le parent à APPELER l'école en citant les numéros du champ "contacts" de la FICHE DE L'ÉCOLE (téléphone fixe et mobile). N'invente aucun numéro : s'il n'y en a pas dans le contexte, n'en donne aucun.
 2bis. Si le contexte contient "sujets_non_communiques", ces sujets ont été VOLONTAIREMENT désactivés par l'établissement. Tu ne dois ni les traiter, ni prétendre que la donnée n'existe pas : réponds que cette information n'est pas communiquée par WhatsApp et invite le parent à contacter l'école. N'essaie jamais de la déduire d'un autre champ.
 3. LANGUE : Tu réponds OBLIGATOIREMENT dans la MÊME langue/écriture que la question du parent.
    - Question en arabe (ou darija écrite en arabe) → réponse 100% en arabe, AUCUN mot français.
@@ -549,8 +549,14 @@ async function buildStudentContext(student, parentInfo, { includeFinance = false
  * Si l'IA détecte hors-sujet → renvoie un message de redirection court.
  */
 export async function answerWithAI({ messageText, student, parentInfo }) {
+  // Coordonnées de l'école, collées sous chaque réponse impuissante : sans
+  // elles, « contactez l'école » laisse le parent sans savoir COMMENT.
+  const contacts = await schoolContactBlock(parentInfo?.school_id, {
+    lang: isArabicText(messageText) ? 'ar' : 'fr',
+  }).catch(() => '');
+
   if (!process.env.DEEPSEEK_API_KEY) {
-    return `🎓 Le mode question libre est temporairement indisponible.\n\n_Tapez *menu* pour voir les options disponibles._`;
+    return `🎓 Le mode question libre est temporairement indisponible.${contacts}\n\n_Tapez *menu* pour voir les options disponibles._`;
   }
 
   try {
@@ -650,13 +656,13 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
 
     const response = completion.choices[0]?.message?.content?.trim();
     if (!response) {
-      return `🤔 Je n'ai pas pu traiter votre question.\n\n_Tapez *menu* pour voir les options disponibles._`;
+      return `🤔 Je n'ai pas pu traiter votre question.${contacts}\n\n_Tapez *menu* pour voir les options disponibles._`;
     }
 
     return response;
   } catch (e) {
     console.error('[chatbot/ai] Erreur DeepSeek:', e.message);
-    return `⚠️ Le service IA est temporairement indisponible.\n\n_Tapez *menu* pour utiliser les questions prédéfinies._`;
+    return `⚠️ Le service IA est temporairement indisponible.${contacts}\n\n_Tapez *menu* pour utiliser les questions prédéfinies._`;
   }
 }
 
