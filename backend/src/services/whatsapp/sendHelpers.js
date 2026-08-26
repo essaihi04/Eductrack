@@ -4,6 +4,7 @@
 import { sendText, sendImage, sendDocument } from './index.js';
 import * as cloud from './cloudApi.js';
 import { sendUtility, serviceWindowOpen } from './utility.js';
+import { runAsCampaign } from './outboundGate.js';
 import { queuePending } from './pendingDelivery.js';
 
 // Une école est joignable si son numéro est rattaché à l'API Cloud officielle
@@ -22,7 +23,14 @@ export const isSessionReady = async (schoolId) => {
  * sur le template « information », qui annonce l'objet et invite le parent à
  * répondre. Sa réponse rouvre la fenêtre et le contenu complet peut suivre.
  */
-export async function sendUnified(schoolId, phone, {
+export async function sendUnified(schoolId, phone, opts) {
+  // Tout appelant de sendUnified écrit déjà une ligne destinataire : on pose
+  // le contexte « campagne » pour que l'envoi ne soit pas AUSSI journalisé,
+  // ce qui l'afficherait deux fois dans le fil de conversation.
+  return runAsCampaign(() => sendUnifiedImpl(schoolId, phone, opts));
+}
+
+async function sendUnifiedImpl(schoolId, phone, {
   messageType, message, mediaUrl, fileName,
   templateKey = null, templateParams = [], templateLang = null,
 }) {

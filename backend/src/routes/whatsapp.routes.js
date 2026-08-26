@@ -1510,7 +1510,11 @@ router.get('/conversations', async (req, res) => {
             errorMessage: o.error_message,
             createdAt: o.created_at,
             sentAt: o.created_at,
-            senderName: '🤖 Chatbot',
+            // Le journal couvre désormais DEUX sources : les réponses du
+            // chatbot et les notifications automatiques (absence, note,
+            // facture, transport…). Les confondre ferait croire à l'école que
+            // le robot a répondu là où l'application a notifié.
+            senderName: o.source === 'notification' ? '🔔 Notification automatique' : '🤖 Chatbot',
             direction: 'outgoing',
             isBot: true,
           });

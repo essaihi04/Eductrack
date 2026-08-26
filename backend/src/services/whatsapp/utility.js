@@ -21,8 +21,11 @@
 import { supabaseAdmin } from '../../config/supabase.js';
 import * as cloud from './cloudApi.js';
 import { sendText } from './index.js';
-import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
-import { getTemplate, buildComponents, definitionFor } from './templates.js';
+import { logOutgoing } from './outgoingLog.js';
+import {
+  isOutboundBlocked, isCampaignContext, outgoingSource, OUTBOUND_DISABLED_MESSAGE,
+} from './outboundGate.js';
+import { getTemplate, buildComponents, definitionFor, sanitizeParam } from './templates.js';
 import { queuePending } from './pendingDelivery.js';
 
 /** Normalise un numéro pour la comparaison en base (E.164 sans espaces). */
@@ -124,6 +127,51 @@ export function subjectFromText(text) {
   return line || "une information de l'établissement";
 }
 
+// Nom de l'école, mis en cache : il n'apparaît que dans les annonces, mais
+// celles-ci partent par centaines lors d'une campagne.
+const NOM_TTL_MS = 30 * 60 * 1000;
+const nomsEcoles = new Map();
+
+async function schoolName(schoolId) {
+  if (!schoolId) return null;
+  const hit = nomsEcoles.get(schoolId);
+  if (hit && hit.expiresAt > Date.now()) return hit.nom;
+  const { data } = await supabaseAdmin
+    .from('schools').select('name').eq('id', schoolId).maybeSingle();
+  const nom = data?.name || null;
+  nomsEcoles.set(schoolId, { nom, expiresAt: Date.now() + NOM_TTL_MS });
+  return nom;
+}
+
+/**
+ * Corps du template tel que le destinataire va le LIRE : les {{1}}, {{2}}…
+ * remplacés par leurs valeurs. C'est ce texte qui est journalisé, pour que la
+ * boîte de réception montre le message réel et non « template information ».
+ */
+function corpsRendu(def, params = []) {
+  return (params || []).reduce(
+    (texte, valeur, i) => texte.replaceAll(`{{${i + 1}}}`, sanitizeParam(valeur)),
+    def.body || '',
+  );
+}
+
+/**
+ * Journalise un envoi de template.
+ *
+ * Les templates partaient jusqu'ici SANS aucune trace : ni dans le journal des
+ * envois (réservé aux messages texte), ni ailleurs. L'école voyait donc la
+ * réponse du parent à une annonce dont elle n'avait jamais vu partir le
+ * message — une conversation qui commence par une réponse.
+ */
+function journaliserTemplate(schoolId, phone, def, params, result) {
+  if (isCampaignContext()) return;
+  logOutgoing(
+    schoolId, phone,
+    { type: 'text', body: corpsRendu(def, params), source: outgoingSource() },
+    result,
+  );
+}
+
 /**
  * Envoi utilitaire proactif.
  *
@@ -161,11 +209,23 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
   // Confort : le template générique « information » n'a qu'un paramètre (l'objet).
   // Quand l'appelant ne le fournit pas, on le dérive du texte libre — cela évite
   // d'imposer un libellé à la main sur chaque envoi du hub de communication.
-  const finalParams =
+  let finalParams =
     params.length ? params
     : (template === 'information' && text ? [subjectFromText(text)] : params);
 
-  const tpl = template ? getTemplate(template) : null;
+  let tpl = template ? getTemplate(template) : null;
+
+  // Annonce SIGNÉE : dès que le template nommant l'école est approuvé, il
+  // remplace l'annonce anonyme — les parents ne reconnaissaient pas
+  // l'expéditeur et prenaient le message pour une tentative d'hameçonnage.
+  if (template === 'information' && finalParams.length === 1) {
+    const signe = getTemplate('informationEcole');
+    const nomEcole = await schoolName(schoolId);
+    if (signe && nomEcole) {
+      tpl = signe;
+      finalParams = [nomEcole, finalParams[0]];
+    }
+  }
   if (!tpl) {
     const key = template || '(aucune)';
     console.warn(
@@ -195,6 +255,7 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
     def.language || 'fr',
     buildComponents(finalParams, def.buttonPayloads || [])
   );
+  journaliserTemplate(schoolId, phone, def, finalParams, r);
   // `announced` : le template s'est contenté d'annoncer, le contenu réel n'est
   // pas parti. L'appelant doit le journaliser comme tel (voir deliveryStatus).
   return { ...r, channel: 'template', paid: true, lang: def.language, announced: tpl.announce === true };
@@ -255,6 +316,7 @@ export async function sendUtilityMedia(schoolId, phone, {
   const r = await cloud.sendTemplate(
     schoolId, phone, tpl.name, def.language || 'fr', buildComponents(params, def.buttonPayloads || [])
   );
+  journaliserTemplate(schoolId, phone, def, params, r);
   // Succès = l'ANNONCE est partie ; le PDF suivra quand le parent répondra.
   return { ...r, channel: 'template_announce', paid: true, mediaDeferred: true, lang: def.language, announced: true };
 }

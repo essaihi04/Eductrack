@@ -15,6 +15,7 @@ import { supabaseAdmin } from '../../config/supabase.js';
 import { sendPushToUser } from '../webPush.js';
 import { isSessionReady, sendUnified } from './sendHelpers.js';
 import { withGreeting, withOptOutNotice } from './messagePersonalization.js';
+import { runAsCampaign } from './outboundGate.js';
 
 export const WHATSAPP_BULK_SEND = 'whatsapp_bulk_send';
 
@@ -25,7 +26,14 @@ export const WHATSAPP_BULK_SEND = 'whatsapp_bulk_send';
  */
 class SendSuspended extends Error {}
 
-export async function runBulkSend({ message_id: messageId }, ctx = {}) {
+export async function runBulkSend(payload, ctx = {}) {
+  // Contexte « campagne » : les envois qui suivent ne sont pas rejournalisés
+  // dans le journal des envois, ils ont déjà leur ligne destinataire. Sans ce
+  // marqueur, chaque message de campagne apparaîtrait DEUX FOIS dans le fil.
+  return runAsCampaign(() => runBulkSendImpl(payload, ctx));
+}
+
+async function runBulkSendImpl({ message_id: messageId }, ctx = {}) {
   const touch = ctx.touch || (async () => {});
 
   const CHAMPS = 'id, school_id, message_type, content, media_url, file_name, channels, total_recipients, personalize, resend_of';

@@ -41,5 +41,23 @@ export const runAsChatbot = (fn) => als.run({ chatbot: true }, fn);
 /** True si on est dans le traitement d'un message entrant du chatbot. */
 export const isChatbotContext = () => als.getStore()?.chatbot === true;
 
+/**
+ * Exécute fn dans le contexte « campagne ».
+ *
+ * Sert uniquement à la journalisation : une campagne a déjà sa trace dans
+ * whatsapp_messages / whatsapp_message_recipients, la rejournaliser dans le
+ * journal des envois l'afficherait DEUX FOIS dans le fil de conversation.
+ * Tout ce qui n'est ni chatbot ni campagne (absences, notes, transport,
+ * rendez-vous…) doit en revanche être journalisé : sans cela, l'école ne voit
+ * jamais dans la boîte de réception ce que l'application a envoyé au parent.
+ */
+export const runAsCampaign = (fn) => als.run({ campaign: true }, fn);
+
+/** True si l'envoi appartient à une campagne déjà tracée ailleurs. */
+export const isCampaignContext = () => als.getStore()?.campaign === true;
+
+/** Libellé de la source, pour le journal des envois. */
+export const outgoingSource = () => (isChatbotContext() ? 'chatbot' : 'notification');
+
 /** True si CET envoi doit être bloqué (notification hors chatbot). */
 export const isOutboundBlocked = () => !WA_OUTBOUND_ENABLED && !isChatbotContext();

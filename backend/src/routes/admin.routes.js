@@ -5,6 +5,7 @@ import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.j
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
 import { sendUtility, serviceWindowOpen, deliveryStatus } from '../services/whatsapp/utility.js';
 import { queuePending } from '../services/whatsapp/pendingDelivery.js';
+import { runAsCampaign } from '../services/whatsapp/outboundGate.js';
 import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE, BUCKET_PUBLIC, normalizeLogoToPng } from '../utils/storage.js';
@@ -1042,7 +1043,7 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
           usedPhone = phone;
           // Hors fenêtre 24 h, le texte libre est refusé par Meta : bascule
           // automatique sur le template « information » (objet dérivé du texte).
-          waResult = await sendUtility(schoolId, phone, { text: messageText, template: 'information' });
+          waResult = await runAsCampaign(() => sendUtility(schoolId, phone, { text: messageText, template: 'information' }));
           if (waResult.success) break;
           console.error('[Parents WhatsApp] send failed, repli numéro suivant', parent.id, phone, waResult.message);
         }
@@ -2646,7 +2647,7 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
           let usedPhone = job.phones[0];
           for (const phone of job.phones) {
             usedPhone = phone;
-            waResult = await sendUtility(schoolId, phone, { text: job.messageText, template: 'information' });
+            waResult = await runAsCampaign(() => sendUtility(schoolId, phone, { text: job.messageText, template: 'information' }));
             if (waResult.success) break;
             console.error('[Massar WhatsApp] échec, repli numéro suivant', job.parentId, phone, waResult.message);
           }
@@ -3370,7 +3371,7 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 .single();
 
               if (recipientLog.data) {
-                const waResult = await sendUtility(schoolId, contact.phone_e164, { text: messageText, template: 'information' });
+                const waResult = await runAsCampaign(() => sendUtility(schoolId, contact.phone_e164, { text: messageText, template: 'information' }));
 
                 if (waResult.success) {
                   const statut = deliveryStatus(waResult);
@@ -3533,7 +3534,7 @@ router.post('/students/:id/reset-password', async (req, res) => {
                         .single();
 
                       if (recipientLog.data) {
-                        const waResult = await sendUtility(student.school_id, contact.phone_e164, { text: messageText, template: 'information' });
+                        const waResult = await runAsCampaign(() => sendUtility(student.school_id, contact.phone_e164, { text: messageText, template: 'information' }));
 
                         if (waResult.success) {
                           const statut = deliveryStatus(waResult);
@@ -5578,9 +5579,9 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
                   messageType: message_type, kind: 'teacher_message',
                 });
               }
-              waResult = await sendUtility(schoolId, phoneNumber, {
+              waResult = await runAsCampaign(() => sendUtility(schoolId, phoneNumber, {
                 text: messageText, template: 'information', queueText: !media_url,
-              });
+              }));
             } else if (messageType === 'image' && mediaUrl) {
               waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '');
             } else if (messageType === 'document' && mediaUrl) {

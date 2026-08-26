@@ -17,7 +17,9 @@
  */
 
 import * as cloud from './cloudApi.js';
-import { isOutboundBlocked, isChatbotContext, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
+import {
+  isOutboundBlocked, isCampaignContext, outgoingSource, OUTBOUND_DISABLED_MESSAGE,
+} from './outboundGate.js';
 import { logOutgoing } from './outgoingLog.js';
 
 const fail = (message, extra = {}) => ({ success: false, message, ...extra });
@@ -39,13 +41,19 @@ const notConfigured = async (schoolId) => {
   return fail('Numéro WhatsApp non configuré pour cette école (API Cloud)', { reason: 'session_down' });
 };
 
-// Journalise UNIQUEMENT les envois faits pendant le traitement d'un message
-// entrant (contexte chatbot). Les campagnes ont déjà leur propre trace dans
-// whatsapp_messages : les journaliser ici les afficherait deux fois dans le
-// fil de conversation.
+// Journalise TOUT envoi, sauf les campagnes — celles-ci ont déjà leur trace
+// dans whatsapp_messages / whatsapp_message_recipients, et les rejournaliser
+// les afficherait deux fois dans le fil.
+//
+// Auparavant seul le chatbot était journalisé : absences, notes, factures,
+// devoirs, transport et rendez-vous partaient sans laisser la moindre trace,
+// et l'école ne voyait jamais dans sa boîte de réception ce que l'application
+// avait écrit au parent en son nom.
 const traced = async (schoolId, phone, meta, send) => {
   const result = await send();
-  if (isChatbotContext()) logOutgoing(schoolId, phone, meta, result);
+  if (!isCampaignContext()) {
+    logOutgoing(schoolId, phone, { ...meta, source: outgoingSource() }, result);
+  }
   return result;
 };
 

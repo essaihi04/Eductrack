@@ -741,5 +741,8 @@ export function detectSpecialCommand(text) {
   if (['menu', 'القائمة', 'liste'].includes(lower)) return 'menu';
   if (['stop', 'désabonner', 'إيقاف'].includes(lower)) return 'stop';
   if (['aide', 'help', 'مساعدة', '?'].includes(lower)) return 'help';
+  // Changer d'enfant : les parents de plusieurs élèves n'avaient AUCUN moyen
+  // de repasser d'un enfant à l'autre sans attendre l'expiration de l'état.
+  if (['enfant', 'enfants', 'changer', 'ابني', 'ابنتي', 'الأبناء', 'تغيير'].includes(lower)) return 'child';
   return null;
 }

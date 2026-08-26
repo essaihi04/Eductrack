@@ -724,6 +724,40 @@ function matchChildFromInput(rawText, children) {
   return null;
 }
 
+/**
+ * Le parent désigne-t-il PLUSIEURS enfants d'un coup ?
+ *
+ * « 1 et 2 », « les deux », « pour les deux enfants », « Hanaa et Mohamed » :
+ * observé cinq fois chez MARCEL ARNAUD, et chaque fois le menu répondait
+ * « option non reconnue ». Le chatbot ne traite qu'un enfant à la fois — il
+ * doit au moins le DIRE, commencer par le premier, et rappeler comment
+ * passer au suivant.
+ *
+ * @returns {object[]} enfants désignés (0 ou 1 = pas une demande multiple)
+ */
+function matchSeveralChildren(rawText, children) {
+  if (!children || children.length < 2) return [];
+  const text = normalizeDigits(String(rawText || '').trim());
+  if (!text || text.length > 60) return [];
+
+  // « les deux », « tous », « pour les deux enfants », « الاثنين », « الجميع ».
+  // Le chiffre 2 seul en est EXCLU : c'est le numéro du deuxième enfant.
+  if (/^(pour\s+)?(les\s+)?(deux|tous|toutes)(\s+(les\s+)?enfants?)?$/i.test(text)
+      || /^(الاثنين|كلاهما|الجميع|كل الأبناء)$/.test(text)) {
+    return children;
+  }
+
+  // « 1 et 2 », « 1,2 », « 1 2 » — au moins deux index valides et rien d'autre
+  const morceaux = text.split(/\s*(?:et|و|and|,|\/|\+|&)\s*|\s+/i).filter(Boolean);
+  if (morceaux.length >= 2) {
+    const trouves = morceaux.map((m) => matchChildFromInput(m, children));
+    const valides = trouves.filter(Boolean);
+    const uniques = [...new Map(valides.map((c) => [c.id, c])).values()];
+    if (uniques.length >= 2 && valides.length === morceaux.length) return uniques;
+  }
+  return [];
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Envoi du menu de sélection enfant
 // ─────────────────────────────────────────────────────────────────────────
@@ -1449,6 +1483,16 @@ _Tapez *menu* pour afficher les options._`);
     await markProcessed(incomingMsg?.id);
     return;
   }
+  // Retour explicite au choix de l'enfant. Sans cette commande, un parent de
+  // plusieurs élèves restait bloqué sur le premier jusqu'à expiration de
+  // l'état — d'où les « 1 et 2 », « Pour les deux enfants » observés.
+  if (cmd === 'child') {
+    State.resetState(schoolId, phone);
+    const children = await getParentChildren(parentInfo.parent_id);
+    await sendChildSelectionMenu(parentInfo.school_id, phone, children, parentInfo);
+    await markProcessed(incomingMsg?.id);
+    return;
+  }
   if (cmd === 'stop') {
     State.resetState(schoolId, phone);
     // Persiste l'opt-out WhatsApp → le routeur ne lui enverra plus de WhatsApp.
@@ -1728,6 +1772,27 @@ _Tapez *menu* pour afficher les options._`);
     // Plusieurs enfants : tenter de matcher la saisie courante (utile quand
     // l'état en mémoire a été perdu après un redémarrage PM2 alors que le
     // parent vient de recevoir le menu de sélection).
+    // Demande portant sur plusieurs enfants : on l'annonce clairement plutôt
+    // que de répondre « option non reconnue » comme avant.
+    const plusieurs = matchSeveralChildren(text, children);
+    if (plusieurs.length >= 2) {
+      const premier = plusieurs[0];
+      const autres = plusieurs.slice(1).map((c) => c.first_name).join(', ');
+      State.selectStudent(schoolId, phone, premier.id);
+      await sendText(
+        parentInfo.school_id,
+        phone,
+        `👨‍👩‍👧 Je traite *un enfant à la fois*.
+
+Je commence par *${premier.first_name} ${premier.last_name}*.
+
+_Tapez *enfant* à tout moment pour passer à ${autres}._`,
+      );
+      await sendMainMenu(parentInfo.school_id, phone, premier, parentInfo);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
     const matched = matchChildFromInput(text, children);
     if (matched) {
       State.selectStudent(schoolId, phone, matched.id);

@@ -213,6 +213,39 @@ export const TEMPLATES = {
     },
   },
 
+  /**
+   * ANNONCE SIGNÉE PAR L'ÉCOLE.
+   *
+   * « information_etablissement » ne nomme pas l'expéditeur : les parents de
+   * MARCEL ARNAUD ont répondu « دبا هاد الرسالة شكون كاتبها واش المدرسة و لا
+   * شكون » (« qui a écrit ce message, l'école ou qui ? »), « je n'ai pas bien
+   * compris votre message », « de quel dossier s'agit-il ? ». Un message
+   * anonyme qui demande de répondre ressemble à une tentative d'hameçonnage.
+   *
+   * Même rôle, mais le nom de l'école ouvre la phrase. Dès qu'il est approuvé
+   * et déclaré (WA_TPL_INFORMATION_ECOLE), il remplace automatiquement le
+   * précédent partout où le nom de l'école est connu.
+   */
+  informationEcole: {
+    announce: true,
+    env: 'WA_TPL_INFORMATION_ECOLE',
+    name: process.env.WA_TPL_INFORMATION_ECOLE || null,
+    params: ['ecole', 'objet'],
+    definition: {
+      name: 'information_ecole_signee',
+      category: 'UTILITY',
+      language: 'fr',
+      body: 'Bonjour, message de {{1}} : votre établissement souhaite vous transmettre une information au sujet de {{2}}. Répondez à ce message pour en recevoir le détail, ou consultez votre espace parent.',
+      example: ['Groupe Scolaire Marcel Arnaud', 'la sortie pédagogique du 12 septembre'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة، رسالة من {{1}}: تودّ مؤسستكم إبلاغكم بمعلومة بخصوص {{2}}. ردّوا على هذه الرسالة لتلقّي التفاصيل، أو اطّلعوا على فضاء ولي الأمر.',
+        example: ['مجموعة مدارس مارسيل أرنو', 'الخرجة التربوية ليوم 12 شتنبر'],
+      },
+    },
+  },
+
   // ╔══════════════════════════════════════════════════════════════════════╗
   // ║  PAS DE TEMPLATE D'IDENTIFIANTS — N'EN RECRÉEZ PAS                    ║
   // ╠══════════════════════════════════════════════════════════════════════╣
