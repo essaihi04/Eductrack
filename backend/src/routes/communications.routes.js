@@ -29,9 +29,20 @@ router.get('/pending-delivery', async (req, res) => {
   try {
     const schoolId = getSchoolId(req);
     const { period, from: fromDate, to: toDate } = req.query;
-    const jours = { today: 1, week: 7, month: 30 }[period];
-    const from = jours ? new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString()
-      : (period === 'custom' && fromDate ? new Date(`${fromDate}T00:00:00`).toISOString() : null);
+    // « Aujourd'hui » se lit comme une date (depuis minuit), les autres
+    // périodes comme des fenêtres glissantes. Même règle que l'interface,
+    // sinon la tuile et la liste ne racontent pas la même histoire.
+    const jours = { week: 7, month: 30 }[period];
+    let from = null;
+    if (period === 'today') {
+      const minuit = new Date();
+      minuit.setHours(0, 0, 0, 0);
+      from = minuit.toISOString();
+    } else if (jours) {
+      from = new Date(Date.now() - jours * 24 * 3600 * 1000).toISOString();
+    } else if (period === 'custom' && fromDate) {
+      from = new Date(`${fromDate}T00:00:00`).toISOString();
+    }
     // Borne haute INCLUSIVE : « jusqu'au 26 » couvre toute la journée du 26.
     const to = period === 'custom' && toDate
       ? new Date(`${toDate}T23:59:59`).toISOString() : null;

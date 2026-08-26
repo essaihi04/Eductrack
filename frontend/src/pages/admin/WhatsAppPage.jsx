@@ -1462,7 +1462,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       if (commTo && t > new Date(`${commTo}T23:59:59`).getTime()) return false;
       return true;
     }
-    const jours = { today: 1, week: 7, month: 30 }[commPeriod] || 0;
+    // « Aujourd'hui » se lit comme une date, pas comme une fenêtre glissante :
+    // un envoi d'hier 23 h n'est pas « aujourd'hui ».
+    if (commPeriod === 'today') {
+      const minuit = new Date();
+      minuit.setHours(0, 0, 0, 0);
+      return t >= minuit.getTime();
+    }
+    const jours = { week: 7, month: 30 }[commPeriod] || 0;
     return t >= Date.now() - jours * 24 * 3600 * 1000;
   }, [commPeriod, commFrom, commTo]);
 
@@ -4083,8 +4090,11 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
               </div>
             )}
 
-            {/* Bandeau KPI — vue d'ensemble des communications */}
-            {commsFiltres.length > 0 && (
+            {/* Bandeau KPI — vue d'ensemble des communications.
+                Il reste affiché même quand la période ne retient rien : c'est
+                LUI qui porte le sélecteur, le masquer enfermerait l'utilisateur
+                dans une vue vide sans moyen d'en sortir. */}
+            {comms.length > 0 && (
               <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <BarChart3 className="w-4 h-4 text-indigo-600" />
