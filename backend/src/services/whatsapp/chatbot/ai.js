@@ -35,6 +35,61 @@ const deepseek = new OpenAI({
   maxRetries: 1,
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Limitation de concurrence
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Une campagne qui part sur des centaines de numéros ramène une VAGUE de
+// réponses en quelques minutes. Le 2026-08-26, 17 questions sur 35 ont ainsi
+// reçu « le service IA est temporairement indisponible » — la clé était
+// valide, c'est la rafale simultanée qui a saturé DeepSeek.
+//
+// On sérialise donc les appels par petits paquets : le parent attend au pire
+// quelques secondes de plus, au lieu de recevoir un message d'erreur.
+
+const MAX_APPELS_SIMULTANES = 3;
+let enCours = 0;
+const fileAttente = [];
+
+function libererSlot() {
+  enCours -= 1;
+  const suivant = fileAttente.shift();
+  if (suivant) { enCours += 1; suivant(); }
+}
+
+function prendreSlot() {
+  if (enCours < MAX_APPELS_SIMULTANES) {
+    enCours += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => fileAttente.push(resolve));
+}
+
+const attendre = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Appelle DeepSeek en respectant le plafond de concurrence, avec UNE seconde
+ * tentative sur les erreurs passagères (429, 5xx, délai dépassé). Une clé
+ * invalide ou un solde épuisé (401/402) ne sont pas réessayés : la seconde
+ * tentative échouerait pareil, en faisant attendre le parent pour rien.
+ */
+async function appelDeepseek(payload) {
+  await prendreSlot();
+  try {
+    try {
+      return await deepseek.chat.completions.create(payload);
+    } catch (e) {
+      const passagere = !e.status || e.status === 429 || e.status >= 500;
+      if (!passagere) throw e;
+      console.warn(`[chatbot/ai] nouvel essai après ${e.status || 'timeout'}`);
+      await attendre(1500);
+      return await deepseek.chat.completions.create(payload);
+    }
+  } finally {
+    libererSlot();
+  }
+}
+
 const SYSTEM_PROMPT = `Tu es l'assistant pédagogique officiel d'une école marocaine, accessible via WhatsApp aux parents.
 
 RÈGLES STRICTES :
@@ -634,7 +689,7 @@ export async function answerWithAI({ messageText, student, parentInfo }) {
       });
     }
 
-    const completion = await deepseek.chat.completions.create({
+    const completion = await appelDeepseek({
       model: 'deepseek-chat',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },

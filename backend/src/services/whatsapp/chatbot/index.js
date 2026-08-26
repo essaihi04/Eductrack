@@ -21,6 +21,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import { runAsChatbot } from '../outboundGate.js';
 import { flushPending } from '../pendingDelivery.js';
+import { isPureAck, isAnnounceReply, ackMessage, deliveredMessage } from './smallTalk.js';
 import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
 import { storeIncomingMedia, mediaPlaceholder, insertIncomingRow } from '../inboxMedia.js';
 import { markResponded } from '../../communicationTracking.js';
@@ -1110,6 +1111,24 @@ async function handleReceptionistMessage({ phone, text, providerMessageId, schoo
   await markProcessed(incomingMsg?.id);
 }
 
+/**
+ * Réponse courte à un message qui n'attend pas de réponse d'IA : politesse,
+ * ou « oui je veux le détail » adressé à un template d'annonce.
+ *
+ * Un tiers des messages entrants sont de cette nature. Les envoyer à DeepSeek
+ * coûtait un appel, un délai, et parfois un « service temporairement
+ * indisponible » là où le parent venait simplement de dire merci.
+ *
+ * @returns {string|null} le texte à envoyer, ou null pour poursuivre le flux
+ */
+function repliquePolitesse({ text, livres, schoolName }) {
+  if (livres > 0 && (isAnnounceReply(text) || isPureAck(text))) {
+    return deliveredMessage(text);
+  }
+  if (isPureAck(text)) return ackMessage(text, { schoolName });
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Entry point principal
 // ─────────────────────────────────────────────────────────────────────────
@@ -1149,8 +1168,9 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // 0.bis Livraison différée : ce message ENTRANT vient d'ouvrir la fenêtre de
   // 24 h. Tout ce que l'école n'avait pas pu envoyer à ce numéro (identifiants
   // de connexion, message du hub…) part maintenant, avant toute autre réponse.
+  let contenusLivres = 0;
   try {
-    await flushPending(schoolId, phone);
+    contenusLivres = await flushPending(schoolId, phone);
   } catch (e) {
     console.error('[chatbot] livraison différée:', e.message);
   }
@@ -1672,6 +1692,15 @@ _Tapez *menu* pour afficher les options._`);
             await markProcessed(incomingMsg?.id);
             return;
           }
+          // Politesse ou « oui, je veux le détail » : pas la peine de déranger l'IA.
+          const politesse = repliquePolitesse({
+            text, livres: contenusLivres, schoolName: parentInfo.school_name,
+          });
+          if (politesse) {
+            await sendText(parentInfo.school_id, phone, politesse);
+            await markProcessed(incomingMsg?.id);
+            return;
+          }
           if (await tryShowcaseAnswer({ schoolId, phone, parentInfo, text })) {
             await markProcessed(incomingMsg?.id);
             return;
@@ -1810,6 +1839,15 @@ _Tapez *menu* pour afficher les options._`);
       await markProcessed(incomingMsg?.id);
       return;
     }
+    // Politesse ou « oui, je veux le détail » : pas la peine de déranger l'IA.
+    const politesse = repliquePolitesse({
+      text, livres: contenusLivres, schoolName: parentInfo.school_name,
+    });
+    if (politesse) {
+      await sendText(parentInfo.school_id, phone, politesse);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
     if (await tryShowcaseAnswer({ schoolId, phone, parentInfo, text })) {
       await markProcessed(incomingMsg?.id);
       return;
@@ -1902,6 +1940,15 @@ _Tapez *menu* pour afficher les options._`);
       if (isFullWeekTimetableQuery(text)) {
         await sendText(parentInfo.school_id, phone, `📅 Voici l'emploi du temps hebdomadaire de *${student.first_name}* :`);
         await sendTimetablePdf(parentInfo.school_id, phone, student);
+        await markProcessed(incomingMsg?.id);
+        return;
+      }
+      // Politesse ou « oui, je veux le détail » : pas la peine de déranger l'IA.
+      const politesse = repliquePolitesse({
+        text, livres: contenusLivres, schoolName: parentInfo.school_name,
+      });
+      if (politesse) {
+        await sendText(parentInfo.school_id, phone, politesse);
         await markProcessed(incomingMsg?.id);
         return;
       }
