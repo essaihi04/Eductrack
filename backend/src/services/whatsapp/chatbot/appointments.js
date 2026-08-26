@@ -18,6 +18,7 @@
 
 import OpenAI from 'openai';
 import { supabaseAdmin } from '../../../config/supabase.js';
+import { phoneVariants } from '../../../utils/phoneVariants.js';
 import { sendText } from '../index.js';
 import * as State from './state.js';
 import {
@@ -442,16 +443,49 @@ export async function handleAppointmentReply({ schoolId, parentInfo, phone, text
 // B. FLUX PROFESSEUR (réponse WhatsApp à une demande)
 // ═════════════════════════════════════════════════════════════════════════
 
-/** Le numéro appartient-il à un professeur de cette école ? */
+/**
+ * Le numéro appartient-il à un professeur de cette école ?
+ *
+ * WhatsApp livre « +212612345678 » alors que `profiles.phone` contient la
+ * saisie de l'administration (« 0612345678 », « 06 12 34 56 78 »…). Une
+ * égalité stricte ratait donc la quasi-totalité des professeurs : le chatbot
+ * les traitait en numéros inconnus et leur répondait comme à un visiteur.
+ * On interroge désormais TOUTES les écritures plausibles du même numéro.
+ *
+ * Repli inter-écoles : si aucun professeur de l'école du numéro Cloud ne
+ * correspond, on accepte un professeur d'une autre école UNIQUEMENT s'il est
+ * le seul à porter ce numéro (école mal renseignée sur le profil).
+ */
 export async function getTeacherByPhone(phone, schoolId = null) {
-  let q = supabaseAdmin
+  const variants = phoneVariants(phone);
+  if (variants.length === 0) return null;
+
+  const base = () => supabaseAdmin
     .from('profiles')
-    .select('id, first_name, last_name, school_id')
+    .select('id, first_name, last_name, school_id, phone')
     .eq('role', 'teacher')
-    .eq('phone', phone);
-  if (schoolId) q = q.eq('school_id', schoolId);
-  const { data } = await q.limit(1);
-  return data?.[0] || null;
+    .in('phone', variants);
+
+  if (schoolId) {
+    const { data } = await base().eq('school_id', schoolId).limit(1);
+    if (data?.[0]) return data[0];
+  }
+
+  // Un même numéro peut porter DEUX fiches professeur dans la même école
+  // (doublon de saisie) : ce n'est pas une ambiguïté, on prend la première.
+  // Deux ÉCOLES différentes, en revanche, exigent le silence : on ne devine
+  // pas à qui appartient le numéro.
+  const { data: ailleurs } = await base().limit(5);
+  if (!ailleurs?.length) return null;
+  const ecoles = new Set(ailleurs.map((t) => t.school_id));
+  if (ecoles.size > 1) {
+    console.warn(`[chatbot] numéro ${phone} porté par des professeurs de ${ecoles.size} écoles — non routé`);
+    return null;
+  }
+  if (schoolId) {
+    console.warn(`[chatbot] professeur ${phone} rattaché à l'école ${ailleurs[0].school_id} — message reçu sur le numéro de ${schoolId}`);
+  }
+  return ailleurs[0];
 }
 
 /** Demandes en attente d'une réponse de ce professeur. */

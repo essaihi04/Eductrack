@@ -3,7 +3,8 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { sendText, sendImage, sendDocument, getStatus } from '../services/whatsapp/index.js';
-import { sendUtility, serviceWindowOpen } from '../services/whatsapp/utility.js';
+import { sendUtility, serviceWindowOpen, deliveryStatus } from '../services/whatsapp/utility.js';
+import { queuePending } from '../services/whatsapp/pendingDelivery.js';
 import { getSemesterBounds } from '../services/bulletins/calculator.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 import { memoryUpload, uploadBuffer, removeObject, signedUrl, BUCKET_PRIVATE, BUCKET_PUBLIC, normalizeLogoToPng } from '../utils/storage.js';
@@ -1060,13 +1061,16 @@ router.post('/parents/send-credentials-whatsapp', async (req, res) => {
         if (!recipientLog) { errorCount++; continue; }
 
         if (waResult.success) {
+          // « annoncé » ≠ « envoyé » : hors fenêtre 24 h seul le template
+          // d'annonce est parti, le texte attend la réponse du destinataire.
+          const statut = deliveryStatus(waResult);
           await supabaseAdmin
             .from('whatsapp_message_recipients')
-            .update({ status: 'sent', sent_at: new Date().toISOString() })
+            .update({ status: statut, sent_at: statut === 'sent' ? new Date().toISOString() : null })
             .eq('id', recipientLog.id);
           await supabaseAdmin
             .from('whatsapp_messages')
-            .update({ status: 'sent', sent_count: 1 })
+            .update({ status: statut, sent_count: 1 })
             .eq('id', msgLog.id);
           sentCount++;
           sentDetails.push({ parent_id: parent.id, email: newEmail, phone: usedPhone });
@@ -2654,8 +2658,9 @@ router.post('/classes/:classId/send-massar-whatsapp', async (req, res) => {
             .single();
 
           if (waResult.success) {
-            if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', recipientLog.id);
-            await supabaseAdmin.from('whatsapp_messages').update({ status: 'sent', sent_count: 1 }).eq('id', msgLog.id);
+            const statut = deliveryStatus(waResult);
+            if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: statut, sent_at: statut === 'sent' ? new Date().toISOString() : null }).eq('id', recipientLog.id);
+            await supabaseAdmin.from('whatsapp_messages').update({ status: statut, sent_count: 1 }).eq('id', msgLog.id);
             sentCount++;
           } else {
             if (recipientLog) await supabaseAdmin.from('whatsapp_message_recipients').update({ status: 'failed', error_message: waResult.message || 'Échec envoi' }).eq('id', recipientLog.id);
@@ -3368,9 +3373,10 @@ router.post('/students/send-credentials-whatsapp', async (req, res) => {
                 const waResult = await sendUtility(schoolId, contact.phone_e164, { text: messageText, template: 'information' });
 
                 if (waResult.success) {
+                  const statut = deliveryStatus(waResult);
                   await supabaseAdmin
                     .from('whatsapp_message_recipients')
-                    .update({ status: 'sent', sent_at: new Date().toISOString() })
+                    .update({ status: statut, sent_at: statut === 'sent' ? new Date().toISOString() : null })
                     .eq('id', recipientLog.data.id);
                   sentCount++;
                 } else {
@@ -3530,9 +3536,10 @@ router.post('/students/:id/reset-password', async (req, res) => {
                         const waResult = await sendUtility(student.school_id, contact.phone_e164, { text: messageText, template: 'information' });
 
                         if (waResult.success) {
+                          const statut = deliveryStatus(waResult);
                           await supabaseAdmin
                             .from('whatsapp_message_recipients')
-                            .update({ status: 'sent', sent_at: new Date().toISOString() })
+                            .update({ status: statut, sent_at: statut === 'sent' ? new Date().toISOString() : null })
                             .eq('id', recipientLog.data.id);
                         } else {
                           await supabaseAdmin
@@ -5100,7 +5107,10 @@ router.post('/teachers', async (req, res) => {
         email,
         first_name: firstName,
         last_name: lastName,
-        phone: phone || null,
+        // Stocké en E.164 : c'est sous cette forme que WhatsApp livre le
+        // numéro, et donc la seule qui permette au chatbot de reconnaître
+        // le professeur à coup sûr.
+        phone: normalizePhoneToE164(phone) || phone || null,
         role: 'teacher',
         school_id: getSchoolId(req)
       })
@@ -5146,7 +5156,7 @@ router.put('/teachers/:id', async (req, res) => {
       .update({
         first_name: firstName,
         last_name: lastName,
-        phone: phone || null
+        phone: normalizePhoneToE164(phone) || phone || null
       })
       .eq('id', id)
       .eq('role', 'teacher')
@@ -5473,6 +5483,10 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
 
         // Utiliser le message personnalisé ou générer les identifiants par défaut
         let messageText, message_type, content, media_url, file_name;
+        // Renseigné uniquement pour l'envoi d'identifiants : permet de faire
+        // voyager le login et le mot de passe DANS le template Meta, donc de
+        // les livrer du premier coup, sans message d'annonce ni réponse du prof.
+        let credentialParams = null;
         
         // Si un message personnalisé est fourni (texte, image ou document), l'utiliser tel quel
         if (message && message.trim()) {
@@ -5517,6 +5531,11 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
           content = messageText;
           media_url = null;
           file_name = null;
+          credentialParams = [
+            `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim() || 'cher professeur',
+            teacher.email,
+            newPassword,
+          ];
         }
 
         // Créer le log du message
@@ -5555,7 +5574,32 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             // Fermée : on annonce par template, le parent répond, puis le
             // contenu complet (fichier compris) peut partir normalement.
             if (!(await serviceWindowOpen(phoneNumber))) {
-              waResult = await sendUtility(schoolId, phoneNumber, { text: messageText, template: 'information' });
+              // Identifiants : template dédié, le contenu utile est DANS le
+              // message. Le professeur reçoit son accès directement, sans
+              // « bienvenue, répondez pour recevoir le détail ».
+              if (credentialParams) {
+                waResult = await sendUtility(schoolId, phoneNumber, {
+                  text: messageText, template: 'identifiants', params: credentialParams,
+                });
+              } else {
+                waResult = { success: false, reason: 'no_template' };
+              }
+              // Repli (template pas encore approuvé, ou message personnalisé) :
+              // le template d'annonce, dont sendUtility met le TEXTE en attente
+              // tout seul. Une pièce jointe, elle, ne voyage dans aucun
+              // template : on la met en attente explicitement.
+              if (!waResult.success) {
+                if (media_url) {
+                  await queuePending({
+                    schoolId, phone: phoneNumber, text: messageText,
+                    mediaUrl: media_url, fileName: file_name,
+                    messageType: message_type, kind: 'teacher_message',
+                  });
+                }
+                waResult = await sendUtility(schoolId, phoneNumber, {
+                  text: messageText, template: 'information', queueText: !media_url,
+                });
+              }
             } else if (messageType === 'image' && mediaUrl) {
               waResult = await sendImage(schoolId, phoneNumber, mediaUrl, messageText || '');
             } else if (messageType === 'document' && mediaUrl) {
@@ -5565,13 +5609,14 @@ router.post('/teachers/send-credentials-whatsapp', async (req, res) => {
             }
 
             if (waResult.success) {
+              const statut = deliveryStatus(waResult);
               await supabaseAdmin
                 .from('whatsapp_message_recipients')
-                .update({ status: 'sent', sent_at: new Date().toISOString() })
+                .update({ status: statut, sent_at: statut === 'sent' ? new Date().toISOString() : null })
                 .eq('id', recipientLog.data.id);
               await supabaseAdmin
                 .from('whatsapp_messages')
-                .update({ status: 'sent', sent_count: 1 })
+                .update({ status: statut, sent_count: 1 })
                 .eq('id', msgLog.id);
               sentCount++;
             } else {

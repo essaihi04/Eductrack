@@ -132,6 +132,7 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
   for (const recipient of todo) {
     const patch = {};
     let waOk = false;
+    let waAnnounced = false;
     let appOk = false;
     let errorMsg = null;
 
@@ -185,6 +186,10 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
           const result = await sendUnified(schoolId, recipient.phone_e164, { messageType, message: body, mediaUrl, fileName });
           if (result.success) {
             waOk = true;
+            // Hors fenêtre 24 h, seule l'ANNONCE est partie : le message
+            // attend la réponse du parent pour être livré. Le dire, plutôt
+            // que d'afficher « envoyé » sous un texte que personne n'a lu.
+            waAnnounced = result.announced === true;
             waSentPhones.add(recipient.phone_e164);
             patch.provider_msg_id = String(result.data?.msgId || '');
           } else if (result.reason === 'session_down') {
@@ -211,14 +216,18 @@ export async function runBulkSend({ message_id: messageId }, ctx = {}) {
     if (wantPush && recipient.parent_id && recipient.notification_id) appOk = true;
 
     // wa_status suit le canal WhatsApp SEUL : c'est lui qui rend une reprise
-    // possible sans redoubler les envois déjà partis.
+    // possible sans redoubler les envois déjà partis. Il reste à 'sent' même
+    // pour une annonce — sinon une reprise du job réexpédierait l'annonce et
+    // mettrait le texte une SECONDE fois en file d'attente.
     if (wantWa && recipient.phone_e164 && !waOptedOut) {
       patch.wa_status = waOk ? 'sent' : 'failed';
     }
 
     const reached = waOk || appOk;
     if (reached) sentCount++; else failedCount++;
-    patch.status = reached ? 'sent' : 'failed';
+    // Statut LISIBLE par l'école : « annoncé » tant que le contenu n'est pas
+    // réellement parti (et que l'app n'a pas pris le relais).
+    patch.status = reached ? (waAnnounced && !appOk ? 'announced' : 'sent') : 'failed';
     if (reached) patch.sent_at = new Date().toISOString();
     if (errorMsg) patch.error_message = errorMsg;
 

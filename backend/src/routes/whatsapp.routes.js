@@ -1208,6 +1208,9 @@ router.get('/conversations', async (req, res) => {
           lastMessageAt: null,
           lastIncomingAt: null,
           totalSent: 0,
+          // « Annoncés » : envoyés hors fenêtre de 24 h sous forme de simple
+          // annonce — le contenu attend la réponse du destinataire.
+          totalAnnounced: 0,
           totalFailed: 0,
           totalReceived: 0,
           // Dates du dernier succès et du dernier échec vers ce numéro :
@@ -1269,6 +1272,7 @@ router.get('/conversations', async (req, res) => {
         conv.totalSent++;
         if (at && (!conv.lastSentOkAt || new Date(at) > new Date(conv.lastSentOkAt))) conv.lastSentOkAt = at;
       }
+      if (r.status === 'announced') conv.totalAnnounced++;
       if (r.status === 'failed') {
         conv.totalFailed++;
         if (at && (!conv.lastFailedAt || new Date(at) > new Date(conv.lastFailedAt))) conv.lastFailedAt = at;

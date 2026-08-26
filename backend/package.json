@@ -8,7 +8,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "build": "echo 'Backend build complete'",
-    "test": "node --test src/services/studentDossierMetrics.test.js src/services/parentAssistantLocalization.test.js"
+    "test": "node --test src/services/studentDossierMetrics.test.js src/services/parentAssistantLocalization.test.js src/utils/phoneVariants.test.js"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

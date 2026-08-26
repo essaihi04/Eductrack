@@ -23,6 +23,7 @@ import * as cloud from './cloudApi.js';
 import { sendText } from './index.js';
 import { isOutboundBlocked, OUTBOUND_DISABLED_MESSAGE } from './outboundGate.js';
 import { getTemplate, buildComponents, definitionFor } from './templates.js';
+import { queuePending } from './pendingDelivery.js';
 
 /** Normalise un numéro pour la comparaison en base (E.164 sans espaces). */
 const norm = (phone) => String(phone || '').replace(/[^\d+]/g, '');
@@ -132,9 +133,13 @@ export function subjectFromText(text) {
  * @param {string} opts.text        version texte libre (fenêtre ouverte)
  * @param {string} opts.template    clé logique du registre (voir templates.js)
  * @param {Array}  opts.params      valeurs des {{1}}, {{2}}… dans l'ordre
+ * @param {boolean} [opts.queueText] mettre le texte en attente derrière un
+ *                                   template d'annonce (défaut oui ; à couper
+ *                                   quand l'appelant met déjà en attente un
+ *                                   média porteur du même texte en légende)
  * @returns {Promise<{success:boolean, channel?:string, reason?:string, message?:string}>}
  */
-export async function sendUtility(schoolId, phone, { text, template, params = [], lang = null } = {}) {
+export async function sendUtility(schoolId, phone, { text, template, params = [], lang = null, queueText = true } = {}) {
   if (isOutboundBlocked()) {
     return { success: false, reason: 'outbound_disabled', message: OUTBOUND_DISABLED_MESSAGE };
   }
@@ -173,6 +178,13 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
     };
   }
 
+  // Un template d'ANNONCE ne transporte pas le message : sans mise en attente,
+  // le texte réel serait perdu et le destinataire qui répond « oui » ne
+  // recevrait jamais rien. On le stocke ici, il partira à sa première réponse.
+  if (tpl.announce && text && queueText) {
+    await queuePending({ schoolId, phone, text, kind: 'announced_text' });
+  }
+
   // `tpl.name` = nom RÉELLEMENT approuvé chez Meta (variable d'environnement).
   // Chez Meta un même NOM porte plusieurs langues : seul `language` change.
   const def = definitionFor(tpl, lang || (await preferredLanguage(phone)));
@@ -183,7 +195,9 @@ export async function sendUtility(schoolId, phone, { text, template, params = []
     def.language || 'fr',
     buildComponents(finalParams, def.buttonPayloads || [])
   );
-  return { ...r, channel: 'template', paid: true, lang: def.language };
+  // `announced` : le template s'est contenté d'annoncer, le contenu réel n'est
+  // pas parti. L'appelant doit le journaliser comme tel (voir deliveryStatus).
+  return { ...r, channel: 'template', paid: true, lang: def.language, announced: tpl.announce === true };
 }
 
 /**
@@ -242,5 +256,21 @@ export async function sendUtilityMedia(schoolId, phone, {
     schoolId, phone, tpl.name, def.language || 'fr', buildComponents(params, def.buttonPayloads || [])
   );
   // Succès = l'ANNONCE est partie ; le PDF suivra quand le parent répondra.
-  return { ...r, channel: 'template_announce', paid: true, mediaDeferred: true, lang: def.language };
+  return { ...r, channel: 'template_announce', paid: true, mediaDeferred: true, lang: def.language, announced: true };
+}
+
+/**
+ * Statut de livraison à journaliser pour un résultat d'envoi.
+ *
+ *   'sent'      le destinataire a reçu le contenu ;
+ *   'announced' seule l'annonce est partie — le contenu attend sa réponse ;
+ *   'failed'    rien n'est parti.
+ *
+ * Distinguer les deux premiers n'est pas cosmétique : la boîte de réception
+ * affichait « ✓ Envoyé » sous un message d'identifiants que le professeur
+ * n'avait jamais reçu, ce qui rendait le diagnostic impossible.
+ */
+export function deliveryStatus(result) {
+  if (!result?.success) return 'failed';
+  return result.announced ? 'announced' : 'sent';
 }

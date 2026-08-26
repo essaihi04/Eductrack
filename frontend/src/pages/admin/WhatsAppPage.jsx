@@ -860,6 +860,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       (inboxFilter === 'awaiting' && conv.awaitingReply) ||
       (inboxFilter === 'received' && conv.totalReceived > 0) ||
       (inboxFilter === 'sent' && conv.totalSent > 0) ||
+      (inboxFilter === 'announced' && (conv.totalAnnounced || 0) > 0) ||
       // Un échec déjà rattrapé par un renvoi réussi vers le même numéro n'a
       // plus à figurer ici (cas des échecs hérités de l'ancien fournisseur).
       (inboxFilter === 'failed' && (conv.hasUnresolvedFailure ?? conv.totalFailed > 0));
@@ -1623,6 +1624,9 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       completed: { color: 'bg-green-100 text-green-700', icon: CheckCircle, label: 'Terminé' },
       failed: { color: 'bg-red-100 text-red-700', icon: AlertCircle, label: 'Échoué' },
       sent: { color: 'bg-green-100 text-green-700', icon: CheckCircle, label: 'Envoyé' },
+      // Hors fenêtre de 24 h, WhatsApp n'accepte qu'une annonce : le contenu
+      // part automatiquement dès que le destinataire répond.
+      announced: { color: 'bg-amber-100 text-amber-700', icon: Clock, label: 'Annoncé' },
       in_progress: { color: 'bg-blue-100 text-blue-700', icon: RefreshCw, label: 'En cours' }
     };
     const s = map[status] || map.pending;
@@ -2668,6 +2672,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       { key: 'awaiting', label: `À répondre${awaitingCount ? ` (${awaitingCount})` : ''}` },
                       { key: 'received', label: 'Réponses reçues' },
                       { key: 'sent', label: 'Envoyés' },
+                      { key: 'announced', label: 'Annoncés' },
                       { key: 'failed', label: 'Échoués' },
                     ].map(f => (
                       <button key={f.key} onClick={() => setInboxFilter(f.key)}
@@ -4606,8 +4611,10 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                             </span>
                           )}
                         </div>
-                        <span className={`text-xs font-medium flex-shrink-0 ${r.status === 'sent' ? 'text-green-600' : r.status === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}>
-                          {r.status === 'sent' ? '✓ Envoyé' : r.status === 'failed' ? '✗ Échec' : '...'}
+                        <span className={`text-xs font-medium flex-shrink-0 ${r.status === 'sent' ? 'text-green-600' : r.status === 'failed' ? 'text-red-600' : r.status === 'announced' ? 'text-amber-600' : 'text-yellow-600'}`}>
+                          {r.status === 'sent' ? '✓ Envoyé'
+                            : r.status === 'announced' ? '⏳ Annoncé — livré à la réponse'
+                            : r.status === 'failed' ? '✗ Échec' : '...'}
                         </span>
                       </div>
                       {(r.read_at || r.responded_at || r.delivered_at || r.push_status || r.reaction) && (

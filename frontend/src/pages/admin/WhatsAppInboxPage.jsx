@@ -95,6 +95,7 @@ const WhatsAppInboxPage = () => {
 
     const matchesFilter = filterStatus === 'all' ||
       (filterStatus === 'sent' && conv.totalSent > 0) ||
+      (filterStatus === 'announced' && (conv.totalAnnounced || 0) > 0) ||
       (filterStatus === 'failed' && conv.totalFailed > 0);
 
     return matchesSearch && matchesFilter;
@@ -130,6 +131,10 @@ const WhatsAppInboxPage = () => {
         return <CheckCircle className="w-3.5 h-3.5 text-green-500" />;
       case 'failed':
         return <XCircle className="w-3.5 h-3.5 text-red-500" />;
+      // « Annoncé » : seule l'annonce est partie (hors fenêtre de 24 h), le
+      // message attend la réponse du destinataire pour être réellement livré.
+      case 'announced':
+        return <Clock className="w-3.5 h-3.5 text-amber-500" />;
       case 'pending':
         return <Clock className="w-3.5 h-3.5 text-yellow-500" />;
       case 'in_progress':
@@ -142,6 +147,7 @@ const WhatsAppInboxPage = () => {
   const statusLabel = (status) => {
     const map = {
       sent: 'Envoyé',
+      announced: 'Annoncé — livré à la réponse',
       failed: 'Échoué',
       pending: 'En attente',
       in_progress: 'En cours'
@@ -252,6 +258,7 @@ const WhatsAppInboxPage = () => {
                 {[
                   { key: 'all', label: 'Tous' },
                   { key: 'sent', label: 'Envoyés' },
+                  { key: 'announced', label: 'Annoncés' },
                   { key: 'failed', label: 'Échoués' }
                 ].map(f => (
                   <button

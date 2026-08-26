@@ -4,6 +4,7 @@
 import { sendText, sendImage, sendDocument } from './index.js';
 import * as cloud from './cloudApi.js';
 import { sendUtility, serviceWindowOpen } from './utility.js';
+import { queuePending } from './pendingDelivery.js';
 
 // Une école est joignable si son numéro est rattaché à l'API Cloud officielle
 // de Meta (provider unique depuis la suppression de Baileys).
@@ -23,6 +24,19 @@ export const isSessionReady = async (schoolId) => {
  */
 export async function sendUnified(schoolId, phone, { messageType, message, mediaUrl, fileName }) {
   if (!(await serviceWindowOpen(phone))) {
+    // Le texte est mis en attente par sendUtility (template d'annonce) ; le
+    // MÉDIA, lui, ne voyage pas dans un template : on le met en attente ici
+    // pour qu'il parte dès la première réponse du destinataire.
+    if (mediaUrl) {
+      await queuePending({
+        schoolId, phone, text: message || '', mediaUrl, fileName,
+        messageType: messageType || 'document', kind: 'broadcast_media',
+      });
+      const r = await sendUtility(schoolId, phone, {
+        text: message || '', template: 'information', queueText: false,
+      });
+      return { ...r, mediaDeferred: true };
+    }
     return sendUtility(schoolId, phone, { text: message || '', template: 'information' });
   }
   if (messageType === 'image' && mediaUrl) {

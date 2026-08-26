@@ -35,6 +35,12 @@ export function sanitizeParam(value, maxLength = 200) {
  *
  * `params` documente l'ordre attendu ; `definition` est le corps envoyé à
  * l'API Meta pour créer le template (voir scripts/createWhatsAppTemplates.js).
+ *
+ * `announce: true` marque les templates qui ne font qu'ANNONCER un contenu
+ * (« répondez à ce message pour le recevoir ») : l'envoi a réussi, mais le
+ * contenu réel n'est PAS parti. Les appelants doivent alors journaliser
+ * « annoncé », jamais « envoyé » — sinon la boîte de réception affirme avoir
+ * livré un message que le destinataire n'a jamais vu.
  */
 export const TEMPLATES = {
   absence: {
@@ -166,6 +172,7 @@ export const TEMPLATES = {
   },
 
   document: {
+    announce: true,
     env: 'WA_TPL_DOCUMENT',
     name: process.env.WA_TPL_DOCUMENT || null,
     params: ['eleve', 'typeDocument'],
@@ -185,6 +192,7 @@ export const TEMPLATES = {
   },
 
   information: {
+    announce: true,
     env: 'WA_TPL_INFORMATION',
     name: process.env.WA_TPL_INFORMATION || null,
     // Repli générique : un seul paramètre, pour les appelants qui n'ont pas le
@@ -206,6 +214,35 @@ export const TEMPLATES = {
   },
 
   /**
+   * IDENTIFIANTS DE CONNEXION (professeur, personnel).
+   *
+   * Le template générique « information » ne fait qu'ANNONCER : il demande au
+   * destinataire de répondre pour recevoir le détail, ce qui donnait un
+   * message de bienvenue absurde pour un professeur à qui l'école envoie
+   * simplement son accès. Ici le contenu utile voyage DANS le template :
+   * l'identifiant et le mot de passe arrivent du premier coup, sans échange
+   * préalable et sans dépendre de la fenêtre de 24 h.
+   */
+  identifiants: {
+    env: 'WA_TPL_IDENTIFIANTS',
+    name: process.env.WA_TPL_IDENTIFIANTS || null,
+    params: ['nom', 'login', 'motDePasse'],
+    definition: {
+      name: 'identifiants_connexion',
+      category: 'UTILITY',
+      language: 'fr',
+      body: "Bonjour {{1}}, votre accès à la plateforme de l'établissement est activé. Identifiant : {{2}} - Mot de passe : {{3}}. Connectez-vous sur etrack.ma/login puis modifiez votre mot de passe.",
+      example: ['Karim Bennani', 'karim.bennani@ecole.ma', 'Karim2026'],
+    },
+    translations: {
+      ar: {
+        body: 'تحية طيبة {{1}}، تم تفعيل حسابكم في منصة المؤسسة. المعرّف: {{2}} - كلمة السر: {{3}}. سجّلوا الدخول عبر etrack.ma/login ثم غيّروا كلمة السر.',
+        example: ['كريم بناني', 'karim.bennani@ecole.ma', 'Karim2026'],
+      },
+    },
+  },
+
+  /**
    * DOCUMENT OFFICIEL DE L'ÉCOLE — règlement intérieur, calendrier scolaire,
    * dossier d'inscription, menu de cantine, circuit de bus.
    *
@@ -215,6 +252,7 @@ export const TEMPLATES = {
    * type passe en paramètre, ce qui évite six examens Meta distincts.
    */
   documentEcole: {
+    announce: true,
     env: 'WA_TPL_DOC_ECOLE',
     name: process.env.WA_TPL_DOC_ECOLE || null,
     params: ['typeDocument'],
@@ -243,6 +281,7 @@ export const TEMPLATES = {
    * template texte — on annonce la liste et le document part dès la réponse.
    */
   fournitures: {
+    announce: true,
     env: 'WA_TPL_FOURNITURES',
     name: process.env.WA_TPL_FOURNITURES || null,
     params: ['niveau'],

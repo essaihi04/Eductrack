@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import { runAsChatbot } from '../outboundGate.js';
+import { flushPending } from '../pendingDelivery.js';
 import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
 import { storeIncomingMedia, mediaPlaceholder, insertIncomingRow } from '../inboxMedia.js';
 import { markResponded } from '../../communicationTracking.js';
@@ -1145,7 +1146,16 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
     return;
   }
 
-  // 0.bis Mode démo commercial : mot-clé « DEMO PARENT » (QR scanné par un
+  // 0.bis Livraison différée : ce message ENTRANT vient d'ouvrir la fenêtre de
+  // 24 h. Tout ce que l'école n'avait pas pu envoyer à ce numéro (identifiants
+  // de connexion, message du hub…) part maintenant, avant toute autre réponse.
+  try {
+    await flushPending(schoolId, phone);
+  } catch (e) {
+    console.error('[chatbot] livraison différée:', e.message);
+  }
+
+  // 0.ter Mode démo commercial : mot-clé « DEMO PARENT » (QR scanné par un
   // prospect) → création automatique d'un parent lié à l'élève suivant de la
   // classe démo. Ne concerne QUE les écoles avec demo_parent_configs enabled.
   if (text && !location && !image) {
@@ -1160,21 +1170,23 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // 1. Identifier le parent
   const parentInfo = await getParentByPhone(phone, schoolId);
   if (!parentInfo) {
-    // 1.bis Pas un parent → est-ce un « réceptionniste » déclaré par l'admin ?
-    // Si oui, on bascule sur le chatbot IA « statistiques de l'école ».
-    if (location || image || media) {
-      // Le chatbot réceptionniste ne gère que le texte (questions libres).
-      console.log('[chatbot] Numéro non autorisé (média ignoré):', phone);
-      return;
-    }
-    // 1.bis.0 Un PROFESSEUR de l'école → espace enseignant WhatsApp : sa
-    // journée, ses classes, ses élèves, ses devoirs et ses contrôles, sans
-    // ouvrir l'application. Le module gère aussi, en priorité, les réponses
+    // 1.bis.0 Pas un parent → un PROFESSEUR de l'école ? Il obtient l'espace
+    // enseignant WhatsApp : sa journée, ses classes, ses élèves, ses devoirs
+    // et ses contrôles, sans ouvrir l'application. Le module gère aussi, en priorité, les réponses
     // aux demandes de rendez-vous (créneau en FR / arabe / darija).
+    // Testé AVANT le filtre média : un professeur qui envoie une photo doit
+    // recevoir une réponse, pas le silence réservé aux numéros inconnus.
     try {
       const teacherProfile = await getTeacherByPhone(phone, schoolId);
       if (teacherProfile) {
         console.log(`[chatbot] ← professeur ${phone} (school=${teacherProfile.school_id || schoolId})`);
+        if (location || image || media) {
+          // L'espace enseignant est en consultation : rien à faire d'un média.
+          await sendText(teacherProfile.school_id || schoolId, phone,
+            `📎 Les pièces jointes ne sont pas encore traitées dans l'espace enseignant.
+_Tapez *menu* pour afficher les options._`);
+          return;
+        }
         await handleTeacherMessage({
           schoolId, phone, text, providerMessageId: id, teacher: teacherProfile,
         });
@@ -1184,6 +1196,14 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
       console.error('[chatbot] espace enseignant:', e.message);
     }
 
+    if (location || image || media) {
+      // Le chatbot réceptionniste ne gère que le texte (questions libres).
+      console.log('[chatbot] Numéro non autorisé (média ignoré):', phone);
+      return;
+    }
+
+    // 1.bis.1 Un « réceptionniste » déclaré par l'admin → chatbot IA
+    // « statistiques de l'école ».
     const receptionist = await getReceptionistByPhone(phone, schoolId);
     if (receptionist) {
       console.log(`[chatbot] ← réceptionniste ${phone} (school=${receptionist.school_id})`);
