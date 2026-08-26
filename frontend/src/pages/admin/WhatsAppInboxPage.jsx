@@ -96,6 +96,10 @@ const WhatsAppInboxPage = () => {
     const matchesFilter = filterStatus === 'all' ||
       (filterStatus === 'sent' && conv.totalSent > 0) ||
       (filterStatus === 'announced' && (conv.totalAnnounced || 0) > 0) ||
+      // Sollicités, jamais un mot en retour : leur fenêtre de 24 h ne s'ouvre
+      // jamais, donc rien de ce qui leur a été annoncé ne part.
+      (filterStatus === 'silent' && conv.totalReceived === 0 &&
+        (conv.totalSent > 0 || (conv.totalAnnounced || 0) > 0)) ||
       (filterStatus === 'failed' && conv.totalFailed > 0);
 
     return matchesSearch && matchesFilter;
@@ -254,11 +258,12 @@ const WhatsAppInboxPage = () => {
                   className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 bg-gray-50"
                 />
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 flex-wrap">
                 {[
                   { key: 'all', label: 'Tous' },
                   { key: 'sent', label: 'Envoyés' },
-                  { key: 'announced', label: 'Annoncés' },
+                  { key: 'announced', label: 'À livrer' },
+                  { key: 'silent', label: 'Sans réponse' },
                   { key: 'failed', label: 'Échoués' }
                 ].map(f => (
                   <button

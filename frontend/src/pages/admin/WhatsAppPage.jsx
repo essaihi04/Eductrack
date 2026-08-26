@@ -922,6 +922,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
       (inboxFilter === 'received' && conv.totalReceived > 0) ||
       (inboxFilter === 'sent' && conv.totalSent > 0) ||
       (inboxFilter === 'announced' && (conv.totalAnnounced || 0) > 0) ||
+      (inboxFilter === 'silent' && conv.totalReceived === 0 && (conv.totalSent > 0 || (conv.totalAnnounced || 0) > 0)) ||
       // Un échec déjà rattrapé par un renvoi réussi vers le même numéro n'a
       // plus à figurer ici (cas des échecs hérités de l'ancien fournisseur).
       (inboxFilter === 'failed' && (conv.hasUnresolvedFailure ?? conv.totalFailed > 0));
@@ -971,6 +972,13 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   }, [highlightMsgId, selectedConv]);
 
   const awaitingCount = conversations.filter(c => c.awaitingReply).length;
+  // Numéros que l'école a sollicités et qui n'ont JAMAIS écrit en retour.
+  // Ce sont eux, et eux seuls, dont la fenêtre de 24 h ne s'ouvre jamais :
+  // tout ce qui leur a été annoncé attend encore sa livraison.
+  const silencieuxCount = conversations.filter(
+    c => c.totalReceived === 0 && (c.totalSent > 0 || (c.totalAnnounced || 0) > 0)
+  ).length;
+  const annoncesCount = conversations.filter(c => (c.totalAnnounced || 0) > 0).length;
 
   // Inline compose helpers
   // Format d'enregistrement : on demande d'abord ceux que WhatsApp accepte tels
@@ -2806,7 +2814,8 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                       { key: 'awaiting', label: `À répondre${awaitingCount ? ` (${awaitingCount})` : ''}` },
                       { key: 'received', label: 'Réponses reçues' },
                       { key: 'sent', label: 'Envoyés' },
-                      { key: 'announced', label: 'Annoncés' },
+                      { key: 'announced', label: `En attente de livraison${annoncesCount ? ` (${annoncesCount})` : ''}` },
+                      { key: 'silent', label: `Jamais répondu${silencieuxCount ? ` (${silencieuxCount})` : ''}` },
                       { key: 'failed', label: 'Échoués' },
                     ].map(f => (
                       <button key={f.key} onClick={() => setInboxFilter(f.key)}
