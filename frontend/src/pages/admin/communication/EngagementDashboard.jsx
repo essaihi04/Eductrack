@@ -96,6 +96,11 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
   const t = summary?.totals;
   const cov = summary?.coverage;
   const ch = summary?.channels;
+  // Compatibilité pendant un déploiement progressif : certaines instances
+  // backend peuvent encore répondre sans les nouveaux compteurs distincts.
+  // On affiche alors les compteurs historiques au lieu de « undefined ».
+  const respondedParentCount = Number.isFinite(t?.respondedParents) ? t.respondedParents : (t?.responded || 0);
+  const reachedParentCount = Number.isFinite(t?.reachedParents) ? t.reachedParents : (t?.reached || 0);
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
@@ -144,7 +149,7 @@ export default function EngagementDashboard({ apiUrl, getAuthToken, onOpenConver
                   dix fois ne doit pas peser dix. */}
               <StatCard icon={MessageCircle} iconCls="text-emerald-600" title="Taux de réponse"
                 value={`${t.responseRate}%`}
-                sub={`${t.respondedParents} parent(s) sur ${t.reachedParents} joints — ${t.responded} envoi(s) répondu(s)`} />
+                sub={`${respondedParentCount} parent(s) sur ${reachedParentCount} joints — ${t.responded} envoi(s) répondu(s)`} />
               <StatCard icon={Smartphone} iconCls="text-indigo-600" title="Parents avec l'app"
                 value={cov?.parentsTotal ? `${Math.round((cov.parentsWithApp / cov.parentsTotal) * 100)}%` : '—'}
                 sub={`${cov?.parentsWithApp || 0} / ${cov?.parentsTotal || 0} parents — canal gratuit (app mobile + web)`} />
