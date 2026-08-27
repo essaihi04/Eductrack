@@ -909,11 +909,15 @@ router.get('/history', async (req, res) => {
       );
       recs.forEach(r => {
         if (!metricsByMsg.has(r.message_id)) {
-          metricsByMsg.set(r.message_id, { targeted: 0, sent: 0, read: 0, readApp: 0, readWa: 0, responded: 0 });
+          metricsByMsg.set(r.message_id, { targeted: 0, sent: 0, announced: 0, read: 0, readApp: 0, readWa: 0, responded: 0 });
         }
         const m = metricsByMsg.get(r.message_id);
         m.targeted++;
         if (r.status === 'sent') m.sent++;
+        // « Annoncé » : seule l'annonce est partie, le contenu attend la
+        // réponse du parent. Le compter comme envoyé ferait afficher
+        // « 252/252 » pour 97 contenus réellement remis.
+        else if (r.status === 'announced') m.announced++;
         // Une lecture/réponse ne vaut que sur un envoi effectivement servi.
         if (r.read_at && servi(r)) { m.read++; if (r.read_channel === 'app') m.readApp++; else m.readWa++; }
         if (r.responded_at && servi(r)) m.responded++;

@@ -14,7 +14,8 @@ import {
   Smartphone, Wifi, WifiOff, QrCode, Info, Plus, Trash2,
   Search, Phone, XCircle, Inbox, ArrowUpRight, ArrowDownLeft, ArrowLeft,
   Bot, Sparkles, Mic,
-  Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2, Shield
+  Download, Calendar, Filter, TrendingUp, BarChart3, BookOpen, Building2, Shield,
+  AlertTriangle
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
@@ -1486,6 +1487,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   // ne parlaient donc pas du même périmètre (« Portée 305 » contre
   // « À livrer 158 »). Une seule requête, un seul périmètre.
   const [serverStats, setServerStats] = useState(null);
+  const [statsIndispo, setStatsIndispo] = useState(false);
   useEffect(() => {
     if (activeTab !== 'planning') return;
     (async () => {
@@ -1499,9 +1501,20 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
         const res = await fetch(`${apiUrl}/api/admin/communications/stats?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) setServerStats(await res.json());
+        if (res.ok) {
+          setServerStats(await res.json());
+          setStatsIndispo(false);
+        } else {
+          // Serveur pas encore à jour (404) ou erreur : le repli navigateur ne
+          // voit que les campagnes planifiées, jamais les envois directs. Le
+          // dire, plutôt que d'afficher des chiffres partiels sans prévenir.
+          setServerStats(null);
+          setStatsIndispo(true);
+        }
       } catch (e) {
         console.error('Erreur vue d\'ensemble:', e);
+        setServerStats(null);
+        setStatsIndispo(true);
       }
     })();
   }, [activeTab, apiUrl, commPeriod, commFrom, commTo, comms]);
@@ -2582,7 +2595,19 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                                 {msg.category === 'transport' && '🚌 Transport'}
                               </span>
                             )}
-                            <span className="text-xs text-gray-500" title="Envoyés / ciblés">{msg.sent_count}/{msg.total_recipients}</span>
+                            {/* Le compteur de la campagne additionne les annonces aux
+                                envois : « 252/252 » alors que 155 contenus attendent
+                                encore la réponse du parent. Les métriques distinguent
+                                les deux. */}
+                            <span className="text-xs text-gray-500" title="Contenus réellement partis / ciblés">
+                              {msg.metrics ? msg.metrics.sent : msg.sent_count}/{msg.metrics ? msg.metrics.targeted : msg.total_recipients}
+                            </span>
+                            {msg.metrics?.announced > 0 && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-orange-100 text-orange-700"
+                                title="Annonce partie, contenu livré dès que le parent répond">
+                                📣 {msg.metrics.announced} annoncé(s)
+                              </span>
+                            )}
                             {msg.metrics && (
                               <>
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${msg.metrics.read > 0 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}
@@ -4161,6 +4186,18 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     <label className="text-[11px] text-gray-500">au</label>
                     <input type="date" value={commTo} onChange={(e) => setCommTo(e.target.value)}
                       className="text-xs border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                )}
+
+                {statsIndispo && (
+                  <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>
+                      Chiffres partiels : le calcul serveur est indisponible, seules les
+                      communications planifiées sont comptées ici — les envois directs
+                      (relances, messages du hub) manquent. Redéployez le serveur pour
+                      retrouver la vue complète.
+                    </span>
                   </div>
                 )}
 
