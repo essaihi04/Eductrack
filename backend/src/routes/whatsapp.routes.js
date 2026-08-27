@@ -17,7 +17,7 @@ import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.j
 import { enqueueJob } from '../services/jobs/index.js';
 import { whatsappOptedOut } from '../services/notificationRouter.js';
 import { prepareVoiceNote } from '../services/whatsapp/voiceNote.js';
-import { selectAllPages, selectInChunksPaged } from '../utils/chunkedQueries.js';
+import { selectAllPages, selectInChunks, selectInChunksPaged } from '../utils/chunkedQueries.js';
 
 // Destinataire « servi » : le contenu est parti ('sent'), ou l'annonce a
 // été reçue ('announced') — hors fenêtre de 24 h, c'est la réponse du
@@ -69,18 +69,6 @@ const asUtc = (value) => {
   if (!value) return value;
   const s = String(value);
   return /(Z|[+-]\d{2}:?\d{2})$/.test(s) ? s : `${s.replace(' ', 'T')}Z`;
-};
-
-const selectInChunks = async (ids, queryFn, chunkSize = 200) => {
-  const out = [];
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    if (chunk.length === 0) continue;
-    const { data, error } = await queryFn(chunk);
-    if (error) throw error;
-    if (data) out.push(...data);
-  }
-  return out;
 };
 
 // ==================== READ-ONLY DATA (accessible à tous les rôles autorisés sur ce router) ====================
@@ -578,10 +566,14 @@ router.post('/send', async (req, res) => {
       return res.status(400).json({ error: 'Aucun destinataire trouvé' });
     }
 
-    const { data: parentLinks } = await supabaseAdmin
-      .from('parent_students')
-      .select('parent_id, student_id')
-      .in('student_id', studentIds);
+    // Par lots : un .in() avec 590 UUID dépasse la limite de longueur d'URL de
+    // PostgREST. L'erreur était avalée (`const { data }`), la liste retombait à
+    // vide et l'envoi échouait sur « Aucun parent trouvé pour ces élèves »
+    // alors que l'école compte des centaines de parents.
+    const parentLinks = await selectInChunks(
+      studentIds,
+      (chunk) => supabaseAdmin.from('parent_students').select('parent_id, student_id').in('student_id', chunk),
+    );
 
     const parentIds = [...new Set((parentLinks || []).map(l => l.parent_id))];
 
@@ -1272,10 +1264,10 @@ router.get('/conversations', async (req, res) => {
         .in('class_id', scopedClassIds);
       const sIds = (scopedStudents || []).map(s => s.id);
       if (sIds.length === 0) return res.json({ conversations: [] });
-      const { data: ps } = await supabaseAdmin
-        .from('parent_students')
-        .select('parent_id')
-        .in('student_id', sIds);
+      const ps = await selectInChunks(
+        sIds,
+        (chunk) => supabaseAdmin.from('parent_students').select('parent_id').in('student_id', chunk),
+      );
       allowedParentIds = new Set((ps || []).map(p => p.parent_id));
       if (allowedParentIds.size === 0) return res.json({ conversations: [] });
     }
@@ -1340,10 +1332,10 @@ router.get('/conversations', async (req, res) => {
     const parentIds = [...new Set(allRecipients.map(r => r.parent_id).filter(Boolean))];
     let parentMap = {};
     if (parentIds.length > 0) {
-      const { data: parents } = await supabaseAdmin
-        .from('profiles')
-        .select('id, first_name, last_name')
-        .in('id', parentIds);
+      const parents = await selectInChunks(
+        parentIds,
+        (chunk) => supabaseAdmin.from('profiles').select('id, first_name, last_name').in('id', chunk),
+      );
       (parents || []).forEach(p => { parentMap[p.id] = p; });
     }
 
