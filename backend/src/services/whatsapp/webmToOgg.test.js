@@ -35,7 +35,7 @@ const simpleBlock = (frame) =>
  * @param {object} opts
  * @param {boolean} opts.unknownSize cluster de taille inconnue (cas MediaRecorder)
  */
-function buildWebm({ frames = 5, unknownSize = false, codec = 'A_OPUS' } = {}) {
+function buildWebm({ frames = 5, unknownSize = false, codec = 'A_OPUS', strayUnsized = false } = {}) {
   const trackEntry = el([0xae], Buffer.concat([
     el([0xd7], Buffer.from([0x01])),                       // TrackNumber = 1
     el([0x86], Buffer.from(codec, 'latin1')),              // CodecID
@@ -49,7 +49,13 @@ function buildWebm({ frames = 5, unknownSize = false, codec = 'A_OPUS' } = {}) {
     ? Buffer.concat([Buffer.from([0x1f, 0x43, 0xb6, 0x75]), Buffer.from([0xff]), clusterBody])
     : Buffer.concat([Buffer.from([0x1f, 0x43, 0xb6, 0x75]), Buffer.from([0x40, clusterBody.length]), clusterBody]);
 
-  const segmentBody = Buffer.concat([tracks, cluster]);
+  // Info (0x1549A966) écrit en taille inconnue : un élément que le lecteur ne
+  // connaît pas et ne peut pourtant pas sauter.
+  const stray = strayUnsized
+    ? Buffer.concat([Buffer.from([0x15, 0x49, 0xa9, 0x66]), Buffer.from([0xff]),
+        el([0x2a, 0xd7, 0xb1], Buffer.from([0x0f, 0x42, 0x40]))])   // TimecodeScale
+    : Buffer.alloc(0);
+  const segmentBody = Buffer.concat([stray, tracks, cluster]);
   const segment = Buffer.concat([
     Buffer.from([0x18, 0x53, 0x80, 0x67]), Buffer.from([0xff]), segmentBody,  // taille inconnue
   ]);
@@ -125,6 +131,13 @@ test('lit un cluster de taille inconnue, comme en produit MediaRecorder', () => 
 test('refuse ce qui n\'est pas de l\'Opus, pour laisser sa chance à ffmpeg', () => {
   assert.throws(() => webmToOggOpus(buildWebm({ codec: 'A_VORBIS' })), /Opus/);
   assert.throws(() => webmToOggOpus(Buffer.from('pas un fichier audio')), /./);
+});
+
+test('traverse un conteneur inconnu de taille inconnue sans perdre le son', () => {
+  // Sauter un tel élément consommerait tout le reste du fichier : le son
+  // disparaîtrait et l'erreur accuserait à tort le navigateur.
+  const pages = readOggPages(webmToOggOpus(buildWebm({ frames: 6, strayUnsized: true })));
+  assert.equal(pages.at(-1).granule, 312 + 6 * 960);
 });
 
 test('recalcule un CRC valide sur chaque page', () => {

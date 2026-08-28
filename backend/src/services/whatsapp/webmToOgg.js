@@ -84,7 +84,10 @@ function parseWebm(buf) {
     if (!size) break;
 
     const start = size.next;
-    if (MASTERS.has(id.value)) {
+    // Un élément de taille inconnue ne se saute pas : la spec ne l'autorise que
+    // pour les conteneurs, dont il faut donc lire le contenu. Le sauter
+    // reviendrait à filer jusqu'à la fin du fichier — et à n'y trouver aucun son.
+    if (MASTERS.has(id.value) || size.value == null) {
       if (id.value === ID.TRACK_ENTRY) { current = { number: null, codec: null, priv: null }; tracks.push(current); }
       pos = start;             // on entre dedans, sans consommer le contenu
       continue;

@@ -17,6 +17,7 @@ import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.j
 import { enqueueJob } from '../services/jobs/index.js';
 import { whatsappOptedOut } from '../services/notificationRouter.js';
 import { prepareVoiceNote } from '../services/whatsapp/voiceNote.js';
+import { decodeDataUrl } from '../utils/dataUrl.js';
 import { selectAllPages, selectInChunks, selectInChunksPaged } from '../utils/chunkedQueries.js';
 
 // Destinataire « servi » : le contenu est parti ('sent'), ou l'annonce a
@@ -1921,7 +1922,7 @@ router.post('/upload', async (req, res) => {
     const { base64, mimetype } = req.body;
     if (!base64) return res.status(400).json({ error: 'Fichier base64 requis' });
 
-    const buffer = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const buffer = decodeDataUrl(base64);
     const ext = (mimetype || '').split('/')[1] || 'bin';
     const file = {
       buffer,
@@ -2144,7 +2145,7 @@ router.post('/inbox/voice', async (req, res) => {
       });
     }
 
-    const raw = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const raw = decodeDataUrl(base64);
     if (!raw.length) return res.status(400).json({ error: 'Enregistrement illisible' });
     if (raw.length > 16 * 1024 * 1024) {
       return res.status(400).json({ error: 'Note vocale trop longue (16 Mo maximum).' });
@@ -2403,7 +2404,7 @@ router.post('/cloud/profile', async (req, res) => {
     // 1. Photo : fichier envoyé par l'admin, ou logo déjà enregistré de l'école
     let photoBuffer = null;
     if (photoBase64) {
-      photoBuffer = Buffer.from(String(photoBase64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+      photoBuffer = decodeDataUrl(photoBase64);
     } else if (useSchoolLogo) {
       const { data: school } = await supabaseAdmin
         .from('schools').select('logo_url').eq('id', schoolId).maybeSingle();
