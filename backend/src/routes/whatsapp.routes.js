@@ -11,7 +11,7 @@ import * as cloud from '../services/whatsapp/cloudApi.js';
 import { activeEnrollmentMap, activeStudentIdSet } from '../utils/enrollmentScope.js';
 import { archivedStudentIdSet } from '../utils/studentArchive.js';
 import { sendPushToUser } from '../services/webPush.js';
-import { uploadBuffer, BUCKET_PUBLIC } from '../utils/storage.js';
+import { uploadBuffer, BUCKET_PUBLIC, BUCKET_PRIVATE } from '../utils/storage.js';
 import { isSessionReady, sendUnified } from '../services/whatsapp/sendHelpers.js';
 import { runBulkSend, WHATSAPP_BULK_SEND } from '../services/whatsapp/bulkSend.js';
 import { enqueueJob } from '../services/jobs/index.js';
@@ -1274,27 +1274,50 @@ router.get('/conversations', async (req, res) => {
       if (allowedParentIds.size === 0) return res.json({ conversations: [] });
     }
 
-    // Get all message recipients with message info, grouped by phone
-    let msgQuery = supabaseAdmin
-      .from('whatsapp_messages')
-      .select('id, content, message_type, media_url, file_name, status, sent_count, failed_count, total_recipients, recipient_filter, created_at, updated_at, category, sender:profiles!whatsapp_messages_sent_by_fkey(first_name, last_name)')
-      .order('created_at', { ascending: false });
-
-    if (schoolId) {
-      msgQuery = msgQuery.eq('school_id', schoolId);
+    // Messages que l'école a masqués. Table ajoutée par
+    // ADD_WHATSAPP_VOICE_AND_HIDE.sql : tant qu'elle manque, on n'en masque
+    // aucun plutôt que de refuser d'ouvrir la boîte.
+    const hiddenKeys = new Set();
+    {
+      let q = supabaseAdmin.from('whatsapp_hidden_messages').select('message_key');
+      if (schoolId) q = q.eq('school_id', schoolId);
+      const { data: hidden, error: hiddenError } = await q;
+      if (hiddenError) {
+        console.warn('[conversations] messages masqués indisponibles:', hiddenError.message);
+      } else {
+        (hidden || []).forEach((h) => hiddenKeys.add(String(h.message_key)));
+      }
     }
+
+    // Get all message recipients with message info, grouped by phone
+    const MSG_BASE = 'id, content, message_type, media_url, file_name, status, sent_count, failed_count, total_recipients, recipient_filter, created_at, updated_at, category, sender:profiles!whatsapp_messages_sent_by_fkey(first_name, last_name)';
+    // media_path porte les notes vocales enregistrées au micro par l'école.
+    // Colonne ajoutée par ADD_WHATSAPP_VOICE_AND_HIDE.sql : tant qu'elle
+    // manque, la boîte doit continuer de s'ouvrir.
+    const MSG_MEDIA = ', media_path';
 
     // Filtre par catégorie selon le rôle
     const allowedCatsConv = allowedCategoriesForRole(req.user?.role);
-    if (allowedCatsConv) {
-      msgQuery = msgQuery.in('category', allowedCatsConv);
-    }
+
+    const buildMsgQuery = (columns) => {
+      let q = supabaseAdmin
+        .from('whatsapp_messages')
+        .select(columns)
+        .order('created_at', { ascending: false });
+      if (schoolId) q = q.eq('school_id', schoolId);
+      if (allowedCatsConv) q = q.in('category', allowedCatsConv);
+      return q;
+    };
 
     // Les 400 campagnes les plus récentes : la boîte est une vue de
     // conversations, pas une archive (l'onglet Historique, lui, remonte tout).
     // Sans cette borne, la requête est de toute façon coupée à 1 000 par
     // PostgREST, mais en silence.
-    const { data: messages, error: msgError } = await msgQuery.limit(400);
+    let { data: messages, error: msgError } = await buildMsgQuery(MSG_BASE + MSG_MEDIA).limit(400);
+    if (msgError && /media_path|column|does not exist/i.test(msgError.message || '')) {
+      console.warn('[conversations] colonne media_path absente — exécutez ADD_WHATSAPP_VOICE_AND_HIDE.sql');
+      ({ data: messages, error: msgError } = await buildMsgQuery(MSG_BASE).limit(400));
+    }
     if (msgError) throw msgError;
 
     // Get all recipients
@@ -1394,6 +1417,11 @@ router.get('/conversations', async (req, res) => {
           content: msg.content,
           messageType: msg.message_type,
           mediaUrl: msg.media_url,
+          // Note vocale enregistrée par l'école : elle vit dans le bucket
+          // privé, on ne livre donc pas d'URL ici mais de quoi en réclamer une
+          // signée — exactement comme pour un vocal reçu.
+          mediaMessageId: msg.media_path ? msg.id : null,
+          mediaType: msg.media_path ? (msg.message_type || 'audio') : null,
           fileName: msg.file_name,
           status: r.status,
           errorMessage: r.error_message,
@@ -1610,6 +1638,14 @@ router.get('/conversations', async (req, res) => {
       // filtre « Échoués » noierait les vrais échecs à traiter.
       conv.hasUnresolvedFailure = !!conv.lastFailedAt &&
         (!conv.lastSentOkAt || new Date(conv.lastFailedAt) > new Date(conv.lastSentOkAt));
+
+      // Messages masqués par l'école : retirés du fil, mais toujours en base
+      // (voir hiddenKeys plus haut). Le filtre passe APRÈS les compteurs
+      // d'envois et de réceptions : masquer une bulle ne doit pas réécrire
+      // l'historique statistique de la conversation.
+      if (hiddenKeys.size) {
+        conv.messages = conv.messages.filter((m) => !hiddenKeys.has(String(m.id)));
+      }
 
       conv.messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       const last = conv.messages[conv.messages.length - 1];
@@ -2164,9 +2200,29 @@ router.post('/inbox/voice', async (req, res) => {
       });
     }
 
+    // Archivage de la note avant l'envoi, pour que l'école puisse la
+    // RÉÉCOUTER. Bucket PRIVÉ : c'est la voix d'un membre du personnel parlant
+    // d'un enfant, elle ne doit pas vivre derrière une URL devinable. On garde
+    // le chemin ; le fil demandera un lien signé d'une heure à l'ouverture.
+    //
+    // Un archivage raté n'annule pas l'envoi : le parent doit recevoir son
+    // message même si le stockage bronche, quitte à ce qu'il soit inréécoutable.
+    let mediaPath = null;
+    try {
+      const stored = await uploadBuffer({
+        bucket: BUCKET_PRIVATE,
+        folder: `whatsapp-outbox/${schoolId || 'sans-ecole'}`,
+        file: { buffer: audio.buffer, mimetype: audio.mimetype, originalname: audio.fileName },
+        prefix: 'vocal',
+      });
+      mediaPath = stored?.path || null;
+    } catch (e) {
+      console.warn('[note vocale] archivage impossible:', e.message);
+    }
+
     // Trace dans l'historique, comme un envoi direct : la note apparaît dans le
     // fil de la conversation et dans les journaux de l'école.
-    const { data: msgLog } = await supabaseAdmin
+    const insertVoice = (withPath) => supabaseAdmin
       .from('whatsapp_messages')
       .insert({
         school_id: schoolId,
@@ -2178,9 +2234,18 @@ router.post('/inbox/voice', async (req, res) => {
         total_recipients: 1,
         status: 'sending',
         category: resolveCategoryForSending(null, req.user?.role),
+        ...(withPath && mediaPath ? { media_path: mediaPath } : {}),
       })
       .select()
       .single();
+
+    // Repli si ADD_WHATSAPP_VOICE_AND_HIDE.sql n'a pas encore été joué : mieux
+    // vaut une note vocale non réécoutable qu'un envoi refusé.
+    let { data: msgLog, error: logError } = await insertVoice(true);
+    if (logError && /media_path|column/i.test(logError.message || '')) {
+      console.warn('[note vocale] colonne media_path absente — exécutez ADD_WHATSAPP_VOICE_AND_HIDE.sql');
+      ({ data: msgLog } = await insertVoice(false));
+    }
 
     if (msgLog) {
       await supabaseAdmin.from('whatsapp_message_recipients').insert({
@@ -2228,23 +2293,34 @@ router.post('/inbox/media-urls', async (req, res) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(Boolean).slice(0, 100) : [];
     if (!ids.length) return res.json({ urls: {} });
 
-    let q = supabaseAdmin
-      .from('whatsapp_incoming_messages')
-      .select('id, media_path, school_id')
-      .in('id', ids);
-    if (schoolId) q = q.eq('school_id', schoolId);   // scope école
-    const { data: rows, error } = await q;
-    // Migration pas encore jouée : aucune pièce jointe n'existe, on renvoie
-    // une liste vide plutôt qu'une erreur qui casserait l'ouverture du fil.
-    if (error && /media_path|column/i.test(error.message || '')) {
-      console.warn('[inbox] colonnes média absentes — exécutez ADD_WHATSAPP_INBOX.sql');
-      return res.json({ urls: {} });
-    }
-    if (error) throw error;
+    // Deux origines pour un même besoin : ce que le parent a envoyé
+    // (whatsapp_incoming_messages) et ce que l'école a enregistré au micro
+    // (whatsapp_messages). Les deux vivent dans le bucket privé ; le fil
+    // réclame ses liens sans savoir de quel côté vient chaque pièce jointe.
+    const collect = async (table) => {
+      let q = supabaseAdmin.from(table).select('id, media_path, school_id').in('id', ids);
+      if (schoolId) q = q.eq('school_id', schoolId);   // scope école
+      const { data, error } = await q;
+      // Migration pas encore jouée : la colonne n'existe pas, on ignore cette
+      // source plutôt que de casser l'ouverture du fil.
+      if (error) {
+        if (/media_path|column|does not exist/i.test(error.message || '')) {
+          console.warn(`[inbox] ${table}.media_path absent — exécutez les migrations WhatsApp`);
+          return [];
+        }
+        throw error;
+      }
+      return data || [];
+    };
+
+    const rows = [
+      ...(await collect('whatsapp_incoming_messages')),
+      ...(await collect('whatsapp_messages')),
+    ];
 
     const { signedUrl } = await import('../utils/storage.js');
     const urls = {};
-    for (const row of rows || []) {
+    for (const row of rows) {
       if (!row.media_path) continue;
       const url = await signedUrl(row.media_path, 3600);
       if (url) urls[row.id] = url;
@@ -2252,6 +2328,75 @@ router.post('/inbox/media-urls', async (req, res) => {
     res.json({ urls });
   } catch (error) {
     console.error('Erreur inbox media-urls:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── Masquer / restaurer un message du fil ────────────────────────────────
+//
+// « Supprimer » ne détruit rien : la ligne d'origine reste en base et la bulle
+// disparaît du fil. Ce n'est pas de la timidité — les statistiques
+// d'engagement se calculent sur whatsapp_message_recipients, et la
+// déduplication des entrants sur provider_message_id : effacer pour de bon
+// fausserait les premières et laisserait Meta réinjecter les seconds.
+//
+// À SAVOIR, et l'interface le dit : cela n'efface RIEN sur le téléphone du
+// parent. L'API Cloud de Meta n'offre aucun moyen de retirer un message déjà
+// remis ; le masquage ne concerne que la boîte de réception de l'école.
+
+// Clés telles que la boîte de réception les affiche : destinataire d'une
+// campagne (uuid nu), message reçu (in-), réponse du chatbot (bot-), journal
+// des notifications (bot-log-).
+const MESSAGE_KEY = /^(in-|bot-log-|bot-)?[0-9a-fA-F-]{8,64}$/;
+
+// DELETE /inbox/messages/:key — retire un message du fil de l'école.
+router.delete('/inbox/messages/:key', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const key = String(req.params.key || '');
+    if (!MESSAGE_KEY.test(key)) return res.status(400).json({ error: 'Message introuvable' });
+
+    const { error } = await supabaseAdmin
+      .from('whatsapp_hidden_messages')
+      .upsert({
+        school_id: schoolId,
+        message_key: key,
+        phone_e164: req.body?.phone ? String(req.body.phone) : null,
+        hidden_by: req.user.id,
+      }, { onConflict: 'school_id,message_key' });
+
+    if (error) {
+      if (/whatsapp_hidden_messages|does not exist|relation/i.test(error.message || '')) {
+        return res.status(400).json({
+          error: "Suppression indisponible : exécutez ADD_WHATSAPP_VOICE_AND_HIDE.sql dans Supabase.",
+        });
+      }
+      throw error;
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur masquage message:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// POST /inbox/messages/:key/restore — remet le message dans le fil.
+// C'est ce qui rend la suppression réversible : sans cette route, « masqué »
+// vaudrait « perdu ».
+router.post('/inbox/messages/:key/restore', async (req, res) => {
+  try {
+    const schoolId = getSchoolId(req);
+    const key = String(req.params.key || '');
+    if (!MESSAGE_KEY.test(key)) return res.status(400).json({ error: 'Message introuvable' });
+
+    let q = supabaseAdmin.from('whatsapp_hidden_messages').delete().eq('message_key', key);
+    // Une école ne restaure que ses propres messages ; le super admin, tous.
+    if (schoolId) q = q.eq('school_id', schoolId);
+    const { error } = await q;
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur restauration message:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });

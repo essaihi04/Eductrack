@@ -180,6 +180,11 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   // URL signées des pièces jointes REÇUES : les binaires vivent dans le bucket
   // privé, on ne demande des liens qu'à l'ouverture d'une conversation.
   const [inboxMediaUrls, setInboxMediaUrls] = useState({});
+  // Messages masqués à l'instant : le serveur les filtre déjà au prochain
+  // chargement, cet état ne sert qu'à faire disparaître la bulle tout de suite.
+  const [hiddenMsgIds, setHiddenMsgIds] = useState(() => new Set());
+  const [undoDelete, setUndoDelete] = useState(null);   // { key, phone }
+  const [deleteError, setDeleteError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [highlightMsgId, setHighlightMsgId] = useState(null); // message atteint par la recherche
   const [inboxFilter, setInboxFilter] = useState('all');
@@ -1073,6 +1078,49 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   const discardVoiceNote = () => {
     if (voiceNote?.url) URL.revokeObjectURL(voiceNote.url);
     setVoiceNote(null);
+  };
+
+  // Masquer un message du fil. Le serveur garde la ligne : les statistiques
+  // d'engagement et la déduplication des entrants s'appuient dessus.
+  //
+  // Cela n'efface RIEN chez le parent — l'API de Meta ne sait pas retirer un
+  // message déjà remis. La confirmation le dit, pour qu'aucune école ne croie
+  // avoir rattrapé un envoi malheureux.
+  const hideMessage = async (msg) => {
+    if (!msg?.id) return;
+    setDeleteError('');
+    const key = String(msg.id);
+    setHiddenMsgIds((prev) => new Set(prev).add(key));      // retrait immédiat
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${apiUrl}/api/admin/whatsapp/inbox/messages/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: selectedConv?.phone || null }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Suppression refusée');
+      setUndoDelete({ key });
+    } catch (e) {
+      // Échec : la bulle revient, sinon l'école croirait le message parti.
+      setHiddenMsgIds((prev) => { const next = new Set(prev); next.delete(key); return next; });
+      setDeleteError(e.message || "Le message n'a pas pu être supprimé.");
+    }
+  };
+
+  const restoreMessage = async (key) => {
+    try {
+      const token = await getAuthToken();
+      await fetch(`${apiUrl}/api/admin/whatsapp/inbox/messages/${encodeURIComponent(key)}/restore`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setHiddenMsgIds((prev) => { const next = new Set(prev); next.delete(key); return next; });
+      setUndoDelete(null);
+      fetchConversations();
+    } catch (e) {
+      setDeleteError("La restauration a échoué.");
+    }
   };
 
   const sendVoiceNote = async () => {
@@ -3194,8 +3242,10 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                 </div>
                 <div className="flex-1 min-w-0 relative flex flex-col overflow-hidden">
                 <div ref={threadScrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-                  {selectedConv.messages.map((msg, idx) => {
-                    const showDate = idx === 0 || new Date(msg.createdAt).toDateString() !== new Date(selectedConv.messages[idx - 1].createdAt).toDateString();
+                  {selectedConv.messages
+                    .filter((m) => !hiddenMsgIds.has(String(m.id)))
+                    .map((msg, idx, shown) => {
+                    const showDate = idx === 0 || new Date(msg.createdAt).toDateString() !== new Date(shown[idx - 1].createdAt).toDateString();
                     const incoming = msg.direction === 'incoming';
                     return (
                       <div key={msg.id} id={`msg-${msg.id}`}
@@ -3208,7 +3258,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                           </div>
                         )}
                         <div className={incoming ? 'flex justify-start' : 'flex justify-end'}>
-                          <div className={`max-w-[92%] sm:max-w-[80%] lg:max-w-[72%] rounded-lg px-3 py-2 shadow-sm ${incoming ? 'rounded-tl-none bg-white border border-gray-200' : 'rounded-tr-none'} ${incoming ? '' : msg.isComprehensiveReport ? 'bg-[#dbeafe] border border-blue-200' : (msg.isAiReport || msg.isBot) ? 'bg-[#e8e0f3] border border-purple-200' : 'bg-[#d9fdd3]'}`}>
+                          <div className={`group max-w-[92%] sm:max-w-[80%] lg:max-w-[72%] rounded-lg px-3 py-2 shadow-sm ${incoming ? 'rounded-tl-none bg-white border border-gray-200' : 'rounded-tr-none'} ${incoming ? '' : msg.isComprehensiveReport ? 'bg-[#dbeafe] border border-blue-200' : (msg.isAiReport || msg.isBot) ? 'bg-[#e8e0f3] border border-purple-200' : 'bg-[#d9fdd3]'}`}>
                             {msg.isBot && (
                               <div className="flex items-center gap-1.5 mb-2 pb-1.5 border-b border-purple-200">
                                 <Bot className="w-3.5 h-3.5 text-purple-600" />
@@ -3300,6 +3350,14 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                             )}
                             <div className="flex items-center justify-end gap-1.5 mt-1">
                               {msg.senderName && <span className={`text-[10px] mr-auto ${msg.isComprehensiveReport ? 'text-blue-500' : (msg.isAiReport || msg.isBot) ? 'text-purple-500' : 'text-gray-500'}`}>{msg.senderName}</span>}
+                              <button
+                                onClick={() => hideMessage(msg)}
+                                title="Supprimer ce message de la boîte (il reste sur le téléphone du parent)"
+                                aria-label="Supprimer ce message"
+                                className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-0.5 rounded hover:bg-black/10"
+                              >
+                                <Trash2 className="w-3 h-3 text-gray-500" />
+                              </button>
                               <span className="text-[10px] text-gray-500">{new Date(msg.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
                               {!incoming && statusBadge(msg.status)}
                             </div>
@@ -3320,6 +3378,37 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                     </button>
                   )}
                 </div>
+                {/* Suppression : confirmation discrète + retour en arrière.
+                    Le rappel « toujours sur le téléphone du parent » compte
+                    autant que le bouton : sans lui, l'école croirait avoir
+                    rattrapé un envoi malheureux. */}
+                {undoDelete && (
+                  <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 flex-shrink-0">
+                    <Trash2 className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                    <p className="text-xs text-gray-700 flex-1 min-w-0">
+                      Message retiré de la boîte.
+                      <span className="text-gray-500"> Il reste sur le téléphone du parent : WhatsApp ne permet pas de l'y effacer.</span>
+                    </p>
+                    <button
+                      onClick={() => restoreMessage(undoDelete.key)}
+                      className="text-xs font-medium text-green-700 hover:text-green-800 underline flex-shrink-0"
+                    >
+                      Annuler
+                    </button>
+                    <button onClick={() => setUndoDelete(null)} className="p-1 hover:bg-gray-200 rounded-full flex-shrink-0">
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    </button>
+                  </div>
+                )}
+                {deleteError && (
+                  <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 flex-shrink-0">
+                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                    <p className="text-xs text-red-700 flex-1">{deleteError}</p>
+                    <button onClick={() => setDeleteError('')} className="p-1 hover:bg-red-100 rounded-full">
+                      <X className="w-3.5 h-3.5 text-red-400" />
+                    </button>
+                  </div>
+                )}
                 {/* Compose bar */}
                 <div className="bg-white border-t border-gray-200 flex-shrink-0">
                   {/* File preview */}
