@@ -8,8 +8,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Nunito Sans', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
-        display: ['Nunito Sans', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
+        // Les polices emoji couleur devancent les polices de texte, qui
+        // afficheraient ☺ ou ❤ en noir et blanc (voir index.css).
+        sans: ['Nunito Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
+        display: ['Nunito Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'IBM Plex Sans Arabic', 'system-ui', 'sans-serif'],
       },
       colors: {
         brand: {

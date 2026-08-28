@@ -421,7 +421,7 @@ async function downloadCloudMedia(mediaId) {
 /**
  * Parse un payload webhook Meta et en extrait un message normalisé,
  * au format attendu par handleIncomingWhatsAppMessage.
- * @returns {object|null} { from, text, id, schoolId, location, image } ou null
+ * @returns {object|null} { from, text, id, schoolId, location, image, media, reaction } ou null
  */
 export async function parseIncoming(body) {
   const value = body?.entry?.[0]?.changes?.[0]?.value;
@@ -451,6 +451,15 @@ export async function parseIncoming(body) {
     msg.image?.caption ||
     msg.document?.caption ||
     '';
+
+  // Réaction : le 👍 qu'un parent pose sur un message. Ce n'est pas une
+  // question — le chatbot ne doit pas y répondre — mais c'est bien un signe de
+  // lui, et il doit se voir dans le fil comme il se voit dans WhatsApp.
+  // Un emoji vide signale le RETRAIT d'une réaction : il n'y a rien à afficher.
+  let reaction = null;
+  if (msg.reaction?.emoji) {
+    reaction = { emoji: String(msg.reaction.emoji), targetId: msg.reaction.message_id || null };
+  }
 
   // Localisation partagée → profil transport
   let location = null;
@@ -496,9 +505,9 @@ export async function parseIncoming(body) {
     break;
   }
 
-  if (!text && !location && !image && !media) return null;
+  if (!text && !location && !image && !media && !reaction) return null;
 
-  return { from, text, id, schoolId, location, image, media };
+  return { from, text, id, schoolId, location, image, media, reaction };
 }
 
 // ─────────────────────────────────────────────────────────────────────────

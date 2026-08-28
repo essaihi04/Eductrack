@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useYear } from '../../contexts/YearContext';
 import { sameYear } from '../../lib/schoolYear';
 import { saveBlob } from '../../lib/download';
+import { withColorEmoji } from '../../lib/emoji';
 import EngagementDashboard from './communication/EngagementDashboard';
 import ChatbotDocsPage from './communication/ChatbotDocsPage';
 import ChatbotAccessPage from './ChatbotAccessPage';
@@ -1012,7 +1013,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
   // Inline compose helpers
   // Format d'enregistrement : on demande d'abord ceux que WhatsApp accepte tels
   // quels (ogg/opus sur Firefox, mp4 sur Safari). Chrome ne sait produire que du
-  // WebM — le serveur le reconvertit alors avec ffmpeg.
+  // WebM — le serveur le ré-empaquette alors en Ogg, sans ré-encoder.
   const pickAudioMime = () => {
     if (typeof MediaRecorder === 'undefined') return null;
     const candidates = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
@@ -3095,7 +3096,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                               {last?.direction === 'incoming' && <ArrowDownLeft className="w-3 h-3 text-blue-500 flex-shrink-0" />}
                               {last?.isBot && <Bot className="w-3 h-3 text-purple-500 flex-shrink-0" />}
                               {last?.isAiReport && <Bot className="w-3 h-3 text-purple-500 flex-shrink-0" />}
-                              {last ? (last.isAiReport ? 'Rapport IA quotidien' : (last.content || `[${last.messageType}]`)) : ''}
+                              {last ? (last.isAiReport ? 'Rapport IA quotidien' : (withColorEmoji(last.content) || `[${last.messageType}]`)) : ''}
                             </p>
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               {conv.totalReceived > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-600"><MessageSquare className="w-3 h-3" />{conv.totalReceived}</span>}
@@ -3293,7 +3294,7 @@ const WhatsAppPage = ({ pageTab = null, pageTitle = null, pageSubtitle = null })
                                 <Download className="w-3.5 h-3.5 text-gray-400 ml-auto flex-shrink-0" />
                               </a>
                             )}
-                            {msg.content && <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">{msg.content}</p>}
+                            {msg.content && <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">{withColorEmoji(msg.content)}</p>}
                             {msg.errorMessage && (
                               <p className="text-[11px] text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{msg.errorMessage}</p>
                             )}

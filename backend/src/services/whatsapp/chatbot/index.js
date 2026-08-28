@@ -1184,7 +1184,7 @@ export async function handleIncomingWhatsAppMessage(args) {
   return runAsChatbot(() => handleIncomingImpl(args));
 }
 
-async function handleIncomingImpl({ from, text, id, schoolId, location = null, image = null, media = null }) {
+async function handleIncomingImpl({ from, text, id, schoolId, location = null, image = null, media = null, reaction = null }) {
   const phone = normalizePhone(from);
   console.log(`[chatbot] ← ${phone} (school=${schoolId}): "${text?.substring(0, 80)}"${location ? ` 📍(${location.lat},${location.lng})` : ''}${image ? ' 📷' : ''}`);
 
@@ -1301,9 +1301,12 @@ _Tapez *menu* pour afficher les options._`);
     message_text: text
       || (location ? `📍 Localisation: ${location.lat},${location.lng}` : '')
       || mediaPlaceholder(media)
-      || (image ? '📷 Photo reçue' : ''),
+      || (image ? '📷 Photo reçue' : '')
+      || (reaction ? `${reaction.emoji} (réaction)` : ''),
     provider_message_id: id,
-    processed: false,
+    // Une réaction n'appelle aucune réponse : elle est classée traitée dès
+    // l'écriture, sinon un réenvoi du webhook la ferait apparaître deux fois.
+    processed: Boolean(reaction),
     category: incomingCategory,
     ...(mediaCols || {}),
   });
@@ -1311,6 +1314,10 @@ _Tapez *menu* pour afficher les options._`);
   // Tracking communications : ce message entrant vaut « réponse » (et lecture)
   // pour les envois récents adressés à ce parent.
   markResponded({ parentId: parentInfo.parent_id, phone }).catch(() => {});
+
+  // La réaction est désormais dans le fil : le parent n'attend rien de plus.
+  // Lui répondre par un menu serait absurde.
+  if (reaction) return;
 
   // 2.0 Numéro à DOUBLE CASQUETTE : professeur de l'école ET parent d'un élève.
   // Le parent étant résolu en premier, sans cet aiguillage l'espace enseignant

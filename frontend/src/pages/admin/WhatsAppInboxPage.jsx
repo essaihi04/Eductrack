@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { withColorEmoji } from '../../lib/emoji';
 import {
   MessageSquare, Search, Send, ArrowLeft, User, Phone, Clock,
   CheckCircle, AlertCircle, XCircle, Image, FileText, RefreshCw,
@@ -321,7 +322,7 @@ const WhatsAppInboxPage = () => {
                         )}
                         <div className="flex items-center justify-between mt-1">
                           <p className="text-xs text-gray-500 truncate pr-2">
-                            {conv.messages.length > 0 ? (conv.messages[conv.messages.length - 1].content || `[${conv.messages[conv.messages.length - 1].messageType}]`) : ''}
+                            {conv.messages.length > 0 ? (withColorEmoji(conv.messages[conv.messages.length - 1].content) || `[${conv.messages[conv.messages.length - 1].messageType}]`) : ''}
                           </p>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
                             {conv.totalSent > 0 && (
@@ -408,7 +409,7 @@ const WhatsAppInboxPage = () => {
                             {/* Message content */}
                             {msg.content && (
                               <p className="text-[13px] text-gray-900 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">
-                                {msg.content}
+                                {withColorEmoji(msg.content)}
                               </p>
                             )}
 

@@ -8,34 +8,39 @@
  * refus de Meta.
  *
  * Firefox (ogg/opus) et Safari (mp4/aac) enregistrent déjà dans un format
- * accepté : leur flux part sans retouche. Pour les autres, on ré-encapsule avec
- * ffmpeg — sans ré-encoder quand c'est possible, l'Opus du WebM étant déjà le
- * codec attendu dans un conteneur Ogg.
+ * accepté : leur flux part sans retouche. Pour les autres, on ré-empaquette —
+ * sans ré-encoder, l'Opus du WebM étant déjà le codec attendu dans un conteneur
+ * Ogg.
+ *
+ * Ce ré-empaquetage se fait d'abord en JavaScript (webmToOgg.js), pour ne rien
+ * exiger du serveur : demander « apt install ffmpeg » à une école qui héberge
+ * son backend sur une plateforme gérée revient à lui refuser la fonction. ffmpeg
+ * ne sert plus que de filet, pour les formats exotiques.
  */
 
 import { spawn } from 'child_process';
+import { webmToOggOpus } from './webmToOgg.js';
 
 // Formats que l'API Cloud accepte tels quels (voir doc Meta « Media »).
 const NATIVE = [/^audio\/ogg/, /^audio\/mp4/, /^audio\/aac/, /^audio\/mpeg/, /^audio\/amr/];
 
 export const isNativeAudio = (mimetype) => NATIVE.some((re) => re.test(String(mimetype || '')));
 
-let ffmpegChecked = false;
-let ffmpegAvailable = false;
+let ffmpegProbe = null;
 
-/** ffmpeg est-il installé sur la machine ? (testé une seule fois) */
+/** ffmpeg est-il installé sur la machine ? (réellement testé, une seule fois) */
 export function hasFfmpeg() {
-  if (ffmpegChecked) return ffmpegAvailable;
-  ffmpegChecked = true;
-  try {
-    const probe = spawn('ffmpeg', ['-version']);
-    probe.on('error', () => { ffmpegAvailable = false; });
-    // Le résultat n'est pas attendu ici : la première conversion tranchera.
-    ffmpegAvailable = true;
-  } catch {
-    ffmpegAvailable = false;
-  }
-  return ffmpegAvailable;
+  if (ffmpegProbe) return ffmpegProbe;
+  ffmpegProbe = new Promise((resolve) => {
+    try {
+      const probe = spawn('ffmpeg', ['-version']);
+      probe.on('error', () => resolve(false));
+      probe.on('close', (code) => resolve(code === 0));
+    } catch {
+      resolve(false);
+    }
+  });
+  return ffmpegProbe;
 }
 
 /**
@@ -91,6 +96,17 @@ export async function prepareVoiceNote(buffer, mimetype) {
     const ext = /ogg/.test(mimetype) ? 'ogg' : /mp4|aac/.test(mimetype) ? 'm4a' : /mpeg/.test(mimetype) ? 'mp3' : 'amr';
     return { buffer, mimetype: String(mimetype).split(';')[0], fileName: `note-vocale.${ext}` };
   }
-  const converted = await toOggOpus(buffer);
-  return { buffer: converted, mimetype: 'audio/ogg', fileName: 'note-vocale.ogg' };
+
+  const ogg = { mimetype: 'audio/ogg', fileName: 'note-vocale.ogg' };
+
+  // Cas courant — Chrome, Edge : du WebM qui contient déjà de l'Opus. On change
+  // la boîte, pas le son : instantané, sans perte, sans binaire externe.
+  try {
+    return { buffer: webmToOggOpus(buffer), ...ogg };
+  } catch (e) {
+    // Format inattendu (WebM/Vorbis, conteneur inconnu) : ffmpeg s'il est là.
+    if (!(await hasFfmpeg())) throw new Error(`Format audio non pris en charge (${e.message})`);
+  }
+
+  return { buffer: await toOggOpus(buffer), ...ogg };
 }

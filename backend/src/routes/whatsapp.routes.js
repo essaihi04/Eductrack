@@ -2154,13 +2154,11 @@ router.post('/inbox/voice', async (req, res) => {
     try {
       audio = await prepareVoiceNote(raw, mimetype);
     } catch (e) {
-      // ffmpeg absent : le message doit être explicite, sinon l'école croit à
-      // une panne alors qu'il manque un paquet sur le serveur.
-      const missing = /introuvable|ENOENT/i.test(e.message || '');
+      // Le ré-empaquetage se fait en JavaScript : il n'y a plus de paquet à
+      // installer. Un échec ici ne peut venir que d'un format que le navigateur
+      // n'aurait pas dû produire — on le dit sans jargon d'administrateur.
       return res.status(400).json({
-        error: missing
-          ? "Conversion audio indisponible sur le serveur : installez ffmpeg (apt install ffmpeg), ou enregistrez depuis Firefox ou Safari."
-          : `Conversion de l'enregistrement impossible : ${e.message}`,
+        error: `L'enregistrement n'a pas pu être préparé pour WhatsApp : ${e.message}`,
       });
     }
 
