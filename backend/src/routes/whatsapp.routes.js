@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, getScopedClassIds } from '../middleware/auth.js';
 import { generatePreview, generateComprehensivePreview } from '../services/dailyReports.js';
 import { resolveCategoryForSending, allowedCategoriesForRole } from '../utils/whatsappCategory.js';
-import { sendText, getStatus } from '../services/whatsapp/index.js';
+import { sendText, sendMediaBuffer, getStatus } from '../services/whatsapp/index.js';
 import { sendUtility, sendUtilityMedia, serviceWindowOpen } from '../services/whatsapp/utility.js';
 import { TEMPLATES, getTemplate, templateLanguages, definitionFor } from '../services/whatsapp/templates.js';
 import { generateStudentReportPdf } from '../services/studentReportPdf.js';
@@ -18,6 +18,7 @@ import { enqueueJob } from '../services/jobs/index.js';
 import { whatsappOptedOut } from '../services/notificationRouter.js';
 import { prepareVoiceNote } from '../services/whatsapp/voiceNote.js';
 import { decodeDataUrl } from '../utils/dataUrl.js';
+import { runAsCampaign } from '../services/whatsapp/outboundGate.js';
 import { selectAllPages, selectInChunks, selectInChunksPaged } from '../utils/chunkedQueries.js';
 
 // Destinataire « servi » : le contenu est parti ('sent'), ou l'annonce a
@@ -2187,9 +2188,12 @@ router.post('/inbox/voice', async (req, res) => {
       });
     }
 
-    const result = await sendMediaBuffer(schoolId, phone, audio.buffer, {
+    // Contexte « campagne » : la ligne destinataire est déjà écrite ci-dessus.
+    // Sans lui, l'envoi serait AUSSI journalisé par traced() et la note vocale
+    // apparaîtrait deux fois dans le fil.
+    const result = await runAsCampaign(() => sendMediaBuffer(schoolId, phone, audio.buffer, {
       type: 'audio', fileName: audio.fileName, mimetype: audio.mimetype,
-    });
+    }));
 
     if (msgLog) {
       await supabaseAdmin.from('whatsapp_message_recipients').update(
