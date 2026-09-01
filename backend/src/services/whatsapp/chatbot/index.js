@@ -21,7 +21,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import { runAsChatbot } from '../outboundGate.js';
 import { flushPending } from '../pendingDelivery.js';
-import { isPureAck, isAnnounceReply, ackMessage, deliveredMessage } from './smallTalk.js';
+import { isPureAck, isAnnounceReply, isGreeting, ackMessage, deliveredMessage } from './smallTalk.js';
 import { setWhatsappOptOut, setTransportSkipToday } from '../../notificationRouter.js';
 import { storeIncomingMedia, mediaPlaceholder, insertIncomingRow } from '../inboxMedia.js';
 import { markResponded } from '../../communicationTracking.js';
@@ -36,7 +36,7 @@ const __dirname = dirname(__filename);
 import { categorizeIncoming } from '../../../utils/whatsappCategory.js';
 import * as State from './state.js';
 import { normalizeDigits } from './textUtils.js';
-import { sendMenu, matchMenuOption, resolveMenu } from './menus.js';
+import { sendMenu, matchMenuOption, resolveMenu, targetMenuId } from './menus.js';
 import { isCapabilityEnabled, capabilityForOption } from './capabilities.js';
 import { findCustomEntry, matchCustomEntryByKeyword } from './customEntries.js';
 import { answerWithAI, detectSpecialCommand, menuFooterForText, isBulletinQuery, detectSemester, isFullWeekTimetableQuery, isMassarQuery } from './ai.js';
@@ -53,6 +53,7 @@ import { generatePreview } from '../../dailyReports.js';
 import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
 import { tryOfficialDocument } from './documents.js';
 import { handlePublicMessage } from './publicChatbot.js';
+import { startAddNumberFlow, handleAddNumberReply, tryPairingCode } from './parentNumbers.js';
 import { handleShowcaseQuestion, handleShowcaseReply, sendShowcaseMenu } from './showcase.js';
 import {
   isAppointmentQuery,
@@ -692,8 +693,9 @@ function matchChildFromInput(rawText, children) {
   const text = normalizeDigits(String(rawText || '').trim());
   if (!text) return null;
 
-  // 1. Tentative index numérique
-  const idx = parseInt(text, 10);
+  // 1. Tentative index numérique — saisie entièrement chiffrée uniquement,
+  // sinon « 1bac » ou « 2ac » désignerait le premier enfant de la liste.
+  const idx = /^\d+[.)-]?$/.test(text) ? parseInt(text, 10) : NaN;
   if (Number.isFinite(idx) && idx >= 1 && idx <= children.length) {
     return children[idx - 1];
   }
@@ -885,6 +887,10 @@ async function executeOption(option, schoolId, phone, student, parentInfo) {
     if (target === 'appointment') {
       // Demande de rendez-vous : administration ou professeur de la classe.
       return startAppointmentFlow({ schoolId, parentInfo, phone, studentId: student.id });
+    }
+    if (target === 'addnumber') {
+      // Rattachement d'un second numéro (père/mère/tuteur) au compte famille.
+      return startAddNumberFlow({ schoolId, phone, parentInfo });
     }
     if (target === 'photo') {
       // Active le mode "photo attendue" : la prochaine image reçue sera
@@ -1224,6 +1230,29 @@ async function handleIncomingImpl({ from, text, id, schoolId, location = null, i
   // 1. Identifier le parent
   const parentInfo = await getParentByPhone(phone, schoolId);
   if (!parentInfo) {
+    // 1.bis.-1 Ce numéro est-il en train de se faire rattacher par un parent
+    // du compte ? Il envoie alors le code à six chiffres reçu de vive voix.
+    // Testé en premier : c'est le seul cas où un numéro inconnu attend une
+    // réponse immédiate, et le code prouve qu'il a le téléphone en main.
+    if (text && !location && !image && !media) {
+      const paired = await tryPairingCode({ schoolId, phone, text }).catch((e) => {
+        console.error('[chatbot] code de rattachement:', e.message);
+        return false;
+      });
+      if (paired) {
+        await insertIncomingRow(supabaseAdmin, {
+          phone_e164: phone,
+          school_id: schoolId,
+          message_text: '🔐 Code de rattachement (nouveau numéro parent)',
+          provider_message_id: id,
+          processed: true,
+          category: 'general',
+        }).catch(() => {});
+        console.log(`[chatbot] ← nouveau numéro parent rattaché ${phone} (school=${schoolId})`);
+        return;
+      }
+    }
+
     // 1.bis.0 Pas un parent → un PROFESSEUR de l'école ? Il obtient l'espace
     // enseignant WhatsApp : sa journée, ses classes, ses élèves, ses devoirs
     // et ses contrôles, sans ouvrir l'application. Le module gère aussi, en priorité, les réponses
@@ -1591,7 +1620,9 @@ _Tapez *menu* pour afficher les options._`);
   // numéro de menu. Sinon le flux chatbot normal continue.
   {
     const st = State.getState(schoolId, phone);
-    const inDataFlow = st && ['PHOTO', 'CHILD'].includes(st.state);
+    // ADDNUM en fait partie : le numéro saisi par le parent ne doit pas être
+    // pris pour une justification d'absence.
+    const inDataFlow = st && ['PHOTO', 'CHILD', 'ADDNUM'].includes(st.state);
     const trimmed = String(text || '').trim();
     const isMenuNumber = /^\d{1,2}$/.test(normalizeDigits(trimmed));
     if (!inDataFlow && !isMenuNumber && trimmed.length >= 3) {
@@ -1711,6 +1742,20 @@ _Tapez *menu* pour afficher les options._`);
     }
   }
 
+  // Mode ADDNUM : le parent déclare un second numéro (père / mère / tuteur).
+  if (state?.state === 'ADDNUM') {
+    const handled = await handleAddNumberReply({
+      schoolId, phone, text, parentInfo, state,
+    }).catch((e) => {
+      console.error('[chatbot] ajout de numéro:', e.message);
+      return false;
+    });
+    if (handled) {
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+  }
+
   // Pas d'état (1re interaction, expiré, ou redémarrage serveur) → essayer
   // d'abord d'interpréter la saisie comme une sélection d'enfant (numéro ou
   // nom), sinon afficher le menu de sélection.
@@ -1724,10 +1769,8 @@ _Tapez *menu* pour afficher les options._`);
       // salutation type "bonjour", "salam", "hi"…). Si oui, on répond
       // directement à la question puis on affiche le menu, comme demandé.
       const trimmed = String(text || '').trim();
-      const lower = trimmed.toLowerCase();
-      const greetings = /^(bonjour|bonsoir|salut|coucou|hi|hello|hey|salam|salem|sa?lam|marhaba|ahlan|ا?لسلام|مرحبا|سلام|اهلا)[\s!.?,؟]*$/i;
-      const isGreeting = greetings.test(lower) || trimmed.length < 5;
-      const looksLikeQuestion = !isGreeting && (trimmed.includes(' ') || trimmed.length > 8);
+      const salutation = isGreeting(trimmed) || trimmed.length < 5;
+      const looksLikeQuestion = !salutation && (trimmed.includes(' ') || trimmed.length > 8);
 
       // Accueil
       await sendText(parentInfo.school_id, phone, `Bonjour ${parentInfo.parent_name} 👋\nBienvenue sur le service WhatsApp de *${parentInfo.school_name}*.`);
@@ -1985,19 +2028,53 @@ _Tapez *enfant* à tout moment pour passer à ${autres}._`,
 
     // Menu effectif de l'école : les données coupées par l'administration
     // n'y figurent pas, donc leur numéro n'est plus reconnu non plus.
-    const menu = await resolveMenu(parentInfo.school_id, state.currentMenu || 'main');
+    //
+    // Un clic de liste porte son menu d'origine dans son identifiant
+    // (« main:2 ») : c'est LUI qui décide, pas le menu où le parent se trouve.
+    // Un bouton recliqué plus haut dans le fil doit fonctionner.
+    const clickedMenuId = targetMenuId(text);
+    const currentMenuId = state.currentMenu || 'main';
+    const menuId = clickedMenuId || currentMenuId;
+    const menu = await resolveMenu(parentInfo.school_id, menuId);
     const opt = matchMenuOption(menu, text);
     if (opt) {
+      if (clickedMenuId && clickedMenuId !== currentMenuId) {
+        State.setMenu(schoolId, phone, clickedMenuId);
+      }
       await executeOption(opt, parentInfo.school_id, phone, student, parentInfo);
       await markProcessed(incomingMsg?.id);
       return;
     }
 
-    // Pas de correspondance avec une option. Heuristique : si l'utilisateur a
-    // tapé une vraie phrase / question (> 4 caractères, contient au moins 1
-    // espace OU plus de 8 caractères), on considère que c'est une question
-    // libre (français, arabe, darja, etc.) et on la route vers l'IA au lieu
-    // de répondre "Option non reconnue".
+    // Pas de correspondance avec une option.
+    //
+    // Politesse d'abord : « Slm », « Merci », « سلام », « Bien reçu » sont
+    // trop courts pour l'heuristique de question ci-dessous et retombaient
+    // donc sur « 🤔 Option non reconnue : "Merci" ». Une salutation doit
+    // TOUJOURS produire un accueil, jamais un message d'échec.
+    if (isGreeting(text)) {
+      await sendText(parentInfo.school_id, phone,
+        `Bonjour ${parentInfo.parent_name} 👋\nBienvenue sur le service WhatsApp de *${parentInfo.school_name}*.`);
+      await sendMenu(parentInfo.school_id, phone, menu, {
+        studentName: `${student.first_name} ${student.last_name}`,
+        schoolName: parentInfo.school_name,
+      });
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+    const politesseCourte = repliquePolitesse({
+      text, livres: contenusLivres, schoolName: parentInfo.school_name,
+    });
+    if (politesseCourte) {
+      await sendText(parentInfo.school_id, phone, politesseCourte);
+      await markProcessed(incomingMsg?.id);
+      return;
+    }
+
+    // Heuristique : si l'utilisateur a tapé une vraie phrase / question
+    // (> 4 caractères, contient au moins 1 espace OU plus de 8 caractères),
+    // on considère que c'est une question libre (français, arabe, darija) et
+    // on la route vers l'IA au lieu de répondre "Option non reconnue".
     const trimmed = text.trim();
     const looksLikeQuestion =
       trimmed.length >= 5 && (trimmed.includes(' ') || trimmed.length > 8);
@@ -2015,15 +2092,8 @@ _Tapez *enfant* à tout moment pour passer à ${autres}._`,
         await markProcessed(incomingMsg?.id);
         return;
       }
-      // Politesse ou « oui, je veux le détail » : pas la peine de déranger l'IA.
-      const politesse = repliquePolitesse({
-        text, livres: contenusLivres, schoolName: parentInfo.school_name,
-      });
-      if (politesse) {
-        await sendText(parentInfo.school_id, phone, politesse);
-        await markProcessed(incomingMsg?.id);
-        return;
-      }
+      // La politesse a déjà été traitée plus haut (avant cette heuristique) :
+      // ici, le message est bien une question.
       if (await tryShowcaseAnswer({ schoolId, phone, parentInfo, text })) {
         await markProcessed(incomingMsg?.id);
         return;

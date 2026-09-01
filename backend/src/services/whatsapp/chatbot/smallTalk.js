@@ -87,6 +87,44 @@ export function isAnnounceReply(text) {
   return DEMANDES_DETAIL.some((re) => re.test(brut));
 }
 
+// Salutations, toutes écritures confondues. Les abréviations comptent autant
+// que les formes pleines : chez MARCEL ARNAUD, « Slm », « Cc », « Bjr » et
+// « سلام » arrivaient plus souvent que « Bonjour », et recevaient « je n'ai
+// pas cette information dans les documents » ou « option non reconnue ».
+const SALUTATIONS = new Set([
+  'bonjour', 'bonsoir', 'bjr', 'bnj', 'bnjr', 'bsr', 'salut', 'slt', 'coucou', 'cc',
+  'hi', 'hello', 'hey', 'yo', 'bonjour a tous', 'bonjour monsieur', 'bonjour madame',
+  'salam', 'slam', 'slm', 'sl', 'salem', 'salamo', 'salam alaykom', 'salam alaikom',
+  'salamo alaykom', 'assalamo alaykom', 'marhba', 'marhaba', 'ahlan', 'sabah lkhir',
+  'sbah lkhir', 'msa lkhir',
+  'سلام', 'السلام', 'سلام عليكم', 'السلام عليكم', 'سلام وعليكم',
+  'وعليكم السلام', 'مرحبا', 'اهلا', 'أهلا', 'صباح الخير', 'مساء الخير', 'تحية طيبة',
+]);
+
+/**
+ * Le message est-il une simple salutation ?
+ *
+ * Strict par construction : « salam, imta la rentrée ? » n'est PAS une
+ * salutation — c'est une question qui commence poliment, et elle doit
+ * continuer son chemin vers la vraie réponse.
+ */
+export function isGreeting(text) {
+  const brut = String(text || '').trim();
+  if (!brut) return false;
+  const n = noyau(brut);
+  if (!n) return false;
+  if (SALUTATIONS.has(n)) return true;
+
+  // Formules rituelles complètes (« السلام عليكم ورحمة الله وبركاته »,
+  // « salam 3alaykom wa rahmatou llah ») : le début suffit, la suite n'ajoute
+  // rien. Mais seulement sur un message COURT — « السلام عليكم عافاكم صيفطو
+  // ليا التفاصيل » est une demande, pas une salutation.
+  if (n.split(' ').length > 5) return false;
+  // `\b` est inopérant après une lettre arabe (elle n'est pas un caractère de
+  // mot au sens JS) : on borne explicitement sur l'espace ou la fin.
+  return /^((as|a)?s+alam[ou]*\s*3?ala?y?k[ou]m|السلام عليكم|سلام عليكم|وعليكم السلام)(\s|$)/.test(n);
+}
+
 /** Réponse brève à une politesse, dans la langue du parent. */
 export function ackMessage(text, { schoolName = null } = {}) {
   if (ARABE.test(String(text || ''))) {

@@ -51,6 +51,7 @@ export const ACCOUNT_MENU = {
     { id: '1', emoji: '🔑', label: 'Mes identifiants (login & mot de passe)', labelAr: 'بيانات الدخول وكلمات السر', action: 'goto:credentials' },
     { id: '2', emoji: '📍', label: 'Ma localisation (transport scolaire)',    labelAr: 'موقعي (النقل المدرسي)',      action: 'goto:location' },
     { id: '3', emoji: '📷', label: 'Photo de profil de mon enfant',           labelAr: 'صورة ملف ابني',              action: 'goto:photo' },
+    { id: '4', emoji: '📱', label: 'Ajouter un numéro (2ᵉ parent)',           labelAr: 'إضافة رقم (ولي أمر ثانٍ)',   action: 'goto:addnumber' },
     { id: '0', emoji: '🔙', label: 'Retour au menu principal',                labelAr: 'العودة إلى القائمة الرئيسية', action: 'goto:main' },
   ],
 };
@@ -224,6 +225,25 @@ export async function sendMenu(schoolId, phone, menu, ctx = {}) {
   console.warn(`[chatbot] liste Cloud échouée, repli texte:`, r?.message);
   const res = await sendText(schoolId, phone, renderMenuText(localise, contexte));
   return !!res.success;
+}
+
+/**
+ * Menu VISÉ par un clic de liste « menuId:optionId ».
+ *
+ * Un parent qui remonte dans le fil et reclique un bouton d'un menu affiché
+ * plus tôt envoie « main:2 » alors que son état conversationnel est resté sur
+ * « finance ». Le préfixe DIT pourtant de quel menu vient le bouton : c'est
+ * lui qui fait foi, pas l'état. Sans cela, MARCEL ARNAUD a vu des parents
+ * boucler sur « 🤔 Option non reconnue : "main:1" » cinq fois de suite.
+ *
+ * @returns {string|null} identifiant du menu visé, ou null si la saisie n'est
+ *                        pas un identifiant de liste connu.
+ */
+export function targetMenuId(input) {
+  const m = /^([a-z]+):([\w-]+)$/i.exec(String(input || '').trim());
+  if (!m) return null;
+  const id = m[1].toLowerCase();
+  return MENUS[id] ? id : null;
 }
 
 /**

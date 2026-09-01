@@ -181,10 +181,16 @@ export async function handleSuppliesLevelReply({ schoolId, stateSchoolId = schoo
   // Ordre du prompt = ordre des ids mémorisés
   const ordered = ids.map((id) => sections.find((s) => s.id === id)).filter(Boolean);
 
-  // Numéro dans la liste, sinon nom du niveau
+  // Numéro dans la liste, sinon nom du niveau.
+  //
+  // ⚠️ La saisie doit être ENTIÈREMENT chiffrée pour valoir un rang : un
+  // parent qui répond « 1bac » désigne la première année du bac, pas la
+  // première ligne de la liste. `parseInt('1bac')` vaut 1 — le 2026-08-25, ce
+  // parent a reçu la liste de la Grande Section, puis a dû s'y reprendre à
+  // quatre reprises.
   const raw = normalizeText(text).replace(/\s/g, '');
-  const idx = parseInt(raw, 10);
-  let section = Number.isFinite(idx) && idx >= 1 && idx <= ordered.length ? ordered[idx - 1] : null;
+  const rang = /^\d+[.)-]?$/.test(raw) ? parseInt(raw, 10) : NaN;
+  let section = Number.isFinite(rang) && rang >= 1 && rang <= ordered.length ? ordered[rang - 1] : null;
   if (!section) section = matchSectionFromText(text, ordered);
 
   if (!section) {

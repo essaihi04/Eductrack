@@ -69,6 +69,7 @@ export const CAPABILITIES = [
   { id: 'account.credentials', menu: 'account', option: '1', label: 'Identifiants (login et mot de passe)', description: 'Envoi des identifiants de connexion du parent et de l\'enfant.', sensitivity: 'high' },
   { id: 'account.location', menu: 'account', option: '2', label: 'Localisation du domicile', description: 'Consultation et mise à jour de l\'adresse pour le transport.', sensitivity: 'high' },
   { id: 'account.photo', menu: 'account', option: '3', label: 'Photo de profil de l\'enfant', description: 'Le parent envoie une photo qui devient l\'avatar de l\'élève.', sensitivity: 'medium' },
+  { id: 'account.add_number', menu: 'account', option: '4', label: 'Ajout d\'un second numéro parent', description: 'Le parent rattache lui-même le numéro du second parent ou d\'un tuteur (jusqu\'à 3 par famille). Le nouveau numéro doit renvoyer un code reçu de vive voix, puis voit les mêmes données que le titulaire.', sensitivity: 'high' },
 ];
 
 /** Capacité → menu de destination quand elle ouvre une section entière. */

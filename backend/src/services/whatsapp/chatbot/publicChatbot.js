@@ -19,6 +19,7 @@ import { supabaseAdmin } from '../../../config/supabase.js';
 import { sendText } from '../index.js';
 import * as State from './state.js';
 import { detectSpecialCommand } from './ai.js';
+import { isGreeting, isPureAck } from './smallTalk.js';
 import { getKnowledgeSnippets } from './knowledge.js';
 import { isSuppliesQuery, handleSuppliesRequest, handleSuppliesLevelReply } from './supplies.js';
 import { tryOfficialDocument } from './documents.js';
@@ -261,8 +262,7 @@ export async function handlePublicMessage({ schoolId, phone, text, providerMessa
 
   // Accueil / menu / première prise de contact
   const cmd = detectSpecialCommand(trimmed);
-  const isGreeting = /^(bonjour|bonsoir|salut|coucou|hi|hello|hey|salam|salem|marhaba|ahlan|السلام|مرحبا|سلام|اهلا)[\s!.?,؟]*$/i.test(trimmed);
-  if (!trimmed || cmd === 'menu' || cmd === 'help' || isGreeting) {
+  if (!trimmed || cmd === 'menu' || cmd === 'help' || isGreeting(trimmed) || isPureAck(trimmed)) {
     State.setState(schoolId, phone, { state: 'PUBLIC' });
     await sendText(schoolId, phone, welcomeMessage(schoolName));
     await markProcessed(incomingId);
