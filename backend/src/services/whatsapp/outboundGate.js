@@ -61,3 +61,35 @@ export const outgoingSource = () => (isChatbotContext() ? 'chatbot' : 'notificat
 
 /** True si CET envoi doit être bloqué (notification hors chatbot). */
 export const isOutboundBlocked = () => !WA_OUTBOUND_ENABLED && !isChatbotContext();
+
+/**
+ * ╔══════════════════════════════════════════════════════════════════════╗
+ * ║  NOTIFICATIONS PROACTIVES PAR TYPE (envoi automatique aux parents)    ║
+ * ╠══════════════════════════════════════════════════════════════════════╣
+ * ║  Interrupteur plus fin que WA_OUTBOUND : il coupe l'envoi AUTOMATIQUE ║
+ * ║  d'un type de notification sans toucher au reste.                     ║
+ * ║                                                                        ║
+ * ║  Une notification coupée ici reste consultable À LA DEMANDE dans le    ║
+ * ║  chatbot (menu « Suivi pédagogique » : devoirs, documents, contrôles)  ║
+ * ║  et dans l'application parent — seul le push automatique est arrêté.   ║
+ * ║                                                                        ║
+ * ║  Chaque type accepte une variable d'env WA_NOTIFY_<TYPE>=on|off qui    ║
+ * ║  a priorité sur la valeur ci-dessous (ex. WA_NOTIFY_HOMEWORK=on).      ║
+ * ╚══════════════════════════════════════════════════════════════════════╝
+ */
+const PROACTIVE_NOTIFICATIONS = {
+  homework: false, // devoirs assignés par le professeur
+  control: false,  // contrôles planifiés
+  document: false, // documents pédagogiques déposés par le professeur
+};
+
+/**
+ * True si l'envoi WhatsApp automatique de ce type de notification est actif.
+ * Un type inconnu est considéré actif (on ne coupe que ce qui est listé).
+ */
+export const isProactiveNotificationEnabled = (kind) => {
+  const env = process.env[`WA_NOTIFY_${String(kind).toUpperCase()}`];
+  if (env === 'on') return true;
+  if (env === 'off') return false;
+  return PROACTIVE_NOTIFICATIONS[kind] !== false;
+};

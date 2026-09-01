@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { v4 as uuidv4 } from 'uuid';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { isProactiveNotificationEnabled } from '../services/whatsapp/outboundGate.js';
 import { getStatus as getWhatsAppStatus } from '../services/whatsapp/index.js';
 
 const router = express.Router();
@@ -388,6 +389,14 @@ router.post('/', authorize('teacher'), uploadSingleDocument, async (req, res) =>
         // Envoyer notification WhatsApp aux parents (asynchrone, sans bloquer la requête HTTP)
         void (async () => {
           try {
+            // Envoi automatique COUPÉ : le document reste consultable à la demande
+            // dans le chatbot (« Suivi pédagogique » → « Documents partagés ») et
+            // dans l'application parent. Réactiver via WA_NOTIFY_DOCUMENT=on.
+            if (!isProactiveNotificationEnabled('document')) {
+              console.log(`[Documents][${requestId}] Notification WhatsApp automatique désactivée — document consultable à la demande via le chatbot`);
+              return;
+            }
+
             const studentIds = students.map(s => s.id);
 
             const { data: classInfoWa } = await supabaseAdmin

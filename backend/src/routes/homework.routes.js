@@ -2,6 +2,7 @@ import express from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, authorize, isPedagogicalStaff, getTeachingClassIds, canAccessClassAsTeacher } from '../middleware/auth.js';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { isProactiveNotificationEnabled } from '../services/whatsapp/outboundGate.js';
 
 const router = express.Router();
 
@@ -206,97 +207,104 @@ router.post('/homework', async (req, res) => {
         });
     }
 
-    // Envoyer notification WhatsApp aux parents
-    try {
-      const { data: classInfo } = await supabaseAdmin
-        .from('classes')
-        .select('name, school_id')
-        .eq('id', classId)
-        .single();
+    // Notification WhatsApp aux parents — envoi automatique COUPÉ.
+    // Le devoir reste consultable à la demande
+    // dans le chatbot (« Suivi pédagogique » → « Devoirs à faire ») et dans
+    // l'application parent. Réactiver via WA_NOTIFY_HOMEWORK=on.
+    if (isProactiveNotificationEnabled('homework')) {
+      try {
+        const { data: classInfo } = await supabaseAdmin
+          .from('classes')
+          .select('name, school_id')
+          .eq('id', classId)
+          .single();
 
-      const schoolId = classInfo?.school_id || req.user.school_id;
+        const schoolId = classInfo?.school_id || req.user.school_id;
 
-      if (!targetStudentIds || targetStudentIds.length === 0) {
-        console.log('[Homework] Aucun élève ciblé pour ce devoir, notification WhatsApp ignorée');
-      }
-
-      // Récupérer les parents des élèves concernés avec leur numéro
-      const { data: parentLinks } = targetStudentIds?.length
-        ? await supabaseAdmin
-            .from('parent_students')
-            .select('profiles!parent_id(first_name, phone)')
-            .in('student_id', targetStudentIds)
-        : { data: [] };
-
-      if (parentLinks && parentLinks.length > 0) {
-        const dueDateFormatted = new Date(dueDate + 'T00:00:00').toLocaleDateString('fr-FR', {
-          day: 'numeric', month: 'long', year: 'numeric'
-        });
-
-        // Récupérer la / les matière(s) enseignée(s) par le professeur pour
-        // les inclure dans la notification (le formulaire devoir ne demande
-        // pas explicitement la matière, on prend donc celle(s) du prof).
-        let subjectLabel = '';
-        try {
-          const { data: teacherSubjects } = await supabaseAdmin
-            .from('teacher_subjects')
-            .select('subjects(name)')
-            .eq('teacher_id', teacherId);
-          const names = (teacherSubjects || [])
-            .map(ts => ts.subjects?.name)
-            .filter(Boolean);
-          if (names.length > 0) subjectLabel = names.join(', ');
-        } catch (e) {
-          console.warn('[Homework] Impossible de récupérer la matière du prof:', e.message);
+        if (!targetStudentIds || targetStudentIds.length === 0) {
+          console.log('[Homework] Aucun élève ciblé pour ce devoir, notification WhatsApp ignorée');
         }
 
-        const messageText = `📚 *Nouveau devoir assigné*\n\n` +
-          `Classe: *${classInfo?.name || 'N/A'}*\n` +
-          (subjectLabel ? `Matière: *${subjectLabel}*\n` : '') +
-          `Type: ${type || 'Devoir'}\n\n` +
-          `📝 *${title}*\n` +
-          (description ? `${description}\n\n` : '\n') +
-          `📅 À rendre avant le: *${dueDateFormatted}*\n\n` +
-          `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+        // Récupérer les parents des élèves concernés avec leur numéro
+        const { data: parentLinks } = targetStudentIds?.length
+          ? await supabaseAdmin
+              .from('parent_students')
+              .select('profiles!parent_id(first_name, phone)')
+              .in('student_id', targetStudentIds)
+          : { data: [] };
 
-        // Dédupliquer les numéros parents
-        const sentPhones = new Set();
-        for (const link of parentLinks) {
-          const phone = link.profiles?.phone;
-          if (!phone || sentPhones.has(phone)) continue;
-          sentPhones.add(phone);
-          const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-          const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
-            category: 'pedagogical',
-            // Notification proactive : hors fenêtre 24 h, seul un template passe.
-            // `{{1}}` reçoit la CLASSE et non l'élève : le devoir est donné à
-            // toute la classe et `parentLinks` ne porte pas le nom de l'enfant.
-            template: 'devoir',
-            templateParams: [
-              classInfo?.name || 'la classe',
-              subjectLabel || type || 'cours',
-              dueDateFormatted,
-            ],
-            senderId: req.user.id,
-            recipientFilter: {
-              event: 'homework_assigned',
-              homework_id: homework?.id || null,
-              homework_title: title,
-              class_id: classId || null,
-            },
+        if (parentLinks && parentLinks.length > 0) {
+          const dueDateFormatted = new Date(dueDate + 'T00:00:00').toLocaleDateString('fr-FR', {
+            day: 'numeric', month: 'long', year: 'numeric'
           });
-          if (sent) {
-            console.log(`[Homework] Notification devoir envoyée au parent (${e164Phone})`);
-          } else {
-            console.error(`[Homework] Échec envoi notification devoir au parent (${e164Phone})`);
+
+          // Récupérer la / les matière(s) enseignée(s) par le professeur pour
+          // les inclure dans la notification (le formulaire devoir ne demande
+          // pas explicitement la matière, on prend donc celle(s) du prof).
+          let subjectLabel = '';
+          try {
+            const { data: teacherSubjects } = await supabaseAdmin
+              .from('teacher_subjects')
+              .select('subjects(name)')
+              .eq('teacher_id', teacherId);
+            const names = (teacherSubjects || [])
+              .map(ts => ts.subjects?.name)
+              .filter(Boolean);
+            if (names.length > 0) subjectLabel = names.join(', ');
+          } catch (e) {
+            console.warn('[Homework] Impossible de récupérer la matière du prof:', e.message);
           }
+
+          const messageText = `📚 *Nouveau devoir assigné*\n\n` +
+            `Classe: *${classInfo?.name || 'N/A'}*\n` +
+            (subjectLabel ? `Matière: *${subjectLabel}*\n` : '') +
+            `Type: ${type || 'Devoir'}\n\n` +
+            `📝 *${title}*\n` +
+            (description ? `${description}\n\n` : '\n') +
+            `📅 À rendre avant le: *${dueDateFormatted}*\n\n` +
+            `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+
+          // Dédupliquer les numéros parents
+          const sentPhones = new Set();
+          for (const link of parentLinks) {
+            const phone = link.profiles?.phone;
+            if (!phone || sentPhones.has(phone)) continue;
+            sentPhones.add(phone);
+            const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
+            const sent = await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
+              category: 'pedagogical',
+              // Notification proactive : hors fenêtre 24 h, seul un template passe.
+              // `{{1}}` reçoit la CLASSE et non l'élève : le devoir est donné à
+              // toute la classe et `parentLinks` ne porte pas le nom de l'enfant.
+              template: 'devoir',
+              templateParams: [
+                classInfo?.name || 'la classe',
+                subjectLabel || type || 'cours',
+                dueDateFormatted,
+              ],
+              senderId: req.user.id,
+              recipientFilter: {
+                event: 'homework_assigned',
+                homework_id: homework?.id || null,
+                homework_title: title,
+                class_id: classId || null,
+              },
+            });
+            if (sent) {
+              console.log(`[Homework] Notification devoir envoyée au parent (${e164Phone})`);
+            } else {
+              console.error(`[Homework] Échec envoi notification devoir au parent (${e164Phone})`);
+            }
+          }
+        } else {
+          console.log('[Homework] Aucun parent trouvé pour les élèves concernés');
         }
-      } else {
-        console.log('[Homework] Aucun parent trouvé pour les élèves concernés');
+      } catch (whatsappError) {
+        console.error('Erreur notification WhatsApp:', whatsappError);
+        // Ne pas bloquer la création du devoir si l'envoi WhatsApp échoue
       }
-    } catch (whatsappError) {
-      console.error('Erreur notification WhatsApp:', whatsappError);
-      // Ne pas bloquer la création du devoir si l'envoi WhatsApp échoue
+    } else {
+      console.log('[Homework] Notification WhatsApp automatique désactivée — devoir consultable à la demande via le chatbot');
     }
 
     res.status(201).json(homework);

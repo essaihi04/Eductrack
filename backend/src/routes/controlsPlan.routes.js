@@ -1,6 +1,7 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
+import { isProactiveNotificationEnabled } from '../services/whatsapp/outboundGate.js';
 import { generateControlReportPdfForControl } from '../services/bulletins/controlReportPdf.js';
 
 const router = express.Router();
@@ -231,73 +232,80 @@ router.post('/controls-plan', authenticateUser, async (req, res) => {
       console.log('[DEBUG] Aucun admin trouvé');
     }
 
-    // Envoyer notification WhatsApp aux parents
-    try {
-      if (studentsData && studentsData.length > 0) {
-        const studentIds = studentsData.map(s => s.id);
+    // Notification WhatsApp aux parents — envoi automatique COUPÉ.
+    // Le contrôle reste consultable à la demande
+    // dans le chatbot (« Suivi pédagogique » → « Programme de demain ») et
+    // dans l'application parent. Réactiver via WA_NOTIFY_CONTROL=on.
+    if (isProactiveNotificationEnabled('control')) {
+      try {
+        if (studentsData && studentsData.length > 0) {
+          const studentIds = studentsData.map(s => s.id);
 
-        // Récupérer school_id depuis la classe
-        const { data: classForSchool } = await supabase
-          .from('classes')
-          .select('school_id')
-          .eq('id', class_id)
-          .single();
-        const schoolId = classForSchool?.school_id;
+          // Récupérer school_id depuis la classe
+          const { data: classForSchool } = await supabase
+            .from('classes')
+            .select('school_id')
+            .eq('id', class_id)
+            .single();
+          const schoolId = classForSchool?.school_id;
 
-        // Récupérer les parents avec leur numéro
-        const { data: parentLinks } = await supabase
-          .from('parent_students')
-          .select('profiles!parent_id(first_name, phone)')
-          .in('student_id', studentIds);
+          // Récupérer les parents avec leur numéro
+          const { data: parentLinks } = await supabase
+            .from('parent_students')
+            .select('profiles!parent_id(first_name, phone)')
+            .in('student_id', studentIds);
 
-        if (parentLinks && parentLinks.length > 0) {
-          const teacherName = teacherData ? `${teacherData.first_name} ${teacherData.last_name}` : 'Votre professeur';
-          const className = classData ? classData.name : 'N/A';
-          const subjectName = subjectData?.subjects?.name || '';
+          if (parentLinks && parentLinks.length > 0) {
+            const teacherName = teacherData ? `${teacherData.first_name} ${teacherData.last_name}` : 'Votre professeur';
+            const className = classData ? classData.name : 'N/A';
+            const subjectName = subjectData?.subjects?.name || '';
 
-          const dateFormatted = new Date(date + 'T00:00:00').toLocaleDateString('fr-FR', {
-            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-          });
-          const timeInfo = start_time && end_time ? `\n🕐 Horaire: ${start_time.slice(0,5)} - ${end_time.slice(0,5)}` : '';
-
-          const messageText = `📝 *Contrôle planifié*\n\n` +
-            `Classe: *${className}*\n` +
-            `Professeur: ${teacherName}\n` +
-            (subjectName ? `Matière: ${subjectName}\n` : '') +
-            `\n📌 *${name}*\n` +
-            `📅 Date: *${dateFormatted}*${timeInfo}\n` +
-            (description ? `\n${description}\n` : '') +
-            `\n✏️ Merci de préparer votre enfant pour ce contrôle.\n\n` +
-            `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
-
-          const sentPhones = new Set();
-          for (const link of parentLinks) {
-            const phone = link.profiles?.phone;
-            if (!phone || sentPhones.has(phone)) continue;
-            sentPhones.add(phone);
-            const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
-            await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
-              category: 'pedagogical',
-              // Notification proactive : hors fenêtre 24 h, seul un template passe.
-              template: 'information',
-              senderId: teacher_id,
-              recipientFilter: {
-                event: 'control_planned',
-                control_id: control?.id || null,
-                control_name: name,
-                class_id: class_id || null,
-                date: date || null,
-              },
+            const dateFormatted = new Date(date + 'T00:00:00').toLocaleDateString('fr-FR', {
+              weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
             });
-            console.log(`[Controls] Notification contrôle envoyée au parent (${e164Phone})`);
+            const timeInfo = start_time && end_time ? `\n🕐 Horaire: ${start_time.slice(0,5)} - ${end_time.slice(0,5)}` : '';
+
+            const messageText = `📝 *Contrôle planifié*\n\n` +
+              `Classe: *${className}*\n` +
+              `Professeur: ${teacherName}\n` +
+              (subjectName ? `Matière: ${subjectName}\n` : '') +
+              `\n📌 *${name}*\n` +
+              `📅 Date: *${dateFormatted}*${timeInfo}\n` +
+              (description ? `\n${description}\n` : '') +
+              `\n✏️ Merci de préparer votre enfant pour ce contrôle.\n\n` +
+              `━━━━━━━━━━━━━━━\n👥 L'équipe pédagogique`;
+
+            const sentPhones = new Set();
+            for (const link of parentLinks) {
+              const phone = link.profiles?.phone;
+              if (!phone || sentPhones.has(phone)) continue;
+              sentPhones.add(phone);
+              const e164Phone = phone.startsWith('+') ? phone : `+${phone}`;
+              await sendWhatsAppResponse(e164Phone, messageText, schoolId, {
+                category: 'pedagogical',
+                // Notification proactive : hors fenêtre 24 h, seul un template passe.
+                template: 'information',
+                senderId: teacher_id,
+                recipientFilter: {
+                  event: 'control_planned',
+                  control_id: control?.id || null,
+                  control_name: name,
+                  class_id: class_id || null,
+                  date: date || null,
+                },
+              });
+              console.log(`[Controls] Notification contrôle envoyée au parent (${e164Phone})`);
+            }
+          } else {
+            console.log('[Controls] Aucun parent trouvé pour les élèves de la classe');
           }
-        } else {
-          console.log('[Controls] Aucun parent trouvé pour les élèves de la classe');
         }
+      } catch (whatsappError) {
+        console.error('Erreur notification WhatsApp:', whatsappError);
+        // Ne pas bloquer la création du contrôle si l'envoi WhatsApp échoue
       }
-    } catch (whatsappError) {
-      console.error('Erreur notification WhatsApp:', whatsappError);
-      // Ne pas bloquer la création du contrôle si l'envoi WhatsApp échoue
+    } else {
+      console.log('[Controls] Notification WhatsApp automatique désactivée — contrôle consultable à la demande via le chatbot');
     }
 
     res.status(201).json(control);
