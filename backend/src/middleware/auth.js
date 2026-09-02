@@ -1,4 +1,5 @@
 import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { getSchoolAccess } from '../utils/schoolAccess.js';
 import {
   verifyAccessTokenLocally, localVerificationEnabled,
   getCachedProfile, setCachedProfile,
@@ -51,11 +52,16 @@ export const authenticate = async (req, res, next) => {
         .eq('id', user.id)
         .single();
 
-      if (profileError) {
+      if (profileError || !data) {
         return res.status(500).json({ error: 'Erreur lors de la récupération du profil' });
       }
       profile = data;
       setCachedProfile(user.id, profile);
+    }
+
+    const { denial } = await getSchoolAccess(profile, supabaseAdmin);
+    if (denial) {
+      return res.status(denial.status).json(denial.body);
     }
 
     req.user = { ...user, ...profile };
@@ -288,4 +294,3 @@ export const requireDriverOrTransportAccess = (req, res, next) => {
   if (!ok) return res.status(403).json({ error: 'Accès refusé' });
   next();
 };
-

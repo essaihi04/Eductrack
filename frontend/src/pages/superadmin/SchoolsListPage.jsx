@@ -17,6 +17,9 @@ const SchoolsListPage = () => {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(null);
+  const [statusError, setStatusError] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [globalStats, setGlobalStats] = useState(null);
   const [newSchool, setNewSchool] = useState({ name: '', code: '', address: '', phone: '' });
 
@@ -88,16 +91,27 @@ const SchoolsListPage = () => {
   };
 
   const handleStatusChange = async (schoolId, newStatus) => {
+    setChangingStatus(schoolId);
+    setStatusError('');
+    setStatusMessage('');
     try {
       const token = await getToken();
-      await fetch(`${apiUrl}/api/superadmin/schools/${schoolId}/status`, {
+      const res = await fetch(`${apiUrl}/api/superadmin/schools/${schoolId}/status`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
       });
-      fetchSchools();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Le changement de statut n’a pas pu être enregistré.');
+      setSchools((previous) => previous.map((school) => school.id === schoolId
+        ? { ...school, status: data.school?.status || newStatus }
+        : school));
+      setStatusMessage(newStatus === 'suspended' ? 'L’accès à cette école est suspendu.' : 'L’accès à cette école est réactivé.');
     } catch (err) {
       console.error('Erreur changement statut:', err);
+      setStatusError(err.message || 'Le changement de statut n’a pas pu être enregistré.');
+    } finally {
+      setChangingStatus(null);
     }
   };
 
@@ -220,6 +234,9 @@ const SchoolsListPage = () => {
         </motion.div>
       )}
 
+      {statusError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{statusError}</p>}
+      {statusMessage && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-700">{statusMessage}</p>}
+
       {/* Recherche */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -305,16 +322,18 @@ const SchoolsListPage = () => {
                     {school.status === 'active' ? (
                       <button
                         onClick={() => handleStatusChange(school.id, 'suspended')}
-                        className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded transition"
+                        disabled={changingStatus !== null}
+                        className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded transition disabled:opacity-50"
                       >
-                        Suspendre
+                        {changingStatus === school.id ? 'Enregistrement…' : 'Suspendre'}
                       </button>
                     ) : (
                       <button
                         onClick={() => handleStatusChange(school.id, 'active')}
-                        className="text-xs px-2 py-1 text-green-600 hover:bg-green-50 rounded transition"
+                        disabled={changingStatus !== null}
+                        className="text-xs px-2 py-1 text-green-600 hover:bg-green-50 rounded transition disabled:opacity-50"
                       >
-                        Réactiver
+                        {changingStatus === school.id ? 'Enregistrement…' : 'Réactiver'}
                       </button>
                     )}
                   </div>

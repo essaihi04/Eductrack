@@ -1,5 +1,6 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { authenticate as authenticateUser } from '../middleware/auth.js';
 import { sendWhatsAppResponse } from '../services/whatsappChatbot.js';
 import { isProactiveNotificationEnabled } from '../services/whatsapp/outboundGate.js';
 import { generateControlReportPdfForControl } from '../services/bulletins/controlReportPdf.js';
@@ -63,30 +64,6 @@ const enrichControls = async (controls, currentUserId = null) => {
       : '',
     is_owner: currentUserId ? control.teacher_id === currentUserId : undefined
   }));
-};
-
-// Middleware pour vérifier l'authentification
-const authenticateUser = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Non autorisé' });
-  }
-  
-  const token = authHeader.split(' ')[1];
-  
-  try {
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    
-    if (error || !user) {
-      return res.status(401).json({ error: 'Token invalide' });
-    }
-    
-    req.user = { id: user.id };
-    next();
-  } catch (error) {
-    console.error('Erreur lors de la vérification du token:', error);
-    return res.status(401).json({ error: 'Token invalide' });
-  }
 };
 
 // Créer un contrôle planifié

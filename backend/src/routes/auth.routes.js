@@ -1,6 +1,9 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { supabase, supabaseAdmin } from '../config/supabase.js';
+import { supabase, supabaseAdmin, createPublicAuthClient } from '../config/supabase.js';
+import { authenticate } from '../middleware/auth.js';
+import { invalidateProfileCache, setCachedProfile } from '../utils/authToken.js';
+import { getSchoolAccess } from '../utils/schoolAccess.js';
 import { profilePhotoUpload, uploadProfilePhotoFile } from '../utils/profilePhoto.js';
 
 const router = express.Router();
@@ -75,7 +78,8 @@ router.post('/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const authClient = createPublicAuthClient();
+    const { data, error } = await authClient.auth.signInWithPassword({
       email,
       password
     });
@@ -85,11 +89,22 @@ router.post('/login', authLimiter, async (req, res) => {
     }
 
     // Récupérer le profil
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .eq('id', data.user.id)
       .single();
+
+    if (profileError || !profile) {
+      await authClient.auth.signOut({ scope: 'local' });
+      return res.status(503).json({ error: 'Impossible de récupérer le profil. Réessayez dans quelques instants.' });
+    }
+
+    const { denial } = await getSchoolAccess(profile, supabaseAdmin);
+    if (denial) {
+      await authClient.auth.signOut({ scope: 'local' });
+      return res.status(denial.status).json(denial.body);
+    }
 
     res.json({
       user: data.user,
@@ -181,28 +196,51 @@ router.get('/me', async (req, res) => {
       return res.status(503).json({ error: 'Base de données momentanément indisponible', details: profileError.code || profileError.message });
     }
 
-    // Enrichir le profil avec les infos de l'école (nom + logo)
-    let school = null;
-    if (profile.school_id) {
+    const access = await getSchoolAccess(profile, supabaseAdmin);
+    if (access.denial && access.denial.status !== 403) {
+      return res.status(access.denial.status).json(access.denial.body);
+    }
+
+    // Enrichir le profil avec les infos de l'école (nom + logo + statut).
+    let school = access.school;
+    if (profile.role === 'super_admin' && profile.school_id) {
       const { data: schoolData } = await supabaseAdmin
         .from('schools')
-        .select('id, name, code, logo_url')
+        .select('id, name, code, logo_url, status')
         .eq('id', profile.school_id)
         .single();
       school = schoolData;
     }
 
     // Écoles que ce compte peut piloter (multi-établissements sur un même compte).
-    // On y inclut toujours l'école active courante.
+    // On y inclut l'école courante uniquement si elle est accessible.
     let available_schools = [];
-    const { data: links } = await supabaseAdmin
+    const { data: links, error: linksError } = await supabaseAdmin
       .from('account_schools')
-      .select('school:schools(id, name, code, logo_url)')
+      .select('school:schools(id, name, code, logo_url, status)')
       .eq('user_id', user.id);
+    // Les installations sans migration multi-écoles restent compatibles.
+    // Une panne de lecture ne doit pas masquer les autres écoles du compte.
+    if (linksError && !['42P01', 'PGRST205'].includes(linksError.code)) {
+      return res.status(503).json({ error: 'Impossible de récupérer les écoles du compte. Réessayez dans quelques instants.' });
+    }
     const byId = new Map();
-    (links || []).forEach((l) => { if (l.school) byId.set(l.school.id, l.school); });
-    if (school) byId.set(school.id, school);
+    (links || []).forEach((l) => {
+      if (l.school && (profile.role === 'super_admin' || l.school.status === 'active')) {
+        byId.set(l.school.id, l.school);
+      }
+    });
+    if (school && (profile.role === 'super_admin' || school.status === 'active')) {
+      byId.set(school.id, school);
+    }
     available_schools = Array.from(byId.values());
+
+    if (access.denial) {
+      // Permet au compte multi-écoles de choisir une autre école active,
+      // sans lui donner accès au profil ni aux données de l'école suspendue.
+      return res.status(access.denial.status).json({ ...access.denial.body, available_schools });
+    }
+    setCachedProfile(user.id, profile);
 
     res.json({ user, profile: { ...profile, school }, available_schools });
   } catch (error) {
@@ -225,10 +263,14 @@ router.post('/switch-school', async (req, res) => {
     if (!school_id) return res.status(400).json({ error: 'school_id requis' });
 
     // Ensemble des écoles autorisées = account_schools ∪ école active courante.
-    const { data: profile } = await supabaseAdmin
-      .from('profiles').select('school_id').eq('id', user.id).single();
-    const { data: links } = await supabaseAdmin
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles').select('school_id, role').eq('id', user.id).single();
+    if (profileError || !profile) {
+      return res.status(503).json({ error: 'Impossible de récupérer le profil' });
+    }
+    const { data: links, error: linksError } = await supabaseAdmin
       .from('account_schools').select('school_id').eq('user_id', user.id);
+    if (linksError) throw linksError;
     const allowed = new Set([
       ...(profile?.school_id ? [profile.school_id] : []),
       ...((links || []).map((l) => l.school_id)),
@@ -238,12 +280,24 @@ router.post('/switch-school', async (req, res) => {
       return res.status(403).json({ error: 'Accès à cette école non autorisé' });
     }
 
+    // Vérifier la destination avant de changer le profil. Un compte rattaché
+    // à plusieurs écoles peut quitter une école suspendue pour une école active.
+    const access = await getSchoolAccess({ ...profile, school_id }, supabaseAdmin);
+    if (access.denial) {
+      return res.status(access.denial.status).json(access.denial.body);
+    }
+
     const { error: updErr } = await supabaseAdmin
       .from('profiles').update({ school_id }).eq('id', user.id);
     if (updErr) throw updErr;
+    invalidateProfileCache(user.id);
 
-    const { data: school } = await supabaseAdmin
-      .from('schools').select('id, name, code, logo_url').eq('id', school_id).single();
+    let school = access.school;
+    if (profile.role === 'super_admin') {
+      const { data } = await supabaseAdmin
+        .from('schools').select('id, name, code, logo_url, status').eq('id', school_id).single();
+      school = data;
+    }
 
     res.json({ success: true, school });
   } catch (error) {
@@ -255,13 +309,9 @@ router.post('/switch-school', async (req, res) => {
 // Importer sa propre photo de profil (tous les rôles authentifiés).
 // L'ancienne route /students/me/photo reste disponible pour compatibilité,
 // mais le profil parent ne doit pas dépendre d'une autorisation « student ».
-router.post('/profile/photo', profilePhotoUpload.single('photo'), async (req, res) => {
+router.post('/profile/photo', authenticate, profilePhotoUpload.single('photo'), async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) return res.status(401).json({ error: 'Token manquant' });
-
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) return res.status(401).json({ error: 'Utilisateur non authentifié' });
+    const user = req.user;
     if (!req.file) return res.status(400).json({ error: 'Aucune image fournie' });
 
     const avatar_url = await uploadProfilePhotoFile(req.file);
@@ -280,17 +330,9 @@ router.post('/profile/photo', profilePhotoUpload.single('photo'), async (req, re
 });
 
 // Mettre à jour le profil (tous les utilisateurs)
-router.put('/profile', async (req, res) => {
+router.put('/profile', authenticate, async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ error: 'Token manquant' });
-    }
-
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) {
-      return res.status(401).json({ error: 'Utilisateur non authentifié' });
-    }
+    const user = req.user;
 
     const { first_name, last_name, phone, avatar, avatar_url, preferred_language } = req.body;
 
@@ -318,6 +360,7 @@ router.put('/profile', async (req, res) => {
 
     if (error) throw error;
 
+    invalidateProfileCache(user.id);
     res.json(data);
   } catch (error) {
     console.error('Erreur mise à jour profil:', error);
@@ -326,12 +369,9 @@ router.put('/profile', async (req, res) => {
 });
 
 // Changer le mot de passe (tous les utilisateurs)
-router.post('/change-password', authLimiter, async (req, res) => {
+router.post('/change-password', authLimiter, authenticate, async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ error: 'Token manquant' });
-    }
+    const user = req.user;
 
     const { currentPassword, newPassword } = req.body;
 
@@ -343,14 +383,8 @@ router.post('/change-password', authLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 8 caractères' });
     }
 
-    // Récupérer l'utilisateur via le token
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !user) {
-      return res.status(401).json({ error: 'Utilisateur non authentifié' });
-    }
-
     // Vérifier le mot de passe actuel
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { error: signInError } = await createPublicAuthClient().auth.signInWithPassword({
       email: user.email,
       password: currentPassword
     });

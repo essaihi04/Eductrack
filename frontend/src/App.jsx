@@ -118,10 +118,12 @@ const isInstalledApp = () =>
   Capacitor?.isNativePlatform?.() === true || /electron/i.test(navigator.userAgent);
 
 const ProtectedRoute = ({ children }) => {
-  const { user, profile, school, loading, profileError, refreshProfile } = useAuth();
+  const { user, profile, school, loading, profileError, accessError, refreshProfile } = useAuth();
   // Splash « logo de l'école » uniquement au chargement initial de la page
   // (rechargement / accès direct) : jamais lors des navigations internes.
   const [splashDone, setSplashDone] = useState(() => !loading);
+
+  if (accessError) return <Navigate to="/login" replace />;
 
   // Utilisateur connecté mais profil impossible à charger (serveur saturé,
   // réseau) : écran d'attente avec réessai, plutôt qu'une fausse déconnexion.
@@ -148,7 +150,7 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (!splashDone) {
+  if (loading || !splashDone) {
     // Avant le chargement du profil, on affiche le logo mémorisé lors de la
     // dernière session ; le vrai logo prend le relais dès qu'il arrive.
     const cached = readSplashCache(user?.email);

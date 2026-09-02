@@ -28,15 +28,31 @@ const Login = () => {
   // Splash « logo de l'école » : affiché dès la connexion réussie, pendant le
   // chargement du profil ; la navigation part à la fin de l'animation.
   const [splash, setSplash] = useState(false);
-  const { signIn, user, profile, school } = useAuth();
+  const { signIn, signOut, switchSchool, availableSchools, user, profile, school, loading: authLoading, profileError, accessError } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     // Déjà connecté (retour sur /login) : redirection directe, sans splash.
-    if (user && profile && !splash) {
+    if (!authLoading && !accessError && user && profile && !splash) {
       navigate(homeFor(profile.role), { replace: true });
     }
-  }, [user, profile, splash, navigate]);
+  }, [user, profile, splash, authLoading, accessError, navigate]);
+
+  useEffect(() => {
+    if (accessError) {
+      setSplash(false);
+      setLoading(false);
+      return;
+    }
+    if (!authLoading && user && !profile && profileError) {
+      // L'écran protégé permet de réessayer /me sans retaper ses identifiants.
+      navigate('/dashboard', { replace: true });
+    } else if (splash && !authLoading && !user) {
+      setSplash(false);
+      setLoading(false);
+      setError('Votre session a expiré. Veuillez vous reconnecter.');
+    }
+  }, [accessError, authLoading, user, profile, profileError, splash, navigate]);
 
   // ── Reconnexion automatique (app desktop Electron) ──
   // Les identifiants sont chiffrés côté Electron (safeStorage) et exposés via
@@ -45,7 +61,7 @@ const Login = () => {
   // évite de reconnecter d'office après une déconnexion volontaire).
   useEffect(() => {
     const desktopAuth = window.desktopAuth;
-    if (!desktopAuth || user) return;
+    if (!desktopAuth || user || accessError) return;
     let cancelled = false;
     Promise.resolve(desktopAuth.load()).then(async (creds) => {
       if (cancelled || !creds?.email || !creds?.password) return;
@@ -87,14 +103,30 @@ const Login = () => {
     }
   };
 
-  if (splash) {
+  const handleSchoolChoice = async (schoolId) => {
+    setError('');
+    setLoading(true);
+    try {
+      await switchSchool(schoolId);
+    } catch (err) {
+      setError(err.message || 'Changement d’école impossible');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (splash && !accessError) {
     const cached = readSplashCache(email);
     return (
       <SchoolSplash
         logoUrl={school?.logo_url || cached?.logo_url || null}
         schoolName={school?.name || cached?.name || ''}
-        ready={!!(user && profile)}
-        onDone={() => navigate(homeFor(profile.role), { replace: true })}
+        ready={!authLoading && !!(user && profile)}
+        onDone={() => {
+          if (!authLoading && !accessError && user && profile) {
+            navigate(homeFor(profile.role), { replace: true });
+          }
+        }}
       />
     );
   }
@@ -131,16 +163,34 @@ const Login = () => {
             <CardTitle className="flex items-center gap-2 text-[#173A59] dark:text-white"><Compass className="h-5 w-5 text-[#E66F51]" />Connexion</CardTitle>
             <CardDescription>Retrouvez le parcours de votre établissement</CardDescription>
           </CardHeader>
+          {accessError && user && availableSchools.length > 0 ? (
+            <CardContent className="space-y-4">
+              <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{accessError}</p>
+              <p className="text-sm text-muted-foreground">Choisissez un autre établissement auquel vous avez accès.</p>
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              <div className="space-y-2">
+                {availableSchools.map((entry) => (
+                  <Button key={entry.id} type="button" className="w-full" disabled={loading} onClick={() => handleSchoolChoice(entry.id)}>
+                    {entry.name}
+                  </Button>
+                ))}
+              </div>
+              <button type="button" className="w-full text-sm text-muted-foreground underline" disabled={loading} onClick={() => signOut()}>
+                Utiliser un autre compte
+              </button>
+            </CardContent>
+          ) : (
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
-              {error && (
+              {(accessError || error) && (
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-lg"
+                  role="alert"
                 >
                   <AlertCircle className="w-5 h-5" />
-                  <span className="text-sm">{error}</span>
+                  <span className="text-sm">{accessError || error}</span>
                 </motion.div>
               )}
 
@@ -187,6 +237,7 @@ const Login = () => {
               </Button>
             </CardFooter>
           </form>
+          )}
         </Card>
       </motion.div>
     </div>
